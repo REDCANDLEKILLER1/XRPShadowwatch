@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>XRPL SENTINEL // LIME FIRE</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --lime-main: #39ff14;
+            --lime-dim: #1b4d0f;
+            --glass-bg: rgba(0, 10, 0, 0.92);
+            --alert-red: #ff2a2a;
+        }
+
+        body {
+            margin: 0; overflow: hidden; background-color: #000;
+            font-family: 'Rajdhani', sans-serif; color: var(--lime-main);
+            touch-action: none; user-select: none;
+        }
+
+        #canvas-container { position: absolute; inset: 0; z-index: 1; }
+
+        /* TOAST */
+        #toast {
+            position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(0, 50, 0, 0.95); border: 1px solid var(--lime-main);
+            color: white; padding: 12px 24px; border-radius: 4px;
+            font-family: 'Share Tech Mono'; font-size: 14px; letter-spacing: 1px;
+            opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 100;
+            box-shadow: 0 0 30px var(--lime-main);
+        }
+        .toast-show { opacity: 1 !important; }
+
+        /* TOP HUD */
+        #hud-top {
+            position: absolute; top: 0; left: 0; right: 0; z-index: 20;
+            background: linear-gradient(to bottom, #000 20%, transparent);
+            padding: 12px; pointer-events: none;
+        }
+
+        .stat-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 10px; pointer-events: auto;
+        }
+
+        .stat-box {
+            background: rgba(0, 20, 0, 0.8); border: 1px solid var(--lime-dim);
+            padding: 8px; border-radius: 4px; backdrop-filter: blur(4px);
+            display: flex; flex-direction: column; justify-content: center;
+        }
+
+        .price-text { font-family: 'Share Tech Mono', monospace; font-size: 1.4rem; font-weight: bold; line-height: 1.2; }
+        .label-text { font-size: 0.65rem; color: #558855; letter-spacing: 1px; font-weight: bold; }
+
+        .connect-btn {
+            grid-column: span 2; background: #0a220a; border: 1px solid var(--lime-main);
+            color: var(--lime-main); padding: 12px; font-weight: bold; font-size: 14px;
+            letter-spacing: 3px; text-align: center; margin-top: 5px; border-radius: 4px;
+            box-shadow: 0 0 10px rgba(57,255,20,0.1); transition: all 0.2s;
+        }
+        .connect-btn:active { background: var(--lime-main); color: black; }
+
+        /* BOTTOM DECK */
+        #hud-bottom {
+            position: absolute; bottom: 0; left: 0; right: 0; height: 60vh; z-index: 30;
+            display: flex; flex-direction: column; pointer-events: none;
+        }
+        #command-deck {
+            flex-grow: 1; background: var(--glass-bg); border-top: 2px solid var(--lime-dim);
+            backdrop-filter: blur(12px); display: flex; flex-direction: column;
+            pointer-events: auto; border-radius: 16px 16px 0 0;
+            box-shadow: 0 -10px 40px rgba(0,0,0,0.8);
+        }
+
+        /* TABS */
+        .tab-bar { display: flex; border-bottom: 1px solid var(--lime-dim); height: 50px; }
+        .tab-btn {
+            flex: 1; display: flex; align-items: center; justify-content: center;
+            font-weight: bold; font-size: 13px; background: rgba(0,20,0,0.4); color: #447744;
+            border-right: 1px solid #113311; letter-spacing: 1px;
+        }
+        .tab-btn.active { background: #051505; color: var(--lime-main); border-bottom: 3px solid var(--lime-main); }
+
+        /* LISTS */
+        .view-panel { display: none; flex-direction: column; height: 100%; padding: 0; }
+        .view-panel.active { display: flex; }
+
+        .tx-row {
+            padding: 12px; border-bottom: 1px solid #112211;
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        
+        .row-top { display: flex; justify-content: space-between; align-items: center; }
+        
+        .tag-pill {
+            font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: bold;
+            display: inline-block; margin-left: 6px; font-family: 'Share Tech Mono';
+        }
+        .tag-exchange { background: #113355; color: #55aaff; border: 1px solid #224488; }
+        .tag-whale { background: #443300; color: #ffaa00; border: 1px solid #664400; }
+
+        .btn-row { display: flex; gap: 8px; margin-top: 4px; }
+        .action-btn {
+            flex: 1; padding: 8px 0; text-align: center; border-radius: 2px;
+            font-size: 11px; font-weight: bold; font-family: 'Share Tech Mono';
+            background: #0f1a0f; color: #668866; border: 1px solid #223322;
+        }
+        .action-btn:active { background: var(--lime-main); color: black; }
+
+        /* KNOWN ENTITY HIGHLIGHT */
+        .entity-name { color: #ffcc00; font-weight: bold; }
+
+    </style>
+</head>
+<body>
+
+    <div id="toast">NOTIFICATION</div>
+    <div id="canvas-container"></div>
+
+    <!-- TOP HUD -->
+    <div id="hud-top">
+        <div class="stat-grid">
+            <div class="stat-box">
+                <div class="label-text">XRP / USDT</div>
+                <div id="price-display" class="price-text">---</div>
+            </div>
+            <div class="stat-box text-right">
+                <div class="label-text">LEDGER INDEX</div>
+                <div id="ledger-display" class="price-text text-green-700">OFFLINE</div>
+            </div>
+            <button id="connect-main" onclick="toggleConnection()" class="connect-btn">INITIALIZE UPLINK</button>
+        </div>
+    </div>
+
+    <!-- BOTTOM DECK -->
+    <div id="hud-bottom">
+        <div id="command-deck">
+            <div class="tab-bar">
+                <div class="tab-btn active" onclick="switchView('live')">LIVE FEED</div>
+                <div class="tab-btn" onclick="switchView('watch')">WATCHLIST</div>
+                <div class="tab-btn" onclick="switchView('case')">EVIDENCE</div>
+            </div>
+
+            <!-- LIVE TAB -->
+            <div id="view-live" class="view-panel active">
+                <div id="feed" class="flex-grow overflow-y-auto pb-4">
+                    <div class="text-center text-gray-600 mt-12 font-tech">
+                        SYSTEM READY.<br>TAP INITIALIZE TO START.
+                    </div>
+                </div>
+            </div>
+
+            <!-- WATCH TAB -->
+            <div id="view-watch" class="view-panel p-4">
+                <div class="flex gap-2 p-2 bg-black/50 border border-green-900 mb-2">
+                    <input type="text" id="watch-input" placeholder="Enter rAddress..." class="flex-grow bg-transparent text-white text-xs outline-none font-tech">
+                    <button onclick="addWatch()" class="text-green-500 font-bold text-xs uppercase">Track</button>
+                </div>
+                <div id="watch-list" class="flex-grow overflow-y-auto space-y-1"></div>
+            </div>
+
+            <!-- CASE TAB -->
+            <div id="view-case" class="view-panel">
+                <div class="flex justify-between p-3 border-b border-green-900 bg-black/20">
+                    <span class="text-xs text-gray-400">SAVED ANOMALIES</span>
+                    <button onclick="exportJSON()" class="text-[10px] text-green-400 border border-green-600 px-3 rounded">EXPORT</button>
+                </div>
+                <div id="case-list" class="flex-grow overflow-y-auto space-y-1 p-2"></div>
+                <button onclick="clearCases()" class="text-red-500 text-xs py-4 bg-red-900/10 font-bold tracking-widest">CLEAR LOCKER</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 3D ENGINE: LIME FIRE ---
+        let scene, camera, renderer, particles;
+        const particleCount = 2500;
+
+        function init3D() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x000000, 0.03); // Heavy black fog for contrast
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+            camera.position.set(0, -10, 30); // Low angle looking up
+            camera.lookAt(0, 10, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            container.appendChild(renderer.domElement);
+
+            // "Digital Fire" Particles
+            const pGeo = new THREE.BufferGeometry();
+            const pos = [];
+            const speeds = [];
+            for(let i=0; i<particleCount; i++) {
+                // Cone shape emitter
+                const x = (Math.random() - 0.5) * 50;
+                const y = (Math.random() - 0.5) * 10 - 20; // Start bottom
+                const z = (Math.random() - 0.5) * 30;
+                pos.push(x, y, z);
+                speeds.push(0.1 + Math.random() * 0.4);
+            }
+            pGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            pGeo.setAttribute('speed', new THREE.Float32BufferAttribute(speeds, 1));
+
+            const pMat = new THREE.PointsMaterial({
+                color: 0x39ff14,
+                size: 0.4,
+                transparent: true,
+                opacity: 0.8,
+                blending: THREE.AdditiveBlending
+            });
+
+            particles = new THREE.Points(pGeo, pMat);
+            scene.add(particles);
+
+            animate();
+            
+            // Interaction (Subtle Parallax)
+            let startX = 0;
+            container.addEventListener('touchmove', e => {
+                const delta = e.touches[0].clientX - startX;
+                camera.rotation.z -= delta * 0.0005;
+                startX = e.touches[0].clientX;
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const positions = particles.geometry.attributes.position.array;
+            const speeds = particles.geometry.attributes.speed.array;
+
+            for(let i=0; i<particleCount; i++) {
+                // Move Up Y axis
+                positions[i*3 + 1] += speeds[i];
+
+                // Reset to bottom if too high (Fire loop)
+                if(positions[i*3 + 1] > 30) {
+                    positions[i*3 + 1] = -20;
+                    positions[i*3] = (Math.random() - 0.5) * 50; // Reset X for randomness
+                }
+            }
+            particles.geometry.attributes.position.needsUpdate = true;
+
+            // Camera drift
+            camera.position.x = Math.sin(Date.now() * 0.0005) * 2;
+            
+            renderer.render(scene, camera);
+        }
+
+        // --- APP LOGIC ---
+        let socket, isConnected = false;
+        let watchlist = [], cases = [];
+        let priceInterval;
+
+        // KNOWN ENTITIES MAP
+        const ENTITIES = {
+            'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh': 'GENESIS',
+            'rh1HPuR9...': 'BITSTAMP',
+            'rPVMhWBsfF9iMXYj3aAzJ5NrPxrXz...': 'XRP TIP BOT',
+            'rLNaPoKeeBJZe2qs6x52yVPZpZ8td4dc6w': 'COINBASE',
+            'rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh': 'BINANCE',
+            'rJb5KsHsDHF1YSnasbwqSagepE8XXAuGh': 'BITSTAMP',
+            'rU2mEJSLqBRkYLVTv55rFTgQYkDBqVyTRn': 'COINS.PH'
+        };
+
+        function toggleConnection() {
+            const btn = document.getElementById('connect-main');
+            if(isConnected) {
+                if(socket) socket.close();
+                clearInterval(priceInterval);
+                isConnected = false;
+                btn.innerText = "INITIALIZE UPLINK";
+                btn.style.background = "#0a220a";
+                btn.style.color = "#39ff14";
+                showToast("SYSTEM HALTED");
+            } else {
+                startXRPL();
+                startPricePoller();
+                isConnected = true;
+                btn.innerText = "UPLINK ACTIVE";
+                btn.style.background = "#39ff14";
+                btn.style.color = "#000";
+                document.getElementById('feed').innerHTML = '';
+                showToast("FIREWALL BREACHED");
+            }
+        }
+
+        // 1. PRICE POLLING (Robust)
+        function startPricePoller() {
+            fetchPrice(); // Immediate
+            priceInterval = setInterval(fetchPrice, 5000); // Every 5s
+        }
+
+        async function fetchPrice() {
+            try {
+                // Using Binance API - reliable public endpoint
+                const res = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=XRPUSDT');
+                const data = await res.json();
+                const el = document.getElementById('price-display');
+                const oldPrice = parseFloat(el.innerText.replace('$','')) || 0;
+                const newPrice = parseFloat(data.price);
+                
+                el.innerText = `$${newPrice.toFixed(4)}`;
+                el.style.color = newPrice > oldPrice ? '#39ff14' : (newPrice < oldPrice ? '#ff5555' : 'white');
+            } catch(e) {
+                console.log("Price Fetch Error");
+            }
+        }
+
+        // 2. XRPL STREAM
+        function startXRPL() {
+            socket = new WebSocket('wss://s1.ripple.com');
+            socket.onopen = () => {
+                socket.send(JSON.stringify({command:"subscribe", streams:["transactions", "ledger"]}));
+            };
+            socket.onmessage = (e) => {
+                const d = JSON.parse(e.data);
+                if(d.type==='transaction') handleTx(d.transaction);
+                if(d.type==='ledgerClosed') document.getElementById('ledger-display').innerText = d.ledger_index;
+            };
+        }
+
+        function handleTx(tx) {
+            if(tx.TransactionType!=='Payment' || typeof tx.Amount!=='string') return;
+            const amt = parseInt(tx.Amount)/1000000;
+            
+            // Identification Logic
+            let nameFrom = ENTITIES[tx.Account] || null;
+            let nameTo = ENTITIES[tx.Destination] || null;
+            const hasTag = tx.DestinationTag !== undefined;
+            const isWhale = amt >= 1000000;
+            
+            // Label Construction
+            let labelType = "TX";
+            let color = "text-green-500";
+            let tags = "";
+
+            if(isWhale) {
+                labelType = "WHALE";
+                color = "text-yellow-400";
+                tags += `<span class="tag-pill tag-whale">WHALE</span>`;
+            }
+            if(hasTag) {
+                tags += `<span class="tag-pill tag-exchange">TAG:${tx.DestinationTag}</span>`;
+            }
+
+            // Watchlist Alert
+            if(watchlist.includes(tx.Account) || watchlist.includes(tx.Destination)) {
+                color = "text-red-500 font-bold";
+                showToast("TARGET DETECTED");
+            }
+
+            // Addresses Display
+            const dispFrom = nameFrom ? `<span class="entity-name">${nameFrom}</span>` : tx.Account.substring(0,4)+'...';
+            const dispTo = nameTo ? `<span class="entity-name">${nameTo}</span>` : tx.Destination.substring(0,4)+'...';
+
+            // DOM
+            const row = document.createElement('div');
+            row.className = "tx-row";
+            row.innerHTML = `
+                <div class="row-top ${color}">
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-sm">${amt.toLocaleString()} XRP</span>
+                        ${tags}
+                    </div>
+                    <div class="text-[10px] font-mono text-gray-500">${new Date().toLocaleTimeString()}</div>
+                </div>
+                
+                <div class="flex justify-between text-[11px] font-mono text-gray-400">
+                    <span>${dispFrom} ➔ ${dispTo}</span>
+                </div>
+
+                <div class="btn-row">
+                    <button class="action-btn" onclick="openScan('${tx.hash}')">SCAN</button>
+                    <button class="action-btn" onclick="copyHash('${tx.hash}')">COPY</button>
+                    <button class="action-btn" onclick='saveCase(${JSON.stringify({hash:tx.hash, amt, from:dispFrom, to:dispTo})})'>SAVE</button>
+                </div>
+            `;
+            
+            const feed = document.getElementById('feed');
+            feed.prepend(row);
+            if(feed.children.length > 30) feed.lastChild.remove();
+        }
+
+        // --- UTILS ---
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.innerText = msg; t.classList.add('toast-show');
+            setTimeout(() => t.classList.remove('toast-show'), 2000);
+        }
+        function openScan(h) { window.open(`https://xrpscan.com/tx/${h}`, '_blank'); }
+        function copyHash(h) { navigator.clipboard.writeText(h); showToast("HASH COPIED"); }
+        function switchView(id) {
+            document.querySelectorAll('.view-panel').forEach(e => e.classList.remove('active'));
+            document.getElementById('view-'+id).classList.add('active');
+            document.querySelectorAll('.tab-btn').forEach(e => e.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+
+        // --- WATCH/CASE LOGIC ---
+        function addWatch() {
+            const v = document.getElementById('watch-input').value;
+            if(v) { watchlist.push(v); renderWatch(); document.getElementById('watch-input').value=''; showToast("TRACKING ACTIVE"); }
+        }
+        function renderWatch() {
+            document.getElementById('watch-list').innerHTML = watchlist.map((w,i) => `
+                <div class="flex justify-between p-3 bg-green-900/20 border-b border-green-900">
+                    <span class="font-mono text-xs text-green-300 truncate w-48">${w}</span>
+                    <button onclick="watchlist.splice(${i},1);renderWatch()" class="text-red-500 font-bold">X</button>
+                </div>`).join('');
+        }
+        function saveCase(d) {
+            if(!cases.some(c=>c.hash===d.hash)) { cases.push(d); renderCases(); showToast("EVIDENCE SECURED"); }
+        }
+        function renderCases() {
+            document.getElementById('case-list').innerHTML = cases.map(c => `
+                <div class="p-3 border-l-2 border-yellow-500 bg-yellow-900/10 mb-1">
+                    <div class="flex justify-between font-bold text-yellow-400 text-xs">
+                        <span>${c.amt.toLocaleString()} XRP</span>
+                        <span class="text-[10px] text-gray-500 font-mono">${c.hash.substring(0,8)}...</span>
+                    </div>
+                    <div class="text-[10px] text-gray-400 mt-1">${c.from} -> ${c.to}</div>
+                </div>`).join('');
+        }
+        function clearCases() { cases=[]; renderCases(); showToast("LOCKER CLEARED"); }
+        function exportJSON() {
+            const a = document.createElement('a');
+            a.href = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(cases));
+            a.download = "sentinel_cases.json";
+            a.click();
+        }
+
+        init3D();
+    </script>
+</body>
+</html>
