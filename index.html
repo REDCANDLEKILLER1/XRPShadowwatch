@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>XRPMAN SHADOW WATCH // v6.5</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>XRPMAN SHADOW WATCH // v6.9</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -11,7 +11,7 @@
         :root {
             --lime-main: #00ff00;
             --lime-dim: #004400;
-            --glass-bg: rgba(0, 10, 0, 0.94);
+            --glass-bg: rgba(0, 10, 0, 0.96);
             --alert-red: #ff0000;
             --ghost-gray: #444444;
             --warn-orange: #ffaa00;
@@ -22,7 +22,8 @@
         body {
             margin: 0; overflow: hidden; background-color: #000;
             font-family: 'Rajdhani', sans-serif; color: var(--lime-main);
-            touch-action: none; user-select: none;
+            touch-action: none; /* Disables browser zoom/pan globally */
+            user-select: none;
         }
 
         /* --- LAYERS --- */
@@ -78,56 +79,62 @@
         /* TOP HUD */
         #hud-top {
             position: absolute; top: 0; left: 0; right: 0; z-index: 20;
-            background: linear-gradient(to bottom, rgba(0,0,0,0.9) 80%, transparent);
-            padding: 15px; pointer-events: none;
-            display: flex; flex-direction: column; gap: 15px;
-            padding-bottom: 30px;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.95) 70%, transparent);
+            padding-top: max(10px, env(safe-area-inset-top)); 
+            padding-left: 15px; padding-right: 15px; padding-bottom: 20px;
+            pointer-events: none; /* Let touches pass through gaps */
+            display: flex; flex-direction: column; gap: 8px;
         }
 
-        .header-section { text-align: center; pointer-events: auto; margin-top: 5px; }
-        .glitch {
-            font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 1.4rem;
-            color: var(--lime-main); letter-spacing: 2px; text-shadow: 0 0 10px var(--lime-main);
+        .stat-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 10px; pointer-events: auto;
+            margin-bottom: 5px;
         }
-        .subtitle {
-            font-family: 'Share Tech Mono', monospace; font-size: 0.7rem; color: var(--lime-main);
-            letter-spacing: 3px; opacity: 0.8;
-        }
-
-        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; pointer-events: auto; margin-top: 10px; }
         .stat-box {
-            background: rgba(0, 20, 0, 0.85); border: 1px solid var(--lime-dim);
-            padding: 10px; border-radius: 6px; backdrop-filter: blur(10px);
+            background: rgba(0, 20, 0, 0.9); border: 1px solid var(--lime-dim);
+            padding: 8px; border-radius: 6px; backdrop-filter: blur(10px);
             display: flex; flex-direction: column; justify-content: center;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.6);
         }
         .price-text { font-family: 'Share Tech Mono', monospace; font-size: 1.4rem; font-weight: bold; color: #fff; text-shadow: 0 0 5px var(--lime-main); }
         .label-text { font-size: 0.65rem; color: #55aa55; letter-spacing: 1px; font-weight: bold; }
         .source-tag { font-size: 0.5rem; color: #338833; float: right; }
 
+        .header-section { text-align: center; pointer-events: auto; }
+        .glitch {
+            font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 1.2rem;
+            color: var(--lime-main); letter-spacing: 2px; text-shadow: 0 0 10px var(--lime-main);
+        }
+        .subtitle {
+            font-family: 'Share Tech Mono', monospace; font-size: 0.65rem; color: var(--lime-main);
+            letter-spacing: 3px; opacity: 0.8;
+        }
+
         .connect-container { display: flex; justify-content: center; width: 100%; pointer-events: auto; }
         .connect-btn {
             background: #001100; border: 2px solid var(--lime-main);
-            color: var(--lime-main); padding: 10px 40px; font-weight: 900; font-size: 13px;
+            color: var(--lime-main); padding: 8px 30px; font-weight: 900; font-size: 12px;
             letter-spacing: 2px; border-radius: 6px;
             box-shadow: 0 0 15px rgba(0,255,0,0.3); transition: all 0.2s;
             font-family: 'Orbitron', sans-serif; text-transform: uppercase;
         }
         .connect-btn:active { background: var(--lime-main); color: black; box-shadow: 0 0 25px var(--lime-main); }
 
-        /* BOTTOM DECK */
+        /* BOTTOM DECK - SCROLL FIX */
         #hud-bottom {
             position: absolute; bottom: 0; left: 0; right: 0; height: 55vh; z-index: 30;
-            display: flex; flex-direction: column; pointer-events: none;
+            display: flex; flex-direction: column; 
+            pointer-events: auto; /* CRITICAL: Capture touches for scrolling */
         }
         #command-deck {
             flex-grow: 1; background: var(--glass-bg); border-top: 2px solid var(--lime-dim);
             backdrop-filter: blur(12px); display: flex; flex-direction: column;
-            pointer-events: auto; border-radius: 16px 16px 0 0;
+            border-radius: 16px 16px 0 0;
             box-shadow: 0 -10px 40px rgba(0,0,0,0.8);
+            overflow: hidden; /* Contain inner scrolls */
         }
 
-        .tab-bar { display: flex; border-bottom: 1px solid var(--lime-dim); height: 45px; }
+        .tab-bar { display: flex; border-bottom: 1px solid var(--lime-dim); height: 45px; flex-shrink: 0; }
         .tab-btn {
             flex: 1; display: flex; align-items: center; justify-content: center;
             font-weight: bold; font-size: 12px; background: rgba(0,20,0,0.4); color: #00aa00;
@@ -135,11 +142,15 @@
         }
         .tab-btn.active { background: #001100; color: var(--lime-main); border-bottom: 3px solid var(--lime-main); text-shadow: 0 0 10px var(--lime-main); }
 
-        .view-panel { display: none; flex-direction: column; height: 100%; padding: 0; position: relative; }
+        .view-panel { 
+            display: none; flex-direction: column; height: 100%; padding: 0; position: relative; 
+            overflow: hidden;
+        }
         .view-panel.active { display: flex; }
 
         .filter-bar {
             display: flex; gap: 5px; padding: 8px; border-bottom: 1px solid var(--lime-dim); background: rgba(0,0,0,0.3);
+            flex-shrink: 0;
         }
         .filter-btn {
             flex: 1; background: #002200; border: 1px solid var(--lime-dim); color: #008800;
@@ -147,7 +158,14 @@
         }
         .filter-btn.active { background: var(--lime-main); color: black; border-color: var(--lime-main); }
 
-        #feed { flex-grow: 1; overflow-y: auto; touch-action: pan-y; padding-bottom: 20px; }
+        /* SCROLLABLE AREAS */
+        #feed, #watch-list, #case-list { 
+            flex-grow: 1; 
+            overflow-y: auto; 
+            -webkit-overflow-scrolling: touch; /* Momentum scrolling iOS */
+            touch-action: pan-y; /* Allow vertical scrolling explicitly */
+            padding-bottom: 40px;
+        }
 
         .tx-row { padding: 10px; border-bottom: 1px solid #112211; display: flex; flex-direction: column; gap: 4px; }
         
@@ -159,9 +177,9 @@
             display: inline-block; margin-left: 6px; font-family: 'Share Tech Mono';
         }
         .tag-tsfr { background: #003300; color: #00ff00; border: 1px solid #005500; }
-        .tag-dep { background: #442200; color: #ffaa00; border: 1px solid #663300; } /* DEPOSIT (SELL) */
-        .tag-wth { background: #003344; color: #00ffff; border: 1px solid #005566; } /* WITHDRAWAL (BUY/HOLD) */
-        .tag-dex { background: #330044; color: #aa00ff; border: 1px solid #550066; } /* TRADE */
+        .tag-dep { background: #442200; color: #ffaa00; border: 1px solid #663300; }
+        .tag-wth { background: #003344; color: #00ffff; border: 1px solid #005566; }
+        .tag-dex { background: #330044; color: #aa00ff; border: 1px solid #550066; }
         .tag-fail { background: #333; color: #aaa; border: 1px solid #555; }
 
         .tx-failed { opacity: 0.5; border-left: 3px solid #555; background: rgba(20,20,20,0.5); }
@@ -175,6 +193,17 @@
         }
         .action-btn:active { background: var(--lime-main); color: black; }
         .entity-name { color: #ffcc00; font-weight: bold; }
+
+        /* PAUSE BTN */
+        .control-bar {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 8px 12px; border-bottom: 1px solid var(--lime-dim); background: rgba(0,0,0,0.5); flex-shrink: 0;
+        }
+        .pause-btn {
+            background: #002200; border: 1px solid var(--lime-main); color: var(--lime-main);
+            padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: bold; font-family: 'Share Tech Mono';
+        }
+        .paused-mode { background: #442200 !important; border-color: #ffaa00 !important; color: #ffaa00 !important; }
 
         @keyframes pulse-green {
             0% { box-shadow: 0 0 10px var(--lime-main); }
@@ -203,15 +232,7 @@
 
     <!-- TOP HUD -->
     <div id="hud-top">
-        <div class="header-section">
-            <h1 class="glitch">XRPMAN SHADOW WATCH</h1>
-            <div class="subtitle">POWERED BY $XMEME</div>
-        </div>
-
-        <div class="connect-container">
-            <button id="connect-main" onclick="toggleConnection()" class="connect-btn">INITIALIZE UPLINK</button>
-        </div>
-
+        <!-- DATA FIRST -->
         <div class="stat-grid">
             <div class="stat-box">
                 <div id="price-label" class="label-text">XRP / USD <span id="price-source" class="source-tag">SCANNING...</span></div>
@@ -221,6 +242,17 @@
                 <div class="label-text">LEDGER INDEX</div>
                 <div id="ledger-display" class="price-text text-green-700">OFFLINE</div>
             </div>
+        </div>
+
+        <!-- BRANDING SECOND -->
+        <div class="header-section">
+            <h1 class="glitch">XRPMAN SHADOW WATCH</h1>
+            <div class="subtitle">POWERED BY $XMEME</div>
+        </div>
+
+        <!-- CONNECT BUTTON THIRD -->
+        <div class="connect-container">
+            <button id="connect-main" onclick="toggleConnection()" class="connect-btn">INITIALIZE UPLINK</button>
         </div>
     </div>
 
@@ -243,6 +275,10 @@
                         <input type="checkbox" id="hide-failed" checked class="accent-green-500"> NO GHOSTS
                     </label>
                 </div>
+                <div class="control-bar">
+                    <span class="text-[10px] text-gray-400">STATUS: <span id="status-text" class="text-green-500">ACTIVE</span></span>
+                    <button id="pause-btn" class="pause-btn" onclick="togglePause()">PAUSE STREAM</button>
+                </div>
                 <div id="feed">
                     <div class="text-center text-green-800 mt-12 font-tech text-xs tracking-widest">
                         AWAITING UPLINK...
@@ -252,21 +288,21 @@
 
             <!-- WATCH TAB -->
             <div id="view-watch" class="view-panel p-4">
-                <div class="flex gap-2 p-2 bg-black/50 border border-green-900 mb-2">
+                <div class="flex gap-2 p-2 bg-black/50 border border-green-900 mb-2 flex-shrink-0">
                     <input type="text" id="watch-input" placeholder="Enter rAddress..." class="flex-grow bg-transparent text-white text-xs outline-none font-tech">
                     <button onclick="addWatch()" class="text-green-500 font-bold text-xs uppercase">Track</button>
                 </div>
-                <div id="watch-list" class="flex-grow overflow-y-auto space-y-1" style="touch-action: pan-y;"></div>
+                <div id="watch-list" class="flex-grow overflow-y-auto space-y-1"></div>
             </div>
 
             <!-- CASE TAB -->
             <div id="view-case" class="view-panel">
-                <div class="flex justify-between p-3 border-b border-green-900 bg-black/20">
+                <div class="flex justify-between p-3 border-b border-green-900 bg-black/20 flex-shrink-0">
                     <span class="text-xs text-green-700">SAVED ANOMALIES</span>
                     <button onclick="exportJSON()" class="text-[10px] text-green-400 border border-green-600 px-3 rounded">EXPORT</button>
                 </div>
-                <div id="case-list" class="flex-grow overflow-y-auto space-y-1 p-2" style="touch-action: pan-y;"></div>
-                <button onclick="clearCases()" class="text-red-500 text-xs py-4 bg-red-900/10 font-bold tracking-widest border-t border-red-900">CLEAR LOCKER</button>
+                <div id="case-list" class="flex-grow overflow-y-auto space-y-1 p-2"></div>
+                <button onclick="clearCases()" class="text-red-500 text-xs py-4 bg-red-900/10 font-bold tracking-widest border-t border-red-900 flex-shrink-0">CLEAR LOCKER</button>
             </div>
         </div>
     </div>
@@ -313,11 +349,13 @@
             scene.add(particles);
             animate();
             
+            // Only capture touches on the canvas element, not the whole window
             let startX = 0;
+            container.addEventListener('touchstart', e => startX = e.touches[0].clientX, {passive: true});
             container.addEventListener('touchmove', e => {
                 camera.rotation.z -= (e.touches[0].clientX - startX) * 0.0005;
                 startX = e.touches[0].clientX;
-            });
+            }, {passive: true});
         }
 
         function animate() {
@@ -337,6 +375,7 @@
         let socket, isConnected = false, watchlist = [], cases = [], priceInterval;
         let activeFilter = 'all'; 
         let lastAlertTime = 0;
+        let isPaused = false;
 
         const ENTITIES = {
             'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh': 'GENESIS', 'rh1HPuR9...': 'BITSTAMP',
@@ -380,7 +419,30 @@
             activeFilter = mode;
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
+            
+            // CLEAR THE FEED FOR VISUAL CONFIRMATION
+            document.getElementById('feed').innerHTML = 
+                `<div class="text-center text-green-800 mt-12 font-tech text-xs tracking-widest">
+                    FILTER ACTIVE: [ ${mode.toUpperCase()} ]<br>AWAITING NEW TARGETS...
+                </div>`;
+            
             showToast("FILTER: " + mode.toUpperCase());
+        }
+
+        function togglePause() {
+            isPaused = !isPaused;
+            const btn = document.getElementById('pause-btn');
+            const status = document.getElementById('status-text');
+            
+            if(isPaused) {
+                btn.innerText = "RESUME"; btn.classList.add('paused-mode');
+                status.innerText = "PAUSED"; status.classList.replace('text-green-500', 'text-yellow-500');
+                showToast("STREAM FROZEN");
+            } else {
+                btn.innerText = "PAUSE STREAM"; btn.classList.remove('paused-mode');
+                status.innerText = "ACTIVE"; status.classList.replace('text-yellow-500', 'text-green-500');
+                showToast("STREAM RESUMED");
+            }
         }
 
         const PRICE_SOURCES = [
@@ -426,7 +488,8 @@
         }
 
         function handleTx(tx, meta) {
-            // Support Payment and OfferCreate
+            if (isPaused) return; // Prevent new items when paused
+            
             if (tx.TransactionType !== 'Payment' && tx.TransactionType !== 'OfferCreate') return;
             
             // --- GHOST FILTER ---
@@ -453,9 +516,14 @@
                     amt = parseInt(tx.Amount) / 1000000;
                 }
             } else if (tx.TransactionType === 'OfferCreate') {
+                // Try to extract DEX amount
+                if (typeof tx.TakerPays === 'string') {
+                    amt = parseInt(tx.TakerPays) / 1000000;
+                } else if (typeof tx.TakerGets === 'string') {
+                    amt = parseInt(tx.TakerGets) / 1000000;
+                }
                 type = "DEX";
                 color = "text-purple-400"; // DEX Color
-                // Approximate value not easily available without meta parsing logic, generic tag
             }
 
             // --- CLASSIFICATION ---
@@ -508,12 +576,16 @@
             const dispFrom = nameFrom ? `<span class="entity-name">${nameFrom}</span>` : tx.Account ? tx.Account.substring(0,4)+'...' : '???';
             const dispTo = nameTo ? `<span class="entity-name">${nameTo}</span>` : tx.Destination ? tx.Destination.substring(0,4)+'...' : 'DEX';
 
+            // REMOVE INIT MSG
+            const feed = document.getElementById('feed');
+            if (feed.innerText.includes("AWAITING")) feed.innerHTML = "";
+
             const row = document.createElement('div');
             row.className = rowClass;
             row.innerHTML = `
                 <div class="row-top ${color}">
                     <div class="flex items-center gap-2">
-                        <span class="font-bold text-sm">${amt > 0 ? amt.toLocaleString() + ' XRP' : 'DEX TRADE'}</span>
+                        <span class="font-bold text-base text-white text-shadow-lime">${amt > 0 ? amt.toLocaleString() + ' XRP' : 'DEX TRADE'}</span>
                         ${tags}
                     </div>
                     <div class="text-[10px] font-mono text-gray-500">${new Date().toLocaleTimeString()}</div>
@@ -524,7 +596,7 @@
                     <button class="action-btn" onclick="copyHash('${tx.hash}')">COPY</button>
                     <button class="action-btn" onclick='saveCase(${JSON.stringify({hash:tx.hash, amt, from:dispFrom, to:dispTo})})'>SAVE</button>
                 </div>`;
-            const feed = document.getElementById('feed');
+            
             feed.prepend(row);
             if(feed.children.length > 40) feed.lastChild.remove();
         }
