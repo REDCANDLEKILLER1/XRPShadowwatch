@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>XRPMAN SHADOWWATCH // v6.1</title>
+    <title>XRPMAN SHADOW WATCH // v6.5</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -13,6 +13,10 @@
             --lime-dim: #004400;
             --glass-bg: rgba(0, 10, 0, 0.94);
             --alert-red: #ff0000;
+            --ghost-gray: #444444;
+            --warn-orange: #ffaa00;
+            --info-cyan: #00ffff;
+            --dex-purple: #aa00ff;
         }
 
         body {
@@ -22,8 +26,6 @@
         }
 
         /* --- LAYERS --- */
-        
-        /* 1. SPLASH SCREEN */
         #splash-screen {
             position: fixed; inset: 0; z-index: 9999;
             background-color: #000;
@@ -43,38 +45,46 @@
         }
         .fade-out { opacity: 0; pointer-events: none; }
 
-        /* 2. BACKGROUND WALLPAPER */
         #app-background {
             position: absolute; inset: 0; z-index: 0;
             background-image: url('https://ipfs.filebase.io/ipfs/QmakcwAeW4QrNTYn5ntAbC1t2E3n5q57EbeSusm4czUc3G');
             background-size: cover; background-position: center;
-            filter: brightness(0.4) contrast(1.2); /* Darken for text readability */
+            filter: brightness(0.4) contrast(1.2);
         }
 
-        /* 3. 3D CANVAS */
         #canvas-container { position: absolute; inset: 0; z-index: 1; opacity: 0.8; }
 
-        /* 4. UI LAYERS */
         #toast {
             position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
             background: rgba(0, 50, 0, 0.95); border: 1px solid var(--lime-main);
             color: white; padding: 12px 24px; border-radius: 4px;
             font-family: 'Share Tech Mono'; font-size: 14px; letter-spacing: 1px;
-            opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 100;
+            opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 1000;
             box-shadow: 0 0 30px var(--lime-main); font-weight: bold;
         }
         .toast-show { opacity: 1 !important; }
 
+        /* ALERT FLASH */
+        @keyframes border-flash {
+            0% { box-shadow: inset 0 0 0 0 transparent; }
+            50% { box-shadow: inset 0 0 50px 20px var(--lime-main); }
+            100% { box-shadow: inset 0 0 0 0 transparent; }
+        }
+        .whale-alert-anim {
+            animation: border-flash 1s ease-in-out 3;
+            position: absolute; inset: 0; pointer-events: none; z-index: 900;
+        }
+
         /* TOP HUD */
         #hud-top {
             position: absolute; top: 0; left: 0; right: 0; z-index: 20;
-            background: linear-gradient(to bottom, rgba(0,0,0,0.9) 60%, transparent);
+            background: linear-gradient(to bottom, rgba(0,0,0,0.9) 80%, transparent);
             padding: 15px; pointer-events: none;
-            display: flex; flex-direction: column; gap: 12px;
+            display: flex; flex-direction: column; gap: 15px;
+            padding-bottom: 30px;
         }
 
-        .header-section { text-align: center; pointer-events: auto; margin-bottom: 2px; }
-        
+        .header-section { text-align: center; pointer-events: auto; margin-top: 5px; }
         .glitch {
             font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 1.4rem;
             color: var(--lime-main); letter-spacing: 2px; text-shadow: 0 0 10px var(--lime-main);
@@ -84,27 +94,21 @@
             letter-spacing: 3px; opacity: 0.8;
         }
 
-        /* STATS GRID */
-        .stat-grid {
-            display: grid; grid-template-columns: 1fr 1fr; gap: 10px; pointer-events: auto;
-        }
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; pointer-events: auto; margin-top: 10px; }
         .stat-box {
-            background: rgba(0, 20, 0, 0.7); border: 1px solid var(--lime-dim);
-            padding: 8px; border-radius: 4px; backdrop-filter: blur(4px);
+            background: rgba(0, 20, 0, 0.85); border: 1px solid var(--lime-dim);
+            padding: 10px; border-radius: 6px; backdrop-filter: blur(10px);
             display: flex; flex-direction: column; justify-content: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
         }
-        .price-text { font-family: 'Share Tech Mono', monospace; font-size: 1.2rem; font-weight: bold; }
-        .label-text { font-size: 0.6rem; color: #55aa55; letter-spacing: 1px; font-weight: bold; }
+        .price-text { font-family: 'Share Tech Mono', monospace; font-size: 1.4rem; font-weight: bold; color: #fff; text-shadow: 0 0 5px var(--lime-main); }
+        .label-text { font-size: 0.65rem; color: #55aa55; letter-spacing: 1px; font-weight: bold; }
         .source-tag { font-size: 0.5rem; color: #338833; float: right; }
 
-        /* CONNECT BUTTON (REPOSITIONED) */
-        .connect-container {
-            display: flex; justify-content: center; width: 100%; pointer-events: auto;
-            padding-bottom: 5px;
-        }
+        .connect-container { display: flex; justify-content: center; width: 100%; pointer-events: auto; }
         .connect-btn {
             background: #001100; border: 2px solid var(--lime-main);
-            color: var(--lime-main); padding: 12px 40px; font-weight: 900; font-size: 14px;
+            color: var(--lime-main); padding: 10px 40px; font-weight: 900; font-size: 13px;
             letter-spacing: 2px; border-radius: 6px;
             box-shadow: 0 0 15px rgba(0,255,0,0.3); transition: all 0.2s;
             font-family: 'Orbitron', sans-serif; text-transform: uppercase;
@@ -113,7 +117,7 @@
 
         /* BOTTOM DECK */
         #hud-bottom {
-            position: absolute; bottom: 0; left: 0; right: 0; height: 60vh; z-index: 30;
+            position: absolute; bottom: 0; left: 0; right: 0; height: 55vh; z-index: 30;
             display: flex; flex-direction: column; pointer-events: none;
         }
         #command-deck {
@@ -123,10 +127,10 @@
             box-shadow: 0 -10px 40px rgba(0,0,0,0.8);
         }
 
-        .tab-bar { display: flex; border-bottom: 1px solid var(--lime-dim); height: 50px; }
+        .tab-bar { display: flex; border-bottom: 1px solid var(--lime-dim); height: 45px; }
         .tab-btn {
             flex: 1; display: flex; align-items: center; justify-content: center;
-            font-weight: bold; font-size: 13px; background: rgba(0,20,0,0.4); color: #00aa00;
+            font-weight: bold; font-size: 12px; background: rgba(0,20,0,0.4); color: #00aa00;
             border-right: 1px solid var(--lime-dim); letter-spacing: 1px; font-family: 'Orbitron', sans-serif;
         }
         .tab-btn.active { background: #001100; color: var(--lime-main); border-bottom: 3px solid var(--lime-main); text-shadow: 0 0 10px var(--lime-main); }
@@ -134,28 +138,39 @@
         .view-panel { display: none; flex-direction: column; height: 100%; padding: 0; position: relative; }
         .view-panel.active { display: flex; }
 
-        .pause-bar {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 8px 12px; border-bottom: 1px solid var(--lime-dim); background: rgba(0,0,0,0.5);
+        .filter-bar {
+            display: flex; gap: 5px; padding: 8px; border-bottom: 1px solid var(--lime-dim); background: rgba(0,0,0,0.3);
         }
-        .pause-btn {
-            background: #002200; border: 1px solid var(--lime-main); color: var(--lime-main);
-            padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: bold; font-family: 'Share Tech Mono';
+        .filter-btn {
+            flex: 1; background: #002200; border: 1px solid var(--lime-dim); color: #008800;
+            font-size: 10px; padding: 4px; border-radius: 4px; font-weight: bold;
         }
-        .paused-mode { background: #442200 !important; border-color: #ffaa00 !important; color: #ffaa00 !important; }
+        .filter-btn.active { background: var(--lime-main); color: black; border-color: var(--lime-main); }
 
         #feed { flex-grow: 1; overflow-y: auto; touch-action: pan-y; padding-bottom: 20px; }
 
-        .tx-row { padding: 12px; border-bottom: 1px solid var(--lime-dim); display: flex; flex-direction: column; gap: 6px; }
+        .tx-row { padding: 10px; border-bottom: 1px solid #112211; display: flex; flex-direction: column; gap: 4px; }
+        
         .row-top { display: flex; justify-content: space-between; align-items: center; }
-        .tag-pill { font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: bold; display: inline-block; margin-left: 6px; font-family: 'Share Tech Mono'; }
-        .tag-exchange { background: #002244; color: #00ffff; border: 1px solid #004488; }
-        .tag-whale { background: #443300; color: #ffaa00; border: 1px solid #664400; }
+        
+        /* TAG STYLES */
+        .tag-pill {
+            font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: bold;
+            display: inline-block; margin-left: 6px; font-family: 'Share Tech Mono';
+        }
+        .tag-tsfr { background: #003300; color: #00ff00; border: 1px solid #005500; }
+        .tag-dep { background: #442200; color: #ffaa00; border: 1px solid #663300; } /* DEPOSIT (SELL) */
+        .tag-wth { background: #003344; color: #00ffff; border: 1px solid #005566; } /* WITHDRAWAL (BUY/HOLD) */
+        .tag-dex { background: #330044; color: #aa00ff; border: 1px solid #550066; } /* TRADE */
+        .tag-fail { background: #333; color: #aaa; border: 1px solid #555; }
 
-        .btn-row { display: flex; gap: 8px; margin-top: 4px; }
+        .tx-failed { opacity: 0.5; border-left: 3px solid #555; background: rgba(20,20,20,0.5); }
+        .tx-failed .action-btn { border-color: #333; color: #555; }
+
+        .btn-row { display: flex; gap: 5px; margin-top: 4px; }
         .action-btn {
-            flex: 1; padding: 10px 0; text-align: center; border-radius: 2px;
-            font-size: 11px; font-weight: bold; font-family: 'Share Tech Mono';
+            flex: 1; padding: 8px 0; text-align: center; border-radius: 2px;
+            font-size: 10px; font-weight: bold; font-family: 'Share Tech Mono';
             background: #001100; color: #008800; border: 1px solid var(--lime-dim);
         }
         .action-btn:active { background: var(--lime-main); color: black; }
@@ -184,24 +199,22 @@
     <!-- BACKGROUND LAYERS -->
     <div id="app-background"></div>
     <div id="canvas-container"></div>
+    <div id="alert-layer"></div>
 
     <!-- TOP HUD -->
     <div id="hud-top">
-        <!-- BRANDING -->
         <div class="header-section">
             <h1 class="glitch">XRPMAN SHADOW WATCH</h1>
             <div class="subtitle">POWERED BY $XMEME</div>
         </div>
 
-        <!-- INITIALIZE BUTTON (Moved Out of Grid) -->
         <div class="connect-container">
             <button id="connect-main" onclick="toggleConnection()" class="connect-btn">INITIALIZE UPLINK</button>
         </div>
 
-        <!-- STATS -->
         <div class="stat-grid">
             <div class="stat-box">
-                <div class="label-text">XRP / USD <span id="price-source" class="source-tag">SCANNING...</span></div>
+                <div id="price-label" class="label-text">XRP / USD <span id="price-source" class="source-tag">SCANNING...</span></div>
                 <div id="price-display" class="price-text">---</div>
             </div>
             <div class="stat-box text-right">
@@ -222,9 +235,13 @@
 
             <!-- LIVE TAB -->
             <div id="view-live" class="view-panel active">
-                <div class="pause-bar">
-                    <span class="text-[10px] text-green-700 font-bold">VECTOR STREAM</span>
-                    <button id="pause-btn" class="pause-btn" onclick="togglePause()">PAUSE STREAM</button>
+                <div class="filter-bar">
+                    <button class="filter-btn active" onclick="setFilter('all', this)">[ ALL ]</button>
+                    <button class="filter-btn" onclick="setFilter('whale', this)">[ WHALES ]</button>
+                    <button class="filter-btn" onclick="setFilter('exchange', this)">[ EXCH ]</button>
+                    <label class="flex items-center gap-1 text-[9px] text-green-400 font-bold ml-2">
+                        <input type="checkbox" id="hide-failed" checked class="accent-green-500"> NO GHOSTS
+                    </label>
                 </div>
                 <div id="feed">
                     <div class="text-center text-green-800 mt-12 font-tech text-xs tracking-widest">
@@ -259,17 +276,11 @@
         function bootSystem() {
             const vid = document.getElementById('splash-video');
             const btn = document.getElementById('boot-btn');
-            
-            btn.style.display = 'none'; 
-            vid.style.display = 'block'; 
-            vid.volume = 1.0;
-            vid.play().catch(e => console.log("Audio Blocked", e));
-            
+            btn.style.display = 'none'; vid.style.display = 'block'; 
+            vid.volume = 1.0; vid.play().catch(e => console.log("Audio Blocked"));
             vid.onended = () => {
                 document.getElementById('splash-screen').classList.add('fade-out');
-                setTimeout(() => {
-                    document.getElementById('splash-screen').style.display = 'none';
-                }, 1000);
+                setTimeout(() => document.getElementById('splash-screen').style.display = 'none', 1000);
             };
         }
 
@@ -280,14 +291,9 @@
         function init3D() {
             const container = document.getElementById('canvas-container');
             scene = new THREE.Scene();
-            // No fog or very light fog to let background show through
             scene.fog = new THREE.FogExp2(0x000000, 0.01); 
-
             camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-            camera.position.set(0, -10, 30);
-            camera.lookAt(0, 10, 0);
-
-            // Alpha: true is crucial for background visibility
+            camera.position.set(0, -10, 30); camera.lookAt(0, 10, 0);
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             container.appendChild(renderer.domElement);
@@ -301,10 +307,9 @@
             pGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
             pGeo.setAttribute('speed', new THREE.Float32BufferAttribute(speeds, 1));
             
-            const pMat = new THREE.PointsMaterial({
+            particles = new THREE.Points(pGeo, new THREE.PointsMaterial({
                 color: 0x00ff00, size: 0.4, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending
-            });
-            particles = new THREE.Points(pGeo, pMat);
+            }));
             scene.add(particles);
             animate();
             
@@ -321,10 +326,7 @@
             const spd = particles.geometry.attributes.speed.array;
             for(let i=0; i<particleCount; i++) {
                 pos[i*3+1] += spd[i];
-                if(pos[i*3+1] > 30) {
-                    pos[i*3+1] = -20;
-                    pos[i*3] = (Math.random()-0.5)*50;
-                }
+                if(pos[i*3+1] > 30) { pos[i*3+1] = -20; pos[i*3] = (Math.random()-0.5)*50; }
             }
             particles.geometry.attributes.position.needsUpdate = true;
             camera.position.x = Math.sin(Date.now()*0.0005)*2;
@@ -332,44 +334,53 @@
         }
 
         // --- APP LOGIC ---
-        let socket, isConnected = false, watchlist = [], cases = [], priceInterval, isPaused = false;
+        let socket, isConnected = false, watchlist = [], cases = [], priceInterval;
+        let activeFilter = 'all'; 
+        let lastAlertTime = 0;
+
         const ENTITIES = {
             'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh': 'GENESIS', 'rh1HPuR9...': 'BITSTAMP',
             'rPVMhWBsfF9iMXYj3aAzJ5NrPxrXz...': 'XRP TIP BOT', 'rLNaPoKeeBJZe2qs6x52yVPZpZ8td4dc6w': 'COINBASE',
-            'rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh': 'BINANCE', 'rJb5KsHsDHF1YSnasbwqSagepE8XXAuGh': 'BITSTAMP'
+            'rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh': 'BINANCE', 'rJb5KsHsDHF1YSnasbwqSagepE8XXAuGh': 'BITSTAMP',
+            'rU2mEJSLqBRkYLVTv55rFTgQYkDBqVyTRn': 'COINS.PH'
         };
+
+        // --- RECONNECTION LOGIC ---
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && isConnected) {
+                if (!socket || socket.readyState !== WebSocket.OPEN) {
+                    showToast("RE-ESTABLISHING UPLINK...");
+                    startXRPL();
+                }
+            }
+        });
 
         function toggleConnection() {
             const btn = document.getElementById('connect-main');
+            const priceLabel = document.getElementById('price-label'); 
+            
             if(isConnected) {
                 if(socket) socket.close();
                 clearInterval(priceInterval);
                 isConnected = false;
-                btn.innerText = "INITIALIZE UPLINK";
-                btn.style.background = "#001100"; btn.style.color = "#00ff00";
-                document.getElementById('price-label').style.color = "#008800";
+                btn.innerText = "INITIALIZE UPLINK"; btn.style.background = "#001100"; btn.style.color = "#00ff00";
+                if(priceLabel) priceLabel.style.color = "#008800";
                 showToast("SYSTEM HALTED");
             } else {
                 startXRPL();
                 startRedundantPriceEngine();
                 isConnected = true;
-                btn.innerText = "UPLINK ACTIVE";
-                btn.style.background = "#00ff00"; btn.style.color = "#000";
+                btn.innerText = "UPLINK ACTIVE"; btn.style.background = "#00ff00"; btn.style.color = "#000";
                 document.getElementById('feed').innerHTML = '';
                 showToast("FIREWALL BREACHED");
             }
         }
 
-        function togglePause() {
-            isPaused = !isPaused;
-            const btn = document.getElementById('pause-btn');
-            if(isPaused) {
-                btn.innerText = "RESUME STREAM"; btn.classList.add('paused-mode');
-                showToast("STREAM FROZEN");
-            } else {
-                btn.innerText = "PAUSE STREAM"; btn.classList.remove('paused-mode');
-                showToast("STREAM RESUMED");
-            }
+        function setFilter(mode, btn) {
+            activeFilter = mode;
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            showToast("FILTER: " + mode.toUpperCase());
         }
 
         const PRICE_SOURCES = [
@@ -401,42 +412,110 @@
             el.style.color = price > oldPrice ? '#00ff00' : (price < oldPrice ? '#ff5555' : 'white');
         }
 
-        function startRedundantPriceEngine() {
-            fetchPrice();
-            priceInterval = setInterval(fetchPrice, 8000); 
-        }
+        function startRedundantPriceEngine() { fetchPrice(); priceInterval = setInterval(fetchPrice, 8000); }
 
         function startXRPL() {
+            if(socket) socket.close();
             socket = new WebSocket('wss://s1.ripple.com');
             socket.onopen = () => socket.send(JSON.stringify({command:"subscribe", streams:["transactions", "ledger"]}));
             socket.onmessage = (e) => {
                 const d = JSON.parse(e.data);
-                if(d.type==='transaction') handleTx(d.transaction);
+                if(d.type==='transaction') handleTx(d.transaction, d.meta);
                 if(d.type==='ledgerClosed') document.getElementById('ledger-display').innerText = d.ledger_index;
             };
         }
 
-        function handleTx(tx) {
-            if (isPaused || tx.TransactionType!=='Payment' || typeof tx.Amount!=='string') return;
-            const amt = parseInt(tx.Amount)/1000000;
-            let nameFrom = ENTITIES[tx.Account] || null;
-            let nameTo = ENTITIES[tx.Destination] || null;
-            const hasTag = tx.DestinationTag !== undefined;
+        function handleTx(tx, meta) {
+            // Support Payment and OfferCreate
+            if (tx.TransactionType !== 'Payment' && tx.TransactionType !== 'OfferCreate') return;
+            
+            // --- GHOST FILTER ---
+            let isSuccess = false;
+            let result = meta?.TransactionResult || 'unknown';
+            if (result === 'tesSUCCESS') isSuccess = true;
+
+            const hideFailed = document.getElementById('hide-failed').checked;
+            if (hideFailed && !isSuccess) return;
+
+            // --- DATA PARSING ---
+            let type = "TSFR";
+            let color = "text-green-500";
+            let amt = 0;
+            let nameFrom = ENTITIES[tx.Account];
+            let nameTo = ENTITIES[tx.Destination];
+
+            // Handle Amount
+            if (typeof tx.Amount === 'string') {
+                // Check Delivered
+                if (meta && meta.delivered_amount && typeof meta.delivered_amount === 'string') {
+                    amt = parseInt(meta.delivered_amount) / 1000000;
+                } else {
+                    amt = parseInt(tx.Amount) / 1000000;
+                }
+            } else if (tx.TransactionType === 'OfferCreate') {
+                type = "DEX";
+                color = "text-purple-400"; // DEX Color
+                // Approximate value not easily available without meta parsing logic, generic tag
+            }
+
+            // --- CLASSIFICATION ---
+            let tags = "";
             const isWhale = amt >= 1000000;
-            let color = "text-green-500", tags = "";
+            const isExchange = nameFrom || nameTo;
 
-            if(isWhale) { color = "text-yellow-400"; tags += `<span class="tag-pill tag-whale">WHALE</span>`; }
-            if(hasTag) { tags += `<span class="tag-pill tag-exchange">TAG:${tx.DestinationTag}</span>`; }
-            if(watchlist.includes(tx.Account) || watchlist.includes(tx.Destination)) { color = "text-red-500 font-bold"; showToast("TARGET DETECTED"); }
+            if (tx.TransactionType === 'OfferCreate') {
+                tags += `<span class="tag-pill tag-dex">DEX ORD</span>`;
+            } else {
+                if (nameFrom) { 
+                    type = "WTH"; // Withdrawal
+                    color = "text-cyan-400";
+                    tags += `<span class="tag-pill tag-wth">WITHDRAW</span>`;
+                }
+                else if (nameTo) { 
+                    type = "DEP"; // Deposit
+                    color = "text-yellow-500"; // Warning color for sell pressure
+                    tags += `<span class="tag-pill tag-dep">DEPOSIT</span>`;
+                }
+                else {
+                    tags += `<span class="tag-pill tag-tsfr">TRANSFER</span>`;
+                }
+            }
 
-            const dispFrom = nameFrom ? `<span class="entity-name">${nameFrom}</span>` : tx.Account.substring(0,4)+'...';
-            const dispTo = nameTo ? `<span class="entity-name">${nameTo}</span>` : tx.Destination.substring(0,4)+'...';
+            // FILTER CHECK
+            if (activeFilter === 'whale' && !isWhale) return;
+            if (activeFilter === 'exchange' && !isExchange) return;
+
+            // WHALE ALERT
+            const now = Date.now();
+            if (isWhale && isSuccess && (now - lastAlertTime > 60000)) {
+                triggerWhaleAlert();
+                lastAlertTime = now;
+            }
+
+            // RENDER
+            let rowClass = "tx-row";
+            if (!isSuccess) {
+                color = "text-gray-500";
+                rowClass += " tx-failed";
+                tags = `<span class="tag-pill tag-fail">FAILED</span>`;
+            }
+
+            if(watchlist.includes(tx.Account) || watchlist.includes(tx.Destination)) {
+                color = "text-red-500 font-bold";
+                showToast("TARGET DETECTED");
+            }
+
+            const dispFrom = nameFrom ? `<span class="entity-name">${nameFrom}</span>` : tx.Account ? tx.Account.substring(0,4)+'...' : '???';
+            const dispTo = nameTo ? `<span class="entity-name">${nameTo}</span>` : tx.Destination ? tx.Destination.substring(0,4)+'...' : 'DEX';
 
             const row = document.createElement('div');
-            row.className = "tx-row";
+            row.className = rowClass;
             row.innerHTML = `
                 <div class="row-top ${color}">
-                    <div class="flex items-center gap-2"><span class="font-bold text-sm">${amt.toLocaleString()} XRP</span>${tags}</div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-sm">${amt > 0 ? amt.toLocaleString() + ' XRP' : 'DEX TRADE'}</span>
+                        ${tags}
+                    </div>
                     <div class="text-[10px] font-mono text-gray-500">${new Date().toLocaleTimeString()}</div>
                 </div>
                 <div class="flex justify-between text-[11px] font-mono text-gray-400"><span>${dispFrom} ➔ ${dispTo}</span></div>
@@ -447,7 +526,13 @@
                 </div>`;
             const feed = document.getElementById('feed');
             feed.prepend(row);
-            if(feed.children.length > 30) feed.lastChild.remove();
+            if(feed.children.length > 40) feed.lastChild.remove();
+        }
+
+        function triggerWhaleAlert() {
+            document.getElementById('alert-layer').classList.add('whale-alert-anim');
+            showToast("🚨 REAL WHALE MOVEMENT 🚨");
+            setTimeout(() => document.getElementById('alert-layer').classList.remove('whale-alert-anim'), 3000);
         }
 
         function showToast(msg) {
