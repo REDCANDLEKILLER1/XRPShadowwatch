@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v6.9</title>
+    <title>XRPMAN SHADOW WATCH // v7.1</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -11,7 +11,7 @@
         :root {
             --lime-main: #00ff00;
             --lime-dim: #004400;
-            --glass-bg: rgba(0, 10, 0, 0.96);
+            --glass-bg: rgba(0, 10, 0, 0.94);
             --alert-red: #ff0000;
             --ghost-gray: #444444;
             --warn-orange: #ffaa00;
@@ -22,8 +22,7 @@
         body {
             margin: 0; overflow: hidden; background-color: #000;
             font-family: 'Rajdhani', sans-serif; color: var(--lime-main);
-            touch-action: none; /* Disables browser zoom/pan globally */
-            user-select: none;
+            touch-action: none; user-select: none;
         }
 
         /* --- LAYERS --- */
@@ -65,6 +64,20 @@
         }
         .toast-show { opacity: 1 !important; }
 
+        /* BUBBLE MODAL */
+        #bubble-modal {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 85%; max-width: 350px;
+            background: rgba(0, 20, 0, 0.98); border: 2px solid var(--lime-main);
+            border-radius: 12px; padding: 20px; z-index: 2000;
+            display: none; flex-direction: column; gap: 10px;
+            box-shadow: 0 0 50px rgba(0, 255, 0, 0.3);
+        }
+        .modal-active { display: flex !important; }
+        .modal-row { display: flex; justify-content: space-between; font-size: 12px; border-bottom: 1px solid #113311; padding-bottom: 5px; }
+        .modal-label { color: #55aa55; font-weight: bold; }
+        .modal-val { color: white; font-family: 'Share Tech Mono'; text-align: right; word-break: break-all; }
+
         /* ALERT FLASH */
         @keyframes border-flash {
             0% { box-shadow: inset 0 0 0 0 transparent; }
@@ -82,7 +95,7 @@
             background: linear-gradient(to bottom, rgba(0,0,0,0.95) 70%, transparent);
             padding-top: max(10px, env(safe-area-inset-top)); 
             padding-left: 15px; padding-right: 15px; padding-bottom: 20px;
-            pointer-events: none; /* Let touches pass through gaps */
+            pointer-events: none;
             display: flex; flex-direction: column; gap: 8px;
         }
 
@@ -120,18 +133,18 @@
         }
         .connect-btn:active { background: var(--lime-main); color: black; box-shadow: 0 0 25px var(--lime-main); }
 
-        /* BOTTOM DECK - SCROLL FIX */
+        /* BOTTOM DECK */
         #hud-bottom {
             position: absolute; bottom: 0; left: 0; right: 0; height: 55vh; z-index: 30;
             display: flex; flex-direction: column; 
-            pointer-events: auto; /* CRITICAL: Capture touches for scrolling */
+            pointer-events: auto;
         }
         #command-deck {
             flex-grow: 1; background: var(--glass-bg); border-top: 2px solid var(--lime-dim);
             backdrop-filter: blur(12px); display: flex; flex-direction: column;
             border-radius: 16px 16px 0 0;
             box-shadow: 0 -10px 40px rgba(0,0,0,0.8);
-            overflow: hidden; /* Contain inner scrolls */
+            overflow: hidden;
         }
 
         .tab-bar { display: flex; border-bottom: 1px solid var(--lime-dim); height: 45px; flex-shrink: 0; }
@@ -158,20 +171,17 @@
         }
         .filter-btn.active { background: var(--lime-main); color: black; border-color: var(--lime-main); }
 
-        /* SCROLLABLE AREAS */
         #feed, #watch-list, #case-list { 
             flex-grow: 1; 
             overflow-y: auto; 
-            -webkit-overflow-scrolling: touch; /* Momentum scrolling iOS */
-            touch-action: pan-y; /* Allow vertical scrolling explicitly */
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-y;
             padding-bottom: 40px;
         }
 
         .tx-row { padding: 10px; border-bottom: 1px solid #112211; display: flex; flex-direction: column; gap: 4px; }
-        
         .row-top { display: flex; justify-content: space-between; align-items: center; }
         
-        /* TAG STYLES */
         .tag-pill {
             font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: bold;
             display: inline-block; margin-left: 6px; font-family: 'Share Tech Mono';
@@ -194,7 +204,6 @@
         .action-btn:active { background: var(--lime-main); color: black; }
         .entity-name { color: #ffcc00; font-weight: bold; }
 
-        /* PAUSE BTN */
         .control-bar {
             display: flex; justify-content: space-between; align-items: center;
             padding: 8px 12px; border-bottom: 1px solid var(--lime-dim); background: rgba(0,0,0,0.5); flex-shrink: 0;
@@ -211,6 +220,19 @@
             100% { box-shadow: 0 0 10px var(--lime-main); }
         }
 
+        /* --- MAP TAB STYLES --- */
+        #map-canvas {
+            width: 100%; height: 100%; display: block;
+        }
+        #map-legend {
+            position: absolute; bottom: 10px; left: 10px; right: 10px;
+            display: flex; gap: 5px; flex-wrap: wrap; pointer-events: none;
+        }
+        .legend-item {
+            font-size: 9px; padding: 2px 6px; border-radius: 3px; font-weight: bold;
+            font-family: 'Share Tech Mono'; background: rgba(0,0,0,0.8); border: 1px solid #333;
+        }
+
     </style>
 </head>
 <body>
@@ -221,6 +243,31 @@
             <source src="https://ipfs.filebase.io/ipfs/QmVMYvMffwSXPJyuNz3CAW8V6rS1wViWQjPHdzPGofb7Ux" type="video/mp4">
         </video>
         <button id="boot-btn" onclick="bootSystem()">SYSTEM BOOT</button>
+    </div>
+
+    <!-- BUBBLE DETAIL MODAL -->
+    <div id="bubble-modal">
+        <div class="text-center text-lg font-bold text-white mb-4 border-b border-green-900 pb-2">TRANSACTION INTEL</div>
+        
+        <div class="modal-row">
+            <span class="modal-label">AMOUNT:</span>
+            <span id="mod-amt" class="modal-val text-xl text-yellow-400">---</span>
+        </div>
+        <div class="modal-row">
+            <span class="modal-label">TYPE:</span>
+            <span id="mod-type" class="modal-val">---</span>
+        </div>
+        <div class="modal-row">
+            <span class="modal-label">SENDER:</span>
+            <span id="mod-from" class="modal-val text-[10px]">---</span>
+        </div>
+        <div class="modal-row">
+            <span class="modal-label">TARGET:</span>
+            <span id="mod-to" class="modal-val text-[10px]">---</span>
+        </div>
+
+        <button id="mod-scan-btn" class="w-full bg-green-900 hover:bg-green-600 text-white font-bold py-2 mt-4 rounded border border-green-500">SCAN ON LEDGER</button>
+        <button onclick="closeModal()" class="w-full text-red-500 text-xs mt-2">CLOSE INTEL</button>
     </div>
 
     <div id="toast">NOTIFICATION</div>
@@ -261,6 +308,7 @@
         <div id="command-deck">
             <div class="tab-bar">
                 <div class="tab-btn active" onclick="switchView('live')">LIVE FEED</div>
+                <div class="tab-btn" onclick="switchView('map')">MAP</div>
                 <div class="tab-btn" onclick="switchView('watch')">WATCHLIST</div>
                 <div class="tab-btn" onclick="switchView('case')">EVIDENCE</div>
             </div>
@@ -283,6 +331,18 @@
                     <div class="text-center text-green-800 mt-12 font-tech text-xs tracking-widest">
                         AWAITING UPLINK...
                     </div>
+                </div>
+            </div>
+
+            <!-- MAP TAB -->
+            <div id="view-map" class="view-panel">
+                <canvas id="map-canvas"></canvas>
+                <div id="map-legend">
+                    <div class="legend-item" style="color:#00ff00; border-color:#005500;">TSFR</div>
+                    <div class="legend-item" style="color:#ffaa00; border-color:#663300;">DEPOSIT</div>
+                    <div class="legend-item" style="color:#00ffff; border-color:#005566;">WITHDRAW</div>
+                    <div class="legend-item" style="color:#aa00ff; border-color:#550066;">DEX</div>
+                    <div class="legend-item" style="color:#ff0000; border-color:#550000;">ALERT</div>
                 </div>
             </div>
 
@@ -320,7 +380,7 @@
             };
         }
 
-        // --- 3D ENGINE ---
+        // --- 3D ENGINE (Background) ---
         let scene, camera, renderer, particles;
         const particleCount = 2500;
 
@@ -349,7 +409,7 @@
             scene.add(particles);
             animate();
             
-            // Only capture touches on the canvas element, not the whole window
+            // Interaction: Only capture on canvas layer
             let startX = 0;
             container.addEventListener('touchstart', e => startX = e.touches[0].clientX, {passive: true});
             container.addEventListener('touchmove', e => {
@@ -371,11 +431,106 @@
             renderer.render(scene, camera);
         }
 
+        // --- MAP ENGINE (Canvas) ---
+        const mapCanvas = document.getElementById('map-canvas');
+        const mapCtx = mapCanvas.getContext('2d');
+        let bubbles = [];
+        let mapActive = false;
+
+        function resizeMap() {
+            if(!mapCanvas.offsetParent) return;
+            mapCanvas.width = mapCanvas.offsetWidth;
+            mapCanvas.height = mapCanvas.offsetHeight;
+        }
+
+        class Bubble {
+            constructor(amt, color, hash, from, to, type) {
+                this.x = Math.random() * mapCanvas.width;
+                this.y = mapCanvas.height + 20;
+                this.radius = Math.min(30, Math.max(5, Math.log(amt) * 2));
+                this.speed = 1 + Math.random() * 2;
+                this.color = color;
+                this.hash = hash;
+                this.amt = amt;
+                this.from = from;
+                this.to = to;
+                this.type = type;
+                this.life = 1.0;
+            }
+            update() {
+                this.y -= this.speed;
+                this.life -= 0.002;
+            }
+            draw() {
+                mapCtx.globalAlpha = this.life;
+                mapCtx.beginPath();
+                mapCtx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                mapCtx.fillStyle = this.color;
+                mapCtx.fill();
+                mapCtx.strokeStyle = "#fff";
+                mapCtx.lineWidth = 1;
+                mapCtx.stroke();
+                
+                if (this.radius > 10) {
+                    mapCtx.fillStyle = "#000";
+                    mapCtx.font = "bold 8px monospace";
+                    mapCtx.textAlign = "center";
+                    mapCtx.fillText(Math.floor(this.amt), this.x, this.y + 3);
+                }
+            }
+        }
+
+        function loopMap() {
+            if (!mapActive) return;
+            requestAnimationFrame(loopMap);
+            mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
+            
+            for (let i = bubbles.length - 1; i >= 0; i--) {
+                let b = bubbles[i];
+                b.update();
+                b.draw();
+                if (b.y < -50 || b.life <= 0) bubbles.splice(i, 1);
+            }
+        }
+
+        // Tap to pop bubble
+        mapCanvas.addEventListener('click', (e) => {
+            const rect = mapCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            for (let i = bubbles.length - 1; i >= 0; i--) {
+                let b = bubbles[i];
+                const dist = Math.hypot(b.x - x, b.y - y);
+                if (dist < b.radius + 10) { 
+                    openModal(b);
+                    bubbles.splice(i, 1);
+                    break;
+                }
+            }
+        });
+
+        // --- BUBBLE MODAL ---
+        function openModal(b) {
+            document.getElementById('mod-amt').innerText = b.amt.toLocaleString() + " XRP";
+            document.getElementById('mod-amt').style.color = b.color;
+            document.getElementById('mod-type').innerText = b.type;
+            document.getElementById('mod-from').innerText = b.from;
+            document.getElementById('mod-to').innerText = b.to;
+            document.getElementById('mod-scan-btn').onclick = () => openScan(b.hash);
+            document.getElementById('bubble-modal').classList.add('modal-active');
+        }
+
+        function closeModal() {
+            document.getElementById('bubble-modal').classList.remove('modal-active');
+        }
+
         // --- APP LOGIC ---
         let socket, isConnected = false, watchlist = [], cases = [], priceInterval;
         let activeFilter = 'all'; 
         let lastAlertTime = 0;
         let isPaused = false;
+        let lastHeartbeat = Date.now();
 
         const ENTITIES = {
             'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh': 'GENESIS', 'rh1HPuR9...': 'BITSTAMP',
@@ -384,7 +539,7 @@
             'rU2mEJSLqBRkYLVTv55rFTgQYkDBqVyTRn': 'COINS.PH'
         };
 
-        // --- RECONNECTION LOGIC ---
+        // --- HEARTBEAT & RECONNECT ---
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible' && isConnected) {
                 if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -393,6 +548,14 @@
                 }
             }
         });
+
+        setInterval(() => {
+            if (isConnected && (Date.now() - lastHeartbeat > 20000)) {
+                console.log("Heartbeat lost. Reconnecting...");
+                showToast("SIGNAL LOST. RECONNECTING...");
+                startXRPL();
+            }
+        }, 5000);
 
         function toggleConnection() {
             const btn = document.getElementById('connect-main');
@@ -419,13 +582,10 @@
             activeFilter = mode;
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            
-            // CLEAR THE FEED FOR VISUAL CONFIRMATION
             document.getElementById('feed').innerHTML = 
                 `<div class="text-center text-green-800 mt-12 font-tech text-xs tracking-widest">
                     FILTER ACTIVE: [ ${mode.toUpperCase()} ]<br>AWAITING NEW TARGETS...
                 </div>`;
-            
             showToast("FILTER: " + mode.toUpperCase());
         }
 
@@ -479,20 +639,23 @@
         function startXRPL() {
             if(socket) socket.close();
             socket = new WebSocket('wss://s1.ripple.com');
-            socket.onopen = () => socket.send(JSON.stringify({command:"subscribe", streams:["transactions", "ledger"]}));
+            socket.onopen = () => {
+                socket.send(JSON.stringify({command:"subscribe", streams:["transactions", "ledger"]}));
+                lastHeartbeat = Date.now();
+            };
             socket.onmessage = (e) => {
+                lastHeartbeat = Date.now(); // Pulse
                 const d = JSON.parse(e.data);
                 if(d.type==='transaction') handleTx(d.transaction, d.meta);
                 if(d.type==='ledgerClosed') document.getElementById('ledger-display').innerText = d.ledger_index;
             };
+            socket.onclose = () => { console.log("Socket closed"); };
         }
 
         function handleTx(tx, meta) {
-            if (isPaused) return; // Prevent new items when paused
-            
+            if (isPaused) return; 
             if (tx.TransactionType !== 'Payment' && tx.TransactionType !== 'OfferCreate') return;
             
-            // --- GHOST FILTER ---
             let isSuccess = false;
             let result = meta?.TransactionResult || 'unknown';
             if (result === 'tesSUCCESS') isSuccess = true;
@@ -500,33 +663,27 @@
             const hideFailed = document.getElementById('hide-failed').checked;
             if (hideFailed && !isSuccess) return;
 
-            // --- DATA PARSING ---
             let type = "TSFR";
             let color = "text-green-500";
+            let mapColor = "#00ff00";
             let amt = 0;
             let nameFrom = ENTITIES[tx.Account];
             let nameTo = ENTITIES[tx.Destination];
 
-            // Handle Amount
             if (typeof tx.Amount === 'string') {
-                // Check Delivered
                 if (meta && meta.delivered_amount && typeof meta.delivered_amount === 'string') {
                     amt = parseInt(meta.delivered_amount) / 1000000;
                 } else {
                     amt = parseInt(tx.Amount) / 1000000;
                 }
             } else if (tx.TransactionType === 'OfferCreate') {
-                // Try to extract DEX amount
-                if (typeof tx.TakerPays === 'string') {
-                    amt = parseInt(tx.TakerPays) / 1000000;
-                } else if (typeof tx.TakerGets === 'string') {
-                    amt = parseInt(tx.TakerGets) / 1000000;
-                }
+                if (typeof tx.TakerPays === 'string') amt = parseInt(tx.TakerPays) / 1000000;
+                else if (typeof tx.TakerGets === 'string') amt = parseInt(tx.TakerGets) / 1000000;
                 type = "DEX";
-                color = "text-purple-400"; // DEX Color
+                color = "text-purple-400";
+                mapColor = "#aa00ff";
             }
 
-            // --- CLASSIFICATION ---
             let tags = "";
             const isWhale = amt >= 1000000;
             const isExchange = nameFrom || nameTo;
@@ -535,13 +692,11 @@
                 tags += `<span class="tag-pill tag-dex">DEX ORD</span>`;
             } else {
                 if (nameFrom) { 
-                    type = "WTH"; // Withdrawal
-                    color = "text-cyan-400";
+                    type = "WTH"; color = "text-cyan-400"; mapColor="#00ffff";
                     tags += `<span class="tag-pill tag-wth">WITHDRAW</span>`;
                 }
                 else if (nameTo) { 
-                    type = "DEP"; // Deposit
-                    color = "text-yellow-500"; // Warning color for sell pressure
+                    type = "DEP"; color = "text-yellow-500"; mapColor="#ffaa00";
                     tags += `<span class="tag-pill tag-dep">DEPOSIT</span>`;
                 }
                 else {
@@ -549,34 +704,37 @@
                 }
             }
 
-            // FILTER CHECK
             if (activeFilter === 'whale' && !isWhale) return;
             if (activeFilter === 'exchange' && !isExchange) return;
 
-            // WHALE ALERT
             const now = Date.now();
             if (isWhale && isSuccess && (now - lastAlertTime > 60000)) {
                 triggerWhaleAlert();
                 lastAlertTime = now;
             }
 
-            // RENDER
             let rowClass = "tx-row";
             if (!isSuccess) {
                 color = "text-gray-500";
                 rowClass += " tx-failed";
                 tags = `<span class="tag-pill tag-fail">FAILED</span>`;
-            }
-
-            if(watchlist.includes(tx.Account) || watchlist.includes(tx.Destination)) {
-                color = "text-red-500 font-bold";
-                showToast("TARGET DETECTED");
+                mapColor = "#333333";
             }
 
             const dispFrom = nameFrom ? `<span class="entity-name">${nameFrom}</span>` : tx.Account ? tx.Account.substring(0,4)+'...' : '???';
             const dispTo = nameTo ? `<span class="entity-name">${nameTo}</span>` : tx.Destination ? tx.Destination.substring(0,4)+'...' : 'DEX';
 
-            // REMOVE INIT MSG
+            // ADD TO MAP IF ACTIVE
+            if (mapActive && isSuccess) {
+                bubbles.push(new Bubble(amt, mapColor, tx.hash, dispFrom, dispTo, type));
+            }
+
+            if(watchlist.includes(tx.Account) || watchlist.includes(tx.Destination)) {
+                color = "text-red-500 font-bold";
+                showToast("TARGET DETECTED");
+                mapColor = "#ff0000";
+            }
+
             const feed = document.getElementById('feed');
             if (feed.innerText.includes("AWAITING")) feed.innerHTML = "";
 
@@ -619,6 +777,15 @@
             document.getElementById('view-'+id).classList.add('active');
             document.querySelectorAll('.tab-btn').forEach(e => e.classList.remove('active'));
             event.target.classList.add('active');
+            
+            // Map Logic
+            if(id === 'map') {
+                mapActive = true;
+                resizeMap();
+                loopMap();
+            } else {
+                mapActive = false;
+            }
         }
         function addWatch() {
             const v = document.getElementById('watch-input').value;
