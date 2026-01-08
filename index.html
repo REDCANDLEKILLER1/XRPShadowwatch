@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>XRPMAN SHADOW WATCH // POWERED BY $XMEME</title>
+    <title>XRPMAN SHADOW WATCH // v6.1</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -21,116 +21,97 @@
             touch-action: none; user-select: none;
         }
 
-        /* --- SPLASH SCREEN --- */
+        /* --- LAYERS --- */
+        
+        /* 1. SPLASH SCREEN */
         #splash-screen {
             position: fixed; inset: 0; z-index: 9999;
             background-color: #000;
             display: flex; justify-content: center; align-items: center;
             transition: opacity 1s ease-out;
         }
-        
         #splash-video {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            object-fit: cover;
-            display: none; /* Hidden until triggered */
+            object-fit: cover; display: none;
         }
-
         #boot-btn {
-            z-index: 10000;
-            background: #000; border: 2px solid var(--lime-main);
+            z-index: 10000; background: #000; border: 2px solid var(--lime-main);
             color: var(--lime-main); padding: 15px 30px;
             font-family: 'Orbitron', sans-serif; font-size: 16px; letter-spacing: 4px;
             cursor: pointer; box-shadow: 0 0 20px var(--lime-main);
             animation: pulse-green 2s infinite;
         }
-        
-        @keyframes pulse-green {
-            0% { box-shadow: 0 0 10px var(--lime-main); }
-            50% { box-shadow: 0 0 30px var(--lime-main), inset 0 0 10px var(--lime-main); }
-            100% { box-shadow: 0 0 10px var(--lime-main); }
-        }
-
         .fade-out { opacity: 0; pointer-events: none; }
 
-        /* --- MAIN APP --- */
-        #canvas-container { position: absolute; inset: 0; z-index: 1; }
-
-        /* GLITCH HEADER */
-        .glitch-wrapper { position: relative; display: inline-block; }
-        .glitch {
-            font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 1.5rem;
-            color: var(--lime-main); position: relative; letter-spacing: 2px;
-        }
-        .glitch::before, .glitch::after {
-            content: attr(data-text); position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-        }
-        .glitch::before {
-            left: 2px; text-shadow: -1px 0 #ff0000; clip: rect(24px, 550px, 90px, 0);
-            animation: glitch-anim-2 3s infinite linear alternate-reverse;
-        }
-        .glitch::after {
-            left: -2px; text-shadow: -1px 0 #0000ff; clip: rect(85px, 550px, 140px, 0);
-            animation: glitch-anim 2.5s infinite linear alternate-reverse;
-        }
-        @keyframes glitch-anim {
-            0% { clip: rect(10px, 9999px, 31px, 0); }
-            20% { clip: rect(65px, 9999px, 89px, 0); }
-            40% { clip: rect(18px, 9999px, 46px, 0); }
-            60% { clip: rect(80px, 9999px, 10px, 0); }
-            80% { clip: rect(4px, 9999px, 87px, 0); }
-            100% { clip: rect(35px, 9999px, 7px, 0); }
-        }
-        @keyframes glitch-anim-2 {
-            0% { clip: rect(65px, 9999px, 100px, 0); }
-            20% { clip: rect(40px, 9999px, 14px, 0); }
-            40% { clip: rect(2px, 9999px, 67px, 0); }
-            60% { clip: rect(35px, 9999px, 8px, 0); }
-            80% { clip: rect(90px, 9999px, 20px, 0); }
-            100% { clip: rect(15px, 9999px, 55px, 0); }
+        /* 2. BACKGROUND WALLPAPER */
+        #app-background {
+            position: absolute; inset: 0; z-index: 0;
+            background-image: url('https://ipfs.filebase.io/ipfs/QmakcwAeW4QrNTYn5ntAbC1t2E3n5q57EbeSusm4czUc3G');
+            background-size: cover; background-position: center;
+            filter: brightness(0.4) contrast(1.2); /* Darken for text readability */
         }
 
-        .subtitle {
-            font-family: 'Share Tech Mono', monospace; font-size: 0.7rem; color: var(--lime-main);
-            letter-spacing: 3px; margin-top: -5px; opacity: 0.8; text-shadow: 0 0 5px var(--lime-main);
-        }
+        /* 3. 3D CANVAS */
+        #canvas-container { position: absolute; inset: 0; z-index: 1; opacity: 0.8; }
 
-        /* TOAST */
+        /* 4. UI LAYERS */
         #toast {
             position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
             background: rgba(0, 50, 0, 0.95); border: 1px solid var(--lime-main);
-            color: var(--lime-main); padding: 12px 24px; border-radius: 4px;
+            color: white; padding: 12px 24px; border-radius: 4px;
             font-family: 'Share Tech Mono'; font-size: 14px; letter-spacing: 1px;
             opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 100;
             box-shadow: 0 0 30px var(--lime-main); font-weight: bold;
         }
         .toast-show { opacity: 1 !important; }
 
-        /* HUD LAYOUT */
+        /* TOP HUD */
         #hud-top {
             position: absolute; top: 0; left: 0; right: 0; z-index: 20;
-            background: linear-gradient(to bottom, #000 40%, transparent);
+            background: linear-gradient(to bottom, rgba(0,0,0,0.9) 60%, transparent);
             padding: 15px; pointer-events: none;
-            display: flex; flex-direction: column; gap: 10px;
+            display: flex; flex-direction: column; gap: 12px;
         }
-        .header-section { text-align: center; pointer-events: auto; margin-bottom: 5px; }
-        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; pointer-events: auto; }
+
+        .header-section { text-align: center; pointer-events: auto; margin-bottom: 2px; }
+        
+        .glitch {
+            font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 1.4rem;
+            color: var(--lime-main); letter-spacing: 2px; text-shadow: 0 0 10px var(--lime-main);
+        }
+        .subtitle {
+            font-family: 'Share Tech Mono', monospace; font-size: 0.7rem; color: var(--lime-main);
+            letter-spacing: 3px; opacity: 0.8;
+        }
+
+        /* STATS GRID */
+        .stat-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 10px; pointer-events: auto;
+        }
         .stat-box {
-            background: rgba(0, 20, 0, 0.8); border: 1px solid var(--lime-dim);
+            background: rgba(0, 20, 0, 0.7); border: 1px solid var(--lime-dim);
             padding: 8px; border-radius: 4px; backdrop-filter: blur(4px);
             display: flex; flex-direction: column; justify-content: center;
         }
-        .price-text { font-family: 'Share Tech Mono', monospace; font-size: 1.4rem; font-weight: bold; line-height: 1.2; }
-        .label-text { font-size: 0.65rem; color: #55aa55; letter-spacing: 1px; font-weight: bold; }
-        .source-tag { font-size: 0.55rem; color: #338833; float: right; }
+        .price-text { font-family: 'Share Tech Mono', monospace; font-size: 1.2rem; font-weight: bold; }
+        .label-text { font-size: 0.6rem; color: #55aa55; letter-spacing: 1px; font-weight: bold; }
+        .source-tag { font-size: 0.5rem; color: #338833; float: right; }
 
-        .connect-btn {
-            grid-column: span 2; background: #001100; border: 1px solid var(--lime-main);
-            color: var(--lime-main); padding: 12px; font-weight: bold; font-size: 14px;
-            letter-spacing: 3px; text-align: center; margin-top: 5px; border-radius: 4px;
-            box-shadow: 0 0 10px rgba(0,255,0,0.2); transition: all 0.2s; font-family: 'Orbitron', sans-serif;
+        /* CONNECT BUTTON (REPOSITIONED) */
+        .connect-container {
+            display: flex; justify-content: center; width: 100%; pointer-events: auto;
+            padding-bottom: 5px;
         }
-        .connect-btn:active { background: var(--lime-main); color: black; box-shadow: 0 0 20px var(--lime-main); }
+        .connect-btn {
+            background: #001100; border: 2px solid var(--lime-main);
+            color: var(--lime-main); padding: 12px 40px; font-weight: 900; font-size: 14px;
+            letter-spacing: 2px; border-radius: 6px;
+            box-shadow: 0 0 15px rgba(0,255,0,0.3); transition: all 0.2s;
+            font-family: 'Orbitron', sans-serif; text-transform: uppercase;
+        }
+        .connect-btn:active { background: var(--lime-main); color: black; box-shadow: 0 0 25px var(--lime-main); }
 
+        /* BOTTOM DECK */
         #hud-bottom {
             position: absolute; bottom: 0; left: 0; right: 0; height: 60vh; z-index: 30;
             display: flex; flex-direction: column; pointer-events: none;
@@ -180,6 +161,12 @@
         .action-btn:active { background: var(--lime-main); color: black; }
         .entity-name { color: #ffcc00; font-weight: bold; }
 
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 10px var(--lime-main); }
+            50% { box-shadow: 0 0 30px var(--lime-main), inset 0 0 10px var(--lime-main); }
+            100% { box-shadow: 0 0 10px var(--lime-main); }
+        }
+
     </style>
 </head>
 <body>
@@ -193,18 +180,25 @@
     </div>
 
     <div id="toast">NOTIFICATION</div>
+    
+    <!-- BACKGROUND LAYERS -->
+    <div id="app-background"></div>
     <div id="canvas-container"></div>
 
-    <!-- MAIN APP HUD -->
+    <!-- TOP HUD -->
     <div id="hud-top">
-        <!-- BRANDING SECTION -->
+        <!-- BRANDING -->
         <div class="header-section">
-            <div class="glitch-wrapper">
-                <h1 class="glitch" data-text="XRPMAN SHADOW WATCH">XRPMAN SHADOW WATCH</h1>
-            </div>
+            <h1 class="glitch">XRPMAN SHADOW WATCH</h1>
             <div class="subtitle">POWERED BY $XMEME</div>
         </div>
 
+        <!-- INITIALIZE BUTTON (Moved Out of Grid) -->
+        <div class="connect-container">
+            <button id="connect-main" onclick="toggleConnection()" class="connect-btn">INITIALIZE UPLINK</button>
+        </div>
+
+        <!-- STATS -->
         <div class="stat-grid">
             <div class="stat-box">
                 <div class="label-text">XRP / USD <span id="price-source" class="source-tag">SCANNING...</span></div>
@@ -214,10 +208,10 @@
                 <div class="label-text">LEDGER INDEX</div>
                 <div id="ledger-display" class="price-text text-green-700">OFFLINE</div>
             </div>
-            <button id="connect-main" onclick="toggleConnection()" class="connect-btn">INITIALIZE UPLINK</button>
         </div>
     </div>
 
+    <!-- BOTTOM DECK -->
     <div id="hud-bottom">
         <div id="command-deck">
             <div class="tab-bar">
@@ -266,8 +260,8 @@
             const vid = document.getElementById('splash-video');
             const btn = document.getElementById('boot-btn');
             
-            btn.style.display = 'none'; // Hide button
-            vid.style.display = 'block'; // Show video
+            btn.style.display = 'none'; 
+            vid.style.display = 'block'; 
             vid.volume = 1.0;
             vid.play().catch(e => console.log("Audio Blocked", e));
             
@@ -286,11 +280,15 @@
         function init3D() {
             const container = document.getElementById('canvas-container');
             scene = new THREE.Scene();
-            scene.fog = new THREE.FogExp2(0x000000, 0.03); 
+            // No fog or very light fog to let background show through
+            scene.fog = new THREE.FogExp2(0x000000, 0.01); 
+
             camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
             camera.position.set(0, -10, 30);
             camera.lookAt(0, 10, 0);
-            renderer = new THREE.WebGLRenderer({ antialias: true });
+
+            // Alpha: true is crucial for background visibility
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             container.appendChild(renderer.domElement);
             
@@ -303,9 +301,10 @@
             pGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
             pGeo.setAttribute('speed', new THREE.Float32BufferAttribute(speeds, 1));
             
-            particles = new THREE.Points(pGeo, new THREE.PointsMaterial({
+            const pMat = new THREE.PointsMaterial({
                 color: 0x00ff00, size: 0.4, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending
-            }));
+            });
+            particles = new THREE.Points(pGeo, pMat);
             scene.add(particles);
             animate();
             
