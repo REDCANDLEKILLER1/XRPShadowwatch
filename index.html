@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v7.7</title>
+    <title>XRPMAN SHADOW WATCH // v9.0</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -17,7 +17,6 @@
             --warn-orange: #ffaa00;
             --info-cyan: #00ffff;
             --dex-purple: #aa00ff;
-            --gold-hvt: #ffd700;
         }
 
         body {
@@ -30,21 +29,55 @@
         #splash-screen {
             position: fixed; inset: 0; z-index: 9999;
             background-color: #000;
-            display: flex; justify-content: center; align-items: center;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
             transition: opacity 1s ease-out;
         }
         #splash-video {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             object-fit: cover; display: none;
         }
+        #boot-container {
+            z-index: 10000; display: flex; flex-direction: column; gap: 20px; align-items: center;
+        }
         #boot-btn {
-            z-index: 10000; background: #000; border: 2px solid var(--lime-main);
+            background: #000; border: 2px solid var(--lime-main);
             color: var(--lime-main); padding: 15px 30px;
             font-family: 'Orbitron', sans-serif; font-size: 16px; letter-spacing: 4px;
             cursor: pointer; box-shadow: 0 0 20px var(--lime-main);
             animation: pulse-green 2s infinite;
         }
+        #skip-btn {
+            background: transparent; border: 1px solid #333; color: #666;
+            padding: 8px 20px; font-family: 'Share Tech Mono'; font-size: 12px;
+            cursor: pointer; margin-top: 10px; display: none;
+        }
         .fade-out { opacity: 0; pointer-events: none; }
+
+        /* TUTORIAL OVERLAY */
+        #tutorial-overlay {
+            position: fixed; inset: 0; z-index: 5000; background: rgba(0,0,0,0.85);
+            display: none; pointer-events: auto;
+        }
+        .tut-active { display: block !important; }
+        .highlight-element {
+            position: relative; z-index: 5001 !important;
+            box-shadow: 0 0 0 9999px rgba(0,0,0,0.85), 0 0 20px var(--lime-main);
+            pointer-events: none;
+        }
+        #tut-card {
+            position: absolute; bottom: 20%; left: 50%; transform: translateX(-50%);
+            width: 90%; max-width: 400px;
+            background: rgba(0, 20, 0, 0.95); border: 2px solid var(--lime-main);
+            padding: 20px; border-radius: 8px; z-index: 5002;
+            text-align: center; box-shadow: 0 0 30px var(--lime-main);
+        }
+        .tut-title { font-family: 'Orbitron'; font-weight: bold; color: white; margin-bottom: 10px; font-size: 18px; }
+        .tut-text { font-family: 'Share Tech Mono'; color: #ccc; font-size: 14px; line-height: 1.4; margin-bottom: 20px; }
+        .tut-controls { display: flex; gap: 10px; justify-content: center; }
+        .tut-btn {
+            padding: 8px 20px; border: 1px solid var(--lime-main); background: #001100;
+            color: var(--lime-main); font-family: 'Share Tech Mono'; font-weight: bold;
+        }
 
         #app-background {
             position: absolute; inset: 0; z-index: 0;
@@ -52,15 +85,15 @@
             background-size: cover; background-position: center;
             filter: brightness(0.4) contrast(1.2);
         }
-
         #canvas-container { position: absolute; inset: 0; z-index: 1; opacity: 0.8; }
+        #alert-layer { position: absolute; inset: 0; z-index: 900; pointer-events: none; }
 
         #toast {
             position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
             background: rgba(0, 50, 0, 0.95); border: 1px solid var(--lime-main);
             color: white; padding: 12px 24px; border-radius: 4px;
             font-family: 'Share Tech Mono'; font-size: 14px; letter-spacing: 1px;
-            opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 1000;
+            opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 6000;
             box-shadow: 0 0 30px var(--lime-main); font-weight: bold; text-align: center;
         }
         .toast-show { opacity: 1 !important; }
@@ -78,7 +111,6 @@
         .modal-row { display: flex; justify-content: space-between; font-size: 12px; border-bottom: 1px solid #113311; padding-bottom: 5px; }
         .modal-label { color: #55aa55; font-weight: bold; }
         .modal-val { color: white; font-family: 'Share Tech Mono'; text-align: right; word-break: break-all; }
-
         .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
         .mod-btn {
             background: #001100; border: 1px solid var(--lime-main); color: var(--lime-main);
@@ -87,27 +119,6 @@
         }
         .mod-btn:active { background: var(--lime-main); color: black; }
         .mod-save { border-color: #ffaa00; color: #ffaa00; }
-        .mod-save:active { background: #ffaa00; color: black; }
-
-        /* ALERT FLASH */
-        @keyframes border-flash {
-            0% { box-shadow: inset 0 0 0 0 transparent; }
-            50% { box-shadow: inset 0 0 50px 20px var(--lime-main); }
-            100% { box-shadow: inset 0 0 0 0 transparent; }
-        }
-        .whale-alert-anim {
-            animation: border-flash 1s ease-in-out 3;
-            position: absolute; inset: 0; pointer-events: none; z-index: 900;
-        }
-        @keyframes red-flash {
-            0% { box-shadow: inset 0 0 0 0 transparent; }
-            50% { box-shadow: inset 0 0 50px 20px var(--alert-red); }
-            100% { box-shadow: inset 0 0 0 0 transparent; }
-        }
-        .hvt-alert-anim {
-            animation: red-flash 0.5s ease-in-out 6;
-            position: absolute; inset: 0; pointer-events: none; z-index: 950;
-        }
 
         /* TOP HUD */
         #hud-top {
@@ -115,14 +126,9 @@
             background: linear-gradient(to bottom, rgba(0,0,0,0.95) 70%, transparent);
             padding-top: max(10px, env(safe-area-inset-top)); 
             padding-left: 15px; padding-right: 15px; padding-bottom: 20px;
-            pointer-events: none;
-            display: flex; flex-direction: column; gap: 8px;
+            pointer-events: none; display: flex; flex-direction: column; gap: 8px;
         }
-
-        .stat-grid {
-            display: grid; grid-template-columns: 1fr 1fr; gap: 10px; pointer-events: auto;
-            margin-bottom: 5px;
-        }
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; pointer-events: auto; margin-bottom: 5px; }
         .stat-box {
             background: rgba(0, 20, 0, 0.9); border: 1px solid var(--lime-dim);
             padding: 8px; border-radius: 6px; backdrop-filter: blur(10px);
@@ -132,18 +138,19 @@
         .price-text { font-family: 'Share Tech Mono', monospace; font-size: 1.4rem; font-weight: bold; color: #fff; text-shadow: 0 0 5px var(--lime-main); }
         .label-text { font-size: 0.65rem; color: #55aa55; letter-spacing: 1px; font-weight: bold; }
         .source-tag { font-size: 0.5rem; color: #338833; float: right; }
-
-        .header-section { text-align: center; pointer-events: auto; }
-        .glitch {
-            font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 1.2rem;
-            color: var(--lime-main); letter-spacing: 2px; text-shadow: 0 0 10px var(--lime-main);
+        
+        .header-section { text-align: center; pointer-events: auto; position: relative; }
+        .glitch { font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 1.2rem; color: var(--lime-main); letter-spacing: 2px; text-shadow: 0 0 10px var(--lime-main); }
+        .subtitle { font-family: 'Share Tech Mono', monospace; font-size: 0.65rem; color: var(--lime-main); letter-spacing: 3px; opacity: 0.8; }
+        
+        #help-btn {
+            position: absolute; right: 0; top: 0; width: 30px; height: 30px;
+            border: 1px solid #333; color: #666; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center; font-weight: bold;
+            font-size: 12px; cursor: pointer;
         }
-        .subtitle {
-            font-family: 'Share Tech Mono', monospace; font-size: 0.65rem; color: var(--lime-main);
-            letter-spacing: 3px; opacity: 0.8;
-        }
 
-        .connect-container { display: flex; justify-content: center; gap:10px; width: 100%; pointer-events: auto; }
+        .connect-container { display: flex; justify-content: center; gap: 10px; width: 100%; pointer-events: auto; }
         .connect-btn {
             background: #001100; border: 2px solid var(--lime-main);
             color: var(--lime-main); padding: 8px 30px; font-weight: 900; font-size: 12px;
@@ -152,25 +159,21 @@
             font-family: 'Orbitron', sans-serif; text-transform: uppercase;
         }
         .connect-btn:active { background: var(--lime-main); color: black; box-shadow: 0 0 25px var(--lime-main); }
-        
         .audio-btn {
             background: #001100; border: 1px solid var(--warn-orange); color: var(--warn-orange);
             padding: 8px 15px; font-weight: bold; font-size: 10px; border-radius: 6px;
-            font-family: 'Share Tech Mono';
+            font-family: 'Share Tech Mono'; display: none;
         }
 
         /* BOTTOM DECK */
         #hud-bottom {
             position: absolute; bottom: 0; left: 0; right: 0; height: 55vh; z-index: 30;
-            display: flex; flex-direction: column; 
-            pointer-events: auto;
+            display: flex; flex-direction: column; pointer-events: auto;
         }
         #command-deck {
             flex-grow: 1; background: var(--glass-bg); border-top: 2px solid var(--lime-dim);
             backdrop-filter: blur(12px); display: flex; flex-direction: column;
-            border-radius: 16px 16px 0 0;
-            box-shadow: 0 -10px 40px rgba(0,0,0,0.8);
-            overflow: hidden;
+            border-radius: 16px 16px 0 0; box-shadow: 0 -10px 40px rgba(0,0,0,0.8); overflow: hidden;
         }
 
         .tab-bar { display: flex; border-bottom: 1px solid var(--lime-dim); height: 45px; flex-shrink: 0; }
@@ -182,45 +185,32 @@
         .tab-btn.active { background: #001100; color: var(--lime-main); border-bottom: 3px solid var(--lime-main); text-shadow: 0 0 10px var(--lime-main); }
         .tab-btn.hvt-active { color: var(--gold-hvt); text-shadow: 0 0 5px var(--gold-hvt); }
 
-        .view-panel { 
-            display: none; flex-direction: column; height: 100%; padding: 0; position: relative; 
-            overflow: hidden;
-        }
+        .view-panel { display: none; flex-direction: column; height: 100%; padding: 0; position: relative; overflow: hidden; }
         .view-panel.active { display: flex; }
 
-        .filter-bar {
-            display: flex; gap: 5px; padding: 8px; border-bottom: 1px solid var(--lime-dim); background: rgba(0,0,0,0.3);
-            flex-shrink: 0;
-        }
+        .filter-bar { display: flex; gap: 5px; padding: 8px; border-bottom: 1px solid var(--lime-dim); background: rgba(0,0,0,0.3); flex-shrink: 0; overflow-x: auto; }
         .filter-btn {
-            flex: 1; background: #002200; border: 1px solid var(--lime-dim); color: #008800;
-            font-size: 10px; padding: 4px; border-radius: 4px; font-weight: bold;
+            flex: 1; min-width: 60px; background: #002200; border: 1px solid var(--lime-dim); color: #008800;
+            font-size: 10px; padding: 4px; border-radius: 4px; font-weight: bold; white-space: nowrap;
         }
         .filter-btn.active { background: var(--lime-main); color: black; border-color: var(--lime-main); }
 
         #feed, #watch-list, #case-list, #report-list, #hvt-list { 
-            flex-grow: 1; 
-            overflow-y: auto; 
-            -webkit-overflow-scrolling: touch;
-            touch-action: pan-y;
-            padding-bottom: 40px;
+            flex-grow: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; padding-bottom: 40px;
         }
 
         .tx-row { padding: 10px; border-bottom: 1px solid #112211; display: flex; flex-direction: column; gap: 4px; }
         .row-top { display: flex; justify-content: space-between; align-items: center; }
         
-        /* TAG STYLES */
-        .tag-pill {
-            font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: bold;
-            display: inline-block; margin-left: 6px; font-family: 'Share Tech Mono';
-        }
+        .tag-pill { font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: bold; display: inline-block; margin-left: 6px; font-family: 'Share Tech Mono'; }
         .tag-tsfr { background: #003300; color: #00ff00; border: 1px solid #005500; }
         .tag-dep { background: #442200; color: #ffaa00; border: 1px solid #663300; }
         .tag-wth { background: #003344; color: #00ffff; border: 1px solid #005566; }
         .tag-dex { background: #330044; color: #aa00ff; border: 1px solid #550066; }
         .tag-fail { background: #333; color: #aaa; border: 1px solid #555; }
         .tag-hvt { background: #443300; color: #ffd700; border: 1px solid #ffd700; box-shadow: 0 0 5px #ffd700; animation: blink-hvt 1s infinite; }
-
+        .tag-l2 { background: #003344; color: #00ffff; border: 1px solid #00aaaa; }
+        
         @keyframes blink-hvt { 50% { opacity: 0.5; } }
 
         .tx-failed { opacity: 0.5; border-left: 3px solid #555; background: rgba(20,20,20,0.5); }
@@ -251,39 +241,28 @@
             100% { box-shadow: 0 0 10px var(--lime-main); }
         }
 
-        /* --- MAP TAB STYLES --- */
-        #map-canvas {
-            width: 100%; height: 100%; display: block;
+        @keyframes border-flash {
+            0% { box-shadow: inset 0 0 0 0 transparent; }
+            50% { box-shadow: inset 0 0 50px 20px var(--lime-main); }
+            100% { box-shadow: inset 0 0 0 0 transparent; }
         }
-        #map-legend {
-            position: absolute; bottom: 10px; left: 10px; right: 10px;
-            display: flex; gap: 5px; flex-wrap: wrap; pointer-events: none;
-        }
-        .legend-item {
-            font-size: 9px; padding: 2px 6px; border-radius: 3px; font-weight: bold;
-            font-family: 'Share Tech Mono'; background: rgba(0,0,0,0.8); border: 1px solid #333;
-        }
+        .whale-alert-anim { animation: border-flash 1s ease-in-out 3; position: absolute; inset: 0; pointer-events: none; z-index: 900; }
+        
+        @keyframes red-flash { 0% { box-shadow: inset 0 0 0 0 transparent; } 50% { box-shadow: inset 0 0 50px 20px var(--alert-red); } 100% { box-shadow: inset 0 0 0 0 transparent; } }
+        .hvt-alert-anim { animation: red-flash 0.5s ease-in-out 6; position: absolute; inset: 0; pointer-events: none; z-index: 950; }
 
-        /* --- REPORT TAB STYLES --- */
-        #report-header {
-            display: flex; justify-content: space-between; padding: 8px 10px;
-            background: rgba(0, 50, 0, 0.3); border-bottom: 1px solid var(--lime-dim);
-            font-size: 9px; font-weight: bold; color: #55aa55; font-family: 'Share Tech Mono';
-        }
+        /* --- MAP & REPORT STYLES --- */
+        #map-canvas { width: 100%; height: 100%; display: block; }
+        #map-legend { position: absolute; bottom: 10px; left: 10px; right: 10px; display: flex; gap: 5px; flex-wrap: wrap; pointer-events: none; }
+        .legend-item { font-size: 9px; padding: 2px 6px; border-radius: 3px; font-weight: bold; font-family: 'Share Tech Mono'; background: rgba(0,0,0,0.8); border: 1px solid #333; }
+
+        #report-header { display: flex; justify-content: space-between; padding: 8px 10px; background: rgba(0, 50, 0, 0.3); border-bottom: 1px solid var(--lime-dim); font-size: 9px; font-weight: bold; color: #55aa55; font-family: 'Share Tech Mono'; }
         .rep-col-time { width: 50px; text-align: right; }
         .rep-col-type { width: 30px; text-align: center; }
         .rep-col-out { width: 35px; text-align: center; } 
-        
-        .report-row {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 8px 10px; border-bottom: 1px solid #112211;
-            font-size: 10px; font-family: 'Share Tech Mono';
-            cursor: pointer;
-        }
+        .report-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-bottom: 1px solid #112211; font-size: 10px; font-family: 'Share Tech Mono'; cursor: pointer; }
         .report-row:hover { background: rgba(0, 255, 0, 0.1); }
-        .rep-val-green { color: #00ff00; }
-        .rep-val-white { color: #ffffff; }
-        .rep-val-dim { color: #888888; }
+        .rep-val-green { color: #00ff00; } .rep-val-white { color: #ffffff; } .rep-val-dim { color: #888888; }
 
     </style>
 </head>
@@ -294,50 +273,51 @@
         <video id="splash-video" playsinline>
             <source src="https://ipfs.filebase.io/ipfs/QmVMYvMffwSXPJyuNz3CAW8V6rS1wViWQjPHdzPGofb7Ux" type="video/mp4">
         </video>
-        <button id="boot-btn" onclick="bootSystem()">SYSTEM BOOT</button>
+        <div id="boot-container">
+            <button id="boot-btn" onclick="bootSystem()">SYSTEM BOOT</button>
+            <button id="skip-btn" onclick="skipBoot()">[ SKIP INTRO ]</button>
+        </div>
+    </div>
+
+    <!-- TUTORIAL OVERLAY -->
+    <div id="tutorial-overlay">
+        <div id="tut-card">
+            <div class="tut-title" id="tut-title">WELCOME AGENT</div>
+            <div class="tut-text" id="tut-text">
+                Welcome to XRPMAN SHADOW WATCH.
+                This forensic tool tracks the XRP Ledger in real-time.
+                <br><br>Let's calibrate your system.
+            </div>
+            <div class="tut-controls">
+                <button class="tut-btn" onclick="endTutorial()">SKIP</button>
+                <button class="tut-btn" onclick="nextStep()">NEXT ></button>
+            </div>
+        </div>
     </div>
 
     <!-- BUBBLE/REPORT DETAIL MODAL -->
     <div id="bubble-modal">
         <div class="text-center text-lg font-bold text-white mb-2 border-b border-green-900 pb-2">TRANSACTION INTEL</div>
-        
-        <div class="modal-row">
-            <span class="modal-label">AMOUNT:</span>
-            <span id="mod-amt" class="modal-val text-xl text-yellow-400">---</span>
-        </div>
-        <div class="modal-row">
-            <span class="modal-label">TYPE:</span>
-            <span id="mod-type" class="modal-val">---</span>
-        </div>
-        <div class="modal-row">
-            <span class="modal-label">SENDER:</span>
-            <span id="mod-from" class="modal-val text-[10px]">---</span>
-        </div>
-        <div class="modal-row">
-            <span class="modal-label">TARGET:</span>
-            <span id="mod-to" class="modal-val text-[10px]">---</span>
-        </div>
-
+        <div class="modal-row"><span class="modal-label">AMOUNT:</span><span id="mod-amt" class="modal-val text-xl text-yellow-400">---</span></div>
+        <div class="modal-row"><span class="modal-label">TYPE:</span><span id="mod-type" class="modal-val">---</span></div>
+        <div class="modal-row"><span class="modal-label">SENDER:</span><span id="mod-from" class="modal-val text-[10px]">---</span></div>
+        <div class="modal-row"><span class="modal-label">TARGET:</span><span id="mod-to" class="modal-val text-[10px]">---</span></div>
         <div class="modal-grid">
             <button id="mod-scan-btn" class="mod-btn">SCAN LEDGER</button>
             <button id="mod-copy-hash" class="mod-btn">COPY HASH</button>
             <button id="mod-copy-wallet" class="mod-btn">COPY SENDER</button>
             <button id="mod-save-btn" class="mod-btn mod-save">SAVE EVID</button>
         </div>
-
         <button onclick="closeModal()" class="w-full text-red-500 text-xs mt-4">CLOSE INTEL</button>
     </div>
 
     <div id="toast">NOTIFICATION</div>
-    
-    <!-- BACKGROUND LAYERS -->
     <div id="app-background"></div>
     <div id="canvas-container"></div>
     <div id="alert-layer"></div>
 
     <!-- TOP HUD -->
     <div id="hud-top">
-        <!-- DATA FIRST -->
         <div class="stat-grid">
             <div class="stat-box">
                 <div id="price-label" class="label-text">XRP / USD <span id="price-source" class="source-tag">SCANNING...</span></div>
@@ -349,23 +329,22 @@
             </div>
         </div>
 
-        <!-- BRANDING SECOND -->
         <div class="header-section">
             <h1 class="glitch">XRPMAN SHADOW WATCH</h1>
             <div class="subtitle">POWERED BY $XMEME</div>
+            <button id="help-btn" onclick="startTutorial()">?</button>
         </div>
 
-        <!-- CONNECT BUTTON THIRD -->
-        <div class="connect-container">
+        <div class="connect-container" id="init-zone">
             <button id="connect-main" onclick="toggleConnection()" class="connect-btn">INITIALIZE UPLINK</button>
-            <button id="audio-btn" onclick="toggleAudio()" class="audio-btn" style="display:none;">ENABLE AUDIO</button>
+            <button id="audio-btn" onclick="toggleAudio()" class="audio-btn">ENABLE AUDIO</button>
         </div>
     </div>
 
     <!-- BOTTOM DECK -->
     <div id="hud-bottom">
         <div id="command-deck">
-            <div class="tab-bar">
+            <div class="tab-bar" id="tab-zone">
                 <div class="tab-btn active" onclick="switchView('live')">LIVE</div>
                 <div class="tab-btn" onclick="switchView('hvt')" style="color: gold;">[ HVT ]</div>
                 <div class="tab-btn" onclick="switchView('map')">MAP</div>
@@ -375,10 +354,11 @@
 
             <!-- LIVE TAB -->
             <div id="view-live" class="view-panel active">
-                <div class="filter-bar">
+                <div class="filter-bar" id="filter-zone">
                     <button class="filter-btn active" onclick="setFilter('all', this)">[ ALL ]</button>
                     <button class="filter-btn" onclick="setFilter('whale', this)">[ WHALES ]</button>
                     <button class="filter-btn" onclick="setFilter('exchange', this)">[ EXCH ]</button>
+                    <button class="filter-btn" style="border-color:#00ffff; color:#00ffff;" onclick="setFilter('l2', this)">[ L2 ]</button>
                     <label class="flex items-center gap-1 text-[9px] text-green-400 font-bold ml-2">
                         <input type="checkbox" id="hide-failed" checked class="accent-green-500"> NO GHOSTS
                     </label>
@@ -400,9 +380,7 @@
                     <span class="text-xs text-yellow-400 font-bold tracking-widest">>> HIGH VALUE TARGET BLACK BOX <<</span>
                 </div>
                 <div id="hvt-list">
-                    <div class="text-center text-gray-600 mt-12 font-tech text-xs">
-                        MONITORING FOR FOUNDERS / RIPPLE OPS...
-                    </div>
+                    <div class="text-center text-gray-600 mt-12 font-tech text-xs">MONITORING FOR FOUNDERS / RIPPLE OPS...</div>
                 </div>
             </div>
 
@@ -413,7 +391,7 @@
                     <div class="legend-item" style="color:#00ff00; border-color:#005500;">TSFR</div>
                     <div class="legend-item" style="color:#ffaa00; border-color:#663300;">DEPOSIT</div>
                     <div class="legend-item" style="color:#ffd700; border-color:#555500;">HVT</div>
-                    <div class="legend-item" style="color:#ff0000; border-color:#550000;">ALERT</div>
+                    <div class="legend-item" style="color:#00ffff; border-color:#005566;">L2</div>
                 </div>
             </div>
 
@@ -427,10 +405,17 @@
                     <div class="rep-col-out">OUT</div>
                 </div>
                 <div id="report-list">
-                    <div class="text-center text-gray-600 mt-12 font-tech text-xs tracking-widest">
-                        WAITING FOR 100K+ TXs...
-                    </div>
+                    <div class="text-center text-gray-600 mt-12 font-tech text-xs tracking-widest">WAITING FOR 100K+ TXs...</div>
                 </div>
+            </div>
+
+            <!-- WATCH TAB -->
+            <div id="view-watch" class="view-panel p-4">
+                <div class="flex gap-2 p-2 bg-black/50 border border-green-900 mb-2 flex-shrink-0">
+                    <input type="text" id="watch-input" placeholder="Enter rAddress..." class="flex-grow bg-transparent text-white text-xs outline-none font-tech">
+                    <button onclick="addWatch()" class="text-green-500 font-bold text-xs uppercase">Track</button>
+                </div>
+                <div id="watch-list" class="flex-grow overflow-y-auto space-y-1"></div>
             </div>
 
             <!-- CASE TAB -->
@@ -450,12 +435,83 @@
         function bootSystem() {
             const vid = document.getElementById('splash-video');
             const btn = document.getElementById('boot-btn');
-            btn.style.display = 'none'; vid.style.display = 'block'; 
-            vid.volume = 1.0; vid.play().catch(e => console.log("Audio Blocked"));
-            vid.onended = () => {
-                document.getElementById('splash-screen').classList.add('fade-out');
-                setTimeout(() => document.getElementById('splash-screen').style.display = 'none', 1000);
-            };
+            const skip = document.getElementById('skip-btn');
+            
+            btn.style.display = 'none'; 
+            vid.style.display = 'block'; 
+            skip.style.display = 'block';
+            
+            vid.volume = 1.0; 
+            vid.play().catch(e => console.log("Audio Blocked"));
+            
+            vid.onended = () => finishBoot();
+        }
+
+        function skipBoot() {
+            const vid = document.getElementById('splash-video');
+            vid.pause();
+            finishBoot();
+        }
+
+        function finishBoot() {
+            document.getElementById('splash-screen').classList.add('fade-out');
+            setTimeout(() => {
+                document.getElementById('splash-screen').style.display = 'none';
+                checkTutorial();
+            }, 1000);
+        }
+
+        // --- TUTORIAL SYSTEM ---
+        let tutStep = 0;
+        
+        function checkTutorial() {
+            if(!localStorage.getItem("shadow_watch_tut")) {
+                startTutorial();
+                localStorage.setItem("shadow_watch_tut", "true");
+            }
+        }
+
+        function startTutorial() {
+            tutStep = 0;
+            document.getElementById('tutorial-overlay').classList.add('tut-active');
+            updateTutorial();
+        }
+
+        function endTutorial() {
+            document.getElementById('tutorial-overlay').classList.remove('tut-active');
+            document.querySelectorAll('.highlight-element').forEach(e => e.classList.remove('highlight-element'));
+        }
+
+        function nextStep() {
+            tutStep++;
+            updateTutorial();
+        }
+
+        function updateTutorial() {
+            // Clear previous highlight
+            document.querySelectorAll('.highlight-element').forEach(e => e.classList.remove('highlight-element'));
+            const title = document.getElementById('tut-title');
+            const text = document.getElementById('tut-text');
+
+            if(tutStep === 0) {
+                // Intro is handled in startTutorial
+            } else if (tutStep === 1) {
+                title.innerText = "STEP 1: UPLINK";
+                text.innerText = "Tap 'INITIALIZE UPLINK' to connect to the XRP Ledger node. Use 'ENABLE AUDIO' for alerts.";
+                document.getElementById('init-zone').classList.add('highlight-element');
+            } else if (tutStep === 2) {
+                title.innerText = "STEP 2: FILTERS";
+                text.innerText = "Use these tabs to filter the live stream. \n[WHALE] shows large txs.\n[EXCH] shows exchange activity.\n'NO GHOSTS' hides failed bots.\n[L2] shows Tokens.";
+                document.getElementById('filter-zone').classList.add('highlight-element');
+            } else if (tutStep === 3) {
+                title.innerText = "STEP 3: TACTICAL VIEWS";
+                text.innerText = "[MAP] shows visual money flow.\n[REPORT] lists clean data for analysis.\n[HVT] records only known Targets (Founders/Ripple).";
+                document.getElementById('tab-zone').classList.add('highlight-element');
+            } else if (tutStep === 4) {
+                title.innerText = "READY";
+                text.innerText = "You are now operational. \nStay vigilant. Watch the shadows.";
+                document.querySelector('.tut-controls').innerHTML = `<button class="tut-btn" onclick="endTutorial()">START</button>`;
+            }
         }
 
         // --- 3D ENGINE ---
@@ -539,12 +595,8 @@
 
         function playAlert(type) {
             if (type === 'HVT') {
-                // Triple High Pitch
-                playTone(1200, 0.1);
-                setTimeout(() => playTone(1200, 0.1), 150);
-                setTimeout(() => playTone(1200, 0.2), 300);
+                playTone(1200, 0.1); setTimeout(() => playTone(1200, 0.1), 150); setTimeout(() => playTone(1200, 0.2), 300);
             } else {
-                // Single Low Ping
                 playTone(400, 0.2, "sine");
             }
         }
@@ -585,7 +637,10 @@
                 mapCtx.strokeStyle = "#fff"; mapCtx.lineWidth = 1; mapCtx.stroke();
                 if (this.radius > 10) {
                     mapCtx.fillStyle = "#000"; mapCtx.font = "bold 8px monospace";
-                    mapCtx.textAlign = "center"; mapCtx.fillText(Math.floor(this.amt), this.x, this.y + 3);
+                    mapCtx.textAlign = "center"; 
+                    // Handle non-numeric text for L2
+                    let label = typeof this.amt === 'number' ? Math.floor(this.amt) : this.amt;
+                    mapCtx.fillText(label, this.x, this.y + 3);
                 }
             }
         }
@@ -612,7 +667,7 @@
 
         // --- BUBBLE/REPORT MODAL ---
         function openModal(b) {
-            document.getElementById('mod-amt').innerText = b.amt.toLocaleString() + " XRP";
+            document.getElementById('mod-amt').innerText = typeof b.amt === 'number' ? b.amt.toLocaleString() + " XRP" : b.amt;
             document.getElementById('mod-amt').style.color = b.color || '#00ff00';
             document.getElementById('mod-type').innerText = b.type || 'TX';
             document.getElementById('mod-from').innerText = b.from;
@@ -638,17 +693,15 @@
         let isPaused = false;
         let lastHeartbeat = Date.now();
 
-        // THE BLACK BOOK (Separated by TYPE)
+        // THE BLACK BOOK
         const KNOWN_WALLETS = {
-            // EXCHANGES
             'rLNaPoKeeBJZe2qs6x52yVPZpZ8td4dc6w': {name: 'COINBASE', type: 'EXCH'},
             'rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh': {name: 'BINANCE', type: 'EXCH'},
             'rJb5KsHsDHF1YSnasbwqSagepE8XXAuGh': {name: 'BITSTAMP', type: 'EXCH'},
             'rU2mEJSLqBRkYLVTv55rFTgQYkDBqVyTRn': {name: 'COINS.PH', type: 'EXCH'},
             'rNprNzNWKqaKUH24sF11g8n9C9r295x26d': {name: 'KRAKEN', type: 'EXCH'},
-            // TARGETS (HVT)
             'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh': {name: 'GENESIS', type: 'HVT'},
-            'r945F6e8...Escrow': {name: 'RIPPLE ESCROW', type: 'HVT'}, // Example
+            'r945F6e8...Escrow': {name: 'RIPPLE ESCROW', type: 'HVT'}, 
             'r...Tacostand': {name: 'TACOSTAND', type: 'HVT'},
             'r...Chris': {name: 'CHRIS LARSEN', type: 'HVT'},
             'r...Brad': {name: 'BRAD G.', type: 'HVT'}
@@ -761,6 +814,16 @@
             socket.onclose = () => { console.log("Socket closed"); };
         }
 
+        // --- UTILS: HEX TO STRING ---
+        function hexToASCII(hex) {
+            let str = '';
+            for (let i = 0; i < hex.length; i += 2) {
+                str += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+            }
+            // Remove null bytes
+            return str.replace(/\0/g, '');
+        }
+
         // --- CLASSIFICATION HELPERS ---
         function getReportType(amt, known) {
             if (known) return 'I';
@@ -789,6 +852,8 @@
             let color = "text-green-500";
             let mapColor = "#00ff00";
             let amt = 0;
+            let isL2 = false;
+            let tokenName = "XRP";
             
             // Resolve Entities
             const entFrom = KNOWN_WALLETS[tx.Account];
@@ -799,12 +864,28 @@
             // Check HVT Status
             const isHVT = (entFrom && entFrom.type === 'HVT') || (entTo && entTo.type === 'HVT');
 
+            // --- AMOUNT PARSING (XRP vs TOKEN) ---
             if (typeof tx.Amount === 'string') {
+                // XRP
                 if (meta && meta.delivered_amount && typeof meta.delivered_amount === 'string') {
                     amt = parseInt(meta.delivered_amount) / 1000000;
                 } else {
                     amt = parseInt(tx.Amount) / 1000000;
                 }
+            } else if (typeof tx.Amount === 'object') {
+                // TOKEN (L2)
+                isL2 = true;
+                amt = parseFloat(tx.Amount.value);
+                const currency = tx.Amount.currency;
+                // If len > 3, usually hex
+                if (currency.length > 3) {
+                    tokenName = hexToASCII(currency);
+                } else {
+                    tokenName = currency;
+                }
+                type = "L2";
+                color = "text-cyan-400";
+                mapColor = "#00ffff";
             } else if (tx.TransactionType === 'OfferCreate') {
                 if (typeof tx.TakerPays === 'string') amt = parseInt(tx.TakerPays) / 1000000;
                 else if (typeof tx.TakerGets === 'string') amt = parseInt(tx.TakerGets) / 1000000;
@@ -814,27 +895,34 @@
             }
 
             let tags = "";
-            const isWhale = amt >= 1000000;
+            // Logic adjust for Tokens: Whale logic might not apply to 1000 RLUSD same as 1M XRP
+            const isWhale = !isL2 && amt >= 1000000; 
             const isExchange = nameFrom || nameTo;
 
             if (tx.TransactionType === 'OfferCreate') {
                 tags += `<span class="tag-pill tag-dex">DEX ORD</span>`;
             } else {
-                if (nameFrom) { 
-                    type = "WTH"; color = "text-cyan-400"; mapColor="#00ffff";
-                    tags += `<span class="tag-pill tag-wth">WITHDRAW</span>`;
-                }
-                else if (nameTo) { 
-                    type = "DEP"; color = "text-yellow-500"; mapColor="#ffaa00";
-                    tags += `<span class="tag-pill tag-dep">DEPOSIT</span>`;
-                }
-                else {
-                    tags += `<span class="tag-pill tag-tsfr">TRANSFER</span>`;
+                if (isL2) {
+                    tags += `<span class="tag-pill tag-l2">[ ${tokenName} ]</span>`;
+                } else {
+                    if (nameFrom) { 
+                        type = "WTH"; color = "text-cyan-400"; mapColor="#00ffff";
+                        tags += `<span class="tag-pill tag-wth">WITHDRAW</span>`;
+                    }
+                    else if (nameTo) { 
+                        type = "DEP"; color = "text-yellow-500"; mapColor="#ffaa00";
+                        tags += `<span class="tag-pill tag-dep">DEPOSIT</span>`;
+                    }
+                    else {
+                        tags += `<span class="tag-pill tag-tsfr">TRANSFER</span>`;
+                    }
                 }
             }
 
+            // FILTER LOGIC
             if (activeFilter === 'whale' && !isWhale) return;
             if (activeFilter === 'exchange' && !isExchange) return;
+            if (activeFilter === 'l2' && !isL2) return;
 
             const now = Date.now();
             if (isWhale && isSuccess && (now - lastAlertTime > 60000)) {
@@ -844,14 +932,11 @@
 
             // --- HVT LOGIC ---
             if (isHVT) {
-                // Auto-Add to Evidence
                 saveCase({hash:tx.hash, amt:amt, from:nameFrom||tx.Account, to:nameTo||tx.Destination, type:'HVT'});
-                // Add to HVT Tab
                 addHVTRow(tx.hash, amt, nameFrom||tx.Account, nameTo||tx.Destination);
-                // Alert
                 triggerHVTAlert();
                 playAlert('HVT');
-                color = "text-yellow-300"; // Gold color for feed
+                color = "text-yellow-300";
                 tags += `<span class="tag-pill tag-hvt">HVT TARGET</span>`;
             }
 
@@ -861,7 +946,8 @@
             }
 
             if (mapActive && isSuccess) {
-                bubbles.push(new Bubble(amt, mapColor, tx.hash, nameFrom||tx.Account, nameTo||tx.Destination, type));
+                let bubbleText = isL2 ? tokenName : amt;
+                bubbles.push(new Bubble(bubbleText, mapColor, tx.hash, nameFrom||tx.Account, nameTo||tx.Destination, type));
             }
 
             if(watchlist.includes(tx.Account) || watchlist.includes(tx.Destination)) {
@@ -869,8 +955,8 @@
                 playAlert('HVT');
             }
 
-            // REPORT LOGIC
-            if (isSuccess && amt >= 100000) {
+            // REPORT LOGIC (XRP > 100k or any HVT)
+            if (isSuccess && (amt >= 100000 || isHVT) && !isL2) {
                 const repType = getReportType(amt, isExchange);
                 const outflow = getOutflow(nameFrom, nameTo);
                 addReportRow(tx.hash, amt, nameFrom || tx.Account, repType, outflow);
@@ -880,14 +966,16 @@
             const dispTo = nameTo ? `<span class="entity-name">${nameTo}</span>` : tx.Destination ? tx.Destination.substring(0,4)+'...' : 'DEX';
 
             const feed = document.getElementById('feed');
-            if (feed.innerText.includes("AWAITING")) feed.innerHTML = "";
+            if (feed.innerText.includes("AWAITING") || feed.innerText.includes("FILTER")) feed.innerHTML = "";
 
             const row = document.createElement('div');
             row.className = rowClass;
+            let displayAmt = isL2 ? `${amt.toLocaleString()} ${tokenName}` : `${amt.toLocaleString()} XRP`;
+            
             row.innerHTML = `
                 <div class="row-top ${color}">
                     <div class="flex items-center gap-2">
-                        <span class="font-bold text-base text-white text-shadow-lime">${amt > 0 ? amt.toLocaleString() + ' XRP' : 'DEX TRADE'}</span>
+                        <span class="font-bold text-base text-white text-shadow-lime">${displayAmt}</span>
                         ${tags}
                     </div>
                     <div class="text-[10px] font-mono text-gray-500">${new Date().toLocaleTimeString()}</div>
@@ -937,33 +1025,16 @@
         function openScan(h) { window.open(`https://xrpscan.com/tx/${h}`, '_blank'); }
         
         function copyHash(h) {
-            if (!navigator.clipboard) {
-                fallbackCopyTextToClipboard(h);
-                return;
-            }
-            navigator.clipboard.writeText(h).then(function() {
-                showToast("HASH COPIED");
-            }, function(err) {
-                fallbackCopyTextToClipboard(h);
-            });
+            if (!navigator.clipboard) { fallbackCopyTextToClipboard(h); return; }
+            navigator.clipboard.writeText(h).then(function() { showToast("HASH COPIED"); }, function(err) { fallbackCopyTextToClipboard(h); });
         }
 
         function fallbackCopyTextToClipboard(text) {
             var textArea = document.createElement("textarea");
             textArea.value = text;
-            textArea.style.top = "0";
-            textArea.style.left = "0";
-            textArea.style.position = "fixed";
-            document.body.appendChild(textArea);
-            textArea.focus();
-            textArea.select();
-            try {
-                var successful = document.execCommand('copy');
-                if(successful) showToast("HASH COPIED");
-                else showToast("COPY FAILED");
-            } catch (err) {
-                showToast("COPY FAILED");
-            }
+            textArea.style.top = "0"; textArea.style.left = "0"; textArea.style.position = "fixed";
+            document.body.appendChild(textArea); textArea.focus(); textArea.select();
+            try { var successful = document.execCommand('copy'); if(successful) showToast("HASH COPIED"); else showToast("COPY FAILED"); } catch (err) { showToast("COPY FAILED"); }
             document.body.removeChild(textArea);
         }
 
@@ -1026,3 +1097,4 @@
     </script>
 </body>
 </html>
+
