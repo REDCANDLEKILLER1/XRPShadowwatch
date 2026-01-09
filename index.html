@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v9.2</title>
+    <title>XRPMAN SHADOW WATCH // v9.4</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -26,7 +26,7 @@
             touch-action: none; user-select: none;
         }
 
-        /* --- SPLASH SCREEN (VIDEO RESTORED) --- */
+        /* --- SPLASH SCREEN --- */
         #splash-screen {
             position: fixed; inset: 0; z-index: 9999;
             background-color: #000;
@@ -635,14 +635,22 @@
         }
 
         class Bubble {
-            constructor(amt, color, hash, from, to, type) {
+            // FIXED CONSTRUCTOR: label (text) is separate from numeric val (for math)
+            constructor(label, val, color, hash, from, to, type) {
                 this.x = Math.random() * mapCanvas.width;
                 this.y = mapCanvas.height + 20;
-                this.radius = Math.min(30, Math.max(5, Math.log(amt) * 2));
+                
+                // FIXED RADIUS MATH: Ensure it works for small token amounts and large XRP
+                // Default value of 1 prevents log(0)
+                let safeVal = parseFloat(val) || 1; 
+                // Log scale, clamped between 10px and 50px
+                this.radius = Math.max(10, Math.min(50, Math.log(safeVal + 10) * 3));
+                
                 this.speed = 1 + Math.random() * 2;
                 this.color = color;
                 this.hash = hash;
-                this.amt = amt;
+                this.label = label; // Display text
+                this.val = val;     // Numeric value
                 this.from = from;
                 this.to = to;
                 this.type = type;
@@ -656,12 +664,10 @@
                 mapCtx.fillStyle = this.color;
                 mapCtx.fill();
                 mapCtx.strokeStyle = "#fff"; mapCtx.lineWidth = 1; mapCtx.stroke();
-                if (this.radius > 10) {
-                    mapCtx.fillStyle = "#000"; mapCtx.font = "bold 8px monospace";
+                if (this.radius > 12) {
+                    mapCtx.fillStyle = "#000"; mapCtx.font = "bold 9px monospace";
                     mapCtx.textAlign = "center"; 
-                    // Handle non-numeric text for L2
-                    let label = typeof this.amt === 'number' ? Math.floor(this.amt) : this.amt;
-                    mapCtx.fillText(label, this.x, this.y + 3);
+                    mapCtx.fillText(this.label, this.x, this.y + 3);
                 }
             }
         }
@@ -688,7 +694,7 @@
 
         // --- BUBBLE/REPORT MODAL ---
         function openModal(b) {
-            document.getElementById('mod-amt').innerText = typeof b.amt === 'number' ? b.amt.toLocaleString() + " XRP" : b.amt;
+            document.getElementById('mod-amt').innerText = typeof b.val === 'number' ? b.val.toLocaleString() + " " + (b.type==='L2' ? b.label : 'XRP') : b.label;
             document.getElementById('mod-amt').style.color = b.color || '#00ff00';
             document.getElementById('mod-type').innerText = b.type || 'TX';
             document.getElementById('mod-from').innerText = b.from;
@@ -699,7 +705,7 @@
             document.getElementById('mod-copy-hash').onclick = () => copyHash(b.hash);
             document.getElementById('mod-copy-wallet').onclick = () => copyHash(b.from);
             document.getElementById('mod-save-btn').onclick = () => {
-                saveCase({hash:b.hash, amt:b.amt, from:b.from, to:b.to});
+                saveCase({hash:b.hash, amt:b.val, from:b.from, to:b.to});
                 closeModal();
                 showToast("EVIDENCE SECURED");
             };
@@ -713,6 +719,7 @@
         let lastAlertTime = 0;
         let isPaused = false;
         let lastHeartbeat = Date.now();
+        let pingInterval;
 
         // THE BLACK BOOK
         const KNOWN_WALLETS = {
@@ -737,9 +744,18 @@
                 }
             }
         });
-
+        
+        // PINGER LOOP: Keeps connection alive
         setInterval(() => {
-            if (isConnected && (Date.now() - lastHeartbeat > 20000)) {
+            if (isConnected && socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({command: "ping"}));
+            }
+        }, 15000); // Send ping every 15s
+
+        // WATCHDOG LOOP: Checks for timeout
+        setInterval(() => {
+            // Increased timeout to 45 seconds to prevent false alarms
+            if (isConnected && (Date.now() - lastHeartbeat > 45000)) {
                 console.log("Heartbeat lost. Reconnecting..."); showToast("SIGNAL LOST. RECONNECTING..."); startXRPL();
             }
         }, 5000);
@@ -829,12 +845,19 @@
                 lastHeartbeat = Date.now();
             };
             socket.onmessage = (e) => {
-                lastHeartbeat = Date.now();
+                lastHeartbeat = Date.now(); // Update heartbeat on ANY message (including ping response)
                 const d = JSON.parse(e.data);
                 if(d.type==='transaction') handleTx(d.transaction, d.meta);
                 if(d.type==='ledgerClosed') document.getElementById('ledger-display').innerText = d.ledger_index;
             };
-            socket.onclose = () => { console.log("Socket closed"); };
+            socket.onclose = (e) => { 
+                console.log("Socket closed");
+                // If connected but closed unexpectedly, try to reconnect silently
+                if(isConnected) {
+                   setTimeout(startXRPL, 1000);
+                }
+            };
+            socket.onerror = (e) => { console.log("Socket Error"); };
         }
 
         // --- UTILS: HEX TO STRING ---
@@ -985,8 +1008,11 @@
             }
 
             if (mapActive && isSuccess) {
-                let bubbleText = isL2 ? tokenName : amt;
-                bubbles.push(new Bubble(bubbleText, mapColor, tx.hash, nameFrom||tx.Account, nameTo||tx.Destination, type));
+                // FIXED: Pass label and numeric value separately to constructor
+                // This prevents NaN glitches for L2 tokens
+                let bubbleLabel = isL2 ? tokenName : Math.floor(amt);
+                let bubbleVal = amt;
+                bubbles.push(new Bubble(bubbleLabel, bubbleVal, mapColor, tx.hash, nameFrom||tx.Account, nameTo||tx.Destination, type));
             }
 
             if(watchlist.includes(tx.Account) || watchlist.includes(tx.Destination)) {
@@ -1101,7 +1127,7 @@
         function renderCases() {
             document.getElementById('case-list').innerHTML = cases.map(c => `
                 <div class="p-3 border-l-2 border-yellow-500 bg-yellow-900/10 mb-1">
-                    <div class="flex justify-between font-bold text-yellow-400 text-xs"><span>${c.amt.toLocaleString()} XRP</span><span class="text-[10px] text-gray-500 font-mono">${c.hash.substring(0,8)}...</span></div>
+                    <div class="flex justify-between font-bold text-yellow-400 text-xs"><span>${(c.amt||0).toLocaleString()} ${c.token || 'XRP'}</span><span class="text-[10px] text-gray-500 font-mono">${(c.hash||'').substring(0,8)}...</span></div>
                     <div class="text-[10px] text-gray-400 mt-1">${c.from} -> ${c.to}</div>
                 </div>`).join('');
         }
@@ -1128,7 +1154,8 @@
                 <div class="rep-col-type text-white font-bold">${type}</div>
                 <div class="rep-col-out font-bold" style="${outColor}">${out}</div>
             `;
-            row.onclick = () => openModal({amt: amt, color: '#00ff00', type: `REP-${type}`, from: wallet, to: 'LINKED', hash: hash});
+            // Fixed: passed val: amt instead of amt: amt
+            row.onclick = () => openModal({val: amt, label: (amt/1000).toFixed(1)+'k', color: '#00ff00', type: `REP-${type}`, from: wallet, to: 'LINKED', hash: hash});
             list.prepend(row);
             if (list.children.length > 50) list.lastChild.remove();
         }
