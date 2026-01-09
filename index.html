@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v7.1</title>
+    <title>XRPMAN SHADOW WATCH // v7.4</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -64,7 +64,7 @@
         }
         .toast-show { opacity: 1 !important; }
 
-        /* BUBBLE MODAL */
+        /* BUBBLE/REPORT MODAL */
         #bubble-modal {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             width: 85%; max-width: 350px;
@@ -77,6 +77,17 @@
         .modal-row { display: flex; justify-content: space-between; font-size: 12px; border-bottom: 1px solid #113311; padding-bottom: 5px; }
         .modal-label { color: #55aa55; font-weight: bold; }
         .modal-val { color: white; font-family: 'Share Tech Mono'; text-align: right; word-break: break-all; }
+
+        /* MODAL ACTION GRID */
+        .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+        .mod-btn {
+            background: #001100; border: 1px solid var(--lime-main); color: var(--lime-main);
+            padding: 10px; font-size: 10px; font-weight: bold; text-align: center; border-radius: 4px;
+            font-family: 'Share Tech Mono'; cursor: pointer; transition: background 0.1s;
+        }
+        .mod-btn:active { background: var(--lime-main); color: black; }
+        .mod-save { border-color: #ffaa00; color: #ffaa00; }
+        .mod-save:active { background: #ffaa00; color: black; }
 
         /* ALERT FLASH */
         @keyframes border-flash {
@@ -150,7 +161,7 @@
         .tab-bar { display: flex; border-bottom: 1px solid var(--lime-dim); height: 45px; flex-shrink: 0; }
         .tab-btn {
             flex: 1; display: flex; align-items: center; justify-content: center;
-            font-weight: bold; font-size: 12px; background: rgba(0,20,0,0.4); color: #00aa00;
+            font-weight: bold; font-size: 11px; background: rgba(0,20,0,0.4); color: #00aa00;
             border-right: 1px solid var(--lime-dim); letter-spacing: 1px; font-family: 'Orbitron', sans-serif;
         }
         .tab-btn.active { background: #001100; color: var(--lime-main); border-bottom: 3px solid var(--lime-main); text-shadow: 0 0 10px var(--lime-main); }
@@ -160,6 +171,28 @@
             overflow: hidden;
         }
         .view-panel.active { display: flex; }
+
+        /* REPORT TAB STYLES */
+        #report-header {
+            display: flex; justify-content: space-between; padding: 8px 10px;
+            background: rgba(0, 50, 0, 0.3); border-bottom: 1px solid var(--lime-dim);
+            font-size: 9px; font-weight: bold; color: #55aa55; font-family: 'Share Tech Mono';
+        }
+        .rep-col { flex: 1; text-align: left; }
+        .rep-col-time { width: 50px; text-align: right; }
+        .rep-col-type { width: 30px; text-align: center; }
+        .rep-col-out { width: 35px; text-align: center; } 
+        
+        .report-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 8px 10px; border-bottom: 1px solid #112211;
+            font-size: 10px; font-family: 'Share Tech Mono';
+            cursor: pointer;
+        }
+        .report-row:hover { background: rgba(0, 255, 0, 0.1); }
+        .rep-val-green { color: #00ff00; }
+        .rep-val-white { color: #ffffff; }
+        .rep-val-dim { color: #888888; }
 
         .filter-bar {
             display: flex; gap: 5px; padding: 8px; border-bottom: 1px solid var(--lime-dim); background: rgba(0,0,0,0.3);
@@ -171,7 +204,7 @@
         }
         .filter-btn.active { background: var(--lime-main); color: black; border-color: var(--lime-main); }
 
-        #feed, #watch-list, #case-list { 
+        #feed, #watch-list, #case-list, #report-list { 
             flex-grow: 1; 
             overflow-y: auto; 
             -webkit-overflow-scrolling: touch;
@@ -182,6 +215,7 @@
         .tx-row { padding: 10px; border-bottom: 1px solid #112211; display: flex; flex-direction: column; gap: 4px; }
         .row-top { display: flex; justify-content: space-between; align-items: center; }
         
+        /* TAG STYLES */
         .tag-pill {
             font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: bold;
             display: inline-block; margin-left: 6px; font-family: 'Share Tech Mono';
@@ -245,9 +279,9 @@
         <button id="boot-btn" onclick="bootSystem()">SYSTEM BOOT</button>
     </div>
 
-    <!-- BUBBLE DETAIL MODAL -->
+    <!-- BUBBLE/REPORT DETAIL MODAL -->
     <div id="bubble-modal">
-        <div class="text-center text-lg font-bold text-white mb-4 border-b border-green-900 pb-2">TRANSACTION INTEL</div>
+        <div class="text-center text-lg font-bold text-white mb-2 border-b border-green-900 pb-2">TRANSACTION INTEL</div>
         
         <div class="modal-row">
             <span class="modal-label">AMOUNT:</span>
@@ -266,8 +300,15 @@
             <span id="mod-to" class="modal-val text-[10px]">---</span>
         </div>
 
-        <button id="mod-scan-btn" class="w-full bg-green-900 hover:bg-green-600 text-white font-bold py-2 mt-4 rounded border border-green-500">SCAN ON LEDGER</button>
-        <button onclick="closeModal()" class="w-full text-red-500 text-xs mt-2">CLOSE INTEL</button>
+        <!-- NEW GRID ACTIONS -->
+        <div class="modal-grid">
+            <button id="mod-scan-btn" class="mod-btn">SCAN LEDGER</button>
+            <button id="mod-copy-hash" class="mod-btn">COPY HASH</button>
+            <button id="mod-copy-wallet" class="mod-btn">COPY SENDER</button>
+            <button id="mod-save-btn" class="mod-btn mod-save">SAVE EVID</button>
+        </div>
+
+        <button onclick="closeModal()" class="w-full text-red-500 text-xs mt-4">CLOSE INTEL</button>
     </div>
 
     <div id="toast">NOTIFICATION</div>
@@ -307,10 +348,11 @@
     <div id="hud-bottom">
         <div id="command-deck">
             <div class="tab-bar">
-                <div class="tab-btn active" onclick="switchView('live')">LIVE FEED</div>
+                <div class="tab-btn active" onclick="switchView('live')">LIVE</div>
                 <div class="tab-btn" onclick="switchView('map')">MAP</div>
-                <div class="tab-btn" onclick="switchView('watch')">WATCHLIST</div>
-                <div class="tab-btn" onclick="switchView('case')">EVIDENCE</div>
+                <div class="tab-btn" onclick="switchView('report')">REPORT</div>
+                <div class="tab-btn" onclick="switchView('watch')">WATCH</div>
+                <div class="tab-btn" onclick="switchView('case')">EVID</div>
             </div>
 
             <!-- LIVE TAB -->
@@ -343,6 +385,22 @@
                     <div class="legend-item" style="color:#00ffff; border-color:#005566;">WITHDRAW</div>
                     <div class="legend-item" style="color:#aa00ff; border-color:#550066;">DEX</div>
                     <div class="legend-item" style="color:#ff0000; border-color:#550000;">ALERT</div>
+                </div>
+            </div>
+
+            <!-- REPORT TAB -->
+            <div id="view-report" class="view-panel">
+                <div id="report-header">
+                    <div style="width: 25%">AMT</div>
+                    <div style="width: 25%">WALLET</div>
+                    <div class="rep-col-time">TIME</div>
+                    <div class="rep-col-type">TYPE</div>
+                    <div class="rep-col-out">OUT</div>
+                </div>
+                <div id="report-list">
+                    <div class="text-center text-gray-600 mt-12 font-tech text-xs tracking-widest">
+                        WAITING FOR 100K+ TXs...
+                    </div>
                 </div>
             </div>
 
@@ -380,7 +438,7 @@
             };
         }
 
-        // --- 3D ENGINE (Background) ---
+        // --- 3D ENGINE ---
         let scene, camera, renderer, particles;
         const particleCount = 2500;
 
@@ -409,7 +467,6 @@
             scene.add(particles);
             animate();
             
-            // Interaction: Only capture on canvas layer
             let startX = 0;
             container.addEventListener('touchstart', e => startX = e.touches[0].clientX, {passive: true});
             container.addEventListener('touchmove', e => {
@@ -457,25 +514,17 @@
                 this.type = type;
                 this.life = 1.0;
             }
-            update() {
-                this.y -= this.speed;
-                this.life -= 0.002;
-            }
+            update() { this.y -= this.speed; this.life -= 0.002; }
             draw() {
                 mapCtx.globalAlpha = this.life;
                 mapCtx.beginPath();
                 mapCtx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
                 mapCtx.fillStyle = this.color;
                 mapCtx.fill();
-                mapCtx.strokeStyle = "#fff";
-                mapCtx.lineWidth = 1;
-                mapCtx.stroke();
-                
+                mapCtx.strokeStyle = "#fff"; mapCtx.lineWidth = 1; mapCtx.stroke();
                 if (this.radius > 10) {
-                    mapCtx.fillStyle = "#000";
-                    mapCtx.font = "bold 8px monospace";
-                    mapCtx.textAlign = "center";
-                    mapCtx.fillText(Math.floor(this.amt), this.x, this.y + 3);
+                    mapCtx.fillStyle = "#000"; mapCtx.font = "bold 8px monospace";
+                    mapCtx.textAlign = "center"; mapCtx.fillText(Math.floor(this.amt), this.x, this.y + 3);
                 }
             }
         }
@@ -484,46 +533,42 @@
             if (!mapActive) return;
             requestAnimationFrame(loopMap);
             mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
-            
             for (let i = bubbles.length - 1; i >= 0; i--) {
-                let b = bubbles[i];
-                b.update();
-                b.draw();
+                let b = bubbles[i]; b.update(); b.draw();
                 if (b.y < -50 || b.life <= 0) bubbles.splice(i, 1);
             }
         }
 
-        // Tap to pop bubble
         mapCanvas.addEventListener('click', (e) => {
             const rect = mapCanvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
-            
             for (let i = bubbles.length - 1; i >= 0; i--) {
                 let b = bubbles[i];
-                const dist = Math.hypot(b.x - x, b.y - y);
-                if (dist < b.radius + 10) { 
-                    openModal(b);
-                    bubbles.splice(i, 1);
-                    break;
-                }
+                if (Math.hypot(b.x - x, b.y - y) < b.radius + 10) { openModal(b); bubbles.splice(i, 1); break; }
             }
         });
 
-        // --- BUBBLE MODAL ---
+        // --- BUBBLE/REPORT MODAL ---
         function openModal(b) {
             document.getElementById('mod-amt').innerText = b.amt.toLocaleString() + " XRP";
-            document.getElementById('mod-amt').style.color = b.color;
-            document.getElementById('mod-type').innerText = b.type;
+            document.getElementById('mod-amt').style.color = b.color || '#00ff00';
+            document.getElementById('mod-type').innerText = b.type || 'TX';
             document.getElementById('mod-from').innerText = b.from;
             document.getElementById('mod-to').innerText = b.to;
+            
+            // Assign Actions
             document.getElementById('mod-scan-btn').onclick = () => openScan(b.hash);
+            document.getElementById('mod-copy-hash').onclick = () => copyHash(b.hash);
+            document.getElementById('mod-copy-wallet').onclick = () => copyHash(b.from);
+            document.getElementById('mod-save-btn').onclick = () => {
+                saveCase({hash:b.hash, amt:b.amt, from:b.from, to:b.to});
+                closeModal();
+            };
+
             document.getElementById('bubble-modal').classList.add('modal-active');
         }
-
-        function closeModal() {
-            document.getElementById('bubble-modal').classList.remove('modal-active');
-        }
+        function closeModal() { document.getElementById('bubble-modal').classList.remove('modal-active'); }
 
         // --- APP LOGIC ---
         let socket, isConnected = false, watchlist = [], cases = [], priceInterval;
@@ -539,7 +584,6 @@
             'rU2mEJSLqBRkYLVTv55rFTgQYkDBqVyTRn': 'COINS.PH'
         };
 
-        // --- HEARTBEAT & RECONNECT ---
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible' && isConnected) {
                 if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -551,9 +595,7 @@
 
         setInterval(() => {
             if (isConnected && (Date.now() - lastHeartbeat > 20000)) {
-                console.log("Heartbeat lost. Reconnecting...");
-                showToast("SIGNAL LOST. RECONNECTING...");
-                startXRPL();
+                console.log("Heartbeat lost. Reconnecting..."); showToast("SIGNAL LOST. RECONNECTING..."); startXRPL();
             }
         }, 5000);
 
@@ -644,12 +686,25 @@
                 lastHeartbeat = Date.now();
             };
             socket.onmessage = (e) => {
-                lastHeartbeat = Date.now(); // Pulse
+                lastHeartbeat = Date.now();
                 const d = JSON.parse(e.data);
                 if(d.type==='transaction') handleTx(d.transaction, d.meta);
                 if(d.type==='ledgerClosed') document.getElementById('ledger-display').innerText = d.ledger_index;
             };
             socket.onclose = () => { console.log("Socket closed"); };
+        }
+
+        // --- CLASSIFICATION HELPERS ---
+        function getReportType(amt, known) {
+            if (known) return 'I';
+            if (amt > 5000000) return 'S';
+            return 'R';
+        }
+
+        function getOutflow(fromKnown, toKnown) {
+            if (fromKnown) return 'Y';
+            if (toKnown) return 'N';
+            return 'P2P';
         }
 
         function handleTx(tx, meta) {
@@ -709,31 +764,31 @@
 
             const now = Date.now();
             if (isWhale && isSuccess && (now - lastAlertTime > 60000)) {
-                triggerWhaleAlert();
-                lastAlertTime = now;
+                triggerWhaleAlert(); lastAlertTime = now;
             }
 
             let rowClass = "tx-row";
             if (!isSuccess) {
-                color = "text-gray-500";
-                rowClass += " tx-failed";
-                tags = `<span class="tag-pill tag-fail">FAILED</span>`;
-                mapColor = "#333333";
+                color = "text-gray-500"; rowClass += " tx-failed"; tags = `<span class="tag-pill tag-fail">FAILED</span>`; mapColor = "#333333";
+            }
+
+            if (mapActive && isSuccess) {
+                bubbles.push(new Bubble(amt, mapColor, tx.hash, nameFrom||tx.Account, nameTo||tx.Destination, type));
+            }
+
+            if(watchlist.includes(tx.Account) || watchlist.includes(tx.Destination)) {
+                color = "text-red-500 font-bold"; showToast("TARGET DETECTED"); mapColor = "#ff0000";
+            }
+
+            // REPORT LOGIC
+            if (isSuccess && amt >= 100000) {
+                const repType = getReportType(amt, isExchange);
+                const outflow = getOutflow(nameFrom, nameTo);
+                addReportRow(tx.hash, amt, nameFrom || tx.Account, repType, outflow);
             }
 
             const dispFrom = nameFrom ? `<span class="entity-name">${nameFrom}</span>` : tx.Account ? tx.Account.substring(0,4)+'...' : '???';
             const dispTo = nameTo ? `<span class="entity-name">${nameTo}</span>` : tx.Destination ? tx.Destination.substring(0,4)+'...' : 'DEX';
-
-            // ADD TO MAP IF ACTIVE
-            if (mapActive && isSuccess) {
-                bubbles.push(new Bubble(amt, mapColor, tx.hash, dispFrom, dispTo, type));
-            }
-
-            if(watchlist.includes(tx.Account) || watchlist.includes(tx.Destination)) {
-                color = "text-red-500 font-bold";
-                showToast("TARGET DETECTED");
-                mapColor = "#ff0000";
-            }
 
             const feed = document.getElementById('feed');
             if (feed.innerText.includes("AWAITING")) feed.innerHTML = "";
@@ -759,6 +814,30 @@
             if(feed.children.length > 40) feed.lastChild.remove();
         }
 
+        // --- REPORT FUNCTIONS ---
+        function addReportRow(hash, amt, wallet, type, out) {
+            const list = document.getElementById('report-list');
+            if (list.innerText.includes("WAITING")) list.innerHTML = "";
+
+            const row = document.createElement('div');
+            row.className = "report-row";
+            const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+            const walletDisp = wallet.startsWith('r') ? wallet.substring(0,4)+'..'+wallet.substring(wallet.length-3) : wallet.substring(0,8);
+            const outColor = out === 'Y' ? 'color:#ffaa00' : (out === 'N' ? 'color:#00ffff' : 'color:#888');
+
+            row.innerHTML = `
+                <div style="width: 25%" class="rep-val-green">${(amt/1000).toFixed(1)}k</div>
+                <div style="width: 25%" class="rep-val-white">${walletDisp}</div>
+                <div class="rep-col-time rep-val-dim">${time}</div>
+                <div class="rep-col-type text-white font-bold">${type}</div>
+                <div class="rep-col-out font-bold" style="${outColor}">${out}</div>
+            `;
+            // USE THE NEW openModal WITH FULL DATA
+            row.onclick = () => openModal({amt: amt, color: '#00ff00', type: `REP-${type}`, from: wallet, to: 'LINKED', hash: hash});
+            list.prepend(row);
+            if (list.children.length > 50) list.lastChild.remove();
+        }
+
         function triggerWhaleAlert() {
             document.getElementById('alert-layer').classList.add('whale-alert-anim');
             showToast("🚨 REAL WHALE MOVEMENT 🚨");
@@ -771,7 +850,7 @@
             setTimeout(() => t.classList.remove('toast-show'), 2000);
         }
         function openScan(h) { window.open(`https://xrpscan.com/tx/${h}`, '_blank'); }
-        function copyHash(h) { navigator.clipboard.writeText(h); showToast("HASH COPIED"); }
+        function copyHash(h) { navigator.clipboard.writeText(h); showToast("COPIED"); }
         function switchView(id) {
             document.querySelectorAll('.view-panel').forEach(e => e.classList.remove('active'));
             document.getElementById('view-'+id).classList.add('active');
@@ -779,13 +858,7 @@
             event.target.classList.add('active');
             
             // Map Logic
-            if(id === 'map') {
-                mapActive = true;
-                resizeMap();
-                loopMap();
-            } else {
-                mapActive = false;
-            }
+            if(id === 'map') { mapActive = true; resizeMap(); loopMap(); } else { mapActive = false; }
         }
         function addWatch() {
             const v = document.getElementById('watch-input').value;
