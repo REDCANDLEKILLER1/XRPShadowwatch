@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v9.5</title>
+    <title>XRPMAN SHADOW WATCH // v9.6</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -271,9 +271,9 @@
 </head>
 <body>
 
-    <!-- VIDEO SPLASH SCREEN -->
+    <!-- VIDEO SPLASH SCREEN (LOOP REMOVED) -->
     <div id="splash-screen">
-        <video id="splash-video" playsinline muted autoplay loop>
+        <video id="splash-video" playsinline muted autoplay>
             <source src="https://ipfs.filebase.io/ipfs/QmVMYvMffwSXPJyuNz3CAW8V6rS1wViWQjPHdzPGofb7Ux" type="video/mp4">
         </video>
         <button id="skip-btn" onclick="skipBoot()">[ SKIP INTRO ]</button>
@@ -454,7 +454,7 @@
                 finishBoot();
             });
             
-            // When video ends or after 5 seconds
+            // When video ends or after 5.5 seconds (safety)
             vid.onended = () => finishBoot();
             setTimeout(finishBoot, 5500); 
         }
@@ -466,6 +466,9 @@
         }
 
         function finishBoot() {
+            const vid = document.getElementById('splash-video');
+            if(vid) vid.pause(); // Ensure clean cut
+            
             document.getElementById('splash-screen').classList.add('fade-out');
             setTimeout(() => {
                 document.getElementById('splash-screen').style.display = 'none';
@@ -779,7 +782,7 @@
                 document.getElementById('feed').innerHTML = '';
                 document.getElementById('audio-btn').style.display = 'inline-block';
                 showToast("FIREWALL BREACHED");
-                // Removed duplicate init3D() call here to fix freezing issue
+                // Removed duplicate init3D() call to prevent animation freeze
             }
         }
 
@@ -1165,5 +1168,3 @@
     </script>
 </body>
 </html>
-
-
