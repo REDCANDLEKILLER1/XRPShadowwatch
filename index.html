@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v7.4</title>
+    <title>XRPMAN SHADOW WATCH // v7.7</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -17,6 +17,7 @@
             --warn-orange: #ffaa00;
             --info-cyan: #00ffff;
             --dex-purple: #aa00ff;
+            --gold-hvt: #ffd700;
         }
 
         body {
@@ -60,11 +61,11 @@
             color: white; padding: 12px 24px; border-radius: 4px;
             font-family: 'Share Tech Mono'; font-size: 14px; letter-spacing: 1px;
             opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 1000;
-            box-shadow: 0 0 30px var(--lime-main); font-weight: bold;
+            box-shadow: 0 0 30px var(--lime-main); font-weight: bold; text-align: center;
         }
         .toast-show { opacity: 1 !important; }
 
-        /* BUBBLE/REPORT MODAL */
+        /* BUBBLE MODAL */
         #bubble-modal {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             width: 85%; max-width: 350px;
@@ -78,7 +79,6 @@
         .modal-label { color: #55aa55; font-weight: bold; }
         .modal-val { color: white; font-family: 'Share Tech Mono'; text-align: right; word-break: break-all; }
 
-        /* MODAL ACTION GRID */
         .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
         .mod-btn {
             background: #001100; border: 1px solid var(--lime-main); color: var(--lime-main);
@@ -98,6 +98,15 @@
         .whale-alert-anim {
             animation: border-flash 1s ease-in-out 3;
             position: absolute; inset: 0; pointer-events: none; z-index: 900;
+        }
+        @keyframes red-flash {
+            0% { box-shadow: inset 0 0 0 0 transparent; }
+            50% { box-shadow: inset 0 0 50px 20px var(--alert-red); }
+            100% { box-shadow: inset 0 0 0 0 transparent; }
+        }
+        .hvt-alert-anim {
+            animation: red-flash 0.5s ease-in-out 6;
+            position: absolute; inset: 0; pointer-events: none; z-index: 950;
         }
 
         /* TOP HUD */
@@ -134,7 +143,7 @@
             letter-spacing: 3px; opacity: 0.8;
         }
 
-        .connect-container { display: flex; justify-content: center; width: 100%; pointer-events: auto; }
+        .connect-container { display: flex; justify-content: center; gap:10px; width: 100%; pointer-events: auto; }
         .connect-btn {
             background: #001100; border: 2px solid var(--lime-main);
             color: var(--lime-main); padding: 8px 30px; font-weight: 900; font-size: 12px;
@@ -143,6 +152,12 @@
             font-family: 'Orbitron', sans-serif; text-transform: uppercase;
         }
         .connect-btn:active { background: var(--lime-main); color: black; box-shadow: 0 0 25px var(--lime-main); }
+        
+        .audio-btn {
+            background: #001100; border: 1px solid var(--warn-orange); color: var(--warn-orange);
+            padding: 8px 15px; font-weight: bold; font-size: 10px; border-radius: 6px;
+            font-family: 'Share Tech Mono';
+        }
 
         /* BOTTOM DECK */
         #hud-bottom {
@@ -165,34 +180,13 @@
             border-right: 1px solid var(--lime-dim); letter-spacing: 1px; font-family: 'Orbitron', sans-serif;
         }
         .tab-btn.active { background: #001100; color: var(--lime-main); border-bottom: 3px solid var(--lime-main); text-shadow: 0 0 10px var(--lime-main); }
+        .tab-btn.hvt-active { color: var(--gold-hvt); text-shadow: 0 0 5px var(--gold-hvt); }
 
         .view-panel { 
             display: none; flex-direction: column; height: 100%; padding: 0; position: relative; 
             overflow: hidden;
         }
         .view-panel.active { display: flex; }
-
-        /* REPORT TAB STYLES */
-        #report-header {
-            display: flex; justify-content: space-between; padding: 8px 10px;
-            background: rgba(0, 50, 0, 0.3); border-bottom: 1px solid var(--lime-dim);
-            font-size: 9px; font-weight: bold; color: #55aa55; font-family: 'Share Tech Mono';
-        }
-        .rep-col { flex: 1; text-align: left; }
-        .rep-col-time { width: 50px; text-align: right; }
-        .rep-col-type { width: 30px; text-align: center; }
-        .rep-col-out { width: 35px; text-align: center; } 
-        
-        .report-row {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 8px 10px; border-bottom: 1px solid #112211;
-            font-size: 10px; font-family: 'Share Tech Mono';
-            cursor: pointer;
-        }
-        .report-row:hover { background: rgba(0, 255, 0, 0.1); }
-        .rep-val-green { color: #00ff00; }
-        .rep-val-white { color: #ffffff; }
-        .rep-val-dim { color: #888888; }
 
         .filter-bar {
             display: flex; gap: 5px; padding: 8px; border-bottom: 1px solid var(--lime-dim); background: rgba(0,0,0,0.3);
@@ -204,7 +198,7 @@
         }
         .filter-btn.active { background: var(--lime-main); color: black; border-color: var(--lime-main); }
 
-        #feed, #watch-list, #case-list, #report-list { 
+        #feed, #watch-list, #case-list, #report-list, #hvt-list { 
             flex-grow: 1; 
             overflow-y: auto; 
             -webkit-overflow-scrolling: touch;
@@ -225,6 +219,9 @@
         .tag-wth { background: #003344; color: #00ffff; border: 1px solid #005566; }
         .tag-dex { background: #330044; color: #aa00ff; border: 1px solid #550066; }
         .tag-fail { background: #333; color: #aaa; border: 1px solid #555; }
+        .tag-hvt { background: #443300; color: #ffd700; border: 1px solid #ffd700; box-shadow: 0 0 5px #ffd700; animation: blink-hvt 1s infinite; }
+
+        @keyframes blink-hvt { 50% { opacity: 0.5; } }
 
         .tx-failed { opacity: 0.5; border-left: 3px solid #555; background: rgba(20,20,20,0.5); }
         .tx-failed .action-btn { border-color: #333; color: #555; }
@@ -267,6 +264,27 @@
             font-family: 'Share Tech Mono'; background: rgba(0,0,0,0.8); border: 1px solid #333;
         }
 
+        /* --- REPORT TAB STYLES --- */
+        #report-header {
+            display: flex; justify-content: space-between; padding: 8px 10px;
+            background: rgba(0, 50, 0, 0.3); border-bottom: 1px solid var(--lime-dim);
+            font-size: 9px; font-weight: bold; color: #55aa55; font-family: 'Share Tech Mono';
+        }
+        .rep-col-time { width: 50px; text-align: right; }
+        .rep-col-type { width: 30px; text-align: center; }
+        .rep-col-out { width: 35px; text-align: center; } 
+        
+        .report-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 8px 10px; border-bottom: 1px solid #112211;
+            font-size: 10px; font-family: 'Share Tech Mono';
+            cursor: pointer;
+        }
+        .report-row:hover { background: rgba(0, 255, 0, 0.1); }
+        .rep-val-green { color: #00ff00; }
+        .rep-val-white { color: #ffffff; }
+        .rep-val-dim { color: #888888; }
+
     </style>
 </head>
 <body>
@@ -300,7 +318,6 @@
             <span id="mod-to" class="modal-val text-[10px]">---</span>
         </div>
 
-        <!-- NEW GRID ACTIONS -->
         <div class="modal-grid">
             <button id="mod-scan-btn" class="mod-btn">SCAN LEDGER</button>
             <button id="mod-copy-hash" class="mod-btn">COPY HASH</button>
@@ -341,6 +358,7 @@
         <!-- CONNECT BUTTON THIRD -->
         <div class="connect-container">
             <button id="connect-main" onclick="toggleConnection()" class="connect-btn">INITIALIZE UPLINK</button>
+            <button id="audio-btn" onclick="toggleAudio()" class="audio-btn" style="display:none;">ENABLE AUDIO</button>
         </div>
     </div>
 
@@ -349,9 +367,9 @@
         <div id="command-deck">
             <div class="tab-bar">
                 <div class="tab-btn active" onclick="switchView('live')">LIVE</div>
+                <div class="tab-btn" onclick="switchView('hvt')" style="color: gold;">[ HVT ]</div>
                 <div class="tab-btn" onclick="switchView('map')">MAP</div>
                 <div class="tab-btn" onclick="switchView('report')">REPORT</div>
-                <div class="tab-btn" onclick="switchView('watch')">WATCH</div>
                 <div class="tab-btn" onclick="switchView('case')">EVID</div>
             </div>
 
@@ -376,14 +394,25 @@
                 </div>
             </div>
 
+            <!-- HVT TAB -->
+            <div id="view-hvt" class="view-panel">
+                <div class="p-2 border-b border-green-900 bg-black/40 text-center">
+                    <span class="text-xs text-yellow-400 font-bold tracking-widest">>> HIGH VALUE TARGET BLACK BOX <<</span>
+                </div>
+                <div id="hvt-list">
+                    <div class="text-center text-gray-600 mt-12 font-tech text-xs">
+                        MONITORING FOR FOUNDERS / RIPPLE OPS...
+                    </div>
+                </div>
+            </div>
+
             <!-- MAP TAB -->
             <div id="view-map" class="view-panel">
                 <canvas id="map-canvas"></canvas>
                 <div id="map-legend">
                     <div class="legend-item" style="color:#00ff00; border-color:#005500;">TSFR</div>
                     <div class="legend-item" style="color:#ffaa00; border-color:#663300;">DEPOSIT</div>
-                    <div class="legend-item" style="color:#00ffff; border-color:#005566;">WITHDRAW</div>
-                    <div class="legend-item" style="color:#aa00ff; border-color:#550066;">DEX</div>
+                    <div class="legend-item" style="color:#ffd700; border-color:#555500;">HVT</div>
                     <div class="legend-item" style="color:#ff0000; border-color:#550000;">ALERT</div>
                 </div>
             </div>
@@ -402,15 +431,6 @@
                         WAITING FOR 100K+ TXs...
                     </div>
                 </div>
-            </div>
-
-            <!-- WATCH TAB -->
-            <div id="view-watch" class="view-panel p-4">
-                <div class="flex gap-2 p-2 bg-black/50 border border-green-900 mb-2 flex-shrink-0">
-                    <input type="text" id="watch-input" placeholder="Enter rAddress..." class="flex-grow bg-transparent text-white text-xs outline-none font-tech">
-                    <button onclick="addWatch()" class="text-green-500 font-bold text-xs uppercase">Track</button>
-                </div>
-                <div id="watch-list" class="flex-grow overflow-y-auto space-y-1"></div>
             </div>
 
             <!-- CASE TAB -->
@@ -488,7 +508,48 @@
             renderer.render(scene, camera);
         }
 
-        // --- MAP ENGINE (Canvas) ---
+        // --- AUDIO ENGINE ---
+        let audioCtx;
+        let audioEnabled = false;
+
+        function toggleAudio() {
+            if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if(audioCtx.state === 'suspended') audioCtx.resume();
+            audioEnabled = !audioEnabled;
+            const btn = document.getElementById('audio-btn');
+            btn.innerText = audioEnabled ? "AUDIO ON" : "ENABLE AUDIO";
+            btn.style.color = audioEnabled ? "#00ff00" : "#ffaa00";
+            btn.style.borderColor = audioEnabled ? "#00ff00" : "#ffaa00";
+            if(audioEnabled) playTone(600, 0.1, "sine"); // Test beep
+        }
+
+        function playTone(freq, duration, type="square") {
+            if(!audioEnabled || !audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        }
+
+        function playAlert(type) {
+            if (type === 'HVT') {
+                // Triple High Pitch
+                playTone(1200, 0.1);
+                setTimeout(() => playTone(1200, 0.1), 150);
+                setTimeout(() => playTone(1200, 0.2), 300);
+            } else {
+                // Single Low Ping
+                playTone(400, 0.2, "sine");
+            }
+        }
+
+        // --- MAP ENGINE ---
         const mapCanvas = document.getElementById('map-canvas');
         const mapCtx = mapCanvas.getContext('2d');
         let bubbles = [];
@@ -564,26 +625,36 @@
             document.getElementById('mod-save-btn').onclick = () => {
                 saveCase({hash:b.hash, amt:b.amt, from:b.from, to:b.to});
                 closeModal();
+                showToast("EVIDENCE SECURED");
             };
-
             document.getElementById('bubble-modal').classList.add('modal-active');
         }
         function closeModal() { document.getElementById('bubble-modal').classList.remove('modal-active'); }
 
         // --- APP LOGIC ---
-        let socket, isConnected = false, watchlist = [], cases = [], priceInterval;
+        let socket, isConnected = false, watchlist = [], cases = [], hvtLog = [], priceInterval;
         let activeFilter = 'all'; 
         let lastAlertTime = 0;
         let isPaused = false;
         let lastHeartbeat = Date.now();
 
-        const ENTITIES = {
-            'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh': 'GENESIS', 'rh1HPuR9...': 'BITSTAMP',
-            'rPVMhWBsfF9iMXYj3aAzJ5NrPxrXz...': 'XRP TIP BOT', 'rLNaPoKeeBJZe2qs6x52yVPZpZ8td4dc6w': 'COINBASE',
-            'rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh': 'BINANCE', 'rJb5KsHsDHF1YSnasbwqSagepE8XXAuGh': 'BITSTAMP',
-            'rU2mEJSLqBRkYLVTv55rFTgQYkDBqVyTRn': 'COINS.PH'
+        // THE BLACK BOOK (Separated by TYPE)
+        const KNOWN_WALLETS = {
+            // EXCHANGES
+            'rLNaPoKeeBJZe2qs6x52yVPZpZ8td4dc6w': {name: 'COINBASE', type: 'EXCH'},
+            'rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh': {name: 'BINANCE', type: 'EXCH'},
+            'rJb5KsHsDHF1YSnasbwqSagepE8XXAuGh': {name: 'BITSTAMP', type: 'EXCH'},
+            'rU2mEJSLqBRkYLVTv55rFTgQYkDBqVyTRn': {name: 'COINS.PH', type: 'EXCH'},
+            'rNprNzNWKqaKUH24sF11g8n9C9r295x26d': {name: 'KRAKEN', type: 'EXCH'},
+            // TARGETS (HVT)
+            'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh': {name: 'GENESIS', type: 'HVT'},
+            'r945F6e8...Escrow': {name: 'RIPPLE ESCROW', type: 'HVT'}, // Example
+            'r...Tacostand': {name: 'TACOSTAND', type: 'HVT'},
+            'r...Chris': {name: 'CHRIS LARSEN', type: 'HVT'},
+            'r...Brad': {name: 'BRAD G.', type: 'HVT'}
         };
 
+        // --- RECONNECTION LOGIC ---
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible' && isConnected) {
                 if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -616,6 +687,7 @@
                 isConnected = true;
                 btn.innerText = "UPLINK ACTIVE"; btn.style.background = "#00ff00"; btn.style.color = "#000";
                 document.getElementById('feed').innerHTML = '';
+                document.getElementById('audio-btn').style.display = 'inline-block';
                 showToast("FIREWALL BREACHED");
             }
         }
@@ -624,10 +696,7 @@
             activeFilter = mode;
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            document.getElementById('feed').innerHTML = 
-                `<div class="text-center text-green-800 mt-12 font-tech text-xs tracking-widest">
-                    FILTER ACTIVE: [ ${mode.toUpperCase()} ]<br>AWAITING NEW TARGETS...
-                </div>`;
+            document.getElementById('feed').innerHTML = `<div class="text-center text-green-800 mt-12 font-tech text-xs tracking-widest">FILTER ACTIVE: [ ${mode.toUpperCase()} ]<br>AWAITING NEW TARGETS...</div>`;
             showToast("FILTER: " + mode.toUpperCase());
         }
 
@@ -635,7 +704,6 @@
             isPaused = !isPaused;
             const btn = document.getElementById('pause-btn');
             const status = document.getElementById('status-text');
-            
             if(isPaused) {
                 btn.innerText = "RESUME"; btn.classList.add('paused-mode');
                 status.innerText = "PAUSED"; status.classList.replace('text-green-500', 'text-yellow-500');
@@ -656,8 +724,7 @@
         async function fetchPrice() {
             for (let source of PRICE_SOURCES) {
                 try {
-                    const c = new AbortController();
-                    setTimeout(() => c.abort(), 2000); 
+                    const c = new AbortController(); setTimeout(() => c.abort(), 2000); 
                     const res = await fetch(source.url, { signal: c.signal });
                     const data = await res.json();
                     const price = source.parse(data);
@@ -722,8 +789,15 @@
             let color = "text-green-500";
             let mapColor = "#00ff00";
             let amt = 0;
-            let nameFrom = ENTITIES[tx.Account];
-            let nameTo = ENTITIES[tx.Destination];
+            
+            // Resolve Entities
+            const entFrom = KNOWN_WALLETS[tx.Account];
+            const entTo = KNOWN_WALLETS[tx.Destination];
+            let nameFrom = entFrom ? entFrom.name : null;
+            let nameTo = entTo ? entTo.name : null;
+
+            // Check HVT Status
+            const isHVT = (entFrom && entFrom.type === 'HVT') || (entTo && entTo.type === 'HVT');
 
             if (typeof tx.Amount === 'string') {
                 if (meta && meta.delivered_amount && typeof meta.delivered_amount === 'string') {
@@ -765,6 +839,20 @@
             const now = Date.now();
             if (isWhale && isSuccess && (now - lastAlertTime > 60000)) {
                 triggerWhaleAlert(); lastAlertTime = now;
+                playAlert('WHALE');
+            }
+
+            // --- HVT LOGIC ---
+            if (isHVT) {
+                // Auto-Add to Evidence
+                saveCase({hash:tx.hash, amt:amt, from:nameFrom||tx.Account, to:nameTo||tx.Destination, type:'HVT'});
+                // Add to HVT Tab
+                addHVTRow(tx.hash, amt, nameFrom||tx.Account, nameTo||tx.Destination);
+                // Alert
+                triggerHVTAlert();
+                playAlert('HVT');
+                color = "text-yellow-300"; // Gold color for feed
+                tags += `<span class="tag-pill tag-hvt">HVT TARGET</span>`;
             }
 
             let rowClass = "tx-row";
@@ -778,6 +866,7 @@
 
             if(watchlist.includes(tx.Account) || watchlist.includes(tx.Destination)) {
                 color = "text-red-500 font-bold"; showToast("TARGET DETECTED"); mapColor = "#ff0000";
+                playAlert('HVT');
             }
 
             // REPORT LOGIC
@@ -814,34 +903,30 @@
             if(feed.children.length > 40) feed.lastChild.remove();
         }
 
-        // --- REPORT FUNCTIONS ---
-        function addReportRow(hash, amt, wallet, type, out) {
-            const list = document.getElementById('report-list');
-            if (list.innerText.includes("WAITING")) list.innerHTML = "";
-
+        // --- HVT FUNCTIONS ---
+        function addHVTRow(hash, amt, from, to) {
+            const list = document.getElementById('hvt-list');
+            if (list.innerText.includes("MONITORING")) list.innerHTML = "";
             const row = document.createElement('div');
-            row.className = "report-row";
-            const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
-            const walletDisp = wallet.startsWith('r') ? wallet.substring(0,4)+'..'+wallet.substring(wallet.length-3) : wallet.substring(0,8);
-            const outColor = out === 'Y' ? 'color:#ffaa00' : (out === 'N' ? 'color:#00ffff' : 'color:#888');
-
+            row.className = "p-3 border-l-4 border-yellow-400 bg-yellow-900/20 mb-2";
             row.innerHTML = `
-                <div style="width: 25%" class="rep-val-green">${(amt/1000).toFixed(1)}k</div>
-                <div style="width: 25%" class="rep-val-white">${walletDisp}</div>
-                <div class="rep-col-time rep-val-dim">${time}</div>
-                <div class="rep-col-type text-white font-bold">${type}</div>
-                <div class="rep-col-out font-bold" style="${outColor}">${out}</div>
+                <div class="text-yellow-400 font-bold text-sm">⚠️ HVT INTERCEPT</div>
+                <div class="text-white font-mono">${amt.toLocaleString()} XRP</div>
+                <div class="text-[10px] text-gray-400 mt-1">${from} -> ${to}</div>
+                <button onclick="openScan('${hash}')" class="mt-2 text-[10px] border border-yellow-600 px-2 text-yellow-500">SCAN</button>
             `;
-            // USE THE NEW openModal WITH FULL DATA
-            row.onclick = () => openModal({amt: amt, color: '#00ff00', type: `REP-${type}`, from: wallet, to: 'LINKED', hash: hash});
             list.prepend(row);
-            if (list.children.length > 50) list.lastChild.remove();
         }
 
         function triggerWhaleAlert() {
             document.getElementById('alert-layer').classList.add('whale-alert-anim');
-            showToast("🚨 REAL WHALE MOVEMENT 🚨");
             setTimeout(() => document.getElementById('alert-layer').classList.remove('whale-alert-anim'), 3000);
+        }
+
+        function triggerHVTAlert() {
+            document.getElementById('alert-layer').classList.add('hvt-alert-anim');
+            showToast("⚠️ HVT ACTIVITY CONFIRMED ⚠️");
+            setTimeout(() => document.getElementById('alert-layer').classList.remove('hvt-alert-anim'), 3000);
         }
 
         function showToast(msg) {
@@ -850,7 +935,38 @@
             setTimeout(() => t.classList.remove('toast-show'), 2000);
         }
         function openScan(h) { window.open(`https://xrpscan.com/tx/${h}`, '_blank'); }
-        function copyHash(h) { navigator.clipboard.writeText(h); showToast("COPIED"); }
+        
+        function copyHash(h) {
+            if (!navigator.clipboard) {
+                fallbackCopyTextToClipboard(h);
+                return;
+            }
+            navigator.clipboard.writeText(h).then(function() {
+                showToast("HASH COPIED");
+            }, function(err) {
+                fallbackCopyTextToClipboard(h);
+            });
+        }
+
+        function fallbackCopyTextToClipboard(text) {
+            var textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.top = "0";
+            textArea.style.left = "0";
+            textArea.style.position = "fixed";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                var successful = document.execCommand('copy');
+                if(successful) showToast("HASH COPIED");
+                else showToast("COPY FAILED");
+            } catch (err) {
+                showToast("COPY FAILED");
+            }
+            document.body.removeChild(textArea);
+        }
+
         function switchView(id) {
             document.querySelectorAll('.view-panel').forEach(e => e.classList.remove('active'));
             document.getElementById('view-'+id).classList.add('active');
@@ -885,6 +1001,26 @@
             a.href = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(cases));
             a.download = "sentinel_cases.json";
             a.click();
+        }
+        // REPORT FUNCTIONS
+        function addReportRow(hash, amt, wallet, type, out) {
+            const list = document.getElementById('report-list');
+            if (list.innerText.includes("WAITING")) list.innerHTML = "";
+            const row = document.createElement('div');
+            row.className = "report-row";
+            const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+            const walletDisp = wallet.startsWith('r') ? wallet.substring(0,4)+'..'+wallet.substring(wallet.length-3) : wallet.substring(0,8);
+            const outColor = out === 'Y' ? 'color:#ffaa00' : (out === 'N' ? 'color:#00ffff' : 'color:#888');
+            row.innerHTML = `
+                <div style="width: 25%" class="rep-val-green">${(amt/1000).toFixed(1)}k</div>
+                <div style="width: 25%" class="rep-val-white">${walletDisp}</div>
+                <div class="rep-col-time rep-val-dim">${time}</div>
+                <div class="rep-col-type text-white font-bold">${type}</div>
+                <div class="rep-col-out font-bold" style="${outColor}">${out}</div>
+            `;
+            row.onclick = () => openModal({amt: amt, color: '#00ff00', type: `REP-${type}`, from: wallet, to: 'LINKED', hash: hash});
+            list.prepend(row);
+            if (list.children.length > 50) list.lastChild.remove();
         }
         init3D();
     </script>
