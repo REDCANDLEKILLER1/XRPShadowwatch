@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v9.9 [ICONS ONLINE]</title>
+    <title>XRPMAN SHADOW WATCH // v9.9.1 [FILTERS CALIBRATED]</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -360,7 +360,7 @@
                 <div class="filter-bar" id="filter-zone">
                     <button class="filter-btn active" onclick="setFilter('all', this)">[ ALL ]</button>
                     <button class="filter-btn" onclick="setFilter('small', this)">[ &lt; 100K ]</button>
-                    <button class="filter-btn" onclick="setFilter('whale', this)">[ WHALES ]</button>
+                    <button class="filter-btn" onclick="setFilter('whale', this)">[ 100K+ ]</button>
                     <button class="filter-btn" onclick="setFilter('exchange', this)">[ EXCH ]</button>
                     <button class="filter-btn" style="border-color:#00ffff; color:#00ffff;" onclick="setFilter('l2', this)">[ L2 ]</button>
                     <label class="flex items-center gap-1 text-[9px] text-green-400 font-bold ml-2">
@@ -516,7 +516,7 @@
                 document.getElementById('init-zone').classList.add('highlight-element');
             } else if (tutStep === 2) {
                 title.innerText = "STEP 2: FILTERS";
-                text.innerText = "Use these tabs to filter the live stream. \n[WHALE] shows large txs.\n[< 100K] for small XRP.\n[L2] shows Tokens.";
+                text.innerText = "Use these tabs to filter the live stream. \n[100K+] shows large txs.\n[< 100K] for small XRP.\n[L2] shows Tokens.";
                 document.getElementById('filter-zone').classList.add('highlight-element');
             } else if (tutStep === 3) {
                 title.innerText = "STEP 3: TACTICAL VIEWS";
@@ -823,7 +823,7 @@
             activeFilter = mode;
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            let txt = mode === 'small' ? '< 100K' : mode.toUpperCase();
+            let txt = mode === 'small' ? '< 100K' : (mode === 'whale' ? '> 100K' : mode.toUpperCase());
             document.getElementById('feed').innerHTML = `<div class="text-center text-green-800 mt-12 font-tech text-xs tracking-widest">FILTER ACTIVE: [ ${txt} ]<br>AWAITING NEW TARGETS...</div>`;
             showToast("FILTER: " + txt);
         }
@@ -995,7 +995,7 @@
             }
 
             let tags = "";
-            const isWhale = !isL2 && amt >= 1000000; 
+            const isWhale = !isL2 && amt >= 100000; // UPDATED: Lowered whale threshold to 100k
             const isExchange = nameFrom || nameTo;
 
             if (tx.TransactionType === 'OfferCreate') {
@@ -1021,11 +1021,11 @@
             // FILTER LOGIC
             if (activeFilter === 'small') {
                 if (isL2) return; 
-                if (amt >= 100000) return; 
+                if (amt >= 100000) return; // Keep < 100k
             }
             if (activeFilter === 'whale') {
                 if (isL2) return;
-                if (!isWhale) return;
+                if (amt < 100000) return; // Keep >= 100k
             }
             if (activeFilter === 'exchange') {
                 if (isL2) return;
@@ -1211,4 +1211,3 @@
     </script>
 </body>
 </html>
-
