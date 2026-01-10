@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v9.9.1 [FILTERS CALIBRATED]</title>
+    <title>XRPMAN SHADOW WATCH // v9.9.3 [BOT DETECT]</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -213,6 +213,7 @@
         .tag-fail { background: #333; color: #aaa; border: 1px solid #555; }
         .tag-hvt { background: #443300; color: #ffd700; border: 1px solid #ffd700; box-shadow: 0 0 5px #ffd700; animation: blink-hvt 1s infinite; }
         .tag-l2 { background: #003344; color: #00ffff; border: 1px solid #00aaaa; }
+        .tag-bot { background: #111; color: #888; border: 1px solid #333; }
         
         @keyframes blink-hvt { 50% { opacity: 0.5; } }
 
@@ -650,7 +651,8 @@
                 this.speed = 1 + Math.random() * 2;
                 this.color = color;
                 this.hash = hash;
-                this.label = label;
+                // CHANGED: Use precise number formatting instead of flooring
+                this.label = type === 'L2' ? label : val.toLocaleString(undefined, {maximumFractionDigits: 0});
                 this.val = val;     
                 this.from = from;
                 this.to = to;
@@ -823,7 +825,7 @@
             activeFilter = mode;
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            let txt = mode === 'small' ? '< 100K' : (mode === 'whale' ? '> 100K' : mode.toUpperCase());
+            let txt = mode === 'small' ? '< 100K' : (mode === 'whale' ? '100K+' : mode.toUpperCase());
             document.getElementById('feed').innerHTML = `<div class="text-center text-green-800 mt-12 font-tech text-xs tracking-widest">FILTER ACTIVE: [ ${txt} ]<br>AWAITING NEW TARGETS...</div>`;
             showToast("FILTER: " + txt);
         }
@@ -998,8 +1000,13 @@
             const isWhale = !isL2 && amt >= 100000; // UPDATED: Lowered whale threshold to 100k
             const isExchange = nameFrom || nameTo;
 
+            // BOT DETECT LOGIC
+            // Checks for OfferCreate + Perfectly Round Numbers (Divisible by 100,000)
+            const isBot = tx.TransactionType === 'OfferCreate' && (amt % 100000 === 0);
+
             if (tx.TransactionType === 'OfferCreate') {
                 tags += `<span class="tag-pill tag-dex">DEX ORD</span>`;
+                if(isBot) tags += `<span class="tag-pill tag-bot">[ MM BOT ]</span>`;
             } else {
                 if (isL2) {
                     tags += `<span class="tag-pill tag-l2">[ ${tokenName} ]</span>`;
@@ -1034,7 +1041,7 @@
             if (activeFilter === 'l2' && !isL2) return;
             
             const now = Date.now();
-            if (isWhale && isSuccess && (now - lastAlertTime > 60000)) {
+            if (isWhale && isSuccess && !isBot && (now - lastAlertTime > 60000)) {
                 triggerWhaleAlert(); lastAlertTime = now;
                 playAlert('WHALE');
             }
@@ -1055,7 +1062,8 @@
             }
 
             if (mapActive && isSuccess) {
-                let bubbleLabel = isL2 ? tokenName : Math.floor(amt);
+                // CHANGED: Use precise number formatting instead of flooring
+                let bubbleLabel = isL2 ? tokenName : amt.toLocaleString(undefined, {maximumFractionDigits: 0});
                 let bubbleVal = amt;
                 // PASS ISSUER TO BUBBLE
                 bubbles.push(new Bubble(bubbleLabel, bubbleVal, mapColor, tx.hash, nameFrom||tx.Account, nameTo||tx.Destination, type, issuer));
@@ -1193,8 +1201,9 @@
             const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
             const walletDisp = wallet.startsWith('r') ? wallet.substring(0,4)+'..'+wallet.substring(wallet.length-3) : wallet.substring(0,8);
             const outColor = out === 'Y' ? 'color:#ffaa00' : (out === 'N' ? 'color:#00ffff' : 'color:#888');
+            // CHANGED: Removed rounding logic (toFixed/k) and used full number formatting
             row.innerHTML = `
-                <div style="width: 25%" class="rep-val-green">${(amt/1000).toFixed(1)}k</div>
+                <div style="width: 25%" class="rep-val-green">${amt.toLocaleString()}</div>
                 <div style="width: 25%" class="rep-val-white">${walletDisp}</div>
                 <div class="rep-col-time rep-val-dim">${time}</div>
                 <div class="rep-col-type text-white font-bold">${type}</div>
