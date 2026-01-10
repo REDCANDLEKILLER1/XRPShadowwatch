@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v9.6</title>
+    <title>XRPMAN SHADOW WATCH // v9.8</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -914,33 +914,50 @@
             const isHVT = (entFrom && entFrom.type === 'HVT') || (entTo && entTo.type === 'HVT');
 
             // --- AMOUNT PARSING (XRP vs TOKEN) ---
-            if (typeof tx.Amount === 'string') {
+            // FIXED v9.8: Priority on meta.delivered_amount
+            let delivered = meta?.delivered_amount;
+            
+            if (typeof tx.Amount === 'object' || (delivered && typeof delivered === 'object')) {
+                 isL2 = true;
+                 // Prioritize delivered_amount for accuracy (shows 310 CORN instead of huge request)
+                 if (delivered && typeof delivered === 'object') {
+                     amt = parseFloat(delivered.value);
+                     const currency = delivered.currency;
+                     tokenName = currency.length > 3 ? hexToASCII(currency) : currency;
+                 } else {
+                     // Fallback
+                     amt = parseFloat(tx.Amount.value);
+                     const currency = tx.Amount.currency;
+                     tokenName = currency.length > 3 ? hexToASCII(currency) : currency;
+                 }
+                 type = "L2";
+                 color = "text-cyan-400";
+                 mapColor = "#00ffff";
+                 
+            } else if (typeof tx.Amount === 'string') {
                 // XRP
-                if (meta && meta.delivered_amount && typeof meta.delivered_amount === 'string') {
-                    amt = parseInt(meta.delivered_amount) / 1000000;
+                if (delivered && typeof delivered === 'string') {
+                    amt = parseInt(delivered) / 1000000;
                 } else {
                     amt = parseInt(tx.Amount) / 1000000;
                 }
-            } else if (typeof tx.Amount === 'object') {
-                // TOKEN (L2)
-                isL2 = true;
-                amt = parseFloat(tx.Amount.value);
-                const currency = tx.Amount.currency;
-                // If len > 3, usually hex
-                if (currency.length > 3) {
-                    tokenName = hexToASCII(currency);
-                } else {
-                    tokenName = currency;
-                }
-                type = "L2";
-                color = "text-cyan-400";
-                mapColor = "#00ffff";
             } else if (tx.TransactionType === 'OfferCreate') {
+                // DEX Order
                 if (typeof tx.TakerPays === 'string') amt = parseInt(tx.TakerPays) / 1000000;
                 else if (typeof tx.TakerGets === 'string') amt = parseInt(tx.TakerGets) / 1000000;
                 type = "DEX";
                 color = "text-purple-400";
                 mapColor = "#aa00ff";
+            }
+
+            // COST CALCULATION (If swapped from XRP)
+            let costDisplay = "";
+            if (isL2 && tx.SendMax) {
+                if (typeof tx.SendMax === 'string') {
+                    // Paid in XRP
+                    let costXRP = parseInt(tx.SendMax) / 1000000;
+                    costDisplay = `<span class="text-xs text-gray-500 ml-1">(${costXRP} XRP)</span>`;
+                }
             }
 
             let tags = "";
@@ -1038,7 +1055,7 @@
 
             const row = document.createElement('div');
             row.className = rowClass;
-            let displayAmt = isL2 ? `${amt.toLocaleString()} ${tokenName}` : `${amt.toLocaleString()} XRP`;
+            let displayAmt = isL2 ? `${amt.toLocaleString()} ${tokenName} ${costDisplay}` : `${amt.toLocaleString()} XRP`;
             
             row.innerHTML = `
                 <div class="row-top ${color}">
