@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v9.8</title>
+    <title>XRPMAN SHADOW WATCH // v9.9 [ICONS ONLINE]</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -638,38 +638,72 @@
         }
 
         class Bubble {
-            // FIXED CONSTRUCTOR: label (text) is separate from numeric val (for math)
-            constructor(label, val, color, hash, from, to, type) {
+            // Updated Constructor to accept issuer for image loading
+            constructor(label, val, color, hash, from, to, type, issuer) {
                 this.x = Math.random() * mapCanvas.width;
                 this.y = mapCanvas.height + 20;
                 
-                // FIXED RADIUS MATH: Ensure it works for small token amounts and large XRP
-                // Default value of 1 prevents log(0)
+                // Fixed radius math
                 let safeVal = parseFloat(val) || 1; 
-                // Log scale, clamped between 10px and 50px
                 this.radius = Math.max(10, Math.min(50, Math.log(safeVal + 10) * 3));
                 
                 this.speed = 1 + Math.random() * 2;
                 this.color = color;
                 this.hash = hash;
-                this.label = label; // Display text
-                this.val = val;     // Numeric value
+                this.label = label;
+                this.val = val;     
                 this.from = from;
                 this.to = to;
                 this.type = type;
                 this.life = 1.0;
+
+                // --- ICON LOGIC ---
+                this.isL2 = type === 'L2' && issuer;
+                this.icon = null;
+                this.iconLoaded = false;
+
+                if (this.isL2) {
+                    this.icon = new Image();
+                    this.icon.crossOrigin = "Anonymous"; // Clean practices
+                    this.icon.src = `https://xumm.app/avatar/${issuer}_200.png`;
+                    this.icon.onload = () => { this.iconLoaded = true; };
+                    this.icon.onerror = () => { this.iconLoaded = false; this.icon = null; };
+                }
             }
             update() { this.y -= this.speed; this.life -= 0.002; }
             draw() {
                 mapCtx.globalAlpha = this.life;
+                
+                // Define the circle path
                 mapCtx.beginPath();
                 mapCtx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-                mapCtx.fillStyle = this.color;
-                mapCtx.fill();
+                
+                // IMAGE RENDERING
+                if (this.isL2 && this.iconLoaded && this.icon) {
+                    mapCtx.save();
+                    mapCtx.clip(); // Mask content to the circle
+                    mapCtx.drawImage(this.icon, this.x - this.radius, this.y - this.radius, this.radius * 2, this.radius * 2);
+                    mapCtx.restore();
+                } else {
+                    // Fallback to Solid Color
+                    mapCtx.fillStyle = this.color;
+                    mapCtx.fill();
+                }
+
+                // Border
                 mapCtx.strokeStyle = "#fff"; mapCtx.lineWidth = 1; mapCtx.stroke();
+                
+                // Text Label
                 if (this.radius > 12) {
-                    mapCtx.fillStyle = "#000"; mapCtx.font = "bold 9px monospace";
                     mapCtx.textAlign = "center"; 
+                    mapCtx.font = "bold 9px monospace";
+                    
+                    // Shadow/Stroke for readability over images
+                    mapCtx.lineWidth = 3;
+                    mapCtx.strokeStyle = "black";
+                    mapCtx.strokeText(this.label, this.x, this.y + 3);
+                    
+                    mapCtx.fillStyle = "#fff"; 
                     mapCtx.fillText(this.label, this.x, this.y + 3);
                 }
             }
@@ -782,7 +816,6 @@
                 document.getElementById('feed').innerHTML = '';
                 document.getElementById('audio-btn').style.display = 'inline-block';
                 showToast("FIREWALL BREACHED");
-                // Removed duplicate init3D() call to prevent animation freeze
             }
         }
 
@@ -903,6 +936,7 @@
             let amt = 0;
             let isL2 = false;
             let tokenName = "XRP";
+            let issuer = null; // NEW: Issuer Tracking
             
             // Resolve Entities
             const entFrom = KNOWN_WALLETS[tx.Account];
@@ -914,21 +948,22 @@
             const isHVT = (entFrom && entFrom.type === 'HVT') || (entTo && entTo.type === 'HVT');
 
             // --- AMOUNT PARSING (XRP vs TOKEN) ---
-            // FIXED v9.8: Priority on meta.delivered_amount
             let delivered = meta?.delivered_amount;
             
             if (typeof tx.Amount === 'object' || (delivered && typeof delivered === 'object')) {
                  isL2 = true;
-                 // Prioritize delivered_amount for accuracy (shows 310 CORN instead of huge request)
+                 // Prioritize delivered_amount
                  if (delivered && typeof delivered === 'object') {
                      amt = parseFloat(delivered.value);
                      const currency = delivered.currency;
                      tokenName = currency.length > 3 ? hexToASCII(currency) : currency;
+                     issuer = delivered.issuer; // Capture Issuer
                  } else {
                      // Fallback
                      amt = parseFloat(tx.Amount.value);
                      const currency = tx.Amount.currency;
                      tokenName = currency.length > 3 ? hexToASCII(currency) : currency;
+                     issuer = tx.Amount.issuer; // Capture Issuer
                  }
                  type = "L2";
                  color = "text-cyan-400";
@@ -950,18 +985,16 @@
                 mapColor = "#aa00ff";
             }
 
-            // COST CALCULATION (If swapped from XRP)
+            // COST CALCULATION
             let costDisplay = "";
             if (isL2 && tx.SendMax) {
                 if (typeof tx.SendMax === 'string') {
-                    // Paid in XRP
                     let costXRP = parseInt(tx.SendMax) / 1000000;
                     costDisplay = `<span class="text-xs text-gray-500 ml-1">(${costXRP} XRP)</span>`;
                 }
             }
 
             let tags = "";
-            // Logic adjust for Tokens: Whale logic might not apply to 1000 RLUSD same as 1M XRP
             const isWhale = !isL2 && amt >= 1000000; 
             const isExchange = nameFrom || nameTo;
 
@@ -986,26 +1019,20 @@
             }
 
             // FILTER LOGIC
-            // 1. SMALL FILTER: Show only XRP < 100k
             if (activeFilter === 'small') {
-                if (isL2) return; // Exclude L2 from Small Cap
-                if (amt >= 100000) return; // Exclude > 100k
+                if (isL2) return; 
+                if (amt >= 100000) return; 
             }
-            // 2. WHALE FILTER: Show only XRP > 1M (Exclude L2)
             if (activeFilter === 'whale') {
                 if (isL2) return;
                 if (!isWhale) return;
             }
-            // 3. EXCHANGE FILTER: Show Exchanges (Exclude L2)
             if (activeFilter === 'exchange') {
                 if (isL2) return;
                 if (!isExchange) return;
             }
-            // 4. L2 FILTER: Show only L2
             if (activeFilter === 'l2' && !isL2) return;
             
-            // 5. ALL FILTER: Show Everything (no constraints)
-
             const now = Date.now();
             if (isWhale && isSuccess && (now - lastAlertTime > 60000)) {
                 triggerWhaleAlert(); lastAlertTime = now;
@@ -1028,11 +1055,10 @@
             }
 
             if (mapActive && isSuccess) {
-                // FIXED: Pass label and numeric value separately to constructor
-                // This prevents NaN glitches for L2 tokens
                 let bubbleLabel = isL2 ? tokenName : Math.floor(amt);
                 let bubbleVal = amt;
-                bubbles.push(new Bubble(bubbleLabel, bubbleVal, mapColor, tx.hash, nameFrom||tx.Account, nameTo||tx.Destination, type));
+                // PASS ISSUER TO BUBBLE
+                bubbles.push(new Bubble(bubbleLabel, bubbleVal, mapColor, tx.hash, nameFrom||tx.Account, nameTo||tx.Destination, type, issuer));
             }
 
             if(watchlist.includes(tx.Account) || watchlist.includes(tx.Destination)) {
@@ -1040,7 +1066,7 @@
                 playAlert('HVT');
             }
 
-            // REPORT LOGIC (XRP > 100k or any HVT)
+            // REPORT LOGIC
             if (isSuccess && (amt >= 100000 || isHVT) && !isL2) {
                 const repType = getReportType(amt, isExchange);
                 const outflow = getOutflow(nameFrom, nameTo);
@@ -1185,3 +1211,4 @@
     </script>
 </body>
 </html>
+
