@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v13.3 [COMPACT UI]</title>
+    <title>XRPMAN SHADOW WATCH // v13.10 [STABLE NET]</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -47,6 +47,11 @@
             cursor: pointer; box-shadow: 0 0 20px var(--lime-main);
             animation: pulse-green 2s infinite;
         }
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(0, 255, 0, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(0, 255, 0, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(0, 255, 0, 0); }
+        }
         #skip-btn {
             position: absolute; top: 30px; right: 30px; z-index: 10001;
             background: rgba(0,0,0,0.7); border: 1px solid #333; color: #666;
@@ -62,25 +67,31 @@
             display: none; pointer-events: auto;
         }
         .tut-active { display: block !important; }
+        
+        /* HIGHLIGHTING LOGIC */
         .highlight-element {
-            position: relative; z-index: 5001 !important;
-            box-shadow: 0 0 0 9999px rgba(0,0,0,0.85), 0 0 20px var(--lime-main);
-            pointer-events: none;
+            position: relative; 
+            z-index: 5001 !important;
+            box-shadow: 0 0 0 9999px rgba(0,0,0,0.85), 0 0 30px var(--lime-main);
+            transition: all 0.3s ease;
         }
+        
         #tut-card {
-            position: absolute; bottom: 20%; left: 50%; transform: translateX(-50%);
+            position: absolute; bottom: 15%; left: 50%; transform: translateX(-50%);
             width: 90%; max-width: 400px;
-            background: rgba(0, 20, 0, 0.95); border: 2px solid var(--lime-main);
+            background: rgba(0, 20, 0, 0.98); border: 2px solid var(--lime-main);
             padding: 20px; border-radius: 8px; z-index: 5002;
             text-align: center; box-shadow: 0 0 30px var(--lime-main);
         }
-        .tut-title { font-family: 'Orbitron'; font-weight: bold; color: white; margin-bottom: 10px; font-size: 18px; }
-        .tut-text { font-family: 'Share Tech Mono'; color: #ccc; font-size: 14px; line-height: 1.4; margin-bottom: 20px; }
+        .tut-title { font-family: 'Orbitron'; font-weight: bold; color: white; margin-bottom: 10px; font-size: 18px; border-bottom: 1px solid #333; padding-bottom: 5px; }
+        .tut-text { font-family: 'Share Tech Mono'; color: #ccc; font-size: 13px; line-height: 1.5; margin-bottom: 20px; text-align: left; }
         .tut-controls { display: flex; gap: 10px; justify-content: center; }
         .tut-btn {
-            padding: 8px 20px; border: 1px solid var(--lime-main); background: #001100;
-            color: var(--lime-main); font-family: 'Share Tech Mono'; font-weight: bold; cursor: pointer;
+            padding: 10px 25px; border: 1px solid var(--lime-main); background: #001100;
+            color: var(--lime-main); font-family: 'Orbitron'; font-weight: bold; cursor: pointer;
+            font-size: 12px; letter-spacing: 1px;
         }
+        .tut-btn:hover { background: var(--lime-main); color: black; }
 
         #app-background {
             position: absolute; inset: 0; z-index: 0;
@@ -117,7 +128,7 @@
         .intel-action-btn { flex: 1; background: #001100; border: 1px solid var(--lime-main); color: var(--lime-main); padding: 12px; font-weight: bold; font-size: 12px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s; font-family: 'Orbitron'; display: flex; justify-content: center; align-items: center; gap: 5px; }
         .intel-action-btn:hover { background: var(--lime-main); color: #000; box-shadow: 0 0 15px var(--lime-main); }
 
-        /* BUBBLE MODAL (REUSED FOR GRAPH) */
+        /* BUBBLE MODAL */
         #bubble-modal {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             width: 85%; max-width: 350px; background: rgba(0, 20, 0, 0.98); border: 2px solid var(--lime-main);
@@ -134,6 +145,50 @@
         .mod-save { border-color: #ffaa00; color: #ffaa00; }
         .mod-trace { border-color: #00ffff; color: #00ffff; }
 
+        /* TIP MODAL */
+        #tip-modal {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 85%; max-width: 320px; background: rgba(0, 20, 0, 0.98); border: 2px solid var(--lime-main);
+            border-radius: 12px; padding: 25px; z-index: 7000; display: none; flex-direction: column; align-items: center; gap: 15px;
+            box-shadow: 0 0 50px rgba(0, 255, 0, 0.5); backdrop-filter: blur(10px);
+        }
+        #qr-container { border: 4px solid #fff; padding: 5px; background: #fff; border-radius: 4px; }
+        #qr-code { width: 150px; height: 150px; image-rendering: pixelated; }
+        .tip-addr-box { 
+            background: #001100; border: 1px solid #335533; color: var(--lime-main); 
+            padding: 10px; font-family: 'Share Tech Mono'; font-size: 10px; 
+            word-break: break-all; text-align: center; width: 100%; border-radius: 4px;
+        }
+
+        /* XMEME VIDEO MODAL */
+        #xmeme-modal {
+            position: fixed; top: 20%; left: 50%; transform: translateX(-50%);
+            width: 90%; max-width: 600px;
+            background: #000; border: 2px solid var(--lime-main);
+            box-shadow: 0 0 40px rgba(0, 255, 0, 0.3);
+            z-index: 8000; display: none; flex-direction: column;
+            border-radius: 8px; overflow: hidden;
+        }
+        #xmeme-modal.minimized {
+            top: auto; bottom: 60px; left: auto; right: 10px; transform: none;
+            width: 200px; height: auto;
+        }
+        #xmeme-modal.minimized #xmeme-body { display: none !important; }
+        
+        .xmeme-header {
+            background: #002200; color: var(--lime-main);
+            padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;
+            font-family: 'Orbitron'; font-size: 12px; border-bottom: 1px solid var(--lime-dim);
+            cursor: grab;
+        }
+        .xmeme-controls button {
+            background: transparent; border: 1px solid #004400; color: var(--lime-main);
+            width: 20px; height: 20px; font-size: 10px; cursor: pointer; margin-left: 5px;
+        }
+        .xmeme-controls button:hover { background: var(--lime-main); color: black; }
+        #xmeme-body { width: 100%; background: black; }
+        #xmeme-video { width: 100%; display: block; }
+
         /* TOP HUD */
         #hud-top {
             position: absolute; top: 0; left: 0; right: 0; z-index: 20;
@@ -143,7 +198,6 @@
             pointer-events: none; display: flex; flex-direction: column; gap: 8px;
         }
 
-        /* SESSION TIMER - Top Right Timestamp */
         #session-timer {
             position: absolute;
             top: max(5px, env(safe-area-inset-top));
@@ -187,7 +241,14 @@
         .tac-active { border-color: var(--lime-main); color: var(--lime-main); background: #001100; box-shadow: 0 0 10px rgba(0,255,0,0.2); }
         .tac-alert-active { border-color: var(--alert-red); color: var(--alert-red); background: #220000; box-shadow: 0 0 10px rgba(255,0,0,0.2); }
         
-        /* REPORT BUTTON - SPECIAL STYLE */
+        #xmeme-btn {
+            animation: pulse-green 2s infinite;
+            border-color: var(--lime-main);
+            color: var(--lime-main);
+            font-family: 'Orbitron'; font-size: 8px; font-weight: bold; width: auto; padding: 0 8px; 
+        }
+        #tip-btn { animation: pulse-green 2s infinite; }
+
         #report-btn {
             width: auto; padding: 0 20px; font-family: 'Orbitron'; font-size: 10px; font-weight: bold; letter-spacing: 1px;
             background: #001100; border-color: var(--lime-main); color: var(--lime-main);
@@ -271,6 +332,22 @@
             backdrop-filter: blur(2px);
         }
 
+        /* MAP FILTER OVERLAY */
+        #map-filter-overlay {
+            position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+            z-index: 50; display: flex; gap: 5px;
+            background: rgba(0, 20, 0, 0.8); padding: 4px; border-radius: 20px;
+            border: 1px solid #335533; backdrop-filter: blur(4px);
+        }
+        .map-filter-btn {
+            background: transparent; border: 1px solid transparent; color: #66aa66;
+            font-size: 9px; font-weight: bold; padding: 4px 10px; border-radius: 12px;
+            font-family: 'Orbitron'; cursor: pointer; transition: all 0.2s;
+        }
+        .map-filter-btn.active {
+            background: var(--lime-main); color: black; box-shadow: 0 0 10px rgba(0, 255, 0, 0.4);
+        }
+
         @media print {
             body * { visibility: hidden; }
             #intel-dashboard, #intel-dashboard * { visibility: visible; }
@@ -341,6 +418,31 @@
         <button onclick="closeModal()" class="w-full text-red-500 text-xs mt-4">CLOSE INTEL</button>
     </div>
 
+    <!-- TIP MODAL -->
+    <div id="tip-modal">
+        <div class="text-center font-bold text-green-400 font-orbitron border-b border-green-800 pb-2 w-full">SECURE UPLINK // DONATE</div>
+        <div id="qr-container">
+            <img id="qr-code" src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=r9nepSD5tvQUCA4qQAJJDAoBB3j1gf4ibL&bgcolor=000000&color=00ff00&margin=10" alt="Tip XRPMan">
+        </div>
+        <div class="tip-addr-box">r9nepSD5tvQUCA4qQAJJDAoBB3j1gf4ibL</div>
+        <button class="intel-action-btn w-full" onclick="copyTipAddress()">COPY ADDRESS</button>
+        <button onclick="closeTipModal()" class="text-red-500 text-xs w-full mt-1">[ CLOSE LINK ]</button>
+    </div>
+
+    <!-- XMEME VIDEO MODAL -->
+    <div id="xmeme-modal">
+        <div class="xmeme-header">
+            <span>XMEME FEED</span>
+            <div class="xmeme-controls">
+                <button onclick="minimizeXmeme()">_</button>
+                <button onclick="closeXmeme()">X</button>
+            </div>
+        </div>
+        <div id="xmeme-body">
+            <video id="xmeme-video" controls src="https://jade-adverse-damselfly-13.mypinata.cloud/ipfs/bafybeih2ztocu3elh3m3khkllac7iqsxgmwed2zodu3icn2qsgu376ziga"></video>
+        </div>
+    </div>
+
     <div id="toast">NOTIFICATION</div>
     <div id="app-background"></div>
     <div id="canvas-container"></div>
@@ -378,11 +480,19 @@
                     <svg id="icon-vol" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
                 </button>
                 <button id="help-btn" class="tac-btn" onclick="startTutorial()" title="Help">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
                 </button>
-                <!-- NEW USER GUIDE BUTTON -->
-                <button id="guide-btn" class="tac-btn" onclick="window.open('https://docs.google.com/document/u/0/d/13aI67FUkjt2fVidUEntLXRvcbbTOg4frpvX-c8gmEXs/mobilebasic', '_blank')" title="Operator Manual">
+                <!-- XMEME VIDEO BUTTON -->
+                <button id="xmeme-btn" class="tac-btn" onclick="openXmeme()" title="XMEME Feed">
+                    XMEME
+                </button>
+                <!-- USER GUIDE BUTTON -->
+                <button id="guide-btn" class="tac-btn" onclick="window.open('https://docs.google.com/document/u/0/d/1VPvtI5Ig_MQ3CTNgnfTqosGvHsZvw99Pl_tnNdXkXK0/mobilebasic', '_blank')" title="Operator Manual">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+                </button>
+                <!-- TIP BUTTON -->
+                <button id="tip-btn" class="tac-btn" onclick="openTipModal()" title="Tip XRPMan">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
                 </button>
             </div>
         </div>
@@ -393,27 +503,27 @@
         <div id="command-deck">
             <!-- ICON TAB BAR -->
             <div class="tab-bar" id="tab-zone">
-                <div class="tab-btn active" onclick="switchView('live')" title="Live Feed">
+                <div id="tab-btn-live" class="tab-btn active" onclick="switchView('live')" title="Live Feed">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
                     LIVE
                 </div>
-                <div class="tab-btn" onclick="switchView('graph')" title="Spider Graph">
+                <div id="tab-btn-graph" class="tab-btn" onclick="switchView('graph')" title="Spider Graph">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"></circle><line x1="12" y1="9" x2="12" y2="3"></line><line x1="12" y1="15" x2="12" y2="21"></line><line x1="15" y1="12" x2="21" y2="12"></line><line x1="9" y1="12" x2="3" y2="12"></line></svg>
                     GRAPH
                 </div>
-                <div class="tab-btn" onclick="switchView('hvt')" title="High Value Targets" style="color: var(--gold-hvt);">
+                <div id="tab-btn-hvt" class="tab-btn" onclick="switchView('hvt')" title="High Value Targets" style="color: var(--gold-hvt);">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><line x1="22" y1="12" x2="18" y2="12"></line><line x1="6" y1="12" x2="2" y2="12"></line><line x1="12" y1="6" x2="12" y2="2"></line><line x1="12" y1="22" x2="12" y2="18"></line></svg>
                     HVT
                 </div>
-                <div class="tab-btn" onclick="switchView('map')" title="Visual Map">
+                <div id="tab-btn-map" class="tab-btn" onclick="switchView('map')" title="Visual Map">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
                     MAP
                 </div>
-                <div class="tab-btn" onclick="switchView('report')" title="Whale Reports">
+                <div id="tab-btn-report" class="tab-btn" onclick="switchView('report')" title="Whale Reports">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
                     REPORT
                 </div>
-                <div class="tab-btn" onclick="switchView('case')" title="Evidence Locker">
+                <div id="tab-btn-case" class="tab-btn" onclick="switchView('case')" title="Evidence Locker">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>
                     EVIDENCE
                 </div>
@@ -475,6 +585,12 @@
 
             <!-- MAP TAB -->
             <div id="view-map" class="view-panel">
+                <div id="map-filter-overlay">
+                    <button class="map-filter-btn active" onclick="setMapFilter('all', this)">ALL</button>
+                    <button class="map-filter-btn" onclick="setMapFilter('small', this)">&lt; 100K</button>
+                    <button class="map-filter-btn" onclick="setMapFilter('whale', this)">&gt; 100K</button>
+                    <button class="map-filter-btn" onclick="setMapFilter('l2', this)">L2</button>
+                </div>
                 <canvas id="map-canvas"></canvas>
                 <!-- COMPACT LEGEND AT BOTTOM -->
                 <div id="map-legend">
@@ -544,6 +660,16 @@
         let sessionStart = Date.now();
         let sessionTimerInterval;
 
+        // REDUNDANT SERVERS
+        const XRPL_SERVERS = [
+            'wss://s1.ripple.com',
+            'wss://s2.ripple.com',
+            'wss://xrplcluster.com',
+            'wss://xrpl.ws',
+            'wss://s1.ripple.com'
+        ];
+        let currentServerIndex = 0;
+
         // METRICS ENGINE (Transient - 24h Session)
         let metrics = {
             totalXRPVol: 0,
@@ -574,6 +700,8 @@
         };
 
         const STORAGE_KEY = "XRPMAN_BLACKBOX_V2";
+        const TUT_STORAGE_KEY = "shadow_watch_v13_9_walkthrough"; // NEW KEY FORCED RESET
+        const MANUAL_URL = "https://docs.google.com/document/u/0/d/1VPvtI5Ig_MQ3CTNgnfTqosGvHsZvw99Pl_tnNdXkXK0/mobilebasic";
 
         function loadBlackbox() {
             const saved = localStorage.getItem(STORAGE_KEY);
@@ -792,28 +920,86 @@
             }, 1000);
         }
 
-        // --- TUTORIAL & AUTO-START ---
+        // --- TUTORIAL ENGINE (REWORKED) ---
         function checkTutorial() {
-            if(!localStorage.getItem("shadow_watch_tut")) {
+            if(!localStorage.getItem(TUT_STORAGE_KEY)) {
                 startTutorial();
-                localStorage.setItem("shadow_watch_tut", "true");
             } else {
-                autoStartSystem(); // Skip tutorial, go straight to system
+                autoStartSystem(); 
             }
         }
-        function startTutorial() { tutStep = 0; document.getElementById('tutorial-overlay').classList.add('tut-active'); updateTutorial(); }
+        function startTutorial() { 
+            tutStep = 0; 
+            document.getElementById('tutorial-overlay').classList.add('tut-active'); 
+            updateTutorial(); 
+        }
+        
         function endTutorial() { 
+            // CHECK IF FIRST TIME COMPLETION
+            if (!localStorage.getItem(TUT_STORAGE_KEY)) {
+                localStorage.setItem(TUT_STORAGE_KEY, "true"); // Set flag
+                window.open(MANUAL_URL, '_blank'); // OPEN MANUAL AUTOMATICALLY
+            }
+            
             document.getElementById('tutorial-overlay').classList.remove('tut-active'); 
             document.querySelectorAll('.highlight-element').forEach(e => e.classList.remove('highlight-element')); 
-            autoStartSystem(); // Start after tutorial
+            autoStartSystem(); // Start system
         }
+        
         function nextStep() { tutStep++; updateTutorial(); }
+        
         function updateTutorial() {
+            // CLEAR PREVIOUS
             document.querySelectorAll('.highlight-element').forEach(e => e.classList.remove('highlight-element'));
+            
             const title = document.getElementById('tut-title');
             const text = document.getElementById('tut-text');
-            if(tutStep === 1) { title.innerText = "STEP 1: METRICS"; text.innerText = "The Dashboard tracks volume, trust lines, and token movements."; }
-            else if (tutStep === 2) { title.innerText = "READY"; text.innerText = "System Operational."; document.querySelector('.tut-controls').innerHTML = `<button class="tut-btn" onclick="endTutorial()">ENGAGE</button>`; }
+            const controls = document.querySelector('.tut-controls');
+
+            // --- STEP 0: WELCOME ---
+            if (tutStep === 0) {
+                switchView('live'); // Reset view
+                title.innerText = "IDENTITY CONFIRMED";
+                text.innerHTML = "Welcome to XRPMAN SHADOW WATCH.<br>This forensic tool provides real-time surveillance of the XRP Ledger.<br><br>Let's calibrate your interface.";
+                controls.innerHTML = `<button class="tut-btn" onclick="endTutorial()">SKIP</button><button class="tut-btn" onclick="nextStep()">NEXT ></button>`;
+            } 
+            // --- STEP 1: COMMS & INTEL ---
+            else if (tutStep === 1) { 
+                document.querySelector('.tactical-bar').classList.add('highlight-element');
+                title.innerText = "TACTICAL COMMS"; 
+                text.innerHTML = "Top Right Command Bar:<br>- Generate Daily Intelligence Reports.<br>- Toggle Audio/Visual Alerts.<br>- Access XMEME Video Feed.<br>- Send Tips via QR."; 
+                controls.innerHTML = `<button class="tut-btn" onclick="endTutorial()">SKIP</button><button class="tut-btn" onclick="nextStep()">NEXT ></button>`;
+            } 
+            // --- STEP 2: LIVE FEED ---
+            else if (tutStep === 2) { 
+                switchView('live');
+                document.getElementById('view-live').classList.add('highlight-element');
+                title.innerText = "LIVE INTERCEPTS"; 
+                text.innerHTML = "Real-time ledger monitoring.<br><br>COLOR CODES:<br>- GREEN: Standard XRP Payments<br>- CYAN: L2 / Issued Assets<br>- PURPLE: DEX Trades<br>- GOLD: High Value Targets (HVT)"; 
+                controls.innerHTML = `<button class="tut-btn" onclick="endTutorial()">SKIP</button><button class="tut-btn" onclick="nextStep()">NEXT ></button>`;
+            } 
+            // --- STEP 3: NAVIGATION ---
+            else if (tutStep === 3) { 
+                document.querySelector('.tab-bar').classList.add('highlight-element');
+                title.innerText = "NAVIGATION DECK"; 
+                text.innerHTML = "Switch operational modes:<br>- GRAPH: Trace funds visually.<br>- HVT: Monitor specific wallets.<br>- MAP: Visual transaction bubbles.<br>- EVIDENCE: Saved anomalies."; 
+                controls.innerHTML = `<button class="tut-btn" onclick="endTutorial()">SKIP</button><button class="tut-btn" onclick="nextStep()">NEXT ></button>`;
+            } 
+            // --- STEP 4: MAP FILTERS (NEW) ---
+            else if (tutStep === 4) { 
+                switchView('map'); // FORCE MAP VIEW
+                document.getElementById('map-filter-overlay').classList.add('highlight-element');
+                title.innerText = "VISUAL INTELLIGENCE"; 
+                text.innerHTML = "Use the new MAP FILTERS to isolate signal from noise.<br><br>- SMALL: < 100k XRP<br>- WHALE: > 100k XRP<br>- L2: Issued Assets Only"; 
+                controls.innerHTML = `<button class="tut-btn" onclick="endTutorial()">SKIP</button><button class="tut-btn" onclick="nextStep()">NEXT ></button>`;
+            } 
+            // --- STEP 5: ENGAGE ---
+            else if (tutStep === 5) { 
+                switchView('live');
+                title.innerText = "SYSTEM ONLINE"; 
+                text.innerHTML = "Calibration complete. UPLINK ESTABLISHED.<br><br>Click ENGAGE to begin monitoring."; 
+                controls.innerHTML = `<button class="tut-btn" onclick="endTutorial()">ENGAGE</button>`; 
+            }
         }
 
         // --- AUTO-START LOGIC ---
@@ -912,7 +1098,17 @@
             requestAnimationFrame(loopMap);
             mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
             for (let i = bubbles.length - 1; i >= 0; i--) {
-                let b = bubbles[i]; b.update(); b.draw();
+                let b = bubbles[i]; 
+                
+                // --- MAP FILTERING LOGIC ---
+                let shouldDraw = true;
+                if (activeFilter === 'small' && (b.isL2 || b.val >= 100000)) shouldDraw = false;
+                if (activeFilter === 'whale' && (b.isL2 || b.val < 100000)) shouldDraw = false; // Added Whale Filter Check
+                if (activeFilter === 'l2' && !b.isL2) shouldDraw = false;
+                
+                b.update(); 
+                if (shouldDraw) b.draw();
+                
                 if (b.y < -50 || b.life <= 0) bubbles.splice(i, 1);
             }
         }
@@ -922,7 +1118,13 @@
             const y = e.clientY - rect.top;
             for (let i = bubbles.length - 1; i >= 0; i--) {
                 let b = bubbles[i];
-                if (Math.hypot(b.x - x, b.y - y) < b.radius + 10) { openModal(b); bubbles.splice(i, 1); break; }
+                // Check filter before allowing click
+                let visible = true;
+                if (activeFilter === 'small' && (b.isL2 || b.val >= 100000)) visible = false;
+                if (activeFilter === 'whale' && (b.isL2 || b.val < 100000)) visible = false;
+                if (activeFilter === 'l2' && !b.isL2) visible = false;
+                
+                if (visible && Math.hypot(b.x - x, b.y - y) < b.radius + 10) { openModal(b); bubbles.splice(i, 1); break; }
             }
         });
 
@@ -932,20 +1134,67 @@
         setInterval(() => { if (isConnected && (Date.now() - lastHeartbeat > 45000)) { showToast("SIGNAL LOST. RECONNECTING..."); startXRPL(); } }, 5000);
 
         function startXRPL() {
-            if(socket) socket.close();
-            socket = new WebSocket('wss://s1.ripple.com');
-            socket.onopen = () => { socket.send(JSON.stringify({command:"subscribe", streams:["transactions", "ledger"]})); lastHeartbeat = Date.now(); };
-            socket.onmessage = (e) => { 
-                lastHeartbeat = Date.now(); 
-                const d = JSON.parse(e.data); 
-                if(d.type==='transaction') handleTx(d.transaction, d.meta); 
-                if(d.type==='ledgerClosed') document.getElementById('ledger-display').innerText = d.ledger_index; 
-                // HANDLE ACCOUNT HISTORY RESPONSE
-                if(d.result && d.result.transactions) {
-                    processTrace(d.result.account, d.result.transactions);
+            // Cleanup existing socket listeners to prevent zombie retries
+            if(socket) {
+                socket.onclose = null;
+                socket.onerror = null;
+                socket.onmessage = null;
+                socket.onopen = null;
+                socket.close();
+                socket = null;
+            }
+
+            const server = XRPL_SERVERS[currentServerIndex];
+            
+            const serverName = server.split('//')[1].split('.')[0].toUpperCase();
+            const statusEl = document.getElementById('status-text');
+            if(statusEl) statusEl.innerText = `CONNECTING [${serverName}]...`;
+            
+            try {
+                socket = new WebSocket(server);
+            } catch (e) {
+                console.error("WS Init Fail", e);
+                retryConnection();
+                return;
+            }
+            
+            socket.onopen = () => { 
+                socket.send(JSON.stringify({command:"subscribe", streams:["transactions", "ledger"]})); 
+                lastHeartbeat = Date.now();
+                if(statusEl) {
+                    statusEl.innerText = `ACTIVE [${serverName}]`;
+                    statusEl.classList.replace('text-yellow-500', 'text-green-500');
                 }
             };
-            socket.onclose = (e) => { if(isConnected) setTimeout(startXRPL, 1000); };
+            
+            socket.onmessage = (e) => { 
+                lastHeartbeat = Date.now(); 
+                let d;
+                try { d = JSON.parse(e.data); } catch(err){ return; }
+                if(d.type==='transaction') handleTx(d.transaction, d.meta); 
+                if(d.type==='ledgerClosed' && document.getElementById('ledger-display')) document.getElementById('ledger-display').innerText = d.ledger_index; 
+                if(d.result && d.result.transactions) processTrace(d.result.account, d.result.transactions);
+            };
+            
+            socket.onclose = (e) => { 
+                // Only retry if we are supposed to be connected
+                if(isConnected) retryConnection();
+            };
+            
+            socket.onerror = (e) => {
+                // Just log, onclose will trigger the retry
+                // console.log("WS Error on " + server); 
+            };
+        }
+
+        function retryConnection() {
+            const statusEl = document.getElementById('status-text');
+            if(statusEl) {
+                statusEl.innerText = "SIGNAL LOST. REROUTING...";
+                statusEl.classList.replace('text-green-500', 'text-yellow-500');
+            }
+            currentServerIndex = (currentServerIndex + 1) % XRPL_SERVERS.length;
+            setTimeout(startXRPL, 2000);
         }
 
         function processTrace(centerAccount, txs) {
@@ -1111,27 +1360,40 @@
             if (isWhale && isSuccess) { triggerWhaleAlert(); }
 
             // --- VISUAL FILTERS ---
-            if (activeFilter === 'small' && (isL2 || amt >= 100000)) return;
-            if (activeFilter === 'whale' && (isL2 || amt < 100000)) return;
-            if (activeFilter === 'exchange' && (!isL2 && !isExchange)) return;
-            if (activeFilter === 'l2' && !isL2) return;
-
+            
+            // ONLY APPLY FILTER TO LIVE FEED (bubbles handle their own visibility in loopMap)
+            // But we must still let the data through to update the Bubble Array if we want toggling to work on existing data
+            
+            // We create the bubble object regardless of filter, but we only prepend to FEED if activeFilter matches
+            // This decouples the MAP filter from the FEED filter if we want them separate, 
+            // BUT for consistency, usually they are shared. 
+            // The prompt requests map-specific controls. Let's use `activeFilter` globally.
+            
             if(!isSuccess) { color = "text-gray-500"; mapColor = "#333333"; }
             const dispFrom = nameFrom ? `<span class="entity-name">${nameFrom}</span>` : tx.Account ? tx.Account.substring(0,4)+'...' : '???';
             const dispTo = nameTo ? `<span class="entity-name">${nameTo}</span>` : tx.Destination ? tx.Destination.substring(0,4)+'...' : 'DEX';
             
-            const feed = document.getElementById('feed');
-            if (feed.innerText.includes("AWAITING")) feed.innerHTML = "";
-            
-            const row = document.createElement('div'); row.className = "tx-row" + (!isSuccess ? " tx-failed" : "");
-            // *** FIX: SHOW FULL DECIMALS IN FEED ***
-            let displayAmt = isL2 ? `${amt.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:6})} ${tokenName}` : `${amt.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:6})} XRP`;
-            
-            // ADDED TRACE BUTTON TO LIVE FEED
-            row.innerHTML = `<div class="row-top ${color}"><div class="flex items-center gap-2"><span class="font-bold text-base text-shadow-lime">${displayAmt}</span>${isHVT ? '<span class="tag-pill tag-hvt">HVT</span>' : ''}${isL2 ? `<span class="tag-pill tag-l2">${tokenName}</span>` : ''}${!isSuccess ? '<span class="tag-pill tag-fail">FAIL</span>' : ''}</div><div class="text-[10px] font-mono text-gray-500">${new Date().toLocaleTimeString()}</div></div><div class="flex justify-between text-[11px] font-mono text-gray-400"><span>${dispFrom} ➔ ${dispTo}</span></div><div class="btn-row"><button class="action-btn trace-btn" onclick="traceWallet('${tx.Account}')">TRACE</button><button class="action-btn" onclick="openScan('${tx.hash}')">SCAN</button><button class="action-btn" onclick='saveCase(${JSON.stringify({hash:tx.hash, amt, from:dispFrom, to:dispTo})})'>SAVE</button></div>`;
-            
-            feed.prepend(row);
-            if(feed.children.length > 40) feed.lastChild.remove();
+            // FEED FILTER LOGIC
+            let showInFeed = true;
+            if (activeFilter === 'small' && (isL2 || amt >= 100000)) showInFeed = false;
+            if (activeFilter === 'whale' && (isL2 || amt < 100000)) showInFeed = false;
+            if (activeFilter === 'exchange' && (!isL2 && !isExchange)) showInFeed = false;
+            if (activeFilter === 'l2' && !isL2) showInFeed = false;
+
+            if (showInFeed) {
+                const feed = document.getElementById('feed');
+                if (feed.innerText.includes("AWAITING")) feed.innerHTML = "";
+                
+                const row = document.createElement('div'); row.className = "tx-row" + (!isSuccess ? " tx-failed" : "");
+                // *** FIX: SHOW FULL DECIMALS IN FEED ***
+                let displayAmt = isL2 ? `${amt.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:6})} ${tokenName}` : `${amt.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:6})} XRP`;
+                
+                // ADDED TRACE BUTTON TO LIVE FEED
+                row.innerHTML = `<div class="row-top ${color}"><div class="flex items-center gap-2"><span class="font-bold text-base text-shadow-lime">${displayAmt}</span>${isHVT ? '<span class="tag-pill tag-hvt">HVT</span>' : ''}${isL2 ? `<span class="tag-pill tag-l2">${tokenName}</span>` : ''}${!isSuccess ? '<span class="tag-pill tag-fail">FAIL</span>' : ''}</div><div class="text-[10px] font-mono text-gray-500">${new Date().toLocaleTimeString()}</div></div><div class="flex justify-between text-[11px] font-mono text-gray-400"><span>${dispFrom} ➔ ${dispTo}</span></div><div class="btn-row"><button class="action-btn trace-btn" onclick="traceWallet('${tx.Account}')">TRACE</button><button class="action-btn" onclick="openScan('${tx.hash}')">SCAN</button><button class="action-btn" onclick='saveCase(${JSON.stringify({hash:tx.hash, amt, from:dispFrom, to:dispTo})})'>SAVE</button></div>`;
+                
+                feed.prepend(row);
+                if(feed.children.length > 40) feed.lastChild.remove();
+            }
 
             if (mapActive && isSuccess) bubbles.push(new Bubble(isL2 ? tokenName : amt.toLocaleString(undefined, {maximumFractionDigits:0}), amt, mapColor, tx.hash, nameFrom||tx.Account, nameTo||tx.Destination, type, issuer));
         }
@@ -1231,7 +1493,28 @@
         });
 
         function closeModal() { document.getElementById('bubble-modal').classList.remove('modal-active'); }
-        function setFilter(mode, btn) { activeFilter = mode; document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); document.getElementById('feed').innerHTML = ''; showToast("FILTER: " + mode.toUpperCase()); }
+        
+        // GENERIC FILTER FUNCTION (Updates visuals on Feed)
+        function setFilter(mode, btn) { 
+            activeFilter = mode; 
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active')); 
+            btn.classList.add('active'); 
+            document.getElementById('feed').innerHTML = ''; 
+            showToast("FILTER: " + mode.toUpperCase()); 
+        }
+
+        // SPECIFIC MAP FILTER FUNCTION (Updates visuals on Map Overlay)
+        function setMapFilter(mode, btn) {
+            activeFilter = mode;
+            // Update MAP Buttons
+            document.querySelectorAll('.map-filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            // Also update main filter buttons to stay in sync if visible
+            // This keeps the app consistent state-wise
+            showToast("MAP FILTER: " + mode.toUpperCase());
+        }
+
         function showToast(msg) { const t = document.getElementById('toast'); t.innerText = msg; t.classList.add('toast-show'); setTimeout(() => t.classList.remove('toast-show'), 2000); }
         function openScan(h) { 
             // Check if full URL or ID
@@ -1259,10 +1542,45 @@
         const PRICE_SOURCES = [{url:'https://api.binance.us/api/v3/ticker/price?symbol=XRPUSDT',parse:d=>parseFloat(d.price)}];
         async function fetchPrice() { try { const res = await fetch(PRICE_SOURCES[0].url); const d = await res.json(); const p = PRICE_SOURCES[0].parse(d); document.getElementById('price-display').innerText = `$${p.toFixed(4)}`; document.getElementById('price-display').style.color=p>parseFloat(document.getElementById('price-display').innerText.replace('$','')||0)?'#00ff00':'#ff5555'; } catch(e){} }
         function startRedundantPriceEngine() { fetchPrice(); setInterval(fetchPrice, 8000); }
-        function switchView(id) { document.querySelectorAll('.view-panel').forEach(e=>e.classList.remove('active')); document.getElementById('view-'+id).classList.add('active'); document.querySelectorAll('.tab-btn').forEach(e=>e.classList.remove('active')); event.currentTarget.classList.add('active'); if(id==='map') { mapActive=true; resizeMap(); loopMap(); } else { mapActive=false; } if(id==='graph') { graphActive=true; resizeGraph(); updateGraph(); } else { graphActive=false; } }
+        function switchView(id) { 
+            document.querySelectorAll('.view-panel').forEach(e=>e.classList.remove('active')); 
+            document.getElementById('view-'+id).classList.add('active'); 
+            
+            document.querySelectorAll('.tab-btn').forEach(e=>e.classList.remove('active')); 
+            // Select button by ID derived from view ID
+            const btn = document.getElementById('tab-btn-' + id);
+            if (btn) btn.classList.add('active');
+            
+            // Logic for specific views
+            if(id==='map') { mapActive=true; resizeMap(); loopMap(); } else { mapActive=false; } 
+            if(id==='graph') { graphActive=true; resizeGraph(); updateGraph(); } else { graphActive=false; } 
+        }
         function addWatch() { const v=document.getElementById('watch-input').value; if(v){watchlist.push(v);renderWatch();document.getElementById('watch-input').value='';showToast("TRACKING");} }
         function renderWatch() { document.getElementById('watch-list').innerHTML=watchlist.map((w,i)=>`<div class="flex justify-between p-3 bg-green-900/20 border-b border-green-900"><span class="font-mono text-xs text-green-300 truncate w-48">${w}</span><button onclick="watchlist.splice(${i},1);renderWatch()" class="text-red-500">X</button></div>`).join(''); }
         function togglePause() { isPaused = !isPaused; const btn = document.getElementById('pause-btn'); const status = document.getElementById('status-text'); if(isPaused) { btn.innerText = "RESUME"; btn.classList.add('paused-mode'); status.innerText = "PAUSED"; status.classList.replace('text-green-500', 'text-yellow-500'); showToast("STREAM FROZEN"); } else { btn.innerText = "PAUSE STREAM"; btn.classList.remove('paused-mode'); status.innerText = "ACTIVE"; status.classList.replace('text-yellow-500', 'text-green-500'); showToast("STREAM RESUMED"); } }
+
+        // --- TIP FUNCTIONS ---
+        function openTipModal() { document.getElementById('tip-modal').classList.add('modal-active'); }
+        function closeTipModal() { document.getElementById('tip-modal').classList.remove('modal-active'); }
+        function copyTipAddress() { copyHash("r9nepSD5tvQUCA4qQAJJDAoBB3j1gf4ibL"); showToast("ADDRESS SECURED"); }
+
+        // --- XMEME FUNCTIONS ---
+        function openXmeme() {
+            const m = document.getElementById('xmeme-modal');
+            m.style.display = 'flex';
+            m.classList.remove('minimized');
+            document.getElementById('xmeme-body').style.display = 'block';
+            document.getElementById('xmeme-video').play().catch(()=>{});
+        }
+        function closeXmeme() {
+            const m = document.getElementById('xmeme-modal');
+            m.style.display = 'none';
+            document.getElementById('xmeme-video').pause();
+        }
+        function minimizeXmeme() {
+            const m = document.getElementById('xmeme-modal');
+            m.classList.toggle('minimized');
+        }
     </script>
 </body>
 </html>
