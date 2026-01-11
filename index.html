@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v14.0 [TUTORIAL PRIME]</title>
+    <title>XRPMAN SHADOW WATCH // v13.3 [COMPACT UI]</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -298,7 +298,7 @@
         <div id="tut-card">
             <div class="tut-title" id="tut-title">WELCOME AGENT</div>
             <div class="tut-text" id="tut-text">
-                Welcome to XRPMAN SHADOW WATCH v14.0.
+                Welcome to XRPMAN SHADOW WATCH.
                 This forensic tool tracks the XRP Ledger in real-time.
                 <br><br>Let's calibrate your system.
             </div>
@@ -804,38 +804,12 @@
             autoStartSystem(); // Start after tutorial
         }
         function nextStep() { tutStep++; updateTutorial(); }
-        
-        // ** UPDATED TUTORIAL LOGIC **
         function updateTutorial() {
             document.querySelectorAll('.highlight-element').forEach(e => e.classList.remove('highlight-element'));
             const title = document.getElementById('tut-title');
             const text = document.getElementById('tut-text');
-            const controls = document.querySelector('.tut-controls');
-
-            // Step 1: HUD
-            if(tutStep === 1) {
-                title.innerText = "TACTICAL HUD";
-                text.innerText = "Top Bar: Session Timer & Live Metrics.\nThe Tactical Control Bar (below title) handles:\n- [ DAILY REPORT ] (Intelligence Brief)\n- [ ALERTS ] (Toggle HVT Alarms)\n- [ AUDIO ] (Mute)";
-                document.querySelector('.header-section').classList.add('highlight-element');
-            }
-            // Step 2: Tabs
-            else if(tutStep === 2) {
-                title.innerText = "COMMAND DECK";
-                text.innerText = "Switch modes instantly:\n- LIVE: Real-time Transaction Feed\n- GRAPH: Spider Web Analysis (Visual Trace)\n- HVT: High Value Targets List\n- MAP: Geospatial Visualization\n- REPORT: Whale Activity Log\n- EVIDENCE: Saved Cases";
-                document.getElementById('command-deck').classList.add('highlight-element');
-            }
-            // Step 3: Tracing
-            else if(tutStep === 3) {
-                title.innerText = "ACTIVE TRACING";
-                text.innerText = "Click [TRACE] on any transaction to map the wallet network.\nIn GRAPH mode, click nodes to expand relationships or intercept data.";
-                document.getElementById('view-live').classList.add('highlight-element');
-            }
-            // Step 4: Black Box
-            else if(tutStep === 4) {
-                title.innerText = "BLACK BOX";
-                text.innerText = "Your data is persistent. Volume stats and Whale Reports are saved locally to your device (Black Box). Use [ DAILY REPORT ] to export JSON evidence.";
-                controls.innerHTML = `<button class="tut-btn" onclick="endTutorial()">ENGAGE SYSTEM</button>`;
-            }
+            if(tutStep === 1) { title.innerText = "STEP 1: METRICS"; text.innerText = "The Dashboard tracks volume, trust lines, and token movements."; }
+            else if (tutStep === 2) { title.innerText = "READY"; text.innerText = "System Operational."; document.querySelector('.tut-controls').innerHTML = `<button class="tut-btn" onclick="endTutorial()">ENGAGE</button>`; }
         }
 
         // --- AUTO-START LOGIC ---
@@ -846,7 +820,6 @@
             startRedundantPriceEngine();
             startSessionTimer(); 
             isConnected = true;
-            // Removed redundant display block since button is now visible by default in tactical bar
             showToast("BLACK BOX: RECORDING");
         }
 
