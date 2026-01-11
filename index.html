@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v9.9.3 [BOT DETECT]</title>
+    <title>XRPMAN SHADOW WATCH // v14.0 [TUTORIAL PRIME]</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -54,7 +54,6 @@
             cursor: pointer; display: block;
         }
         #skip-btn:hover { border-color: var(--lime-main); color: var(--lime-main); }
-        
         .fade-out { opacity: 0; pointer-events: none; }
 
         /* TUTORIAL OVERLAY */
@@ -100,13 +99,29 @@
         }
         .toast-show { opacity: 1 !important; }
 
-        /* BUBBLE MODAL */
+        /* INTEL DASHBOARD MODAL */
+        #intel-dashboard {
+            position: fixed; top: 5%; left: 5%; right: 5%; bottom: 5%; z-index: 10000;
+            background: rgba(5, 12, 5, 0.98); border: 2px solid var(--lime-main);
+            border-radius: 12px; display: none; flex-direction: column;
+            padding: 20px; font-family: 'Share Tech Mono'; backdrop-filter: blur(20px);
+            box-shadow: 0 0 50px rgba(0,0,0,0.9);
+            animation: neon-breathe 4s infinite ease-in-out;
+        }
+        #intel-dashboard.active { display: flex; }
+        #intel-nav { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--lime-main); padding-bottom: 15px; margin-bottom: 15px; }
+        #intel-title { font-size: 20px; color: var(--lime-main); font-weight: bold; letter-spacing: 2px; font-family: 'Orbitron'; text-shadow: 0 0 10px var(--lime-main); }
+        #intel-close { background: transparent; border: 1px solid #555; color: #555; padding: 5px 15px; cursor: pointer; font-size: 12px; }
+        #intel-content { flex-grow: 1; background: #0a0a0a; border: 1px solid #113311; color: #00ff00; font-family: 'Share Tech Mono'; font-size: 12px; padding: 15px; overflow-y: auto; white-space: pre-wrap; box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8); }
+        #intel-actions { display: flex; gap: 10px; margin-top: 15px; }
+        .intel-action-btn { flex: 1; background: #001100; border: 1px solid var(--lime-main); color: var(--lime-main); padding: 12px; font-weight: bold; font-size: 12px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s; font-family: 'Orbitron'; display: flex; justify-content: center; align-items: center; gap: 5px; }
+        .intel-action-btn:hover { background: var(--lime-main); color: #000; box-shadow: 0 0 15px var(--lime-main); }
+
+        /* BUBBLE MODAL (REUSED FOR GRAPH) */
         #bubble-modal {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            width: 85%; max-width: 350px;
-            background: rgba(0, 20, 0, 0.98); border: 2px solid var(--lime-main);
-            border-radius: 12px; padding: 20px; z-index: 2000;
-            display: none; flex-direction: column; gap: 10px;
+            width: 85%; max-width: 350px; background: rgba(0, 20, 0, 0.98); border: 2px solid var(--lime-main);
+            border-radius: 12px; padding: 20px; z-index: 2000; display: none; flex-direction: column; gap: 10px;
             box-shadow: 0 0 50px rgba(0, 255, 0, 0.3);
         }
         .modal-active { display: flex !important; }
@@ -114,22 +129,34 @@
         .modal-label { color: #55aa55; font-weight: bold; }
         .modal-val { color: white; font-family: 'Share Tech Mono'; text-align: right; word-break: break-all; }
         .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
-        .mod-btn {
-            background: #001100; border: 1px solid var(--lime-main); color: var(--lime-main);
-            padding: 10px; font-size: 10px; font-weight: bold; text-align: center; border-radius: 4px;
-            font-family: 'Share Tech Mono'; cursor: pointer; transition: background 0.1s;
-        }
+        .mod-btn { background: #001100; border: 1px solid var(--lime-main); color: var(--lime-main); padding: 10px; font-size: 10px; font-weight: bold; text-align: center; border-radius: 4px; font-family: 'Share Tech Mono'; cursor: pointer; transition: background 0.1s; }
         .mod-btn:active { background: var(--lime-main); color: black; }
         .mod-save { border-color: #ffaa00; color: #ffaa00; }
+        .mod-trace { border-color: #00ffff; color: #00ffff; }
 
         /* TOP HUD */
         #hud-top {
             position: absolute; top: 0; left: 0; right: 0; z-index: 20;
             background: linear-gradient(to bottom, rgba(0,0,0,0.95) 70%, transparent);
-            padding-top: max(10px, env(safe-area-inset-top)); 
+            padding-top: max(25px, env(safe-area-inset-top)); 
             padding-left: 15px; padding-right: 15px; padding-bottom: 20px;
             pointer-events: none; display: flex; flex-direction: column; gap: 8px;
         }
+
+        /* SESSION TIMER - Top Right Timestamp */
+        #session-timer {
+            position: absolute;
+            top: max(5px, env(safe-area-inset-top));
+            right: 15px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 10px;
+            color: var(--lime-main);
+            text-shadow: 0 0 5px rgba(0, 255, 0, 0.4);
+            letter-spacing: 1px;
+            opacity: 0.8;
+            z-index: 100;
+        }
+
         .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; pointer-events: auto; margin-bottom: 5px; }
         .stat-box {
             background: rgba(0, 20, 0, 0.9); border: 1px solid var(--lime-dim);
@@ -141,70 +168,60 @@
         .label-text { font-size: 0.65rem; color: #55aa55; letter-spacing: 1px; font-weight: bold; }
         .source-tag { font-size: 0.5rem; color: #338833; float: right; }
         
-        .header-section { text-align: center; pointer-events: auto; position: relative; }
+        .header-section { text-align: center; pointer-events: auto; position: relative; padding-bottom: 10px; }
         .glitch { font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 1.2rem; color: var(--lime-main); letter-spacing: 2px; text-shadow: 0 0 10px var(--lime-main); }
         .subtitle { font-family: 'Share Tech Mono', monospace; font-size: 0.65rem; color: var(--lime-main); letter-spacing: 3px; opacity: 0.8; }
         
-        #help-btn {
-            position: absolute; right: 0; top: 0; width: 30px; height: 30px;
-            border: 1px solid #333; color: #666; border-radius: 50%;
-            display: flex; align-items: center; justify-content: center; font-weight: bold;
-            font-size: 12px; cursor: pointer;
+        /* TACTICAL CONTROL BAR */
+        .tactical-bar {
+            display: flex; justify-content: center; gap: 12px; margin-top: 8px; pointer-events: auto;
         }
-
-        .connect-container { display: flex; justify-content: center; gap: 10px; width: 100%; pointer-events: auto; }
-        .connect-btn {
-            background: #001100; border: 2px solid var(--lime-main);
-            color: var(--lime-main); padding: 8px 30px; font-weight: 900; font-size: 12px;
-            letter-spacing: 2px; border-radius: 6px;
-            box-shadow: 0 0 15px rgba(0,255,0,0.3); transition: all 0.2s;
-            font-family: 'Orbitron', sans-serif; text-transform: uppercase; cursor: pointer;
+        .tac-btn {
+            width: 36px; height: 36px;
+            background: rgba(0, 20, 0, 0.8); border: 1px solid #333; color: #666;
+            cursor: pointer; border-radius: 8px; 
+            display: flex; justify-content: center; align-items: center; transition: all 0.2s;
         }
-        .connect-btn:active { background: var(--lime-main); color: black; box-shadow: 0 0 25px var(--lime-main); }
-        .audio-btn {
-            background: #001100; border: 1px solid var(--warn-orange); color: var(--warn-orange);
-            padding: 8px 15px; font-weight: bold; font-size: 10px; border-radius: 6px;
-            font-family: 'Share Tech Mono'; display: none; cursor: pointer;
+        .tac-btn svg { width: 18px; height: 18px; stroke-width: 2; }
+        .tac-btn:hover { border-color: var(--lime-main); color: var(--lime-main); transform: scale(1.1); }
+        .tac-active { border-color: var(--lime-main); color: var(--lime-main); background: #001100; box-shadow: 0 0 10px rgba(0,255,0,0.2); }
+        .tac-alert-active { border-color: var(--alert-red); color: var(--alert-red); background: #220000; box-shadow: 0 0 10px rgba(255,0,0,0.2); }
+        
+        /* REPORT BUTTON - SPECIAL STYLE */
+        #report-btn {
+            width: auto; padding: 0 20px; font-family: 'Orbitron'; font-size: 10px; font-weight: bold; letter-spacing: 1px;
+            background: #001100; border-color: var(--lime-main); color: var(--lime-main);
+            box-shadow: 0 0 5px rgba(0,255,0,0.3);
         }
+        #report-btn:hover { background: var(--lime-main); color: black; }
 
         /* BOTTOM DECK */
-        #hud-bottom {
-            position: absolute; bottom: 0; left: 0; right: 0; height: 55vh; z-index: 30;
-            display: flex; flex-direction: column; pointer-events: auto;
-        }
-        #command-deck {
-            flex-grow: 1; background: var(--glass-bg); border-top: 2px solid var(--lime-dim);
-            backdrop-filter: blur(12px); display: flex; flex-direction: column;
-            border-radius: 16px 16px 0 0; box-shadow: 0 -10px 40px rgba(0,0,0,0.8); overflow: hidden;
-        }
-
-        .tab-bar { display: flex; border-bottom: 1px solid var(--lime-dim); height: 45px; flex-shrink: 0; }
-        .tab-btn {
-            flex: 1; display: flex; align-items: center; justify-content: center;
-            font-weight: bold; font-size: 11px; background: rgba(0,20,0,0.4); color: #00aa00;
-            border-right: 1px solid var(--lime-dim); letter-spacing: 1px; font-family: 'Orbitron', sans-serif;
-            cursor: pointer;
-        }
-        .tab-btn.active { background: #001100; color: var(--lime-main); border-bottom: 3px solid var(--lime-main); text-shadow: 0 0 10px var(--lime-main); }
-        .tab-btn.hvt-active { color: var(--gold-hvt); text-shadow: 0 0 5px var(--gold-hvt); }
+        #hud-bottom { position: absolute; bottom: 0; left: 0; right: 0; height: 55vh; z-index: 30; display: flex; flex-direction: column; pointer-events: auto; }
+        #command-deck { flex-grow: 1; background: var(--glass-bg); border-top: 2px solid var(--lime-dim); backdrop-filter: blur(12px); display: flex; flex-direction: column; border-radius: 16px 16px 0 0; box-shadow: 0 -10px 40px rgba(0,0,0,0.8); overflow: hidden; }
+        
+        /* ICON TAB BAR */
+        .tab-bar { display: flex; border-bottom: 1px solid var(--lime-dim); height: 50px; flex-shrink: 0; }
+        .tab-btn { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-weight: bold; font-size: 9px; background: rgba(0,20,0,0.4); color: #006600; border-right: 1px solid var(--lime-dim); letter-spacing: 1px; font-family: 'Share Tech Mono', sans-serif; cursor: pointer; transition: all 0.2s; }
+        .tab-btn svg { width: 18px; height: 18px; stroke-width: 1.5; }
+        .tab-btn.active { background: #001100; color: var(--lime-main); border-bottom: 3px solid var(--lime-main); text-shadow: 0 0 5px var(--lime-main); }
+        .tab-btn.active svg { stroke: var(--lime-main); stroke-width: 2; filter: drop-shadow(0 0 2px var(--lime-main)); }
+        .tab-btn.hvt-active { color: var(--gold-hvt); }
+        .tab-btn.hvt-active svg { stroke: var(--gold-hvt); }
 
         .view-panel { display: none; flex-direction: column; height: 100%; padding: 0; position: relative; overflow: hidden; }
         .view-panel.active { display: flex; }
-
-        .filter-bar { display: flex; gap: 5px; padding: 8px; border-bottom: 1px solid var(--lime-dim); background: rgba(0,0,0,0.3); flex-shrink: 0; overflow-x: auto; }
-        .filter-btn {
-            flex: 1; min-width: 60px; background: #002200; border: 1px solid var(--lime-dim); color: #008800;
-            font-size: 10px; padding: 4px; border-radius: 4px; font-weight: bold; white-space: nowrap; cursor: pointer;
-        }
-        .filter-btn.active { background: var(--lime-main); color: black; border-color: var(--lime-main); }
-
-        #feed, #watch-list, #case-list, #report-list, #hvt-list { 
-            flex-grow: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; padding-bottom: 40px;
-        }
-
+        
+        /* ICON FILTER BAR */
+        .filter-bar { display: flex; gap: 8px; padding: 10px; border-bottom: 1px solid var(--lime-dim); background: rgba(0,0,0,0.3); flex-shrink: 0; overflow-x: auto; align-items: center; }
+        .filter-btn { min-width: 36px; height: 36px; background: #002200; border: 1px solid var(--lime-dim); color: #008800; border-radius: 6px; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: all 0.2s; }
+        .filter-btn svg { width: 16px; height: 16px; }
+        .filter-btn.active { background: var(--lime-main); color: black; border-color: var(--lime-main); transform: scale(1.05); }
+        
+        #feed, #watch-list, #case-list, #report-list, #hvt-list { flex-grow: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; padding-bottom: 40px; }
+        
+        /* Clean TX Row */
         .tx-row { padding: 10px; border-bottom: 1px solid #112211; display: flex; flex-direction: column; gap: 4px; }
         .row-top { display: flex; justify-content: space-between; align-items: center; }
-        
         .tag-pill { font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: bold; display: inline-block; margin-left: 6px; font-family: 'Share Tech Mono'; }
         .tag-tsfr { background: #003300; color: #00ff00; border: 1px solid #005500; }
         .tag-dep { background: #442200; color: #ffaa00; border: 1px solid #663300; }
@@ -214,70 +231,63 @@
         .tag-hvt { background: #443300; color: #ffd700; border: 1px solid #ffd700; box-shadow: 0 0 5px #ffd700; animation: blink-hvt 1s infinite; }
         .tag-l2 { background: #003344; color: #00ffff; border: 1px solid #00aaaa; }
         .tag-bot { background: #111; color: #888; border: 1px solid #333; }
-        
+        .tag-trust { background: #004400; color: #00ff00; border: 1px solid #008800; box-shadow: 0 0 5px #00ff00; }
         @keyframes blink-hvt { 50% { opacity: 0.5; } }
-
         .tx-failed { opacity: 0.5; border-left: 3px solid #555; background: rgba(20,20,20,0.5); }
         .tx-failed .action-btn { border-color: #333; color: #555; }
-
         .btn-row { display: flex; gap: 5px; margin-top: 4px; }
-        .action-btn {
-            flex: 1; padding: 8px 0; text-align: center; border-radius: 2px;
-            font-size: 10px; font-weight: bold; font-family: 'Share Tech Mono';
-            background: #001100; color: #008800; border: 1px solid var(--lime-dim); cursor: pointer;
-        }
+        .action-btn { flex: 1; padding: 8px 0; text-align: center; border-radius: 2px; font-size: 10px; font-weight: bold; font-family: 'Share Tech Mono'; background: #001100; color: #008800; border: 1px solid var(--lime-dim); cursor: pointer; }
         .action-btn:active { background: var(--lime-main); color: black; }
+        .action-btn.trace-btn { border-color: var(--info-cyan); color: var(--info-cyan); }
+        .action-btn.trace-btn:active { background: var(--info-cyan); color: black; }
         .entity-name { color: #ffcc00; font-weight: bold; }
-
-        .control-bar {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 8px 12px; border-bottom: 1px solid var(--lime-dim); background: rgba(0,0,0,0.5); flex-shrink: 0;
-        }
-        .pause-btn {
-            background: #002200; border: 1px solid var(--lime-main); color: var(--lime-main);
-            padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: bold; font-family: 'Share Tech Mono'; cursor: pointer;
-        }
+        .control-bar { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--lime-dim); background: rgba(0,0,0,0.5); flex-shrink: 0; }
+        .pause-btn { background: #002200; border: 1px solid var(--lime-main); color: var(--lime-main); padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: bold; font-family: 'Share Tech Mono'; cursor: pointer; }
         .paused-mode { background: #442200 !important; border-color: #ffaa00 !important; color: #ffaa00 !important; }
-
-        @keyframes pulse-green {
-            0% { box-shadow: 0 0 10px var(--lime-main); }
-            50% { box-shadow: 0 0 30px var(--lime-main), inset 0 0 10px var(--lime-main); }
-            100% { box-shadow: 0 0 10px var(--lime-main); }
-        }
-
-        @keyframes border-flash {
-            0% { box-shadow: inset 0 0 0 0 transparent; }
-            50% { box-shadow: inset 0 0 50px 20px var(--lime-main); }
-            100% { box-shadow: inset 0 0 0 0 transparent; }
-        }
-        .whale-alert-anim { animation: border-flash 1s ease-in-out 3; position: absolute; inset: 0; pointer-events: none; z-index: 900; }
         
-        @keyframes red-flash { 0% { box-shadow: inset 0 0 0 0 transparent; } 50% { box-shadow: inset 0 0 50px 20px var(--alert-red); } 100% { box-shadow: inset 0 0 0 0 transparent; } }
-        .hvt-alert-anim { animation: red-flash 0.5s ease-in-out 6; position: absolute; inset: 0; pointer-events: none; z-index: 950; }
-
-        /* --- MAP & REPORT STYLES --- */
-        #map-canvas { width: 100%; height: 100%; display: block; }
-        #map-legend { position: absolute; bottom: 10px; left: 10px; right: 10px; display: flex; gap: 5px; flex-wrap: wrap; pointer-events: none; }
-        .legend-item { font-size: 9px; padding: 2px 6px; border-radius: 3px; font-weight: bold; font-family: 'Share Tech Mono'; background: rgba(0,0,0,0.8); border: 1px solid #333; }
-
-        #report-header { display: flex; justify-content: space-between; padding: 8px 10px; background: rgba(0, 50, 0, 0.3); border-bottom: 1px solid var(--lime-dim); font-size: 9px; font-weight: bold; color: #55aa55; font-family: 'Share Tech Mono'; }
-        .rep-col-time { width: 50px; text-align: right; }
-        .rep-col-type { width: 30px; text-align: center; }
-        .rep-col-out { width: 35px; text-align: center; } 
-        .report-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-bottom: 1px solid #112211; font-size: 10px; font-family: 'Share Tech Mono'; cursor: pointer; }
+        /* REPORT ROW STYLES */
+        #report-header { display: flex; justify-content: space-between; padding: 8px 10px; background: rgba(0, 50, 0, 0.5); border-bottom: 1px solid var(--lime-dim); font-size: 9px; font-weight: bold; color: #55aa55; font-family: 'Share Tech Mono'; }
+        .report-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 10px; border-bottom: 1px solid #112211; font-size: 11px; font-family: 'Share Tech Mono'; cursor: pointer; transition: background 0.1s; }
         .report-row:hover { background: rgba(0, 255, 0, 0.1); }
-        .rep-val-green { color: #00ff00; } .rep-val-white { color: #ffffff; } .rep-val-dim { color: #888888; }
+        .rep-val-green { color: #00ff00; font-weight: bold; font-size: 12px; } .rep-val-white { color: #ffffff; opacity: 0.8; } .rep-val-dim { color: #666666; }
 
+        /* GRAPH CANVAS & ZOOM CONTROLS */
+        #graph-canvas { width: 100%; height: 100%; display: block; background: #000500; cursor: crosshair; touch-action: none; }
+        .graph-controls { position: absolute; bottom: 35px; left: 10px; z-index: 50; display: flex; gap: 5px; align-items: center; } /* MOVED UP */
+        .g-btn { background: rgba(0, 20, 0, 0.8); border: 1px solid #335533; color: #00ff00; font-size: 14px; width: 28px; height: 28px; display: flex; justify-content: center; align-items: center; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        .g-btn:active { background: #00ff00; color: black; }
+        .g-reset { font-size: 10px; width: auto; padding: 0 8px; }
+
+        /* COMPACT LEGEND */
+        #map-legend {
+            position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 4px; flex-wrap: nowrap; pointer-events: none;
+            z-index: 40; white-space: nowrap;
+        }
+        .legend-item {
+            font-size: 8px; padding: 2px 4px; border-radius: 3px;
+            font-weight: bold; font-family: 'Share Tech Mono';
+            background: rgba(0, 10, 0, 0.6); border: 1px solid #333;
+            backdrop-filter: blur(2px);
+        }
+
+        @media print {
+            body * { visibility: hidden; }
+            #intel-dashboard, #intel-dashboard * { visibility: visible; }
+            #intel-dashboard { position: absolute; left: 0; top: 0; background: white; color: black; padding: 0; border: none; animation: none; box-shadow: none; }
+            #intel-content { border: none; box-shadow: none; color: black; font-size: 10pt; font-family: 'Courier New', monospace; }
+            #intel-nav, #intel-actions { display: none; }
+        }
     </style>
 </head>
 <body>
 
-    <!-- VIDEO SPLASH SCREEN (LOOP REMOVED) -->
+    <!-- VIDEO SPLASH SCREEN -->
     <div id="splash-screen">
         <video id="splash-video" playsinline muted autoplay>
             <source src="https://ipfs.filebase.io/ipfs/QmVMYvMffwSXPJyuNz3CAW8V6rS1wViWQjPHdzPGofb7Ux" type="video/mp4">
         </video>
-        <button id="skip-btn" onclick="skipBoot()">[ SKIP INTRO ]</button>
+        <button id="skip-btn" onclick="skipBoot()">[ SKIP ]</button>
         <div id="boot-container">
             <button id="boot-btn" onclick="bootSystem()">SYSTEM BOOT</button>
         </div>
@@ -288,7 +298,7 @@
         <div id="tut-card">
             <div class="tut-title" id="tut-title">WELCOME AGENT</div>
             <div class="tut-text" id="tut-text">
-                Welcome to XRPMAN SHADOW WATCH.
+                Welcome to XRPMAN SHADOW WATCH v14.0.
                 This forensic tool tracks the XRP Ledger in real-time.
                 <br><br>Let's calibrate your system.
             </div>
@@ -299,14 +309,30 @@
         </div>
     </div>
 
-    <!-- BUBBLE/REPORT DETAIL MODAL -->
+    <!-- INTEL DASHBOARD MODAL -->
+    <div id="intel-dashboard">
+        <div id="intel-nav">
+            <div id="intel-title">SHADOW INTEL BRIEFING</div>
+            <button id="intel-close" onclick="closeIntel()">[ CLOSE ]</button>
+        </div>
+        <textarea id="intel-content" readonly></textarea>
+        <div id="intel-actions">
+            <button class="intel-action-btn" onclick="copyIntelText()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg> COPY</button>
+            <button class="intel-action-btn" onclick="exportJSON()" style="border-color:#ffaa00; color:#ffaa00;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> SAVE JSON</button>
+        </div>
+    </div>
+
+    <!-- BUBBLE/REPORT DETAIL MODAL (Also used for Graph Node Menu) -->
     <div id="bubble-modal">
-        <div class="text-center text-lg font-bold text-white mb-2 border-b border-green-900 pb-2">TRANSACTION INTEL</div>
-        <div class="modal-row"><span class="modal-label">AMOUNT:</span><span id="mod-amt" class="modal-val text-xl text-yellow-400">---</span></div>
-        <div class="modal-row"><span class="modal-label">TYPE:</span><span id="mod-type" class="modal-val">---</span></div>
-        <div class="modal-row"><span class="modal-label">SENDER:</span><span id="mod-from" class="modal-val text-[10px]">---</span></div>
-        <div class="modal-row"><span class="modal-label">TARGET:</span><span id="mod-to" class="modal-val text-[10px]">---</span></div>
+        <div id="modal-title" class="text-center text-lg font-bold text-white mb-2 border-b border-green-900 pb-2">TRANSACTION INTEL</div>
+        <div id="modal-content-area">
+            <div class="modal-row"><span class="modal-label">AMOUNT:</span><span id="mod-amt" class="modal-val text-xl text-yellow-400">---</span></div>
+            <div class="modal-row"><span class="modal-label">TYPE:</span><span id="mod-type" class="modal-val">---</span></div>
+            <div class="modal-row"><span class="modal-label">SENDER:</span><span id="mod-from" class="modal-val text-[10px]">---</span></div>
+            <div class="modal-row"><span class="modal-label">TARGET:</span><span id="mod-to" class="modal-val text-[10px]">---</span></div>
+        </div>
         <div class="modal-grid">
+            <button id="mod-trace-btn" class="mod-btn mod-trace">TRACE</button>
             <button id="mod-scan-btn" class="mod-btn">SCAN LEDGER</button>
             <button id="mod-copy-hash" class="mod-btn">COPY HASH</button>
             <button id="mod-copy-wallet" class="mod-btn">COPY SENDER</button>
@@ -322,6 +348,9 @@
 
     <!-- TOP HUD -->
     <div id="hud-top">
+        <!-- SESSION TIMER DISPLAY -->
+        <div id="session-timer">T+ 00:00:00</div>
+
         <div class="stat-grid">
             <div class="stat-box">
                 <div id="price-label" class="label-text">XRP / USD <span id="price-source" class="source-tag">SCANNING...</span></div>
@@ -336,36 +365,76 @@
         <div class="header-section">
             <h1 class="glitch">XRPMAN SHADOW WATCH</h1>
             <div class="subtitle">POWERED BY $XMEME</div>
-            <button id="help-btn" onclick="startTutorial()">?</button>
-        </div>
-
-        <div class="connect-container" id="init-zone">
-            <button id="connect-main" onclick="toggleConnection()" class="connect-btn">INITIALIZE UPLINK</button>
-            <button id="audio-btn" onclick="toggleAudio()" class="audio-btn">ENABLE AUDIO</button>
+            
+            <!-- NEW TACTICAL CONTROL BAR (ICONS) -->
+            <div class="tactical-bar">
+                <button id="report-btn" class="tac-btn" onclick="openIntelDashboard()" title="Daily Report">
+                    DAILY REPORT
+                </button>
+                <button id="alert-toggle" class="tac-btn tac-active" onclick="toggleAlerts()" title="Toggle Alerts">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                </button>
+                <button id="mute-btn" class="tac-btn" onclick="toggleMute()" title="Mute Audio">
+                    <svg id="icon-vol" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
+                </button>
+                <button id="help-btn" class="tac-btn" onclick="startTutorial()" title="Help">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                </button>
+            </div>
         </div>
     </div>
 
     <!-- BOTTOM DECK -->
     <div id="hud-bottom">
         <div id="command-deck">
+            <!-- ICON TAB BAR -->
             <div class="tab-bar" id="tab-zone">
-                <div class="tab-btn active" onclick="switchView('live')">LIVE</div>
-                <div class="tab-btn" onclick="switchView('hvt')" style="color: gold;">[ HVT ]</div>
-                <div class="tab-btn" onclick="switchView('map')">MAP</div>
-                <div class="tab-btn" onclick="switchView('report')">REPORT</div>
-                <div class="tab-btn" onclick="switchView('case')">EVID</div>
+                <div class="tab-btn active" onclick="switchView('live')" title="Live Feed">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                    LIVE
+                </div>
+                <div class="tab-btn" onclick="switchView('graph')" title="Spider Graph">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"></circle><line x1="12" y1="9" x2="12" y2="3"></line><line x1="12" y1="15" x2="12" y2="21"></line><line x1="15" y1="12" x2="21" y2="12"></line><line x1="9" y1="12" x2="3" y2="12"></line></svg>
+                    GRAPH
+                </div>
+                <div class="tab-btn" onclick="switchView('hvt')" title="High Value Targets" style="color: var(--gold-hvt);">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><line x1="22" y1="12" x2="18" y2="12"></line><line x1="6" y1="12" x2="2" y2="12"></line><line x1="12" y1="6" x2="12" y2="2"></line><line x1="12" y1="22" x2="12" y2="18"></line></svg>
+                    HVT
+                </div>
+                <div class="tab-btn" onclick="switchView('map')" title="Visual Map">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                    MAP
+                </div>
+                <div class="tab-btn" onclick="switchView('report')" title="Whale Reports">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+                    REPORT
+                </div>
+                <div class="tab-btn" onclick="switchView('case')" title="Evidence Locker">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>
+                    EVIDENCE
+                </div>
             </div>
 
             <!-- LIVE TAB -->
             <div id="view-live" class="view-panel active">
                 <div class="filter-bar" id="filter-zone">
-                    <button class="filter-btn active" onclick="setFilter('all', this)">[ ALL ]</button>
-                    <button class="filter-btn" onclick="setFilter('small', this)">[ &lt; 100K ]</button>
-                    <button class="filter-btn" onclick="setFilter('whale', this)">[ 100K+ ]</button>
-                    <button class="filter-btn" onclick="setFilter('exchange', this)">[ EXCH ]</button>
-                    <button class="filter-btn" style="border-color:#00ffff; color:#00ffff;" onclick="setFilter('l2', this)">[ L2 ]</button>
+                    <button class="filter-btn active" onclick="setFilter('all', this)" title="Show All">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                    </button>
+                    <button class="filter-btn" onclick="setFilter('small', this)" title="Small TXs">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline><line x1="14" y1="10" x2="21" y2="3"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+                    </button>
+                    <button class="filter-btn" onclick="setFilter('whale', this)" title="Whales">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
+                    </button>
+                    <button class="filter-btn" onclick="setFilter('exchange', this)" title="Exchanges">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>
+                    </button>
+                    <button class="filter-btn" style="border-color:#00ffff; color:#00ffff;" onclick="setFilter('l2', this)" title="Layer 2">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+                    </button>
                     <label class="flex items-center gap-1 text-[9px] text-green-400 font-bold ml-2">
-                        <input type="checkbox" id="hide-failed" checked class="accent-green-500"> NO GHOSTS
+                        <input type="checkbox" id="hide-failed" checked class="accent-green-500">
                     </label>
                 </div>
                 <div class="control-bar">
@@ -376,6 +445,17 @@
                     <div class="text-center text-green-800 mt-12 font-tech text-xs tracking-widest">
                         AWAITING UPLINK...
                     </div>
+                </div>
+            </div>
+
+            <!-- GRAPH TAB -->
+            <div id="view-graph" class="view-panel">
+                <canvas id="graph-canvas"></canvas>
+                <div class="graph-controls">
+                    <button class="g-btn" onclick="adjustZoom(-0.2)">-</button>
+                    <button class="g-btn" onclick="adjustZoom(0.2)">+</button>
+                    <button class="g-btn g-reset" onclick="resetGraphView()">RESET</button>
+                    <div class="text-[10px] text-gray-500 flex items-center ml-2">DRAG TO PAN | SCROLL TO ZOOM</div>
                 </div>
             </div>
 
@@ -392,9 +472,10 @@
             <!-- MAP TAB -->
             <div id="view-map" class="view-panel">
                 <canvas id="map-canvas"></canvas>
+                <!-- COMPACT LEGEND AT BOTTOM -->
                 <div id="map-legend">
                     <div class="legend-item" style="color:#00ff00; border-color:#005500;">TSFR</div>
-                    <div class="legend-item" style="color:#ffaa00; border-color:#663300;">DEPOSIT</div>
+                    <div class="legend-item" style="color:#ffaa00; border-color:#663300;">DEP</div>
                     <div class="legend-item" style="color:#ffd700; border-color:#555500;">HVT</div>
                     <div class="legend-item" style="color:#00ffff; border-color:#005566;">L2</div>
                 </div>
@@ -406,8 +487,8 @@
                     <div style="width: 25%">AMT</div>
                     <div style="width: 25%">WALLET</div>
                     <div class="rep-col-time">TIME</div>
-                    <div class="rep-col-type">TYPE</div>
-                    <div class="rep-col-out">OUT</div>
+                    <div class="rep-col-type">CLASS</div>
+                    <div class="rep-col-out">FLOW</div>
                 </div>
                 <div id="report-list">
                     <div class="text-center text-gray-600 mt-12 font-tech text-xs tracking-widest">WAITING FOR 100K+ TXs...</div>
@@ -436,26 +517,244 @@
     </div>
 
     <script>
-        // --- BOOT SEQUENCE WITH VIDEO ---
+        // --- GLOBAL STATE VARIABLES ---
+        let mapActive = false; 
+        let graphActive = false;
+        let bubbles = [];
+        let socket;
+        let isConnected = false;
+        let watchlist = [];
+        let cases = [];
+        let hvtLog = [];
+        let activeFilter = 'all';
+        let isPaused = false;
+        let lastHeartbeat = Date.now();
+        let tutStep = 0;
+        let scene, camera, renderer, particles;
+        const particleCount = 2500;
+        let audioCtx;
+        let audioEnabled = false;
+        let alertsEnabled = true;
+
+        // SESSION TIMER VARS
+        let sessionStart = Date.now();
+        let sessionTimerInterval;
+
+        // METRICS ENGINE (Transient - 24h Session)
+        let metrics = {
+            totalXRPVol: 0,
+            totalUSDVol: 0, 
+            totalL2Vol: 0,  
+            l2TxCount: 0,   
+            txCount: 0,
+            whaleCount: 0, 
+            sharkCount: 0, 
+            fishCount: 0,  
+            trustLines: 0,
+            rlusdLines: 0,
+            uniqueL2: new Set()
+        };
+
+        // --- BLACK BOX ENGINE ---
+        let blackbox = {
+            genesis: null, 
+            lastActive: null,
+            dailySnapshots: {}, 
+            totalXRP: 0,
+            totalUSD: 0,
+            totalL2: 0,
+            txCount: 0,
+            hvtHits: [], 
+            whaleHits: [], 
+            cases: []
+        };
+
+        const STORAGE_KEY = "XRPMAN_BLACKBOX_V2";
+
+        function loadBlackbox() {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    blackbox = { ...blackbox, ...parsed };
+                    if (blackbox.cases && blackbox.cases.length > 0) {
+                        cases = blackbox.cases;
+                        renderCases();
+                    }
+                    if (blackbox.whaleHits && blackbox.whaleHits.length > 0) {
+                        const list = document.getElementById('report-list');
+                        if (list.innerText.includes("WAITING")) list.innerHTML = "";
+                        blackbox.whaleHits.forEach(tx => renderReportRow(tx));
+                    }
+                } catch(e) { console.error("Blackbox corrupted. Resetting."); }
+            } else {
+                blackbox.genesis = new Date().toISOString();
+            }
+            const today = new Date().toISOString().split('T')[0];
+            if (!blackbox.dailySnapshots[today]) {
+                blackbox.dailySnapshots[today] = { xrp: 0, usd: 0, tx: 0 };
+            }
+            setInterval(saveBlackbox, 5000);
+        }
+
+        function saveBlackbox() {
+            blackbox.lastActive = new Date().toISOString();
+            blackbox.cases = cases;
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(blackbox));
+        }
+
+        const KNOWN_WALLETS = {
+            'rLNaPoKeeBJZe2qs6x52yVPZpZ8td4dc6w': {name: 'COINBASE', type: 'EXCH'},
+            'rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh': {name: 'BINANCE', type: 'EXCH'},
+            'rJb5KsHsDHF1YSnasbwqSagepE8XXAuGh': {name: 'BITSTAMP', type: 'EXCH'},
+            'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh': {name: 'GENESIS', type: 'HVT'},
+            'r945F6e8...Escrow': {name: 'RIPPLE ESCROW', type: 'HVT'}
+        };
+
+        // --- GRAPH ENGINE w/ ZOOM ---
+        const graphCanvas = document.getElementById('graph-canvas');
+        const graphCtx = graphCanvas.getContext('2d');
+        let graphNodes = [];
+        let graphEdges = [];
+        let graphZoom = 1;
+        let graphPan = {x: 0, y: 0};
+        let isDragging = false;
+        let lastMouse = {x:0, y:0};
+        
+        function resizeGraph() {
+            if(!graphCanvas.offsetParent) return;
+            graphCanvas.width = graphCanvas.offsetWidth;
+            graphCanvas.height = graphCanvas.offsetHeight;
+        }
+
+        function clearGraph() {
+            graphNodes = [];
+            graphEdges = [];
+            resetGraphView();
+        }
+
+        function resetGraphView() {
+            graphZoom = 1;
+            graphPan = {x: 0, y: 0};
+        }
+
+        function adjustZoom(delta) {
+            graphZoom += delta;
+            if(graphZoom < 0.2) graphZoom = 0.2;
+            if(graphZoom > 5) graphZoom = 5;
+        }
+
+        // Mouse/Touch Events for Pan/Zoom
+        graphCanvas.addEventListener('mousedown', e => { isDragging = true; lastMouse = {x: e.clientX, y: e.clientY}; });
+        graphCanvas.addEventListener('mouseup', () => isDragging = false);
+        graphCanvas.addEventListener('mouseout', () => isDragging = false);
+        graphCanvas.addEventListener('mousemove', e => {
+            if(!isDragging) return;
+            graphPan.x += e.clientX - lastMouse.x;
+            graphPan.y += e.clientY - lastMouse.y;
+            lastMouse = {x: e.clientX, y: e.clientY};
+        });
+        graphCanvas.addEventListener('wheel', e => {
+            e.preventDefault();
+            adjustZoom(e.deltaY > 0 ? -0.1 : 0.1);
+        }, {passive: false});
+
+        function traceWallet(address) {
+            closeModal();
+            switchView('graph');
+            showToast("TRACING TARGET...");
+            if(graphNodes.length === 0) {
+                graphNodes.push({id: address, x: 0, y: 0, type: 'CENTER', color: '#ffd700', vx:0, vy:0});
+            }
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    id: "trace_" + address,
+                    command: "account_tx",
+                    account: address,
+                    limit: 10 
+                }));
+            }
+        }
+
+        function updateGraph() {
+            if (!graphActive) return;
+            requestAnimationFrame(updateGraph);
+            
+            graphCtx.setTransform(1, 0, 0, 1, 0, 0); // Reset for clear
+            graphCtx.fillStyle = "#000500";
+            graphCtx.fillRect(0,0, graphCanvas.width, graphCanvas.height);
+
+            // Apply Zoom/Pan
+            graphCtx.setTransform(graphZoom, 0, 0, graphZoom, (graphCanvas.width/2) + graphPan.x, (graphCanvas.height/2) + graphPan.y);
+
+            // PHYSICS
+            for (let i=0; i<graphNodes.length; i++) {
+                let n1 = graphNodes[i];
+                for (let j=i+1; j<graphNodes.length; j++) {
+                    let n2 = graphNodes[j];
+                    let dx = n1.x - n2.x;
+                    let dy = n1.y - n2.y;
+                    let dist = Math.sqrt(dx*dx + dy*dy) || 1;
+                    if (dist < 150) {
+                        let f = 200 / (dist * dist);
+                        let fx = (dx/dist) * f;
+                        let fy = (dy/dist) * f;
+                        n1.vx += fx; n1.vy += fy;
+                        n2.vx -= fx; n2.vy -= fy;
+                    }
+                }
+                let dx = 0 - n1.x; // Gravity to (0,0)
+                let dy = 0 - n1.y;
+                n1.vx += dx * 0.005;
+                n1.vy += dy * 0.005;
+                n1.vx *= 0.9; n1.vy *= 0.9; 
+                if(n1.type !== 'CENTER' || graphNodes.length === 1) { 
+                    n1.x += n1.vx;
+                    n1.y += n1.vy;
+                }
+            }
+
+            // Draw Edges
+            graphCtx.strokeStyle = "#004400";
+            graphCtx.lineWidth = 1/graphZoom; // Keep line width consistent visually
+            graphEdges.forEach(e => {
+                let s = graphNodes.find(n => n.id === e.source);
+                let t = graphNodes.find(n => n.id === e.target);
+                if(s && t) {
+                    graphCtx.beginPath();
+                    graphCtx.moveTo(s.x, s.y);
+                    graphCtx.lineTo(t.x, t.y);
+                    graphCtx.stroke();
+                }
+            });
+
+            // Draw Nodes
+            graphNodes.forEach(n => {
+                graphCtx.beginPath();
+                let r = (n.type==='CENTER'?8:5) / Math.sqrt(graphZoom); // Adjust size slightly
+                r = Math.max(r, 2);
+                graphCtx.arc(n.x, n.y, r, 0, Math.PI*2);
+                graphCtx.fillStyle = n.color;
+                graphCtx.fill();
+                
+                // Text scale
+                if(graphZoom > 0.5) {
+                    graphCtx.fillStyle = "#fff";
+                    graphCtx.font = `${8/graphZoom}px monospace`;
+                    graphCtx.fillText(n.id.substring(0,4), n.x-(10/graphZoom), n.y-(10/graphZoom));
+                }
+            });
+        }
+
+        // --- BOOT SEQUENCE ---
         function bootSystem() {
             const vid = document.getElementById('splash-video');
             const btn = document.getElementById('boot-btn');
-            
             btn.style.display = 'none'; 
             vid.style.display = 'block'; 
             vid.style.zIndex = '50';
-            
-            // Unmute on interaction for sound
-            vid.muted = false;
-            vid.volume = 1.0; 
-            vid.currentTime = 0;
-            vid.play().catch(e => {
-                console.log("Audio Blocked", e);
-                // If blocked, just finish
-                finishBoot();
-            });
-            
-            // When video ends or after 5.5 seconds (safety)
+            vid.muted = false; vid.volume = 1.0; vid.currentTime = 0;
+            vid.play().catch(e => { finishBoot(); });
             vid.onended = () => finishBoot();
             setTimeout(finishBoot, 5500); 
         }
@@ -468,84 +767,98 @@
 
         function finishBoot() {
             const vid = document.getElementById('splash-video');
-            if(vid) vid.pause(); // Ensure clean cut
-            
+            if(vid) vid.pause(); 
             document.getElementById('splash-screen').classList.add('fade-out');
             setTimeout(() => {
                 document.getElementById('splash-screen').style.display = 'none';
+                sessionStart = Date.now(); 
                 checkTutorial();
             }, 800);
         }
 
-        // --- TUTORIAL SYSTEM ---
-        let tutStep = 0;
-        
+        // --- SESSION TIMER LOGIC ---
+        function startSessionTimer() {
+            if (sessionTimerInterval) clearInterval(sessionTimerInterval);
+            sessionTimerInterval = setInterval(() => {
+                const diff = Date.now() - sessionStart;
+                const h = Math.floor(diff / 3600000).toString().padStart(2, '0');
+                const m = Math.floor((diff % 3600000) / 60000).toString().padStart(2, '0');
+                const s = Math.floor((diff % 60000) / 1000).toString().padStart(2, '0');
+                document.getElementById('session-timer').innerText = `T+ ${h}:${m}:${s}`;
+            }, 1000);
+        }
+
+        // --- TUTORIAL & AUTO-START ---
         function checkTutorial() {
             if(!localStorage.getItem("shadow_watch_tut")) {
                 startTutorial();
                 localStorage.setItem("shadow_watch_tut", "true");
+            } else {
+                autoStartSystem(); // Skip tutorial, go straight to system
             }
         }
-
-        function startTutorial() {
-            tutStep = 0;
-            document.getElementById('tutorial-overlay').classList.add('tut-active');
-            updateTutorial();
+        function startTutorial() { tutStep = 0; document.getElementById('tutorial-overlay').classList.add('tut-active'); updateTutorial(); }
+        function endTutorial() { 
+            document.getElementById('tutorial-overlay').classList.remove('tut-active'); 
+            document.querySelectorAll('.highlight-element').forEach(e => e.classList.remove('highlight-element')); 
+            autoStartSystem(); // Start after tutorial
         }
-
-        function endTutorial() {
-            document.getElementById('tutorial-overlay').classList.remove('tut-active');
-            document.querySelectorAll('.highlight-element').forEach(e => e.classList.remove('highlight-element'));
-        }
-
-        function nextStep() {
-            tutStep++;
-            updateTutorial();
-        }
-
+        function nextStep() { tutStep++; updateTutorial(); }
+        
+        // ** UPDATED TUTORIAL LOGIC **
         function updateTutorial() {
-            // Clear previous highlight
             document.querySelectorAll('.highlight-element').forEach(e => e.classList.remove('highlight-element'));
             const title = document.getElementById('tut-title');
             const text = document.getElementById('tut-text');
+            const controls = document.querySelector('.tut-controls');
 
-            if(tutStep === 0) {
-                // Intro is handled in startTutorial
-            } else if (tutStep === 1) {
-                title.innerText = "STEP 1: UPLINK";
-                text.innerText = "Tap 'INITIALIZE UPLINK' to connect to the XRP Ledger node. Use 'ENABLE AUDIO' for alerts.";
-                document.getElementById('init-zone').classList.add('highlight-element');
-            } else if (tutStep === 2) {
-                title.innerText = "STEP 2: FILTERS";
-                text.innerText = "Use these tabs to filter the live stream. \n[100K+] shows large txs.\n[< 100K] for small XRP.\n[L2] shows Tokens.";
-                document.getElementById('filter-zone').classList.add('highlight-element');
-            } else if (tutStep === 3) {
-                title.innerText = "STEP 3: TACTICAL VIEWS";
-                text.innerText = "[MAP] shows visual money flow.\n[REPORT] lists clean data for analysis.\n[HVT] records only known Targets (Founders/Ripple).";
-                document.getElementById('tab-zone').classList.add('highlight-element');
-            } else if (tutStep === 4) {
-                title.innerText = "READY";
-                text.innerText = "You are now operational. \nStay vigilant. Watch the shadows.";
-                document.querySelector('.tut-controls').innerHTML = `<button class="tut-btn" onclick="endTutorial()">START</button>`;
+            // Step 1: HUD
+            if(tutStep === 1) {
+                title.innerText = "TACTICAL HUD";
+                text.innerText = "Top Bar: Session Timer & Live Metrics.\nThe Tactical Control Bar (below title) handles:\n- [ DAILY REPORT ] (Intelligence Brief)\n- [ ALERTS ] (Toggle HVT Alarms)\n- [ AUDIO ] (Mute)";
+                document.querySelector('.header-section').classList.add('highlight-element');
+            }
+            // Step 2: Tabs
+            else if(tutStep === 2) {
+                title.innerText = "COMMAND DECK";
+                text.innerText = "Switch modes instantly:\n- LIVE: Real-time Transaction Feed\n- GRAPH: Spider Web Analysis (Visual Trace)\n- HVT: High Value Targets List\n- MAP: Geospatial Visualization\n- REPORT: Whale Activity Log\n- EVIDENCE: Saved Cases";
+                document.getElementById('command-deck').classList.add('highlight-element');
+            }
+            // Step 3: Tracing
+            else if(tutStep === 3) {
+                title.innerText = "ACTIVE TRACING";
+                text.innerText = "Click [TRACE] on any transaction to map the wallet network.\nIn GRAPH mode, click nodes to expand relationships or intercept data.";
+                document.getElementById('view-live').classList.add('highlight-element');
+            }
+            // Step 4: Black Box
+            else if(tutStep === 4) {
+                title.innerText = "BLACK BOX";
+                text.innerText = "Your data is persistent. Volume stats and Whale Reports are saved locally to your device (Black Box). Use [ DAILY REPORT ] to export JSON evidence.";
+                controls.innerHTML = `<button class="tut-btn" onclick="endTutorial()">ENGAGE SYSTEM</button>`;
             }
         }
 
-        // --- 3D ENGINE ---
-        let scene, camera, renderer, particles;
-        const particleCount = 2500;
+        // --- AUTO-START LOGIC ---
+        function autoStartSystem() {
+            if(isConnected) return;
+            loadBlackbox(); // INITIALIZE STORAGE & RESTORE REPORTS
+            startXRPL();
+            startRedundantPriceEngine();
+            startSessionTimer(); 
+            isConnected = true;
+            // Removed redundant display block since button is now visible by default in tactical bar
+            showToast("BLACK BOX: RECORDING");
+        }
 
         function init3D() {
             const container = document.getElementById('canvas-container');
             if (!container) return;
-            
-            scene = new THREE.Scene();
-            scene.fog = new THREE.FogExp2(0x000000, 0.01); 
+            scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x000000, 0.01); 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
             camera.position.set(0, -10, 30); camera.lookAt(0, 10, 0);
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             container.appendChild(renderer.domElement);
-            
             const pGeo = new THREE.BufferGeometry();
             const pos = [], speeds = [];
             for(let i=0; i<particleCount; i++) {
@@ -554,119 +867,47 @@
             }
             pGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
             pGeo.setAttribute('speed', new THREE.Float32BufferAttribute(speeds, 1));
-            
-            particles = new THREE.Points(pGeo, new THREE.PointsMaterial({
-                color: 0x00ff00, size: 0.4, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending
-            }));
+            particles = new THREE.Points(pGeo, new THREE.PointsMaterial({ color: 0x00ff00, size: 0.4, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending }));
             scene.add(particles);
             animate();
-            
-            let startX = 0;
-            container.addEventListener('touchstart', e => startX = e.touches[0].clientX, {passive: true});
-            container.addEventListener('touchmove', e => {
-                camera.rotation.z -= (e.touches[0].clientX - startX) * 0.0005;
-                startX = e.touches[0].clientX;
-            }, {passive: true});
-
-            window.addEventListener('resize', () => {
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-                renderer.setSize(window.innerWidth, window.innerHeight);
-            });
+            window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
         }
-
         function animate() {
             requestAnimationFrame(animate);
             if (!particles) return;
             const pos = particles.geometry.attributes.position.array;
             const spd = particles.geometry.attributes.speed.array;
-            for(let i=0; i<particleCount; i++) {
-                pos[i*3+1] += spd[i];
-                if(pos[i*3+1] > 30) { pos[i*3+1] = -20; pos[i*3] = (Math.random()-0.5)*50; }
-            }
+            for(let i=0; i<particleCount; i++) { pos[i*3+1] += spd[i]; if(pos[i*3+1] > 30) { pos[i*3+1] = -20; pos[i*3] = (Math.random()-0.5)*50; } }
             particles.geometry.attributes.position.needsUpdate = true;
             camera.position.x = Math.sin(Date.now()*0.0005)*2;
             renderer.render(scene, camera);
         }
 
-        // --- AUDIO ENGINE ---
-        let audioCtx;
-        let audioEnabled = false;
-
-        function toggleAudio() {
-            if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            if(audioCtx.state === 'suspended') audioCtx.resume();
-            audioEnabled = !audioEnabled;
-            const btn = document.getElementById('audio-btn');
-            btn.innerText = audioEnabled ? "AUDIO ON" : "ENABLE AUDIO";
-            btn.style.color = audioEnabled ? "#00ff00" : "#ffaa00";
-            btn.style.borderColor = audioEnabled ? "#00ff00" : "#ffaa00";
-            if(audioEnabled) playTone(600, 0.1, "sine"); // Test beep
-        }
-
-        function playTone(freq, duration, type="square") {
-            if(!audioEnabled || !audioCtx) return;
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.type = type;
-            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            osc.start();
-            osc.stop(audioCtx.currentTime + duration);
-        }
-
-        function playAlert(type) {
-            if (type === 'HVT') {
-                playTone(1200, 0.1); setTimeout(() => playTone(1200, 0.1), 150); setTimeout(() => playTone(1200, 0.2), 300);
-            } else {
-                playTone(400, 0.2, "sine");
-            }
-        }
-
-        // --- MAP ENGINE ---
+        // --- MAP SETUP ---
         const mapCanvas = document.getElementById('map-canvas');
         const mapCtx = mapCanvas.getContext('2d');
-        let bubbles = [];
-        let mapActive = false;
-
         function resizeMap() {
             if(!mapCanvas.offsetParent) return;
             mapCanvas.width = mapCanvas.offsetWidth;
             mapCanvas.height = mapCanvas.offsetHeight;
         }
-
         class Bubble {
-            // Updated Constructor to accept issuer for image loading
             constructor(label, val, color, hash, from, to, type, issuer) {
                 this.x = Math.random() * mapCanvas.width;
                 this.y = mapCanvas.height + 20;
-                
-                // Fixed radius math
                 let safeVal = parseFloat(val) || 1; 
                 this.radius = Math.max(10, Math.min(50, Math.log(safeVal + 10) * 3));
-                
                 this.speed = 1 + Math.random() * 2;
                 this.color = color;
                 this.hash = hash;
-                // CHANGED: Use precise number formatting instead of flooring
-                this.label = type === 'L2' ? label : val.toLocaleString(undefined, {maximumFractionDigits: 0});
-                this.val = val;     
-                this.from = from;
-                this.to = to;
-                this.type = type;
-                this.life = 1.0;
-
-                // --- ICON LOGIC ---
+                // *** FIX: REMOVED ROUNDING TO SHOW DECIMALS IN BUBBLES ***
+                this.label = type === 'L2' ? label : val.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 4});
+                this.val = val; this.from = from; this.to = to; this.type = type; this.life = 1.0;
                 this.isL2 = type === 'L2' && issuer;
-                this.icon = null;
-                this.iconLoaded = false;
-
+                this.icon = null; this.iconLoaded = false;
                 if (this.isL2) {
                     this.icon = new Image();
-                    this.icon.crossOrigin = "Anonymous"; // Clean practices
+                    this.icon.crossOrigin = "Anonymous";
                     this.icon.src = `https://xumm.app/avatar/${issuer}_200.png`;
                     this.icon.onload = () => { this.iconLoaded = true; };
                     this.icon.onerror = () => { this.iconLoaded = false; this.icon = null; };
@@ -675,42 +916,20 @@
             update() { this.y -= this.speed; this.life -= 0.002; }
             draw() {
                 mapCtx.globalAlpha = this.life;
-                
-                // Define the circle path
-                mapCtx.beginPath();
-                mapCtx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-                
-                // IMAGE RENDERING
+                mapCtx.beginPath(); mapCtx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
                 if (this.isL2 && this.iconLoaded && this.icon) {
-                    mapCtx.save();
-                    mapCtx.clip(); // Mask content to the circle
-                    mapCtx.drawImage(this.icon, this.x - this.radius, this.y - this.radius, this.radius * 2, this.radius * 2);
-                    mapCtx.restore();
+                    mapCtx.save(); mapCtx.clip(); mapCtx.drawImage(this.icon, this.x - this.radius, this.y - this.radius, this.radius * 2, this.radius * 2); mapCtx.restore();
                 } else {
-                    // Fallback to Solid Color
-                    mapCtx.fillStyle = this.color;
-                    mapCtx.fill();
+                    mapCtx.fillStyle = this.color; mapCtx.fill();
                 }
-
-                // Border
                 mapCtx.strokeStyle = "#fff"; mapCtx.lineWidth = 1; mapCtx.stroke();
-                
-                // Text Label
                 if (this.radius > 12) {
-                    mapCtx.textAlign = "center"; 
-                    mapCtx.font = "bold 9px monospace";
-                    
-                    // Shadow/Stroke for readability over images
-                    mapCtx.lineWidth = 3;
-                    mapCtx.strokeStyle = "black";
-                    mapCtx.strokeText(this.label, this.x, this.y + 3);
-                    
-                    mapCtx.fillStyle = "#fff"; 
-                    mapCtx.fillText(this.label, this.x, this.y + 3);
+                    mapCtx.textAlign = "center"; mapCtx.font = "bold 9px monospace";
+                    mapCtx.lineWidth = 3; mapCtx.strokeStyle = "black"; mapCtx.strokeText(this.label, this.x, this.y + 3);
+                    mapCtx.fillStyle = "#fff"; mapCtx.fillText(this.label, this.x, this.y + 3);
                 }
             }
         }
-
         function loopMap() {
             if (!mapActive) return;
             requestAnimationFrame(loopMap);
@@ -720,7 +939,6 @@
                 if (b.y < -50 || b.life <= 0) bubbles.splice(i, 1);
             }
         }
-
         mapCanvas.addEventListener('click', (e) => {
             const rect = mapCanvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
@@ -731,492 +949,343 @@
             }
         });
 
-        // --- BUBBLE/REPORT MODAL ---
-        function openModal(b) {
-            document.getElementById('mod-amt').innerText = typeof b.val === 'number' ? b.val.toLocaleString() + " " + (b.type==='L2' ? b.label : 'XRP') : b.label;
-            document.getElementById('mod-amt').style.color = b.color || '#00ff00';
-            document.getElementById('mod-type').innerText = b.type || 'TX';
-            document.getElementById('mod-from').innerText = b.from;
-            document.getElementById('mod-to').innerText = b.to;
-            
-            // Assign Actions
-            document.getElementById('mod-scan-btn').onclick = () => openScan(b.hash);
-            document.getElementById('mod-copy-hash').onclick = () => copyHash(b.hash);
-            document.getElementById('mod-copy-wallet').onclick = () => copyHash(b.from);
-            document.getElementById('mod-save-btn').onclick = () => {
-                saveCase({hash:b.hash, amt:b.val, from:b.from, to:b.to});
-                closeModal();
-                showToast("EVIDENCE SECURED");
-            };
-            document.getElementById('bubble-modal').classList.add('modal-active');
-        }
-        function closeModal() { document.getElementById('bubble-modal').classList.remove('modal-active'); }
-
-        // --- APP LOGIC ---
-        let socket, isConnected = false, watchlist = [], cases = [], hvtLog = [], priceInterval;
-        let activeFilter = 'all'; 
-        let lastAlertTime = 0;
-        let isPaused = false;
-        let lastHeartbeat = Date.now();
-        let pingInterval;
-
-        // THE BLACK BOOK
-        const KNOWN_WALLETS = {
-            'rLNaPoKeeBJZe2qs6x52yVPZpZ8td4dc6w': {name: 'COINBASE', type: 'EXCH'},
-            'rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh': {name: 'BINANCE', type: 'EXCH'},
-            'rJb5KsHsDHF1YSnasbwqSagepE8XXAuGh': {name: 'BITSTAMP', type: 'EXCH'},
-            'rU2mEJSLqBRkYLVTv55rFTgQYkDBqVyTRn': {name: 'COINS.PH', type: 'EXCH'},
-            'rNprNzNWKqaKUH24sF11g8n9C9r295x26d': {name: 'KRAKEN', type: 'EXCH'},
-            'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh': {name: 'GENESIS', type: 'HVT'},
-            'r945F6e8...Escrow': {name: 'RIPPLE ESCROW', type: 'HVT'}, 
-            'r...Tacostand': {name: 'TACOSTAND', type: 'HVT'},
-            'r...Chris': {name: 'CHRIS LARSEN', type: 'HVT'},
-            'r...Brad': {name: 'BRAD G.', type: 'HVT'}
-        };
-
-        // --- RECONNECTION LOGIC ---
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible' && isConnected) {
-                if (!socket || socket.readyState !== WebSocket.OPEN) {
-                    showToast("RE-ESTABLISHING UPLINK...");
-                    startXRPL();
-                }
-            }
-        });
-        
-        // PINGER LOOP: Keeps connection alive
-        setInterval(() => {
-            if (isConnected && socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({command: "ping"}));
-            }
-        }, 15000); // Send ping every 15s
-
-        // WATCHDOG LOOP: Checks for timeout
-        setInterval(() => {
-            // Increased timeout to 45 seconds to prevent false alarms
-            if (isConnected && (Date.now() - lastHeartbeat > 45000)) {
-                console.log("Heartbeat lost. Reconnecting..."); showToast("SIGNAL LOST. RECONNECTING..."); startXRPL();
-            }
-        }, 5000);
-
-        function toggleConnection() {
-            const btn = document.getElementById('connect-main');
-            const priceLabel = document.getElementById('price-label'); 
-            
-            if(isConnected) {
-                if(socket) socket.close();
-                clearInterval(priceInterval);
-                isConnected = false;
-                btn.innerText = "INITIALIZE UPLINK"; btn.style.background = "#001100"; btn.style.color = "#00ff00";
-                if(priceLabel) priceLabel.style.color = "#008800";
-                showToast("SYSTEM HALTED");
-            } else {
-                startXRPL();
-                startRedundantPriceEngine();
-                isConnected = true;
-                btn.innerText = "UPLINK ACTIVE"; btn.style.background = "#00ff00"; btn.style.color = "#000";
-                document.getElementById('feed').innerHTML = '';
-                document.getElementById('audio-btn').style.display = 'inline-block';
-                showToast("FIREWALL BREACHED");
-            }
-        }
-
-        function setFilter(mode, btn) {
-            activeFilter = mode;
-            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            let txt = mode === 'small' ? '< 100K' : (mode === 'whale' ? '100K+' : mode.toUpperCase());
-            document.getElementById('feed').innerHTML = `<div class="text-center text-green-800 mt-12 font-tech text-xs tracking-widest">FILTER ACTIVE: [ ${txt} ]<br>AWAITING NEW TARGETS...</div>`;
-            showToast("FILTER: " + txt);
-        }
-
-        function togglePause() {
-            isPaused = !isPaused;
-            const btn = document.getElementById('pause-btn');
-            const status = document.getElementById('status-text');
-            if(isPaused) {
-                btn.innerText = "RESUME"; btn.classList.add('paused-mode');
-                status.innerText = "PAUSED"; status.classList.replace('text-green-500', 'text-yellow-500');
-                showToast("STREAM FROZEN");
-            } else {
-                btn.innerText = "PAUSE STREAM"; btn.classList.remove('paused-mode');
-                status.innerText = "ACTIVE"; status.classList.replace('text-yellow-500', 'text-green-500');
-                showToast("STREAM RESUMED");
-            }
-        }
-
-        const PRICE_SOURCES = [
-            { id: 'BINANCE.US', url: 'https://api.binance.us/api/v3/ticker/price?symbol=XRPUSDT', parse: d => parseFloat(d.price) },
-            { id: 'COINGECKO', url: 'https://api.coingecko.com/api/v3/simple/price?ids=ripple&vs_currencies=usd', parse: d => d.ripple.usd },
-            { id: 'KRAKEN', url: 'https://api.kraken.com/0/public/Ticker?pair=XRPUSD', parse: d => parseFloat(d.result.XXRPZUSD.c[0]) }
-        ];
-
-        async function fetchPrice() {
-            for (let source of PRICE_SOURCES) {
-                try {
-                    const c = new AbortController(); setTimeout(() => c.abort(), 2000); 
-                    const res = await fetch(source.url, { signal: c.signal });
-                    const data = await res.json();
-                    const price = source.parse(data);
-                    if (price && !isNaN(price)) { updatePriceDisplay(price, source.id); return; }
-                } catch (e) {}
-            }
-            document.getElementById('price-display').innerText = "ERR";
-        }
-
-        function updatePriceDisplay(price, sourceId) {
-            const el = document.getElementById('price-display');
-            const srcEl = document.getElementById('price-source');
-            const oldPrice = parseFloat(el.innerText.replace('$','')) || 0;
-            el.innerText = `$${price.toFixed(4)}`;
-            srcEl.innerText = `SRC: ${sourceId}`; srcEl.style.color = "#00ff00";
-            el.style.color = price > oldPrice ? '#00ff00' : (price < oldPrice ? '#ff5555' : 'white');
-        }
-
-        function startRedundantPriceEngine() { fetchPrice(); priceInterval = setInterval(fetchPrice, 8000); }
+        // --- WEBSOCKET ---
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && isConnected && (!socket || socket.readyState !== WebSocket.OPEN)) { showToast("RE-ESTABLISHING UPLINK..."); startXRPL(); } });
+        setInterval(() => { if (isConnected && socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({command: "ping"})); }, 15000);
+        setInterval(() => { if (isConnected && (Date.now() - lastHeartbeat > 45000)) { showToast("SIGNAL LOST. RECONNECTING..."); startXRPL(); } }, 5000);
 
         function startXRPL() {
             if(socket) socket.close();
             socket = new WebSocket('wss://s1.ripple.com');
-            socket.onopen = () => {
-                socket.send(JSON.stringify({command:"subscribe", streams:["transactions", "ledger"]}));
-                lastHeartbeat = Date.now();
-            };
-            socket.onmessage = (e) => {
-                lastHeartbeat = Date.now(); // Update heartbeat on ANY message (including ping response)
-                const d = JSON.parse(e.data);
-                if(d.type==='transaction') handleTx(d.transaction, d.meta);
-                if(d.type==='ledgerClosed') document.getElementById('ledger-display').innerText = d.ledger_index;
-            };
-            socket.onclose = (e) => { 
-                console.log("Socket closed");
-                // If connected but closed unexpectedly, try to reconnect silently
-                if(isConnected) {
-                   setTimeout(startXRPL, 1000);
+            socket.onopen = () => { socket.send(JSON.stringify({command:"subscribe", streams:["transactions", "ledger"]})); lastHeartbeat = Date.now(); };
+            socket.onmessage = (e) => { 
+                lastHeartbeat = Date.now(); 
+                const d = JSON.parse(e.data); 
+                if(d.type==='transaction') handleTx(d.transaction, d.meta); 
+                if(d.type==='ledgerClosed') document.getElementById('ledger-display').innerText = d.ledger_index; 
+                // HANDLE ACCOUNT HISTORY RESPONSE
+                if(d.result && d.result.transactions) {
+                    processTrace(d.result.account, d.result.transactions);
                 }
             };
-            socket.onerror = (e) => { console.log("Socket Error"); };
+            socket.onclose = (e) => { if(isConnected) setTimeout(startXRPL, 1000); };
         }
 
-        // --- UTILS: HEX TO STRING ---
-        function hexToASCII(hex) {
-            let str = '';
-            for (let i = 0; i < hex.length; i += 2) {
-                str += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+        function processTrace(centerAccount, txs) {
+            // Find existing or create center
+            let center = graphNodes.find(n => n.id === centerAccount);
+            if(!center) {
+                center = {id: centerAccount, x: 0, y: 0, type: 'CENTER', color: '#ffd700', vx:0, vy:0};
+                graphNodes.push(center);
             }
-            // Remove null bytes
-            return str.replace(/\0/g, '');
+
+            txs.forEach(t => {
+                const tx = t.tx;
+                let other = null;
+                let color = '#00ff00'; // Default green
+                
+                if (tx.Account === centerAccount) {
+                    other = tx.Destination;
+                    color = '#ffaa00'; // Outgoing orange
+                } else {
+                    other = tx.Account;
+                    color = '#00ffff'; // Incoming cyan
+                }
+
+                if(other && !graphNodes.find(n => n.id === other)) {
+                    graphNodes.push({
+                        id: other,
+                        x: center.x + (Math.random()-0.5)*100,
+                        y: center.y + (Math.random()-0.5)*100,
+                        type: 'SAT',
+                        color: color,
+                        vx: 0, vy: 0
+                    });
+                    graphEdges.push({source: centerAccount, target: other});
+                }
+            });
         }
 
-        // --- CLASSIFICATION HELPERS ---
-        function getReportType(amt, known) {
-            if (known) return 'I';
-            if (amt > 5000000) return 'S';
-            return 'R';
-        }
-
-        function getOutflow(fromKnown, toKnown) {
-            if (fromKnown) return 'Y';
-            if (toKnown) return 'N';
-            return 'P2P';
+        function hexToASCII(hex) {
+            let str = ''; for (let i = 0; i < hex.length; i += 2) str += String.fromCharCode(parseInt(hex.substr(i, 2), 16)); return str.replace(/\0/g, '');
         }
 
         function handleTx(tx, meta) {
             if (isPaused) return; 
+            
+            // RLUSD TRACKER
+            if (tx.TransactionType === 'TrustSet') {
+                const currency = tx.LimitAmount.currency;
+                if (currency === 'RLUSD' || currency.startsWith('524C555344')) {
+                    metrics.trustLines++; metrics.rlusdLines++;
+                    const feed = document.getElementById('feed');
+                    const row = document.createElement('div');
+                    row.className = "tx-row";
+                    row.innerHTML = `<div class="row-top text-cyan-400"><div class="flex items-center gap-2"><span class="font-bold text-base text-shadow-lime">RLUSD TRUST LINE</span><span class="tag-pill tag-trust">INFRASTRUCTURE</span></div><div class="text-[10px] font-mono text-gray-500">${new Date().toLocaleTimeString()}</div></div><div class="flex justify-between text-[11px] font-mono text-gray-400"><span>${tx.Account.substring(0,8)}... ACTIVATED</span></div>`;
+                    feed.prepend(row);
+                    if(feed.children.length > 40) feed.lastChild.remove();
+                } else { metrics.trustLines++; }
+                return;
+            }
+
             if (tx.TransactionType !== 'Payment' && tx.TransactionType !== 'OfferCreate') return;
             
-            let isSuccess = false;
-            let result = meta?.TransactionResult || 'unknown';
-            if (result === 'tesSUCCESS') isSuccess = true;
-
+            let isSuccess = meta?.TransactionResult === 'tesSUCCESS';
             const hideFailed = document.getElementById('hide-failed').checked;
             if (hideFailed && !isSuccess) return;
 
-            let type = "TSFR";
-            let color = "text-green-500";
-            let mapColor = "#00ff00";
-            let amt = 0;
-            let isL2 = false;
-            let tokenName = "XRP";
-            let issuer = null; // NEW: Issuer Tracking
-            
-            // Resolve Entities
-            const entFrom = KNOWN_WALLETS[tx.Account];
-            const entTo = KNOWN_WALLETS[tx.Destination];
-            let nameFrom = entFrom ? entFrom.name : null;
-            let nameTo = entTo ? entTo.name : null;
-
-            // Check HVT Status
-            const isHVT = (entFrom && entFrom.type === 'HVT') || (entTo && entTo.type === 'HVT');
-
-            // --- AMOUNT PARSING (XRP vs TOKEN) ---
+            // PARSE
+            let type = "TSFR"; let color = "text-green-500"; let mapColor = "#00ff00"; let amt = 0; let isL2 = false; let tokenName = "XRP"; let issuer = null;
             let delivered = meta?.delivered_amount;
             
             if (typeof tx.Amount === 'object' || (delivered && typeof delivered === 'object')) {
                  isL2 = true;
-                 // Prioritize delivered_amount
                  if (delivered && typeof delivered === 'object') {
-                     amt = parseFloat(delivered.value);
-                     const currency = delivered.currency;
-                     tokenName = currency.length > 3 ? hexToASCII(currency) : currency;
-                     issuer = delivered.issuer; // Capture Issuer
+                     amt = parseFloat(delivered.value); tokenName = delivered.currency.length > 3 ? hexToASCII(delivered.currency) : delivered.currency; issuer = delivered.issuer;
                  } else {
-                     // Fallback
-                     amt = parseFloat(tx.Amount.value);
-                     const currency = tx.Amount.currency;
-                     tokenName = currency.length > 3 ? hexToASCII(currency) : currency;
-                     issuer = tx.Amount.issuer; // Capture Issuer
+                     amt = parseFloat(tx.Amount.value); tokenName = tx.Amount.currency.length > 3 ? hexToASCII(tx.Amount.currency) : tx.Amount.currency; issuer = tx.Amount.issuer;
                  }
-                 type = "L2";
-                 color = "text-cyan-400";
-                 mapColor = "#00ffff";
-                 
+                 type = "L2"; color = "text-cyan-400"; mapColor = "#00ffff";
+                 metrics.uniqueL2.add(tokenName);
             } else if (typeof tx.Amount === 'string') {
-                // XRP
-                if (delivered && typeof delivered === 'string') {
-                    amt = parseInt(delivered) / 1000000;
-                } else {
-                    amt = parseInt(tx.Amount) / 1000000;
-                }
+                if (delivered && typeof delivered === 'string') amt = parseInt(delivered) / 1000000; else amt = parseInt(tx.Amount) / 1000000;
             } else if (tx.TransactionType === 'OfferCreate') {
-                // DEX Order
-                if (typeof tx.TakerPays === 'string') amt = parseInt(tx.TakerPays) / 1000000;
-                else if (typeof tx.TakerGets === 'string') amt = parseInt(tx.TakerGets) / 1000000;
-                type = "DEX";
-                color = "text-purple-400";
-                mapColor = "#aa00ff";
+                let val = 0;
+                if (typeof tx.TakerGets === 'string') val = parseInt(tx.TakerGets) / 1000000;
+                else if (typeof tx.TakerPays === 'string') val = parseInt(tx.TakerPays) / 1000000;
+                amt = val; 
+                if (amt < 1) return;
+                type = "DEX"; color = "text-purple-400"; mapColor = "#aa00ff";
             }
 
-            // COST CALCULATION
-            let costDisplay = "";
-            if (isL2 && tx.SendMax) {
-                if (typeof tx.SendMax === 'string') {
-                    let costXRP = parseInt(tx.SendMax) / 1000000;
-                    costDisplay = `<span class="text-xs text-gray-500 ml-1">(${costXRP} XRP)</span>`;
-                }
-            }
-
-            let tags = "";
-            const isWhale = !isL2 && amt >= 100000; // UPDATED: Lowered whale threshold to 100k
+            const entFrom = KNOWN_WALLETS[tx.Account]; const entTo = KNOWN_WALLETS[tx.Destination];
+            let nameFrom = entFrom ? entFrom.name : null; let nameTo = entTo ? entTo.name : null;
+            const isHVT = (entFrom && entFrom.type === 'HVT') || (entTo && entTo.type === 'HVT');
+            const isWhale = !isL2 && amt >= 100000; 
             const isExchange = nameFrom || nameTo;
 
-            // BOT DETECT LOGIC
-            // Checks for OfferCreate + Perfectly Round Numbers (Divisible by 100,000)
-            const isBot = tx.TransactionType === 'OfferCreate' && (amt % 100000 === 0);
+            // --- SESSION METRICS UPDATE ---
+            metrics.txCount++;
+            let currentPrice = parseFloat(document.getElementById('price-display').innerText.replace('$','')) || 0;
 
-            if (tx.TransactionType === 'OfferCreate') {
-                tags += `<span class="tag-pill tag-dex">DEX ORD</span>`;
-                if(isBot) tags += `<span class="tag-pill tag-bot">[ MM BOT ]</span>`;
+            if (isL2) {
+                metrics.totalL2Vol += amt; // Add raw units
+                metrics.l2TxCount++;
+                blackbox.totalL2 += amt; // BLACKBOX UPDATE
             } else {
-                if (isL2) {
-                    tags += `<span class="tag-pill tag-l2">[ ${tokenName} ]</span>`;
+                metrics.totalXRPVol += amt;
+                metrics.totalUSDVol += (amt * currentPrice);
+                if (amt < 10000) metrics.fishCount++; else if (amt < 100000) metrics.sharkCount++; else metrics.whaleCount++;
+                
+                // BLACKBOX UPDATE
+                blackbox.totalXRP += amt;
+                blackbox.totalUSD += (amt * currentPrice);
+                blackbox.txCount++; 
+                
+                // UPDATE DAILY SNAPSHOT
+                const today = new Date().toISOString().split('T')[0];
+                if (blackbox.dailySnapshots[today]) {
+                    blackbox.dailySnapshots[today].xrp += amt;
+                    blackbox.dailySnapshots[today].usd += (amt * currentPrice);
+                    blackbox.dailySnapshots[today].tx++;
                 } else {
-                    if (nameFrom) { 
-                        type = "WTH"; color = "text-cyan-400"; mapColor="#00ffff";
-                        tags += `<span class="tag-pill tag-wth">WITHDRAW</span>`;
-                    }
-                    else if (nameTo) { 
-                        type = "DEP"; color = "text-yellow-500"; mapColor="#ffaa00";
-                        tags += `<span class="tag-pill tag-dep">DEPOSIT</span>`;
-                    }
-                    else {
-                        tags += `<span class="tag-pill tag-tsfr">TRANSFER</span>`;
-                    }
+                    blackbox.dailySnapshots[today] = { xrp: amt, usd: (amt*currentPrice), tx: 1 };
                 }
             }
 
-            // FILTER LOGIC
-            if (activeFilter === 'small') {
-                if (isL2) return; 
-                if (amt >= 100000) return; // Keep < 100k
-            }
-            if (activeFilter === 'whale') {
-                if (isL2) return;
-                if (amt < 100000) return; // Keep >= 100k
-            }
-            if (activeFilter === 'exchange') {
-                if (isL2) return;
-                if (!isExchange) return;
-            }
-            if (activeFilter === 'l2' && !isL2) return;
-            
-            const now = Date.now();
-            if (isWhale && isSuccess && !isBot && (now - lastAlertTime > 60000)) {
-                triggerWhaleAlert(); lastAlertTime = now;
-                playAlert('WHALE');
-            }
-
-            // --- HVT LOGIC ---
-            if (isHVT) {
-                saveCase({hash:tx.hash, amt:amt, from:nameFrom||tx.Account, to:nameTo||tx.Destination, type:'HVT'});
-                addHVTRow(tx.hash, amt, nameFrom||tx.Account, nameTo||tx.Destination);
-                triggerHVTAlert();
-                playAlert('HVT');
-                color = "text-yellow-300";
-                tags += `<span class="tag-pill tag-hvt">HVT TARGET</span>`;
-            }
-
-            let rowClass = "tx-row";
-            if (!isSuccess) {
-                color = "text-gray-500"; rowClass += " tx-failed"; tags = `<span class="tag-pill tag-fail">FAILED</span>`; mapColor = "#333333";
-            }
-
-            if (mapActive && isSuccess) {
-                // CHANGED: Use precise number formatting instead of flooring
-                let bubbleLabel = isL2 ? tokenName : amt.toLocaleString(undefined, {maximumFractionDigits: 0});
-                let bubbleVal = amt;
-                // PASS ISSUER TO BUBBLE
-                bubbles.push(new Bubble(bubbleLabel, bubbleVal, mapColor, tx.hash, nameFrom||tx.Account, nameTo||tx.Destination, type, issuer));
-            }
-
-            if(watchlist.includes(tx.Account) || watchlist.includes(tx.Destination)) {
-                color = "text-red-500 font-bold"; showToast("TARGET DETECTED"); mapColor = "#ff0000";
-                playAlert('HVT');
-            }
-
-            // REPORT LOGIC
+            // Update Report Tab (Background Process & Persistence)
             if (isSuccess && (amt >= 100000 || isHVT) && !isL2) {
-                const repType = getReportType(amt, isExchange);
-                const outflow = getOutflow(nameFrom, nameTo);
-                addReportRow(tx.hash, amt, nameFrom || tx.Account, repType, outflow);
+                 const repTx = {
+                     hash: tx.hash,
+                     amt: amt,
+                     wallet: nameFrom || tx.Account,
+                     type: getReportType(amt, isExchange),
+                     out: getOutflow(nameFrom, nameTo),
+                     time: new Date().toISOString()
+                 };
+                 
+                 // Update visual list
+                 renderReportRow(repTx);
+                 
+                 // Update Blackbox persistent list
+                 if (!blackbox.whaleHits) blackbox.whaleHits = [];
+                 blackbox.whaleHits.unshift(repTx);
+                 if (blackbox.whaleHits.length > 100) blackbox.whaleHits.pop(); // Keep last 100
+                 saveBlackbox(); // Trigger save immediately for whale events
+            }
+            
+            // Update HVT Tab & Blackbox Logs
+            if (isHVT) { 
+                saveCase({hash:tx.hash, amt:amt, from:nameFrom||tx.Account, to:nameTo||tx.Destination, type:'HVT'}); 
+                addHVTRow(tx.hash, amt, nameFrom||tx.Account, nameTo||tx.Destination); 
+                triggerHVTAlert(); 
+                color = "text-yellow-300"; 
+
+                blackbox.hvtHits.unshift({
+                    date: new Date().toISOString(),
+                    hash: tx.hash,
+                    amt: amt,
+                    desc: `${from} -> ${to}`
+                });
+                if(blackbox.hvtHits.length > 50) blackbox.hvtHits.pop();
             }
 
+            // Alerts (Background Process)
+            if (isWhale && isSuccess) { triggerWhaleAlert(); }
+
+            // --- VISUAL FILTERS ---
+            if (activeFilter === 'small' && (isL2 || amt >= 100000)) return;
+            if (activeFilter === 'whale' && (isL2 || amt < 100000)) return;
+            if (activeFilter === 'exchange' && (!isL2 && !isExchange)) return;
+            if (activeFilter === 'l2' && !isL2) return;
+
+            if(!isSuccess) { color = "text-gray-500"; mapColor = "#333333"; }
             const dispFrom = nameFrom ? `<span class="entity-name">${nameFrom}</span>` : tx.Account ? tx.Account.substring(0,4)+'...' : '???';
             const dispTo = nameTo ? `<span class="entity-name">${nameTo}</span>` : tx.Destination ? tx.Destination.substring(0,4)+'...' : 'DEX';
-
-            const feed = document.getElementById('feed');
-            if (feed.innerText.includes("AWAITING") || feed.innerText.includes("FILTER")) feed.innerHTML = "";
-
-            const row = document.createElement('div');
-            row.className = rowClass;
-            let displayAmt = isL2 ? `${amt.toLocaleString()} ${tokenName} ${costDisplay}` : `${amt.toLocaleString()} XRP`;
             
-            row.innerHTML = `
-                <div class="row-top ${color}">
-                    <div class="flex items-center gap-2">
-                        <span class="font-bold text-base text-white text-shadow-lime">${displayAmt}</span>
-                        ${tags}
-                    </div>
-                    <div class="text-[10px] font-mono text-gray-500">${new Date().toLocaleTimeString()}</div>
-                </div>
-                <div class="flex justify-between text-[11px] font-mono text-gray-400"><span>${dispFrom} ➔ ${dispTo}</span></div>
-                <div class="btn-row">
-                    <button class="action-btn" onclick="openScan('${tx.hash}')">SCAN</button>
-                    <button class="action-btn" onclick="copyHash('${tx.hash}')">COPY</button>
-                    <button class="action-btn" onclick='saveCase(${JSON.stringify({hash:tx.hash, amt, from:dispFrom, to:dispTo})})'>SAVE</button>
-                </div>`;
+            const feed = document.getElementById('feed');
+            if (feed.innerText.includes("AWAITING")) feed.innerHTML = "";
+            
+            const row = document.createElement('div'); row.className = "tx-row" + (!isSuccess ? " tx-failed" : "");
+            // *** FIX: SHOW FULL DECIMALS IN FEED ***
+            let displayAmt = isL2 ? `${amt.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:6})} ${tokenName}` : `${amt.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:6})} XRP`;
+            
+            // ADDED TRACE BUTTON TO LIVE FEED
+            row.innerHTML = `<div class="row-top ${color}"><div class="flex items-center gap-2"><span class="font-bold text-base text-shadow-lime">${displayAmt}</span>${isHVT ? '<span class="tag-pill tag-hvt">HVT</span>' : ''}${isL2 ? `<span class="tag-pill tag-l2">${tokenName}</span>` : ''}${!isSuccess ? '<span class="tag-pill tag-fail">FAIL</span>' : ''}</div><div class="text-[10px] font-mono text-gray-500">${new Date().toLocaleTimeString()}</div></div><div class="flex justify-between text-[11px] font-mono text-gray-400"><span>${dispFrom} ➔ ${dispTo}</span></div><div class="btn-row"><button class="action-btn trace-btn" onclick="traceWallet('${tx.Account}')">TRACE</button><button class="action-btn" onclick="openScan('${tx.hash}')">SCAN</button><button class="action-btn" onclick='saveCase(${JSON.stringify({hash:tx.hash, amt, from:dispFrom, to:dispTo})})'>SAVE</button></div>`;
             
             feed.prepend(row);
             if(feed.children.length > 40) feed.lastChild.remove();
+
+            if (mapActive && isSuccess) bubbles.push(new Bubble(isL2 ? tokenName : amt.toLocaleString(undefined, {maximumFractionDigits:0}), amt, mapColor, tx.hash, nameFrom||tx.Account, nameTo||tx.Destination, type, issuer));
         }
 
-        // --- HVT FUNCTIONS ---
-        function addHVTRow(hash, amt, from, to) {
-            const list = document.getElementById('hvt-list');
-            if (list.innerText.includes("MONITORING")) list.innerHTML = "";
-            const row = document.createElement('div');
-            row.className = "p-3 border-l-4 border-yellow-400 bg-yellow-900/20 mb-2";
-            row.innerHTML = `
-                <div class="text-yellow-400 font-bold text-sm">⚠️ HVT INTERCEPT</div>
-                <div class="text-white font-mono">${amt.toLocaleString()} XRP</div>
-                <div class="text-[10px] text-gray-400 mt-1">${from} -> ${to}</div>
-                <button onclick="openScan('${hash}')" class="mt-2 text-[10px] border border-yellow-600 px-2 text-yellow-500">SCAN</button>
-            `;
-            list.prepend(row);
+        // --- UI FUNCTIONS ---
+        function toggleAlerts() {
+            alertsEnabled = !alertsEnabled;
+            const btn = document.getElementById('alert-toggle');
+            if(alertsEnabled) {
+                btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>`;
+                btn.classList.add('tac-active');
+            } else {
+                btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><line x1="2" y1="2" x2="22" y2="22"></line></svg>`;
+                btn.classList.remove('tac-active');
+            }
         }
 
-        function triggerWhaleAlert() {
-            document.getElementById('alert-layer').classList.add('whale-alert-anim');
-            setTimeout(() => document.getElementById('alert-layer').classList.remove('whale-alert-anim'), 3000);
+        function toggleMute() {
+            if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if(audioCtx.state === 'suspended') audioCtx.resume();
+            audioEnabled = !audioEnabled;
+            const btn = document.getElementById('mute-btn');
+            if(audioEnabled) {
+                btn.innerHTML = `<svg id="icon-vol" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
+                btn.classList.add('tac-active');
+                playTone(600, 0.1, "sine");
+            } else {
+                btn.innerHTML = `<svg id="icon-vol" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`;
+                btn.classList.remove('tac-active');
+            }
         }
-
-        function triggerHVTAlert() {
-            document.getElementById('alert-layer').classList.add('hvt-alert-anim');
-            showToast("⚠️ HVT ACTIVITY CONFIRMED ⚠️");
-            setTimeout(() => document.getElementById('alert-layer').classList.remove('hvt-alert-anim'), 3000);
-        }
-
-        function showToast(msg) {
-            const t = document.getElementById('toast');
-            t.innerText = msg; t.classList.add('toast-show');
-            setTimeout(() => t.classList.remove('toast-show'), 2000);
-        }
-        function openScan(h) { window.open(`https://xrpscan.com/tx/${h}`, '_blank'); }
+        function playTone(freq, duration, type="square") { if(!audioEnabled || !audioCtx) return; const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain(); osc.type = type; osc.frequency.setValueAtTime(freq, audioCtx.currentTime); gain.gain.setValueAtTime(0.1, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration); osc.connect(gain); gain.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime + duration); }
+        function playAlert(type) { if(!alertsEnabled) return; if (type === 'HVT') { playTone(1200, 0.1); setTimeout(() => playTone(1200, 0.1), 150); setTimeout(() => playTone(1200, 0.2), 300); } else { playTone(400, 0.2, "sine"); } }
         
-        function copyHash(h) {
-            if (!navigator.clipboard) { fallbackCopyTextToClipboard(h); return; }
-            navigator.clipboard.writeText(h).then(function() { showToast("HASH COPIED"); }, function(err) { fallbackCopyTextToClipboard(h); });
-        }
-
-        function fallbackCopyTextToClipboard(text) {
-            var textArea = document.createElement("textarea");
-            textArea.value = text;
-            textArea.style.top = "0"; textArea.style.left = "0"; textArea.style.position = "fixed";
-            document.body.appendChild(textArea); textArea.focus(); textArea.select();
-            try { var successful = document.execCommand('copy'); if(successful) showToast("HASH COPIED"); else showToast("COPY FAILED"); } catch (err) { showToast("COPY FAILED"); }
-            document.body.removeChild(textArea);
-        }
-
-        function switchView(id) {
-            document.querySelectorAll('.view-panel').forEach(e => e.classList.remove('active'));
-            document.getElementById('view-'+id).classList.add('active');
-            document.querySelectorAll('.tab-btn').forEach(e => e.classList.remove('active'));
-            event.target.classList.add('active');
+        // MODIFIED OPEN MODAL TO WORK FOR BOTH FEED AND GRAPH NODES
+        function openModal(b) { 
+            // Generic fill for transaction
+            document.getElementById('modal-title').innerText = "INTEL: " + (b.type || 'TX');
+            document.getElementById('mod-amt').innerText = typeof b.val === 'number' ? b.val.toLocaleString() + " " + (b.label?.includes(' ') ? '' : 'XRP') : b.label; 
+            document.getElementById('mod-amt').style.color = b.color || '#00ff00'; 
+            document.getElementById('mod-type').innerText = b.type || 'TX'; 
             
-            // Map Logic
-            if(id === 'map') { mapActive = true; resizeMap(); loopMap(); } else { mapActive = false; }
+            // If it's a GRAPH NODE, adjust content
+            if (b.nodeType === 'GRAPH_NODE') {
+                document.getElementById('modal-title').innerText = "TARGET NODE";
+                document.getElementById('mod-type').innerText = "WALLET ENTITY";
+                document.getElementById('mod-from').innerText = b.id;
+                document.getElementById('mod-to').innerText = "NET LINKED";
+                document.getElementById('mod-trace-btn').innerText = "EXPAND NET";
+                document.getElementById('mod-trace-btn').onclick = () => traceWallet(b.id);
+                document.getElementById('mod-scan-btn').onclick = () => openScan('account/'+b.id); // Scan Account
+                document.getElementById('mod-copy-wallet').onclick = () => copyHash(b.id);
+                // Hide irrelevant buttons for nodes
+                document.getElementById('mod-copy-hash').style.display = 'none';
+                document.getElementById('mod-save-btn').style.display = 'none';
+            } else {
+                // Regular TX
+                document.getElementById('mod-from').innerText = b.from; 
+                document.getElementById('mod-to').innerText = b.to; 
+                document.getElementById('mod-trace-btn').innerText = "TRACE";
+                document.getElementById('mod-trace-btn').onclick = () => traceWallet(b.from); 
+                document.getElementById('mod-scan-btn').onclick = () => openScan(b.hash); 
+                document.getElementById('mod-copy-hash').style.display = 'block';
+                document.getElementById('mod-copy-hash').onclick = () => copyHash(b.hash); 
+                document.getElementById('mod-copy-wallet').onclick = () => copyHash(b.from); 
+                document.getElementById('mod-save-btn').style.display = 'block';
+                document.getElementById('mod-save-btn').onclick = () => { saveCase({hash:b.hash, amt:b.val, from:b.from, to:b.to}); closeModal(); showToast("EVIDENCE SECURED"); }; 
+            }
+            document.getElementById('bubble-modal').classList.add('modal-active'); 
         }
-        function addWatch() {
-            const v = document.getElementById('watch-input').value;
-            if(v) { watchlist.push(v); renderWatch(); document.getElementById('watch-input').value=''; showToast("TRACKING ACTIVE"); }
+
+        // GRAPH NODE CLICK INTERCEPTOR
+        graphCanvas.addEventListener('mousedown', (e) => {
+            const rect = graphCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            // Adjust click coordinates for zoom/pan
+            const transformedX = (x - (graphCanvas.width/2) - graphPan.x) / graphZoom;
+            const transformedY = (y - (graphCanvas.height/2) - graphPan.y) / graphZoom;
+
+            for(let n of graphNodes) {
+                // Distance check on transformed coords
+                let dist = Math.hypot(n.x - transformedX, n.y - transformedY);
+                // Hit radius depends on visual size but let's be generous
+                if(dist < 10) { 
+                    openModal({
+                        nodeType: 'GRAPH_NODE',
+                        id: n.id,
+                        label: 'TARGET',
+                        val: '---',
+                        color: n.color
+                    });
+                    break;
+                }
+            }
+        });
+
+        function closeModal() { document.getElementById('bubble-modal').classList.remove('modal-active'); }
+        function setFilter(mode, btn) { activeFilter = mode; document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); document.getElementById('feed').innerHTML = ''; showToast("FILTER: " + mode.toUpperCase()); }
+        function showToast(msg) { const t = document.getElementById('toast'); t.innerText = msg; t.classList.add('toast-show'); setTimeout(() => t.classList.remove('toast-show'), 2000); }
+        function openScan(h) { 
+            // Check if full URL or ID
+            if(h.includes('/')) window.open(`https://xrpscan.com/${h}`, '_blank');
+            else window.open(`https://xrpscan.com/tx/${h}`, '_blank'); 
         }
-        function renderWatch() {
-            document.getElementById('watch-list').innerHTML = watchlist.map((w,i) => `
-                <div class="flex justify-between p-3 bg-green-900/20 border-b border-green-900">
-                    <span class="font-mono text-xs text-green-300 truncate w-48">${w}</span>
-                    <button onclick="watchlist.splice(${i},1);renderWatch()" class="text-red-500 font-bold">X</button>
-                </div>`).join('');
-        }
-        function saveCase(d) { if(!cases.some(c=>c.hash===d.hash)) { cases.push(d); renderCases(); showToast("EVIDENCE SECURED"); } }
-        function renderCases() {
-            document.getElementById('case-list').innerHTML = cases.map(c => `
-                <div class="p-3 border-l-2 border-yellow-500 bg-yellow-900/10 mb-1">
-                    <div class="flex justify-between font-bold text-yellow-400 text-xs"><span>${(c.amt||0).toLocaleString()} ${c.token || 'XRP'}</span><span class="text-[10px] text-gray-500 font-mono">${(c.hash||'').substring(0,8)}...</span></div>
-                    <div class="text-[10px] text-gray-400 mt-1">${c.from} -> ${c.to}</div>
-                </div>`).join('');
-        }
-        function clearCases() { cases=[]; renderCases(); showToast("LOCKER CLEARED"); }
-        function exportJSON() {
-            const a = document.createElement('a');
-            a.href = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(cases));
-            a.download = "sentinel_cases.json";
-            a.click();
-        }
-        // REPORT FUNCTIONS
-        function addReportRow(hash, amt, wallet, type, out) {
-            const list = document.getElementById('report-list');
-            if (list.innerText.includes("WAITING")) list.innerHTML = "";
-            const row = document.createElement('div');
-            row.className = "report-row";
-            const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
-            const walletDisp = wallet.startsWith('r') ? wallet.substring(0,4)+'..'+wallet.substring(wallet.length-3) : wallet.substring(0,8);
-            const outColor = out === 'Y' ? 'color:#ffaa00' : (out === 'N' ? 'color:#00ffff' : 'color:#888');
-            // CHANGED: Removed rounding logic (toFixed/k) and used full number formatting
-            row.innerHTML = `
-                <div style="width: 25%" class="rep-val-green">${amt.toLocaleString()}</div>
-                <div style="width: 25%" class="rep-val-white">${walletDisp}</div>
-                <div class="rep-col-time rep-val-dim">${time}</div>
-                <div class="rep-col-type text-white font-bold">${type}</div>
-                <div class="rep-col-out font-bold" style="${outColor}">${out}</div>
-            `;
-            // Fixed: passed val: amt instead of amt: amt
-            row.onclick = () => openModal({val: amt, label: (amt/1000).toFixed(1)+'k', color: '#00ff00', type: `REP-${type}`, from: wallet, to: 'LINKED', hash: hash});
-            list.prepend(row);
-            if (list.children.length > 50) list.lastChild.remove();
-        }
-        
-        // Start 3D background immediately so it's ready behind video
+        function saveCase(d) { if(!cases.some(c=>c.hash===d.hash)) { cases.push(d); renderCases(); saveBlackbox(); showToast("EVIDENCE SECURED"); } }
+        function renderCases() { document.getElementById('case-list').innerHTML = cases.map(c => `<div class="p-3 border-l-2 border-yellow-500 bg-yellow-900/10 mb-1"><div class="flex justify-between font-bold text-yellow-400 text-xs"><span>${(c.amt||0).toLocaleString()} ${c.token || 'XRP'}</span><span class="text-[10px] text-gray-500 font-mono">${(c.hash||'').substring(0,8)}...</span></div></div>`).join(''); }
+        function clearCases() { cases=[]; renderCases(); saveBlackbox(); showToast("LOCKER CLEARED"); }
+        function exportJSON() { const a = document.createElement('a'); a.href = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(blackbox)); a.download = `sentinel_blackbox_${new Date().toISOString().slice(0,10)}.json`; a.click(); }
+        function renderReportRow(tx) { const list = document.getElementById('report-list'); const row = document.createElement('div'); row.className = "report-row"; row.innerHTML = `<div style="width: 25%" class="rep-val-green">${tx.amt.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:6})}</div><div style="width: 25%" class="rep-val-white">${tx.wallet.startsWith('r')?tx.wallet.substring(0,8):tx.wallet}</div><div class="rep-col-time rep-val-dim">${new Date(tx.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div><div class="rep-col-type text-white font-bold">${tx.type}</div><div class="rep-col-out font-bold" style="${tx.out==='EXCH-OUT'?'color:#ffaa00':(tx.out==='EXCH-IN'?'color:#00ffff':'color:#888')}">${tx.out}</div>`; row.onclick = () => openModal({val: tx.amt, label: (tx.amt/1000).toFixed(1)+'k', color: '#00ff00', type: `REP-${tx.type}`, from: tx.wallet, to: 'LINKED', hash: tx.hash}); list.prepend(row); if (list.children.length > 100) list.lastChild.remove(); }
+        function addReportRow(hash, amt, wallet, type, out) { /* Placeholder for backward compat if needed */ }
+        function getReportType(amt, known) { if(known) return 'I'; if(amt>5000000) return 'S'; return 'R'; }
+        function getOutflow(fromKnown, toKnown) { if(fromKnown && !toKnown) return 'EXCH-OUT'; if(!fromKnown && toKnown) return 'EXCH-IN'; if(fromKnown && toKnown) return 'INTER-EXCH'; return 'P2P'; }
+        function addHVTRow(hash, amt, from, to) { const list = document.getElementById('hvt-list'); if (list.innerText.includes("MONITORING")) list.innerHTML = ""; const row = document.createElement('div'); row.className = "p-3 border-l-4 border-yellow-400 bg-yellow-900/20 mb-2"; row.innerHTML = `<div class="text-yellow-400 font-bold text-sm">⚠️ HVT INTERCEPT</div><div class="text-white font-mono">${amt.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:6})} XRP</div><div class="text-[10px] text-gray-400 mt-1">${from} -> ${to}</div>`; list.prepend(row); }
+        function triggerWhaleAlert() { if(!alertsEnabled) return; document.getElementById('alert-layer').classList.add('whale-alert-anim'); setTimeout(() => document.getElementById('alert-layer').classList.remove('whale-alert-anim'), 3000); }
+        function triggerHVTAlert() { if(!alertsEnabled) return; document.getElementById('alert-layer').classList.add('hvt-alert-anim'); showToast("HVT CONFIRMED"); setTimeout(() => document.getElementById('alert-layer').classList.remove('hvt-alert-anim'), 3000); }
+        function copyHash(h) { if (!navigator.clipboard) { fallbackCopy(h); return; } navigator.clipboard.writeText(h).then(function() { showToast("HASH COPIED"); }, function(err) { fallbackCopy(h); }); }
+        function fallbackCopy(text) { var textArea = document.createElement("textarea"); textArea.value = text; textArea.style.position = "fixed"; document.body.appendChild(textArea); textArea.focus(); textArea.select(); try { document.execCommand('copy'); showToast("HASH COPIED"); } catch (err) { showToast("COPY FAILED"); } document.body.removeChild(textArea); }
+        function openIntelDashboard() { const now = new Date().toISOString(); const hvtContainer = document.getElementById('hvt-list'); let hvtLog = (hvtContainer && !hvtContainer.innerText.includes("MONITORING")) ? hvtContainer.innerText.substring(0, 800) : "NO HVT ACTIVITY."; const reportContainer = document.getElementById('report-list'); let whaleLog = reportContainer ? Array.from(reportContainer.children).slice(0, 15).map(r => r.innerText.replace(/\n/g, ' | ')).join('\n') : "NO DATA."; const finalReport = `*** SHADOW SENTINEL INTEL ***\nDATE: ${now}\nBLACK BOX GENESIS: ${blackbox.genesis || now}\n\n=== [ CURRENT SESSION (24H) ] ===\n> L1 XRP VOLUME:    ${Math.floor(metrics.totalXRPVol).toLocaleString()} XRP\n> EST. USD VALUE:   $${Math.floor(metrics.totalUSDVol).toLocaleString()}\n> L2 RAW VOLUME:    ${Math.floor(metrics.totalL2Vol).toLocaleString()} Units\n\n=== [ LIFETIME BLACK BOX ] ===\n> TOTAL OBSERVED XRP: ${Math.floor(blackbox.totalXRP).toLocaleString()}\n> TOTAL OBSERVED USD: $${Math.floor(blackbox.totalUSD).toLocaleString()}\n> TOTAL TRANSACTIONS: ${blackbox.txCount}\n\n[EVIDENCE LOCKER]\n${cases.map(c => `> ${c.type||'ANOMALY'} | ${(c.amt||0).toLocaleString()} | ${c.from}->${c.to}`).join('\n') || "NONE"}\n\n[WHALE FLOW (Top 15 - Session)]\n${whaleLog}`; document.getElementById('intel-content').value = finalReport; document.getElementById('intel-dashboard').classList.add('active'); }
+        function closeIntel() { document.getElementById('intel-dashboard').classList.remove('active'); }
+        function copyIntelText() { const t = document.getElementById('intel-content'); t.select(); document.execCommand('copy'); showToast("REPORT COPIED"); }
+        function shareIntel() { const text = document.getElementById('intel-content').value; if (navigator.share) { navigator.share({ title: 'Shadow Intel', text: text }).catch(err => { if (err.name !== 'AbortError') console.error('Share failed:', err); }); } else { copyIntelText(); showToast("SHARE API UNAVAILABLE. COPIED."); } }
         init3D();
+        const PRICE_SOURCES = [{url:'https://api.binance.us/api/v3/ticker/price?symbol=XRPUSDT',parse:d=>parseFloat(d.price)}];
+        async function fetchPrice() { try { const res = await fetch(PRICE_SOURCES[0].url); const d = await res.json(); const p = PRICE_SOURCES[0].parse(d); document.getElementById('price-display').innerText = `$${p.toFixed(4)}`; document.getElementById('price-display').style.color=p>parseFloat(document.getElementById('price-display').innerText.replace('$','')||0)?'#00ff00':'#ff5555'; } catch(e){} }
+        function startRedundantPriceEngine() { fetchPrice(); setInterval(fetchPrice, 8000); }
+        function switchView(id) { document.querySelectorAll('.view-panel').forEach(e=>e.classList.remove('active')); document.getElementById('view-'+id).classList.add('active'); document.querySelectorAll('.tab-btn').forEach(e=>e.classList.remove('active')); event.currentTarget.classList.add('active'); if(id==='map') { mapActive=true; resizeMap(); loopMap(); } else { mapActive=false; } if(id==='graph') { graphActive=true; resizeGraph(); updateGraph(); } else { graphActive=false; } }
+        function addWatch() { const v=document.getElementById('watch-input').value; if(v){watchlist.push(v);renderWatch();document.getElementById('watch-input').value='';showToast("TRACKING");} }
+        function renderWatch() { document.getElementById('watch-list').innerHTML=watchlist.map((w,i)=>`<div class="flex justify-between p-3 bg-green-900/20 border-b border-green-900"><span class="font-mono text-xs text-green-300 truncate w-48">${w}</span><button onclick="watchlist.splice(${i},1);renderWatch()" class="text-red-500">X</button></div>`).join(''); }
+        function togglePause() { isPaused = !isPaused; const btn = document.getElementById('pause-btn'); const status = document.getElementById('status-text'); if(isPaused) { btn.innerText = "RESUME"; btn.classList.add('paused-mode'); status.innerText = "PAUSED"; status.classList.replace('text-green-500', 'text-yellow-500'); showToast("STREAM FROZEN"); } else { btn.innerText = "PAUSE STREAM"; btn.classList.remove('paused-mode'); status.innerText = "ACTIVE"; status.classList.replace('text-yellow-500', 'text-green-500'); showToast("STREAM RESUMED"); } }
     </script>
 </body>
 </html>
