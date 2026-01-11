@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v13.11 [MANUAL UPDATE]</title>
+    <title>XRPMAN SHADOW WATCH // v14.3 [DISTORTION FIX]</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -257,7 +257,18 @@
         #report-btn:hover { background: var(--lime-main); color: black; }
 
         /* BOTTOM DECK */
-        #hud-bottom { position: absolute; bottom: 0; left: 0; right: 0; height: 55vh; z-index: 30; display: flex; flex-direction: column; pointer-events: auto; }
+        #hud-bottom { 
+            position: absolute; bottom: 0; left: 0; right: 0; height: 55vh; z-index: 30; 
+            display: flex; flex-direction: column; pointer-events: auto; 
+            transition: height 0.3s ease-in-out, top 0.3s ease-in-out;
+        }
+        /* FULLSCREEN TACTICAL MODE */
+        #hud-bottom.hud-maximized {
+            height: 100vh;
+            top: 0;
+            z-index: 50;
+        }
+
         #command-deck { flex-grow: 1; background: var(--glass-bg); border-top: 2px solid var(--lime-dim); backdrop-filter: blur(12px); display: flex; flex-direction: column; border-radius: 16px 16px 0 0; box-shadow: 0 -10px 40px rgba(0,0,0,0.8); overflow: hidden; }
         
         /* ICON TAB BAR */
@@ -312,25 +323,36 @@
         .report-row:hover { background: rgba(0, 255, 0, 0.1); }
         .rep-val-green { color: #00ff00; font-weight: bold; font-size: 12px; } .rep-val-white { color: #ffffff; opacity: 0.8; } .rep-val-dim { color: #666666; }
 
-        /* GRAPH CANVAS & ZOOM CONTROLS */
-        #graph-canvas { width: 100%; height: 100%; display: block; background: #000500; cursor: crosshair; touch-action: none; }
-        .graph-controls { position: absolute; bottom: 35px; left: 10px; z-index: 50; display: flex; gap: 5px; align-items: center; } /* MOVED UP */
+        /* GRAPH AND MAP CANVAS & ZOOM CONTROLS */
+        #graph-canvas, #map-canvas { width: 100%; height: 100%; display: block; background: #000500; cursor: crosshair; touch-action: none; }
+        .graph-controls { position: absolute; bottom: 35px; left: 10px; z-index: 50; display: flex; gap: 5px; align-items: center; } 
         .g-btn { background: rgba(0, 20, 0, 0.8); border: 1px solid #335533; color: #00ff00; font-size: 14px; width: 28px; height: 28px; display: flex; justify-content: center; align-items: center; cursor: pointer; border-radius: 4px; font-weight: bold; }
         .g-btn:active { background: #00ff00; color: black; }
         .g-reset { font-size: 10px; width: auto; padding: 0 8px; }
 
-        /* COMPACT LEGEND */
+        /* COMPACT LEGEND (REWORKED) */
         #map-legend {
-            position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
-            display: flex; gap: 4px; flex-wrap: nowrap; pointer-events: none;
-            z-index: 40; white-space: nowrap;
+            position: absolute; bottom: 15px; right: 15px; 
+            display: flex; flex-direction: column; gap: 2px; pointer-events: none;
+            z-index: 40; white-space: nowrap; opacity: 0.8;
+            align-items: flex-end;
         }
         .legend-item {
             font-size: 8px; padding: 2px 4px; border-radius: 3px;
             font-weight: bold; font-family: 'Share Tech Mono';
-            background: rgba(0, 10, 0, 0.6); border: 1px solid #333;
-            backdrop-filter: blur(2px);
+            background: rgba(0, 0, 0, 0.4); border-left: 3px solid;
+            backdrop-filter: blur(2px); width: fit-content;
         }
+        
+        /* FULLSCREEN TOGGLE BUTTON */
+        .view-toggle-btn {
+            position: absolute; top: 10px; right: 10px; z-index: 60;
+            background: rgba(0,0,0,0.6); border: 1px solid var(--lime-main); color: var(--lime-main);
+            width: 30px; height: 30px; border-radius: 4px;
+            display: flex; justify-content: center; align-items: center;
+            cursor: pointer; font-weight: bold; font-family: 'Orbitron';
+        }
+        .view-toggle-btn:hover { background: var(--lime-main); color: black; }
 
         /* MAP FILTER OVERLAY */
         #map-filter-overlay {
@@ -564,12 +586,13 @@
 
             <!-- GRAPH TAB -->
             <div id="view-graph" class="view-panel">
+                <button class="view-toggle-btn" onclick="toggleMaximize()">[ ]</button>
                 <canvas id="graph-canvas"></canvas>
                 <div class="graph-controls">
                     <button class="g-btn" onclick="adjustZoom(-0.2)">-</button>
                     <button class="g-btn" onclick="adjustZoom(0.2)">+</button>
                     <button class="g-btn g-reset" onclick="resetGraphView()">RESET</button>
-                    <div class="text-[10px] text-gray-500 flex items-center ml-2">DRAG TO PAN | SCROLL TO ZOOM</div>
+                    <div class="text-[10px] text-gray-500 flex items-center ml-2">PINCH/SCROLL ZOOM | DOUBLE TAP</div>
                 </div>
             </div>
 
@@ -585,6 +608,7 @@
 
             <!-- MAP TAB -->
             <div id="view-map" class="view-panel">
+                <button class="view-toggle-btn" onclick="toggleMaximize()">[ ]</button>
                 <div id="map-filter-overlay">
                     <button class="map-filter-btn active" onclick="setMapFilter('all', this)">ALL</button>
                     <button class="map-filter-btn" onclick="setMapFilter('small', this)">&lt; 100K</button>
@@ -592,12 +616,15 @@
                     <button class="map-filter-btn" onclick="setMapFilter('l2', this)">L2</button>
                 </div>
                 <canvas id="map-canvas"></canvas>
-                <!-- COMPACT LEGEND AT BOTTOM -->
+                <!-- COMPACT LEGEND AT BOTTOM RIGHT -->
                 <div id="map-legend">
                     <div class="legend-item" style="color:#00ff00; border-color:#005500;">TSFR</div>
                     <div class="legend-item" style="color:#ffaa00; border-color:#663300;">DEP</div>
                     <div class="legend-item" style="color:#ffd700; border-color:#555500;">HVT</div>
                     <div class="legend-item" style="color:#00ffff; border-color:#005566;">L2</div>
+                </div>
+                <div class="absolute bottom-2 left-2 text-[10px] text-gray-500 pointer-events-none opacity-50">
+                    WHEEL/PINCH TO ZOOM
                 </div>
             </div>
 
@@ -655,6 +682,7 @@
         let audioCtx;
         let audioEnabled = false;
         let alertsEnabled = true;
+        let isMaximized = false;
 
         // SESSION TIMER VARS
         let sessionStart = Date.now();
@@ -753,6 +781,9 @@
         let isDragging = false;
         let lastMouse = {x:0, y:0};
         
+        // Touch State for Graph
+        let graphTouchDist = 0;
+        
         function resizeGraph() {
             if(!graphCanvas.offsetParent) return;
             graphCanvas.width = graphCanvas.offsetWidth;
@@ -775,8 +806,24 @@
             if(graphZoom < 0.2) graphZoom = 0.2;
             if(graphZoom > 5) graphZoom = 5;
         }
+        
+        function toggleMaximize() {
+            const hud = document.getElementById('hud-bottom');
+            hud.classList.toggle('hud-maximized');
+            isMaximized = !isMaximized;
+            
+            // Force redraw immediately
+            if(mapActive) { setTimeout(resizeMap, 50); }
+            if(graphActive) { setTimeout(resizeGraph, 50); }
+        }
+        
+        // Listen for standard window resize events too
+        window.addEventListener('resize', () => {
+            if(mapActive) resizeMap();
+            if(graphActive) resizeGraph();
+        });
 
-        // Mouse/Touch Events for Pan/Zoom
+        // Mouse/Touch Events for Graph
         graphCanvas.addEventListener('mousedown', e => { isDragging = true; lastMouse = {x: e.clientX, y: e.clientY}; });
         graphCanvas.addEventListener('mouseup', () => isDragging = false);
         graphCanvas.addEventListener('mouseout', () => isDragging = false);
@@ -790,6 +837,35 @@
             e.preventDefault();
             adjustZoom(e.deltaY > 0 ? -0.1 : 0.1);
         }, {passive: false});
+
+        // Touch Support (Graph)
+        graphCanvas.addEventListener('touchstart', e => {
+            if (e.touches.length === 1) {
+                isDragging = true;
+                lastMouse = {x: e.touches[0].clientX, y: e.touches[0].clientY};
+            } else if (e.touches.length === 2) {
+                // Pinch start
+                isDragging = false;
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                graphTouchDist = Math.hypot(dx, dy);
+            }
+        });
+        graphCanvas.addEventListener('touchmove', e => {
+            e.preventDefault();
+            if (e.touches.length === 1 && isDragging) {
+                graphPan.x += e.touches[0].clientX - lastMouse.x;
+                graphPan.y += e.touches[0].clientY - lastMouse.y;
+                lastMouse = {x: e.touches[0].clientX, y: e.touches[0].clientY};
+            } else if (e.touches.length === 2) {
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                const dist = Math.hypot(dx, dy);
+                const delta = (dist - graphTouchDist) * 0.01;
+                adjustZoom(delta);
+                graphTouchDist = dist;
+            }
+        });
 
         function traceWallet(address) {
             closeModal();
@@ -811,6 +887,12 @@
         function updateGraph() {
             if (!graphActive) return;
             requestAnimationFrame(updateGraph);
+            
+            // AUTO-RESIZE LOGIC (GRAPH) - Fixes squishing on mobile
+            if (graphCanvas.width !== graphCanvas.offsetWidth || graphCanvas.height !== graphCanvas.offsetHeight) {
+                graphCanvas.width = graphCanvas.offsetWidth;
+                graphCanvas.height = graphCanvas.offsetHeight;
+            }
             
             graphCtx.setTransform(1, 0, 0, 1, 0, 0); // Reset for clear
             graphCtx.fillStyle = "#000500";
@@ -920,7 +1002,7 @@
             }, 1000);
         }
 
-        // --- TUTORIAL ENGINE (REWORKED) ---
+        // --- TUTORIAL ENGINE ---
         function checkTutorial() {
             if(!localStorage.getItem(TUT_STORAGE_KEY)) {
                 startTutorial();
@@ -1049,21 +1131,115 @@
         // --- MAP SETUP ---
         const mapCanvas = document.getElementById('map-canvas');
         const mapCtx = mapCanvas.getContext('2d');
+        
+        // Map Camera
+        let mapCamera = { zoom: 1, x: 0, y: 0 };
+        let mapIsDragging = false;
+        let mapLastPos = { x: 0, y: 0 };
+        let mapTouchDist = 0;
+
         function resizeMap() {
             if(!mapCanvas.offsetParent) return;
             mapCanvas.width = mapCanvas.offsetWidth;
             mapCanvas.height = mapCanvas.offsetHeight;
         }
+
+        // Map Interactions
+        mapCanvas.addEventListener('mousedown', (e) => {
+            mapIsDragging = true;
+            mapLastPos = { x: e.clientX, y: e.clientY };
+        });
+        window.addEventListener('mouseup', () => mapIsDragging = false);
+        mapCanvas.addEventListener('mousemove', (e) => {
+            if (!mapIsDragging) return;
+            const dx = e.clientX - mapLastPos.x;
+            const dy = e.clientY - mapLastPos.y;
+            mapCamera.x += dx;
+            mapCamera.y += dy;
+            mapLastPos = { x: e.clientX, y: e.clientY };
+        });
+        mapCanvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const scaleAmount = 1.1;
+            const mouseX = e.offsetX;
+            const mouseY = e.offsetY;
+            // Zoom logic towards mouse pointer
+            if (e.deltaY < 0) {
+                // Zoom in
+                mapCamera.zoom *= scaleAmount;
+                mapCamera.x -= (mouseX - mapCamera.x) * (scaleAmount - 1);
+                mapCamera.y -= (mouseY - mapCamera.y) * (scaleAmount - 1);
+            } else {
+                // Zoom out
+                mapCamera.zoom /= scaleAmount;
+                mapCamera.x += (mouseX - mapCamera.x) * (1 - 1/scaleAmount);
+                mapCamera.y += (mouseY - mapCamera.y) * (1 - 1/scaleAmount);
+            }
+        }, {passive: false});
+
+        // Touch for Map (Pinch Zoom)
+        mapCanvas.addEventListener('touchstart', e => {
+            if (e.touches.length === 1) {
+                mapIsDragging = true;
+                mapLastPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            } else if (e.touches.length === 2) {
+                mapIsDragging = false;
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                mapTouchDist = Math.hypot(dx, dy);
+            }
+        });
+        mapCanvas.addEventListener('touchmove', e => {
+            e.preventDefault();
+            if (e.touches.length === 1 && mapIsDragging) {
+                const dx = e.touches[0].clientX - mapLastPos.x;
+                const dy = e.touches[0].clientY - mapLastPos.y;
+                mapCamera.x += dx;
+                mapCamera.y += dy;
+                mapLastPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            } else if (e.touches.length === 2) {
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                const dist = Math.hypot(dx, dy);
+                
+                // Pinch zoom center is midpoint of fingers
+                const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                const rect = mapCanvas.getBoundingClientRect();
+                const mouseX = centerX - rect.left;
+                const mouseY = centerY - rect.top;
+
+                const zoomFactor = dist / mapTouchDist;
+                
+                mapCamera.zoom *= zoomFactor;
+                mapCamera.x -= (mouseX - mapCamera.x) * (zoomFactor - 1);
+                mapCamera.y -= (mouseY - mapCamera.y) * (zoomFactor - 1);
+                
+                mapTouchDist = dist;
+            }
+        });
+
+        // Double Click Zoom
+        mapCanvas.addEventListener('dblclick', (e) => {
+            const mouseX = e.offsetX;
+            const mouseY = e.offsetY;
+            const zoomAmount = 2;
+            mapCamera.zoom *= zoomAmount;
+            mapCamera.x -= (mouseX - mapCamera.x) * (zoomAmount - 1);
+            mapCamera.y -= (mouseY - mapCamera.y) * (zoomAmount - 1);
+        });
+
         class Bubble {
             constructor(label, val, color, hash, from, to, type, issuer) {
-                this.x = Math.random() * mapCanvas.width;
-                this.y = mapCanvas.height + 20;
+                // Spawn across a wider virtual area so zooming out looks good
+                // Virtual width = canvas width * 3
+                this.x = (Math.random() * mapCanvas.width * 3) - mapCanvas.width; 
+                this.y = mapCanvas.height + 100; // Spawn below visual range
                 let safeVal = parseFloat(val) || 1; 
                 this.radius = Math.max(10, Math.min(50, Math.log(safeVal + 10) * 3));
                 this.speed = 1 + Math.random() * 2;
                 this.color = color;
                 this.hash = hash;
-                // *** FIX: REMOVED ROUNDING TO SHOW DECIMALS IN BUBBLES ***
                 this.label = type === 'L2' ? label : val.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 4});
                 this.val = val; this.from = from; this.to = to; this.type = type; this.life = 1.0;
                 this.isL2 = type === 'L2' && issuer;
@@ -1086,7 +1262,8 @@
                     mapCtx.fillStyle = this.color; mapCtx.fill();
                 }
                 mapCtx.strokeStyle = "#fff"; mapCtx.lineWidth = 1; mapCtx.stroke();
-                if (this.radius > 12) {
+                // Text LOD: Only show text if zoom is high enough or bubble is big
+                if ((this.radius * mapCamera.zoom) > 8) {
                     mapCtx.textAlign = "center"; mapCtx.font = "bold 9px monospace";
                     mapCtx.lineWidth = 3; mapCtx.strokeStyle = "black"; mapCtx.strokeText(this.label, this.x, this.y + 3);
                     mapCtx.fillStyle = "#fff"; mapCtx.fillText(this.label, this.x, this.y + 3);
@@ -1096,35 +1273,54 @@
         function loopMap() {
             if (!mapActive) return;
             requestAnimationFrame(loopMap);
+            
+            // AUTO-RESIZE LOGIC (Fixes squishing)
+            // Check if internal canvas resolution matches displayed resolution
+            if (mapCanvas.width !== mapCanvas.offsetWidth || mapCanvas.height !== mapCanvas.offsetHeight) {
+                mapCanvas.width = mapCanvas.offsetWidth;
+                mapCanvas.height = mapCanvas.offsetHeight;
+            }
+            
+            mapCtx.setTransform(1, 0, 0, 1, 0, 0);
             mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
+            
+            // Apply Camera Transform
+            mapCtx.setTransform(mapCamera.zoom, 0, 0, mapCamera.zoom, mapCamera.x, mapCamera.y);
+
             for (let i = bubbles.length - 1; i >= 0; i--) {
                 let b = bubbles[i]; 
                 
-                // --- MAP FILTERING LOGIC ---
                 let shouldDraw = true;
                 if (activeFilter === 'small' && (b.isL2 || b.val >= 100000)) shouldDraw = false;
-                if (activeFilter === 'whale' && (b.isL2 || b.val < 100000)) shouldDraw = false; // Added Whale Filter Check
+                if (activeFilter === 'whale' && (b.isL2 || b.val < 100000)) shouldDraw = false; 
                 if (activeFilter === 'l2' && !b.isL2) shouldDraw = false;
                 
                 b.update(); 
                 if (shouldDraw) b.draw();
                 
-                if (b.y < -50 || b.life <= 0) bubbles.splice(i, 1);
+                if (b.y < -500 || b.life <= 0) bubbles.splice(i, 1);
             }
         }
+        
+        // Handle Map Clicks with Transform
         mapCanvas.addEventListener('click', (e) => {
+            // Can't use offsetX because transform applies
             const rect = mapCanvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            
+            // Transform mouse coords to world coords
+            const worldX = (mouseX - mapCamera.x) / mapCamera.zoom;
+            const worldY = (mouseY - mapCamera.y) / mapCamera.zoom;
+
             for (let i = bubbles.length - 1; i >= 0; i--) {
                 let b = bubbles[i];
-                // Check filter before allowing click
                 let visible = true;
                 if (activeFilter === 'small' && (b.isL2 || b.val >= 100000)) visible = false;
                 if (activeFilter === 'whale' && (b.isL2 || b.val < 100000)) visible = false;
                 if (activeFilter === 'l2' && !b.isL2) visible = false;
                 
-                if (visible && Math.hypot(b.x - x, b.y - y) < b.radius + 10) { openModal(b); bubbles.splice(i, 1); break; }
+                if (visible && Math.hypot(b.x - worldX, b.y - worldY) < b.radius + 10) { openModal(b); bubbles.splice(i, 1); break; }
             }
         });
 
@@ -1134,7 +1330,6 @@
         setInterval(() => { if (isConnected && (Date.now() - lastHeartbeat > 45000)) { showToast("SIGNAL LOST. RECONNECTING..."); startXRPL(); } }, 5000);
 
         function startXRPL() {
-            // Cleanup existing socket listeners to prevent zombie retries
             if(socket) {
                 socket.onclose = null;
                 socket.onerror = null;
@@ -1177,13 +1372,10 @@
             };
             
             socket.onclose = (e) => { 
-                // Only retry if we are supposed to be connected
                 if(isConnected) retryConnection();
             };
             
             socket.onerror = (e) => {
-                // Just log, onclose will trigger the retry
-                // console.log("WS Error on " + server); 
             };
         }
 
@@ -1198,7 +1390,6 @@
         }
 
         function processTrace(centerAccount, txs) {
-            // Find existing or create center
             let center = graphNodes.find(n => n.id === centerAccount);
             if(!center) {
                 center = {id: centerAccount, x: 0, y: 0, type: 'CENTER', color: '#ffd700', vx:0, vy:0};
@@ -1208,14 +1399,14 @@
             txs.forEach(t => {
                 const tx = t.tx;
                 let other = null;
-                let color = '#00ff00'; // Default green
+                let color = '#00ff00'; 
                 
                 if (tx.Account === centerAccount) {
                     other = tx.Destination;
-                    color = '#ffaa00'; // Outgoing orange
+                    color = '#ffaa00'; 
                 } else {
                     other = tx.Account;
-                    color = '#00ffff'; // Incoming cyan
+                    color = '#00ffff'; 
                 }
 
                 if(other && !graphNodes.find(n => n.id === other)) {
@@ -1234,6 +1425,19 @@
 
         function hexToASCII(hex) {
             let str = ''; for (let i = 0; i < hex.length; i += 2) str += String.fromCharCode(parseInt(hex.substr(i, 2), 16)); return str.replace(/\0/g, '');
+        }
+
+        // --- HELPER FUNCTIONS FOR REPORTS (RESTORED) ---
+        function getReportType(amt, known) { 
+            if(known) return 'I'; // Identified/Institution
+            if(amt>5000000) return 'S'; // Super Whale
+            return 'R'; // Regular Whale
+        }
+        function getOutflow(fromKnown, toKnown) { 
+            if(fromKnown && !toKnown) return 'EXCH-OUT'; 
+            if(!fromKnown && toKnown) return 'EXCH-IN'; 
+            if(fromKnown && toKnown) return 'INTER-EXCH'; 
+            return 'P2P'; 
         }
 
         function handleTx(tx, meta) {
@@ -1329,15 +1533,11 @@
                      out: getOutflow(nameFrom, nameTo),
                      time: new Date().toISOString()
                  };
-                 
-                 // Update visual list
                  renderReportRow(repTx);
-                 
-                 // Update Blackbox persistent list
                  if (!blackbox.whaleHits) blackbox.whaleHits = [];
                  blackbox.whaleHits.unshift(repTx);
-                 if (blackbox.whaleHits.length > 100) blackbox.whaleHits.pop(); // Keep last 100
-                 saveBlackbox(); // Trigger save immediately for whale events
+                 if (blackbox.whaleHits.length > 100) blackbox.whaleHits.pop(); 
+                 saveBlackbox(); 
             }
             
             // Update HVT Tab & Blackbox Logs
@@ -1356,19 +1556,8 @@
                 if(blackbox.hvtHits.length > 50) blackbox.hvtHits.pop();
             }
 
-            // Alerts (Background Process)
             if (isWhale && isSuccess) { triggerWhaleAlert(); }
 
-            // --- VISUAL FILTERS ---
-            
-            // ONLY APPLY FILTER TO LIVE FEED (bubbles handle their own visibility in loopMap)
-            // But we must still let the data through to update the Bubble Array if we want toggling to work on existing data
-            
-            // We create the bubble object regardless of filter, but we only prepend to FEED if activeFilter matches
-            // This decouples the MAP filter from the FEED filter if we want them separate, 
-            // BUT for consistency, usually they are shared. 
-            // The prompt requests map-specific controls. Let's use `activeFilter` globally.
-            
             if(!isSuccess) { color = "text-gray-500"; mapColor = "#333333"; }
             const dispFrom = nameFrom ? `<span class="entity-name">${nameFrom}</span>` : tx.Account ? tx.Account.substring(0,4)+'...' : '???';
             const dispTo = nameTo ? `<span class="entity-name">${nameTo}</span>` : tx.Destination ? tx.Destination.substring(0,4)+'...' : 'DEX';
@@ -1385,10 +1574,8 @@
                 if (feed.innerText.includes("AWAITING")) feed.innerHTML = "";
                 
                 const row = document.createElement('div'); row.className = "tx-row" + (!isSuccess ? " tx-failed" : "");
-                // *** FIX: SHOW FULL DECIMALS IN FEED ***
                 let displayAmt = isL2 ? `${amt.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:6})} ${tokenName}` : `${amt.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:6})} XRP`;
                 
-                // ADDED TRACE BUTTON TO LIVE FEED
                 row.innerHTML = `<div class="row-top ${color}"><div class="flex items-center gap-2"><span class="font-bold text-base text-shadow-lime">${displayAmt}</span>${isHVT ? '<span class="tag-pill tag-hvt">HVT</span>' : ''}${isL2 ? `<span class="tag-pill tag-l2">${tokenName}</span>` : ''}${!isSuccess ? '<span class="tag-pill tag-fail">FAIL</span>' : ''}</div><div class="text-[10px] font-mono text-gray-500">${new Date().toLocaleTimeString()}</div></div><div class="flex justify-between text-[11px] font-mono text-gray-400"><span>${dispFrom} ➔ ${dispTo}</span></div><div class="btn-row"><button class="action-btn trace-btn" onclick="traceWallet('${tx.Account}')">TRACE</button><button class="action-btn" onclick="openScan('${tx.hash}')">SCAN</button><button class="action-btn" onclick='saveCase(${JSON.stringify({hash:tx.hash, amt, from:dispFrom, to:dispTo})})'>SAVE</button></div>`;
                 
                 feed.prepend(row);
@@ -1428,7 +1615,6 @@
         function playTone(freq, duration, type="square") { if(!audioEnabled || !audioCtx) return; const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain(); osc.type = type; osc.frequency.setValueAtTime(freq, audioCtx.currentTime); gain.gain.setValueAtTime(0.1, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration); osc.connect(gain); gain.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime + duration); }
         function playAlert(type) { if(!alertsEnabled) return; if (type === 'HVT') { playTone(1200, 0.1); setTimeout(() => playTone(1200, 0.1), 150); setTimeout(() => playTone(1200, 0.2), 300); } else { playTone(400, 0.2, "sine"); } }
         
-        // MODIFIED OPEN MODAL TO WORK FOR BOTH FEED AND GRAPH NODES
         function openModal(b) { 
             // Generic fill for transaction
             document.getElementById('modal-title').innerText = "INTEL: " + (b.type || 'TX');
@@ -1446,7 +1632,6 @@
                 document.getElementById('mod-trace-btn').onclick = () => traceWallet(b.id);
                 document.getElementById('mod-scan-btn').onclick = () => openScan('account/'+b.id); // Scan Account
                 document.getElementById('mod-copy-wallet').onclick = () => copyHash(b.id);
-                // Hide irrelevant buttons for nodes
                 document.getElementById('mod-copy-hash').style.display = 'none';
                 document.getElementById('mod-save-btn').style.display = 'none';
             } else {
@@ -1476,9 +1661,7 @@
             const transformedY = (y - (graphCanvas.height/2) - graphPan.y) / graphZoom;
 
             for(let n of graphNodes) {
-                // Distance check on transformed coords
                 let dist = Math.hypot(n.x - transformedX, n.y - transformedY);
-                // Hit radius depends on visual size but let's be generous
                 if(dist < 10) { 
                     openModal({
                         nodeType: 'GRAPH_NODE',
@@ -1494,7 +1677,6 @@
 
         function closeModal() { document.getElementById('bubble-modal').classList.remove('modal-active'); }
         
-        // GENERIC FILTER FUNCTION (Updates visuals on Feed)
         function setFilter(mode, btn) { 
             activeFilter = mode; 
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active')); 
@@ -1503,21 +1685,15 @@
             showToast("FILTER: " + mode.toUpperCase()); 
         }
 
-        // SPECIFIC MAP FILTER FUNCTION (Updates visuals on Map Overlay)
         function setMapFilter(mode, btn) {
             activeFilter = mode;
-            // Update MAP Buttons
             document.querySelectorAll('.map-filter-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            
-            // Also update main filter buttons to stay in sync if visible
-            // This keeps the app consistent state-wise
             showToast("MAP FILTER: " + mode.toUpperCase());
         }
 
         function showToast(msg) { const t = document.getElementById('toast'); t.innerText = msg; t.classList.add('toast-show'); setTimeout(() => t.classList.remove('toast-show'), 2000); }
         function openScan(h) { 
-            // Check if full URL or ID
             if(h.includes('/')) window.open(`https://xrpscan.com/${h}`, '_blank');
             else window.open(`https://xrpscan.com/tx/${h}`, '_blank'); 
         }
@@ -1526,9 +1702,6 @@
         function clearCases() { cases=[]; renderCases(); saveBlackbox(); showToast("LOCKER CLEARED"); }
         function exportJSON() { const a = document.createElement('a'); a.href = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(blackbox)); a.download = `sentinel_blackbox_${new Date().toISOString().slice(0,10)}.json`; a.click(); }
         function renderReportRow(tx) { const list = document.getElementById('report-list'); const row = document.createElement('div'); row.className = "report-row"; row.innerHTML = `<div style="width: 25%" class="rep-val-green">${tx.amt.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:6})}</div><div style="width: 25%" class="rep-val-white">${tx.wallet.startsWith('r')?tx.wallet.substring(0,8):tx.wallet}</div><div class="rep-col-time rep-val-dim">${new Date(tx.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div><div class="rep-col-type text-white font-bold">${tx.type}</div><div class="rep-col-out font-bold" style="${tx.out==='EXCH-OUT'?'color:#ffaa00':(tx.out==='EXCH-IN'?'color:#00ffff':'color:#888')}">${tx.out}</div>`; row.onclick = () => openModal({val: tx.amt, label: (tx.amt/1000).toFixed(1)+'k', color: '#00ff00', type: `REP-${tx.type}`, from: tx.wallet, to: 'LINKED', hash: tx.hash}); list.prepend(row); if (list.children.length > 100) list.lastChild.remove(); }
-        function addReportRow(hash, amt, wallet, type, out) { /* Placeholder for backward compat if needed */ }
-        function getReportType(amt, known) { if(known) return 'I'; if(amt>5000000) return 'S'; return 'R'; }
-        function getOutflow(fromKnown, toKnown) { if(fromKnown && !toKnown) return 'EXCH-OUT'; if(!fromKnown && toKnown) return 'EXCH-IN'; if(fromKnown && toKnown) return 'INTER-EXCH'; return 'P2P'; }
         function addHVTRow(hash, amt, from, to) { const list = document.getElementById('hvt-list'); if (list.innerText.includes("MONITORING")) list.innerHTML = ""; const row = document.createElement('div'); row.className = "p-3 border-l-4 border-yellow-400 bg-yellow-900/20 mb-2"; row.innerHTML = `<div class="text-yellow-400 font-bold text-sm">⚠️ HVT INTERCEPT</div><div class="text-white font-mono">${amt.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:6})} XRP</div><div class="text-[10px] text-gray-400 mt-1">${from} -> ${to}</div>`; list.prepend(row); }
         function triggerWhaleAlert() { if(!alertsEnabled) return; document.getElementById('alert-layer').classList.add('whale-alert-anim'); setTimeout(() => document.getElementById('alert-layer').classList.remove('whale-alert-anim'), 3000); }
         function triggerHVTAlert() { if(!alertsEnabled) return; document.getElementById('alert-layer').classList.add('hvt-alert-anim'); showToast("HVT CONFIRMED"); setTimeout(() => document.getElementById('alert-layer').classList.remove('hvt-alert-anim'), 3000); }
@@ -1547,7 +1720,6 @@
             document.getElementById('view-'+id).classList.add('active'); 
             
             document.querySelectorAll('.tab-btn').forEach(e=>e.classList.remove('active')); 
-            // Select button by ID derived from view ID
             const btn = document.getElementById('tab-btn-' + id);
             if (btn) btn.classList.add('active');
             
