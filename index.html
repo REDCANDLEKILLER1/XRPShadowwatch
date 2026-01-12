@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v14.3 [DISTORTION FIX]</title>
+    <title>XRPMAN SHADOW WATCH // v14.6 [SHARP HUD]</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -218,7 +218,14 @@
             display: flex; flex-direction: column; justify-content: center;
             box-shadow: 0 4px 10px rgba(0,0,0,0.6);
         }
-        .price-text { font-family: 'Share Tech Mono', monospace; font-size: 1.4rem; font-weight: bold; color: #fff; text-shadow: 0 0 5px var(--lime-main); }
+        /* FIXED: Removed text-shadow to stop fuzziness */
+        .price-text { 
+            font-family: 'Share Tech Mono', monospace; 
+            font-size: 1.4rem; 
+            font-weight: bold; 
+            color: #fff; 
+            text-shadow: none; 
+        }
         .label-text { font-size: 0.65rem; color: #55aa55; letter-spacing: 1px; font-weight: bold; }
         .source-tag { font-size: 0.5rem; color: #338833; float: right; }
         
@@ -587,6 +594,13 @@
             <!-- GRAPH TAB -->
             <div id="view-graph" class="view-panel">
                 <button class="view-toggle-btn" onclick="toggleMaximize()">[ ]</button>
+                
+                <!-- NEW MANUAL INPUT FOR GRAPH -->
+                <div style="position: absolute; top: 12px; left: 0; right: 0; display: flex; justify-content: center; gap: 8px; z-index: 50; pointer-events: auto;">
+                    <input type="text" id="graph-input" placeholder="ENTER WALLET (r...)" style="background: rgba(0,0,0,0.8); border: 1px solid #00ff00; color: #00ff00; font-size: 10px; padding: 4px; width: 180px; font-family: 'Share Tech Mono'; outline: none;">
+                    <button onclick="manualGraphTrace()" style="background: rgba(0,50,0,0.5); border: 1px solid #00ff00; color: #00ff00; font-size: 10px; padding: 0 8px; font-weight: bold; cursor: pointer;">SCAN</button>
+                </div>
+
                 <canvas id="graph-canvas"></canvas>
                 <div class="graph-controls">
                     <button class="g-btn" onclick="adjustZoom(-0.2)">-</button>
@@ -796,12 +810,28 @@
             resetGraphView();
         }
 
+        function manualGraphTrace() {
+            const val = document.getElementById('graph-input').value.trim();
+            if(!val) return showToast("INVALID TARGET");
+            // Auto-Reset for new search
+            resetGraphView();
+            traceWallet(val);
+            document.getElementById('graph-input').value = '';
+        }
+
         function resetGraphView() {
-            // Repair: Added clearing of active nodes/edges to RESET functionality
+            // Explicitly clear arrays and redraw
+            graphNodes.length = 0;
+            graphEdges.length = 0;
             graphNodes = [];
             graphEdges = [];
             graphZoom = 1;
             graphPan = {x: 0, y: 0};
+            // Force Clear Canvas
+            if(graphCtx && graphCanvas) {
+                 graphCtx.setTransform(1, 0, 0, 1, 0, 0);
+                 graphCtx.clearRect(0,0, graphCanvas.width, graphCanvas.height);
+            }
             showToast("GRAPH PURGED");
         }
 
@@ -1717,7 +1747,25 @@
         function shareIntel() { const text = document.getElementById('intel-content').value; if (navigator.share) { navigator.share({ title: 'Shadow Intel', text: text }).catch(err => { if (err.name !== 'AbortError') console.error('Share failed:', err); }); } else { copyIntelText(); showToast("SHARE API UNAVAILABLE. COPIED."); } }
         init3D();
         const PRICE_SOURCES = [{url:'https://api.binance.us/api/v3/ticker/price?symbol=XRPUSDT',parse:d=>parseFloat(d.price)}];
-        async function fetchPrice() { try { const res = await fetch(PRICE_SOURCES[0].url); const d = await res.json(); const p = PRICE_SOURCES[0].parse(d); document.getElementById('price-display').innerText = `$${p.toFixed(4)}`; document.getElementById('price-display').style.color=p>parseFloat(document.getElementById('price-display').innerText.replace('$','')||0)?'#00ff00':'#ff5555'; } catch(e){} }
+        
+        // FIXED: New Price Engine
+        let lastPrice = 0;
+        async function fetchPrice() { 
+            try { 
+                const res = await fetch(PRICE_SOURCES[0].url); 
+                const d = await res.json(); 
+                const p = PRICE_SOURCES[0].parse(d); 
+                const el = document.getElementById('price-display');
+                
+                el.innerText = `$${p.toFixed(4)}`; 
+                
+                if (p > lastPrice) el.style.color = '#00ff00';
+                else if (p < lastPrice) el.style.color = '#ff0000';
+                
+                lastPrice = p;
+            } catch(e){} 
+        }
+        
         function startRedundantPriceEngine() { fetchPrice(); setInterval(fetchPrice, 8000); }
         function switchView(id) { 
             document.querySelectorAll('.view-panel').forEach(e=>e.classList.remove('active')); 
@@ -1760,8 +1808,3 @@
     </script>
 </body>
 </html>
-
-
-
-
-
