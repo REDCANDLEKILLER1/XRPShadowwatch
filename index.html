@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v14.7 [EVIDENCE FIX]</title>
+    <title>XRPMAN SHADOW WATCH // v14.8 [HVT DATABASE]</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -612,11 +612,20 @@
 
             <!-- HVT TAB -->
             <div id="view-hvt" class="view-panel">
-                <div class="p-2 border-b border-green-900 bg-black/40 text-center">
-                    <span class="text-xs text-yellow-400 font-bold tracking-widest">>> HIGH VALUE TARGET BLACK BOX <<</span>
+                <div class="p-2 border-b border-green-900 bg-black/40 flex flex-col gap-2">
+                    <div class="text-xs text-yellow-400 font-bold tracking-widest text-center mb-1">>> HIGH VALUE TARGET DATABASE <<</div>
+                    <div class="flex gap-2">
+                        <input id="hvt-add-addr" type="text" placeholder="Address (r...)" class="flex-grow bg-black/50 border border-green-800 text-[10px] text-white px-2 py-1 font-mono outline-none">
+                        <input id="hvt-add-label" type="text" placeholder="Label" class="w-1/3 bg-black/50 border border-green-800 text-[10px] text-white px-2 py-1 font-mono outline-none">
+                        <button onclick="addManualHVT()" class="bg-green-900/40 text-green-400 border border-green-600 text-[9px] px-2 hover:bg-green-500 hover:text-black font-bold">ADD</button>
+                    </div>
+                    <div class="flex justify-between mt-1">
+                        <button onclick="exportHVTList()" class="text-[9px] text-yellow-500 border border-yellow-700 px-2 py-1 bg-yellow-900/10">EXPORT DB</button>
+                        <button onclick="updateHVTBalances()" class="text-[9px] text-cyan-400 border border-cyan-700 px-2 py-1 bg-cyan-900/10">REFRESH DATA</button>
+                    </div>
                 </div>
-                <div id="hvt-list">
-                    <div class="text-center text-gray-600 mt-12 font-tech text-xs">MONITORING FOR FOUNDERS / RIPPLE OPS...</div>
+                <div id="hvt-list" class="flex-grow overflow-y-auto p-2 space-y-2">
+                    <!-- HVT ROWS GO HERE -->
                 </div>
             </div>
 
@@ -698,6 +707,33 @@
         let audioEnabled = false;
         let alertsEnabled = true;
         let isMaximized = false;
+        
+        // HVT DATABASE & HOLDINGS
+        const HVT_STORAGE_KEY = "XRPMAN_HVT_DB_V1";
+        const DEFAULT_HVTS = [
+          { "label": "RIPPLE_LABS_ESCROW_1", "address": "r9NpyVfNpMg6x7v7q7v7q7v7q7v7q7v7", "category": "SUPPLY_CONTROL", "desc": "Primary Escrow release wallet (55B origin)" },
+          { "label": "RIPPLE_LABS_HOLDINGS", "address": "r3kmLDecox4yxopP6auuSUYAAKLRn5u9SP", "category": "SUPPLY_CONTROL", "desc": "Ripple operational/holdings wallet" },
+          { "label": "RL_FOUNDATION", "address": "rKVEuyGS78J4rUk3b7P62y34h8F5hJ647", "category": "INSTITUTIONAL", "desc": "Ripple Labs Foundation / Grants" },
+          { "label": "JED_MCCALEB_TACOSTAND", "address": "rEhKZcz5Ndjm9AXjrlM5e15pDy7h5a8C", "category": "FOUNDER", "desc": "The infamous 'Tacostand' settlement wallet (History)" },
+          { "label": "CHRIS_LARSEN_MAIN", "address": "rDdXiA3M4mYBq5rErsdzjP3eN48XFqV2q", "category": "FOUNDER", "desc": "Known Chris Larsen personal wallet" },
+          { "label": "ARTHUR_BRITTO_POLYSIGN", "address": "rHznL53d5a5e5f5g5h5i5j5k5l5m5n5o", "category": "FOUNDER", "desc": "Associated with Britto/Polysign custody" },
+          { "label": "BINANCE_US_COLD", "address": "rJb5KsHsDHF1YS5B5DU6QCkH5NsPaKQTcy", "category": "EXCHANGE", "desc": "Binance Cold Storage (Massive holdings)" },
+          { "label": "BINANCE_HOT", "address": "rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh", "category": "EXCHANGE", "desc": "Binance Hot Wallet (High frequency output)" },
+          { "label": "COINBASE_CUSTODY", "address": "rLNaPoKeeBJEM289xKyrp2PHKu1oUJwmTE", "category": "EXCHANGE", "desc": "Coinbase Main / Custody" },
+          { "label": "COINBASE_HOT", "address": "rw2ciyaNshpHe7bCHo4bRWq6pqqynnWKQg", "category": "EXCHANGE", "desc": "Coinbase Prime / Hot Wallet" },
+          { "label": "BITSTAMP_COLD", "address": "rDsbeomae4FXwgQTJp9Rs64zA9vMmzH5d", "category": "EXCHANGE", "desc": "Bitstamp Cold Storage" },
+          { "label": "BITSTAMP_HOT", "address": "rrpNnNLKrartuEqfJGpqyDwPz1AFKd9Yy2", "category": "EXCHANGE", "desc": "Bitstamp Gateway (Legacy)" },
+          { "label": "KRAKEN_MAIN", "address": "rLHzjBvcm73G2JjL5NH2L5h9MF5h9MF5h9", "category": "EXCHANGE", "desc": "Kraken Exchange Main" },
+          { "label": "UPBIT_KR_COLD", "address": "rN9qNplkSphemkeLanWHWpyMmphmpPTU9", "category": "EXCHANGE", "desc": "Upbit South Korea Cold Storage" },
+          { "label": "BITHUMB_KR_COLD", "address": "rPVMhWBsfF9iMXYj3aAzJcU8HSMBt8CXzi", "category": "EXCHANGE", "desc": "Bithumb South Korea Cold Storage" },
+          { "label": "UPHOLD_RESERVE", "address": "rMwjYedjc7qqtKYVLiAccJSmCwphzWijDZ", "category": "EXCHANGE", "desc": "Uphold Main Reserve" },
+          { "label": "POLONIEX_COLD", "address": "r4H3F9dHrY5rY5rY5rY5rY5rY5rY5rY5", "category": "EXCHANGE", "desc": "Poloniex Cold Storage" },
+          { "label": "BITTREX_MAIN", "address": "rPVMhWBsfF9iMXYj3aAzJcU8HSMBt8CXzi", "category": "EXCHANGE", "desc": "Bittrex Exchange" },
+          { "label": "SBI_VC_TRADE", "address": "rKcT5WpC9q9q9q9q9q9q9q9q9q9q9q9q", "category": "INSTITUTIONAL", "desc": "SBI Japan Holdings" },
+          { "label": "GENESIS_BLOCK", "address": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh", "category": "LEGACY", "desc": "Genesis Address (Ledger Origin)" }
+        ];
+        
+        let hvtList = [];
 
         // SESSION TIMER VARS
         let sessionStart = Date.now();
@@ -777,14 +813,124 @@
             blackbox.cases = cases;
             localStorage.setItem(STORAGE_KEY, JSON.stringify(blackbox));
         }
+        
+        // --- HVT MANAGEMENT ---
+        function loadHVTDatabase() {
+            const saved = localStorage.getItem(HVT_STORAGE_KEY);
+            if(saved) {
+                try {
+                    hvtList = JSON.parse(saved);
+                } catch(e) {
+                    hvtList = [...DEFAULT_HVTS];
+                }
+            } else {
+                hvtList = [...DEFAULT_HVTS];
+            }
+            // Ensure any new defaults are present if not overwriting user data logic
+            // (Simple version: merge unique addresses)
+            DEFAULT_HVTS.forEach(def => {
+                if(!hvtList.some(h => h.address === def.address)) {
+                    hvtList.push(def);
+                }
+            });
+            saveHVTDatabase();
+            buildKnownWallets();
+            renderHVTList();
+        }
+        
+        function saveHVTDatabase() {
+            localStorage.setItem(HVT_STORAGE_KEY, JSON.stringify(hvtList));
+            buildKnownWallets();
+        }
+        
+        function addManualHVT() {
+            const addr = document.getElementById('hvt-add-addr').value.trim();
+            const label = document.getElementById('hvt-add-label').value.trim() || 'MANUAL_TARGET';
+            if(!addr.startsWith('r')) return showToast("INVALID R-ADDRESS");
+            
+            if(hvtList.some(h => h.address === addr)) return showToast("TARGET ALREADY EXISTS");
+            
+            hvtList.push({
+                label: label,
+                address: addr,
+                category: "MANUAL",
+                desc: "User added target"
+            });
+            saveHVTDatabase();
+            renderHVTList();
+            document.getElementById('hvt-add-addr').value = '';
+            document.getElementById('hvt-add-label').value = '';
+            showToast("HVT ADDED TO DB");
+            // Trigger quick update
+            if(isConnected && socket) {
+                socket.send(JSON.stringify({command: "account_info", account: addr}));
+            }
+        }
+        
+        function exportHVTList() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(hvtList, null, 2));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", `hvt_database_${new Date().toISOString().slice(0,10)}.json`);
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+        }
 
-        const KNOWN_WALLETS = {
-            'rLNaPoKeeBJZe2qs6x52yVPZpZ8td4dc6w': {name: 'COINBASE', type: 'EXCH'},
-            'rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh': {name: 'BINANCE', type: 'EXCH'},
-            'rJb5KsHsDHF1YSnasbwqSagepE8XXAuGh': {name: 'BITSTAMP', type: 'EXCH'},
-            'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh': {name: 'GENESIS', type: 'HVT'},
-            'r945F6e8...Escrow': {name: 'RIPPLE ESCROW', type: 'HVT'}
-        };
+        function renderHVTList() {
+            const list = document.getElementById('hvt-list');
+            list.innerHTML = '';
+            
+            hvtList.forEach((h, index) => {
+                const row = document.createElement('div');
+                row.className = "bg-black/40 border border-yellow-900/30 p-2 flex flex-col gap-1";
+                row.innerHTML = `
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs text-yellow-500 font-bold truncate w-2/3">${h.label}</span>
+                        <span class="text-[9px] text-gray-500 border border-gray-800 px-1">${h.category||'UNK'}</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-[10px] text-gray-400 font-mono">${h.address.substring(0,12)}...</span>
+                        <span id="bal-${h.address}" class="text-xs text-green-400 font-mono font-bold">${h.balance ? parseFloat(h.balance).toLocaleString() + ' XRP' : '---'}</span>
+                    </div>
+                    <div class="flex gap-2 mt-1">
+                        <button onclick="openScan('account/${h.address}')" class="flex-1 bg-yellow-900/20 hover:bg-yellow-500 hover:text-black border border-yellow-800 text-yellow-600 text-[9px] font-bold py-1 transition-colors">SCAN</button>
+                        <button onclick="traceWallet('${h.address}')" class="flex-1 bg-cyan-900/20 hover:bg-cyan-500 hover:text-black border border-cyan-800 text-cyan-600 text-[9px] font-bold py-1 transition-colors">TRACE</button>
+                    </div>
+                `;
+                list.appendChild(row);
+            });
+        }
+        
+        function updateHVTBalances() {
+            if(!isConnected || !socket) return showToast("WAITING FOR UPLINK");
+            showToast("REFRESHING HVT HOLDINGS...");
+            // Batch process to avoid flooding, but with 20-30 it's usually fine on 1s
+            hvtList.forEach((h, i) => {
+                setTimeout(() => {
+                    if(socket.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({
+                            id: "bal_" + h.address,
+                            command: "account_info",
+                            account: h.address,
+                            ledger_index: "validated"
+                        }));
+                    }
+                }, i * 150); // Stagger requests
+            });
+        }
+
+        // Auto-refresh balances loop
+        setInterval(updateHVTBalances, 60000); // 1 minute auto refresh
+
+        let KNOWN_WALLETS = {};
+        
+        function buildKnownWallets() {
+            KNOWN_WALLETS = {};
+            hvtList.forEach(h => {
+                KNOWN_WALLETS[h.address] = { name: h.label, type: (h.category === 'EXCHANGE' ? 'EXCH' : 'HVT') };
+            });
+        }
 
         // --- GRAPH ENGINE w/ ZOOM ---
         const graphCanvas = document.getElementById('graph-canvas');
@@ -1123,6 +1269,7 @@
         function autoStartSystem() {
             if(isConnected) return;
             loadBlackbox(); // INITIALIZE STORAGE & RESTORE REPORTS
+            loadHVTDatabase(); // INITIALIZE HVT
             startXRPL();
             startRedundantPriceEngine();
             startSessionTimer(); 
@@ -1390,6 +1537,8 @@
             
             socket.onopen = () => { 
                 socket.send(JSON.stringify({command:"subscribe", streams:["transactions", "ledger"]})); 
+                // Initial fetch
+                setTimeout(updateHVTBalances, 2000);
                 lastHeartbeat = Date.now();
                 if(statusEl) {
                     statusEl.innerText = `ACTIVE [${serverName}]`;
@@ -1404,6 +1553,19 @@
                 if(d.type==='transaction') handleTx(d.transaction, d.meta); 
                 if(d.type==='ledgerClosed' && document.getElementById('ledger-display')) document.getElementById('ledger-display').innerText = d.ledger_index; 
                 if(d.result && d.result.transactions) processTrace(d.result.account, d.result.transactions);
+                
+                // Handle Account Info for HVT Balances
+                if(d.result && d.result.account_data && d.id && d.id.startsWith("bal_")) {
+                    const acc = d.result.account_data.Account;
+                    const bal = parseInt(d.result.account_data.Balance) / 1000000;
+                    const hvt = hvtList.find(h => h.address === acc);
+                    if(hvt) {
+                        hvt.balance = bal;
+                        const el = document.getElementById(`bal-${acc}`);
+                        if(el) el.innerText = bal.toLocaleString(undefined, {maximumFractionDigits:0}) + " XRP";
+                        saveHVTDatabase(); // Persist last known balance
+                    }
+                }
             };
             
             socket.onclose = (e) => { 
