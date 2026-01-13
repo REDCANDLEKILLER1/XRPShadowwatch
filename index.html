@@ -1467,7 +1467,7 @@
                     this.icon.crossOrigin = "Anonymous";
                     this.icon.src = `https://xumm.app/avatar/${issuer}_200.png`;
                     this.icon.onload = () => { this.iconLoaded = true; };
-                    this.icon.onerror = () => { this.iconLoaded = false; this.icon = null; };
+                    this.icon.onerror =  () => { this.iconLoaded = false; this.icon = null; };
                 }
             }
             update() { this.y -= this.speed; this.life -= 0.002; }
