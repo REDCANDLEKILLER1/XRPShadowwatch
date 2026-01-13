@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v15.3 [PURGED]</title>
+    <title>XRPMAN SHADOW WATCH // v15.8 [NO AUTO-DOC]</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -189,6 +189,23 @@
         #xmeme-body { width: 100%; background: black; }
         #xmeme-video { width: 100%; display: block; }
 
+        /* TRADINGVIEW CHART WINDOW (NEW) */
+        #tv-modal {
+            position: fixed; top: 15%; left: 10%; width: 350px; height: 300px;
+            background: rgba(0, 15, 0, 0.95); border: 2px solid var(--lime-main);
+            border-radius: 8px; z-index: 9000; display: none; flex-direction: column;
+            box-shadow: 0 0 30px rgba(0,0,0,0.8);
+            resize: both; overflow: hidden; min-width: 300px; min-height: 250px;
+        }
+        #tv-header {
+            background: #002200; color: var(--lime-main);
+            padding: 6px 10px; font-family: 'Orbitron'; font-size: 11px;
+            display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 1px solid var(--lime-dim); cursor: grab;
+        }
+        #tv-header:active { cursor: grabbing; }
+        #tv-body { flex-grow: 1; background: #000; width: 100%; height: 100%; overflow: hidden; }
+
         /* TOP HUD */
         #hud-top {
             position: absolute; top: 0; left: 0; right: 0; z-index: 20;
@@ -217,7 +234,13 @@
             padding: 8px; border-radius: 6px; backdrop-filter: blur(10px);
             display: flex; flex-direction: column; justify-content: center;
             box-shadow: 0 4px 10px rgba(0,0,0,0.6);
+            transition: border-color 0.2s; /* Add transition for hover */
         }
+        
+        /* INTERACTIVE PRICE BOX STYLE */
+        #price-box { cursor: pointer; }
+        #price-box:hover { border-color: var(--lime-main); box-shadow: 0 0 15px rgba(0,255,0,0.3); }
+
         /* FIXED: Removed text-shadow to stop fuzziness */
         .price-text { 
             font-family: 'Share Tech Mono', monospace; 
@@ -262,6 +285,8 @@
             box-shadow: 0 0 5px rgba(0,255,0,0.3);
         }
         #report-btn:hover { background: var(--lime-main); color: black; }
+
+        #chart-btn { width: auto; padding: 0 8px; font-family: 'Orbitron'; font-size: 9px; font-weight: bold; color: #00ffff; border-color: #00aaaa; }
 
         /* BOTTOM DECK */
         #hud-bottom { 
@@ -447,7 +472,23 @@
         </div>
     </div>
 
-    <!-- BUBBLE/REPORT DETAIL MODAL (Also used for Graph Node Menu) -->
+    <!-- TRADINGVIEW CHART WINDOW (NEW) -->
+    <div id="tv-modal">
+        <div id="tv-header">
+            <span>XRP/USD [LIVE]</span>
+            <div class="flex gap-2">
+                <button onclick="minTV()">_</button>
+                <button onclick="minTV()">X</button> <!-- Both act as minimize/close as requested -->
+            </div>
+        </div>
+        <div id="tv-body">
+            <!-- Embedding TradingView Widget via Iframe for maximum compatibility -->
+            <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tradingview_76d87&symbol=BINANCE%3AXRPUSDT&interval=D&hidesidetoolbar=1&hidetoptoolbar=1&symboledit=1&saveimage=1&toolbarbg=f1f3f6&studies=[]&theme=dark&style=1&timezone=Etc%2FUTC&studies_overrides={}&overrides={}&enabled_features=[]&disabled_features=[]&locale=en&utm_source=tradingview.com&utm_medium=widget&utm_campaign=chart&utm_term=BINANCE%3AXRPUSDT" 
+            style="width: 100%; height: 100%; border: none;"></iframe>
+        </div>
+    </div>
+
+    <!-- BUBBLE/REPORT DETAIL MODAL -->
     <div id="bubble-modal">
         <div id="modal-title" class="text-center text-lg font-bold text-white mb-2 border-b border-green-900 pb-2">TRANSACTION INTEL</div>
         <div id="modal-content-area">
@@ -502,8 +543,8 @@
         <div id="session-timer">T+ 00:00:00</div>
 
         <div class="stat-grid">
-            <div class="stat-box">
-                <div id="price-label" class="label-text">XRP / USD <span id="price-source" class="source-tag">SCANNING...</span></div>
+            <div id="price-box" class="stat-box" onclick="toggleTV()">
+                <div id="price-label" class="label-text">XRP / USD <span id="price-source" class="source-tag">LIVE CHART</span></div>
                 <div id="price-display" class="price-text">---</div>
             </div>
             <div class="stat-box text-right">
@@ -629,7 +670,7 @@
                 </div>
             </div>
 
-            <!-- HVT TAB (UPDATED v15.3) -->
+            <!-- HVT TAB (UPDATED v15.4) -->
             <div id="view-hvt" class="view-panel">
                 <div class="p-2 border-b border-green-900 bg-black/40 text-center">
                     <span class="text-xs text-yellow-400 font-bold tracking-widest">>> HIGH VALUE TARGET BLACK BOX <<</span>
@@ -709,7 +750,10 @@
     </div>
 
     <script>
-        // --- GLOBAL STATE VARIABLES ---
+        // --- GLOBAL VARIABLES (FIXED SCOPE) ---
+        let mapCanvas, mapCtx; 
+        let graphCanvas, graphCtx;
+        
         let mapActive = false; 
         let graphActive = false;
         let bubbles = [];
@@ -779,6 +823,102 @@
         const TUT_STORAGE_KEY = "shadow_watch_v13_3_reset"; // NEW KEY FORCED RESET
         const MANUAL_URL = "https://docs.google.com/document/u/0/d/1kGHvpj9H0CdkS2jc_eQYjDWqyJSSv0INN7Ka9yi96_k/mobilebasic";
 
+        // --- MAP CAMERA VARS ---
+        let mapCamera = { zoom: 1, x: 0, y: 0 };
+        let mapIsDragging = false;
+        let mapLastPos = { x: 0, y: 0 };
+        let mapTouchDist = 0;
+
+        // --- GRAPH ENGINE VARS ---
+        let graphNodes = [];
+        let graphEdges = [];
+        let graphZoom = 1;
+        let graphPan = {x: 0, y: 0};
+        let isDragging = false;
+        let lastMouse = {x:0, y:0};
+        let graphTouchDist = 0;
+
+        // --- TRADINGVIEW DRAG VARS ---
+        let tvDragging = false;
+        let tvOffset = {x:0, y:0};
+
+        // --- INITIALIZATION ---
+        function initSystem() {
+            // Map Canvas Init
+            mapCanvas = document.getElementById('map-canvas');
+            if (mapCanvas) {
+                mapCtx = mapCanvas.getContext('2d');
+                resizeMap();
+                setupMapInteractions();
+            }
+
+            // Graph Canvas Init
+            graphCanvas = document.getElementById('graph-canvas');
+            if (graphCanvas) {
+                graphCtx = graphCanvas.getContext('2d');
+                resizeGraph();
+                setupGraphInteractions();
+            }
+
+            // TV Drag Init
+            const header = document.getElementById('tv-header');
+            const modal = document.getElementById('tv-modal');
+            header.addEventListener('mousedown', (e) => {
+                tvDragging = true;
+                tvOffset.x = e.clientX - modal.offsetLeft;
+                tvOffset.y = e.clientY - modal.offsetTop;
+            });
+            window.addEventListener('mouseup', () => tvDragging = false);
+            window.addEventListener('mousemove', (e) => {
+                if (tvDragging) {
+                    modal.style.left = (e.clientX - tvOffset.x) + 'px';
+                    modal.style.top = (e.clientY - tvOffset.y) + 'px';
+                }
+            });
+            // Touch drag support for TV window
+            header.addEventListener('touchstart', (e) => {
+                tvDragging = true;
+                const touch = e.touches[0];
+                tvOffset.x = touch.clientX - modal.offsetLeft;
+                tvOffset.y = touch.clientY - modal.offsetTop;
+            });
+            window.addEventListener('touchend', () => tvDragging = false);
+            window.addEventListener('touchmove', (e) => {
+                if (tvDragging) {
+                    e.preventDefault();
+                    const touch = e.touches[0];
+                    modal.style.left = (touch.clientX - tvOffset.x) + 'px';
+                    modal.style.top = (touch.clientY - tvOffset.y) + 'px';
+                }
+            }, {passive: false});
+
+            init3D();
+            startRedundantPriceEngine();
+        }
+
+        window.addEventListener('load', initSystem);
+        window.addEventListener('resize', () => {
+            if(mapActive) resizeMap();
+            if(graphActive) resizeGraph();
+        });
+
+        // --- TRADINGVIEW OPS ---
+        function toggleTV() {
+            const m = document.getElementById('tv-modal');
+            if (m.style.display === 'flex') {
+                m.style.display = 'none';
+            } else {
+                m.style.display = 'flex';
+                m.classList.remove('minimized');
+            }
+        }
+        function minTV() {
+           // As per request, minimize effectively hides the window
+           document.getElementById('tv-modal').style.display = 'none';
+        }
+
+        // --- LOGIC FUNCTIONS ---
+
         function loadBlackbox() {
             const saved = localStorage.getItem(STORAGE_KEY);
             if (saved) {
@@ -811,9 +951,8 @@
             localStorage.setItem(STORAGE_KEY, JSON.stringify(blackbox));
         }
 
-        // --- MASSIVE HVT DATABASE (CLEANED v15.3) ---
+        // --- MASSIVE HVT DATABASE (CLEANED v15.4) ---
         const PRELOADED_HVTS = [
-            // EXCHANGES
             { label: "BINANCE_HOT", address: "rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh", type: "EXCH" },
             { label: "COINBASE_HOT", address: "rw2ciyaNshpHe7bCHo4bRWq6pqqynnWKQg", type: "EXCH" },
             { label: "BITBANK_JP", address: "rw7m3CtVHwGSdhFjV4MyJozmZJv3DYQnsA", type: "EXCH" },
@@ -822,26 +961,15 @@
             { label: "BITRUE_COLD", address: "rB3gZey7VwlD9Ka3Z1Qx13rV9f3F2qJ6", type: "EXCH" },
             { label: "INDODAX_COLD", address: "rU2mEJSLqBRkYLVTv55rFTgQYkDBqVyTRU", type: "EXCH" },
             { label: "HUOBI_MAIN", address: "rG6FZ31hDHN1K5Dkbma3PSB5uVCuVVRzfn", type: "EXCH" },
-            { label: "KORBIT_COLD", address: "rKiCet8SdvBnPXCn5t3ZPAmXYyRQXBKdf1", type: "EXCH" },
-            { label: "PARIBU_MAIN", address: "r49qK9S7p7Wk5f7p7Wk5f7p7Wk5f7p7Wk5", type: "EXCH" },
-            { label: "COINALL_HOT", address: "rCoinaUER6X7v7q7v7q7v7q7v7q7v7q7", type: "EXCH" },
-
-            // KNOWN RIPPLE WALLETS
             { label: "RIPPLE_1.3B", address: "rMQ98K56yXJbDGv49ZSmW51sLn94Xe1mu1", type: "HVT" },
             { label: "RIPPLE_845M", address: "rKveEyR1SrkWbJX214xcfH43ZsoGMb3PEv", type: "HVT" },
             { label: "RIPPLE_500M_A", address: "rMhkqz3DeU7GUUJKGZofusbrTwZe6bDyb1", type: "HVT" },
             { label: "RIPPLE_500M_B", address: "r9NpyVfLfUG8hatuCCHKzosyDtKnBdsEN3", type: "HVT" },
-
-            // BINANCE ADDITIONAL
             { label: "BINANCE_1.7B", address: "rs8ZPbYqgecRcDzQpJYAMhSxSi5htsjnza", type: "EXCH" },
             { label: "BINANCE_325M", address: "rJpj1Mv21gJzsbsVnkp1U4nqchZbmZ9pM5", type: "EXCH" },
-
-            // UPBIT ADDITIONAL
             { label: "UPBIT_1.2B", address: "rDxJNbV23mu9xsWoQHoBqZQvc77YcbJXwb", type: "EXCH" },
             { label: "UPBIT_500M_A", address: "r4G689g4KePYLKkyyumM1iUppTP4nhZwVC", type: "EXCH" },
             { label: "UPBIT_500M_B", address: "rMNUAfSz2spLEbaBwPnGtxTzZCajJifnzH", type: "EXCH" },
-
-            // UNLABELED WHALES
             { label: "WHALE_1.8B", address: "rPyCQm8E5j78PDbrfKF24fRC7qUAk1kDMZ", type: "HVT" },
             { label: "WHALE_1.5B", address: "rsXT3AQqhHDusFs3nQQuwcA1yXRLZJAXKw", type: "HVT" }
         ];
@@ -849,21 +977,8 @@
         let customHvts = [];
         let KNOWN_WALLETS = {}; // Populated on Init
 
-        // --- GRAPH ENGINE w/ ZOOM ---
-        const graphCanvas = document.getElementById('graph-canvas');
-        const graphCtx = graphCanvas.getContext('2d');
-        let graphNodes = [];
-        let graphEdges = [];
-        let graphZoom = 1;
-        let graphPan = {x: 0, y: 0};
-        let isDragging = false;
-        let lastMouse = {x:0, y:0};
-        
-        // Touch State for Graph
-        let graphTouchDist = 0;
-        
         function resizeGraph() {
-            if(!graphCanvas.offsetParent) return;
+            if(!graphCanvas || !graphCanvas.offsetParent) return;
             graphCanvas.width = graphCanvas.offsetWidth;
             graphCanvas.height = graphCanvas.offsetHeight;
         }
@@ -914,56 +1029,72 @@
             if(mapActive) { setTimeout(resizeMap, 50); }
             if(graphActive) { setTimeout(resizeGraph, 50); }
         }
-        
-        // Listen for standard window resize events too
-        window.addEventListener('resize', () => {
-            if(mapActive) resizeMap();
-            if(graphActive) resizeGraph();
-        });
 
-        // Mouse/Touch Events for Graph
-        graphCanvas.addEventListener('mousedown', e => { isDragging = true; lastMouse = {x: e.clientX, y: e.clientY}; });
-        graphCanvas.addEventListener('mouseup', () => isDragging = false);
-        graphCanvas.addEventListener('mouseout', () => isDragging = false);
-        graphCanvas.addEventListener('mousemove', e => {
-            if(!isDragging) return;
-            graphPan.x += e.clientX - lastMouse.x;
-            graphPan.y += e.clientY - lastMouse.y;
-            lastMouse = {x: e.clientX, y: e.clientY};
-        });
-        graphCanvas.addEventListener('wheel', e => {
-            e.preventDefault();
-            adjustZoom(e.deltaY > 0 ? -0.1 : 0.1);
-        }, {passive: false});
+        function setupGraphInteractions() {
+            graphCanvas.addEventListener('mousedown', e => { isDragging = true; lastMouse = {x: e.clientX, y: e.clientY}; });
+            window.addEventListener('mouseup', () => isDragging = false);
+            graphCanvas.addEventListener('mousemove', e => {
+                if(!isDragging) return;
+                graphPan.x += e.clientX - lastMouse.x;
+                graphPan.y += e.clientY - lastMouse.y;
+                lastMouse = {x: e.clientX, y: e.clientY};
+            });
+            graphCanvas.addEventListener('wheel', e => {
+                e.preventDefault();
+                adjustZoom(e.deltaY > 0 ? -0.1 : 0.1);
+            }, {passive: false});
 
-        // Touch Support (Graph)
-        graphCanvas.addEventListener('touchstart', e => {
-            if (e.touches.length === 1) {
-                isDragging = true;
-                lastMouse = {x: e.touches[0].clientX, y: e.touches[0].clientY};
-            } else if (e.touches.length === 2) {
-                // Pinch start
-                isDragging = false;
-                const dx = e.touches[0].clientX - e.touches[1].clientX;
-                const dy = e.touches[0].clientY - e.touches[1].clientY;
-                graphTouchDist = Math.hypot(dx, dy);
-            }
-        });
-        graphCanvas.addEventListener('touchmove', e => {
-            e.preventDefault();
-            if (e.touches.length === 1 && isDragging) {
-                graphPan.x += e.touches[0].clientX - lastMouse.x;
-                graphPan.y += e.touches[0].clientY - lastMouse.y;
-                lastMouse = {x: e.touches[0].clientX, y: e.touches[0].clientY};
-            } else if (e.touches.length === 2) {
-                const dx = e.touches[0].clientX - e.touches[1].clientX;
-                const dy = e.touches[0].clientY - e.touches[1].clientY;
-                const dist = Math.hypot(dx, dy);
-                const delta = (dist - graphTouchDist) * 0.01;
-                adjustZoom(delta);
-                graphTouchDist = dist;
-            }
-        });
+            // Touch Support (Graph)
+            graphCanvas.addEventListener('touchstart', e => {
+                if (e.touches.length === 1) {
+                    isDragging = true;
+                    lastMouse = {x: e.touches[0].clientX, y: e.touches[0].clientY};
+                } else if (e.touches.length === 2) {
+                    isDragging = false;
+                    const dx = e.touches[0].clientX - e.touches[1].clientX;
+                    const dy = e.touches[0].clientY - e.touches[1].clientY;
+                    graphTouchDist = Math.hypot(dx, dy);
+                }
+            });
+            graphCanvas.addEventListener('touchmove', e => {
+                e.preventDefault();
+                if (e.touches.length === 1 && isDragging) {
+                    graphPan.x += e.touches[0].clientX - lastMouse.x;
+                    graphPan.y += e.touches[0].clientY - lastMouse.y;
+                    lastMouse = {x: e.touches[0].clientX, y: e.touches[0].clientY};
+                } else if (e.touches.length === 2) {
+                    const dx = e.touches[0].clientX - e.touches[1].clientX;
+                    const dy = e.touches[0].clientY - e.touches[1].clientY;
+                    const dist = Math.hypot(dx, dy);
+                    const delta = (dist - graphTouchDist) * 0.01;
+                    adjustZoom(delta);
+                    graphTouchDist = dist;
+                }
+            });
+            
+            // GRAPH NODE CLICK INTERCEPTOR
+            graphCanvas.addEventListener('mousedown', (e) => {
+                const rect = graphCanvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                const transformedX = (x - (graphCanvas.width/2) - graphPan.x) / graphZoom;
+                const transformedY = (y - (graphCanvas.height/2) - graphPan.y) / graphZoom;
+
+                for(let n of graphNodes) {
+                    let dist = Math.hypot(n.x - transformedX, n.y - transformedY);
+                    if(dist < 10) { 
+                        openModal({
+                            nodeType: 'GRAPH_NODE',
+                            id: n.id,
+                            label: 'TARGET',
+                            val: '---',
+                            color: n.color
+                        });
+                        break;
+                    }
+                }
+            });
+        }
 
         function traceWallet(address) {
             closeModal();
@@ -983,7 +1114,7 @@
         }
 
         function updateGraph() {
-            if (!graphActive) return;
+            if (!graphActive || !graphCanvas) return;
             requestAnimationFrame(updateGraph);
             
             // AUTO-RESIZE LOGIC (GRAPH) - Fixes squishing on mobile
@@ -1118,7 +1249,7 @@
             // CHECK IF FIRST TIME COMPLETION
             if (!localStorage.getItem(TUT_STORAGE_KEY)) {
                 localStorage.setItem(TUT_STORAGE_KEY, "true"); // Set flag
-                window.open(MANUAL_URL, '_blank'); // OPEN MANUAL AUTOMATICALLY
+                // window.open(MANUAL_URL, '_blank'); // DISABLED AUTO-OPEN
             }
             
             document.getElementById('tutorial-overlay').classList.remove('tut-active'); 
@@ -1147,7 +1278,7 @@
             else if (tutStep === 1) { 
                 document.querySelector('.tactical-bar').classList.add('highlight-element');
                 title.innerText = "TACTICAL COMMS"; 
-                text.innerHTML = "Top Right Command Bar:<br>- Generate Daily Intelligence Reports.<br>- Toggle Audio/Visual Alerts.<br>- Access XMEME Video Feed.<br>- Send Tips via QR."; 
+                text.innerHTML = "Top Right Command Bar:<br>- NEW: Chart Tool for TA.<br>- Generate Reports.<br>- Toggle Alerts/Audio.<br>- Access XMEME."; 
                 controls.innerHTML = `<button class="tut-btn" onclick="endTutorial()">SKIP</button><button class="tut-btn" onclick="nextStep()">NEXT ></button>`;
             } 
             // --- STEP 2: LIVE FEED ---
@@ -1346,113 +1477,102 @@
             renderer.render(scene, camera);
         }
 
-        // --- MAP SETUP ---
-        const mapCanvas = document.getElementById('map-canvas');
-        const mapCtx = mapCanvas.getContext('2d');
-        
-        // Map Camera
-        let mapCamera = { zoom: 1, x: 0, y: 0 };
-        let mapIsDragging = false;
-        let mapLastPos = { x: 0, y: 0 };
-        let mapTouchDist = 0;
-
         function resizeMap() {
-            if(!mapCanvas.offsetParent) return;
+            if(!mapCanvas || !mapCanvas.offsetParent) return;
             mapCanvas.width = mapCanvas.offsetWidth;
             mapCanvas.height = mapCanvas.offsetHeight;
         }
 
-        // Map Interactions
-        mapCanvas.addEventListener('mousedown', (e) => {
-            mapIsDragging = true;
-            mapLastPos = { x: e.clientX, y: e.clientY };
-        });
-        window.addEventListener('mouseup', () => mapIsDragging = false);
-        mapCanvas.addEventListener('mousemove', (e) => {
-            if (!mapIsDragging) return;
-            const dx = e.clientX - mapLastPos.x;
-            const dy = e.clientY - mapLastPos.y;
-            mapCamera.x += dx;
-            mapCamera.y += dy;
-            mapLastPos = { x: e.clientX, y: e.clientY };
-        });
-        mapCanvas.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            const scaleAmount = 1.1;
-            const mouseX = e.offsetX;
-            const mouseY = e.offsetY;
-            // Zoom logic towards mouse pointer
-            if (e.deltaY < 0) {
-                // Zoom in
-                mapCamera.zoom *= scaleAmount;
-                mapCamera.x -= (mouseX - mapCamera.x) * (scaleAmount - 1);
-                mapCamera.y -= (mouseY - mapCamera.y) * (scaleAmount - 1);
-            } else {
-                // Zoom out
-                mapCamera.zoom /= scaleAmount;
-                mapCamera.x += (mouseX - mapCamera.x) * (1 - 1/scaleAmount);
-                mapCamera.y += (mouseY - mapCamera.y) * (1 - 1/scaleAmount);
-            }
-        }, {passive: false});
-
-        // Touch for Map (Pinch Zoom)
-        mapCanvas.addEventListener('touchstart', e => {
-            if (e.touches.length === 1) {
+        function setupMapInteractions() {
+            mapCanvas.addEventListener('mousedown', (e) => {
                 mapIsDragging = true;
-                mapLastPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-            } else if (e.touches.length === 2) {
-                mapIsDragging = false;
-                const dx = e.touches[0].clientX - e.touches[1].clientX;
-                const dy = e.touches[0].clientY - e.touches[1].clientY;
-                mapTouchDist = Math.hypot(dx, dy);
-            }
-        });
-        mapCanvas.addEventListener('touchmove', e => {
-            e.preventDefault();
-            if (e.touches.length === 1 && mapIsDragging) {
-                const dx = e.touches[0].clientX - mapLastPos.x;
-                const dy = e.touches[0].clientY - mapLastPos.y;
+                mapLastPos = { x: e.clientX, y: e.clientY };
+            });
+            window.addEventListener('mouseup', () => mapIsDragging = false);
+            mapCanvas.addEventListener('mousemove', (e) => {
+                if (!mapIsDragging) return;
+                const dx = e.clientX - mapLastPos.x;
+                const dy = e.clientY - mapLastPos.y;
                 mapCamera.x += dx;
                 mapCamera.y += dy;
-                mapLastPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-            } else if (e.touches.length === 2) {
-                const dx = e.touches[0].clientX - e.touches[1].clientX;
-                const dy = e.touches[0].clientY - e.touches[1].clientY;
-                const dist = Math.hypot(dx, dy);
-                
-                // Pinch zoom center is midpoint of fingers
-                const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-                const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                mapLastPos = { x: e.clientX, y: e.clientY };
+            });
+            mapCanvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const scaleAmount = 1.1;
+                const mouseX = e.offsetX;
+                const mouseY = e.offsetY;
+                if (e.deltaY < 0) {
+                    mapCamera.zoom *= scaleAmount;
+                    mapCamera.x -= (mouseX - mapCamera.x) * (scaleAmount - 1);
+                    mapCamera.y -= (mouseY - mapCamera.y) * (scaleAmount - 1);
+                } else {
+                    mapCamera.zoom /= scaleAmount;
+                    mapCamera.x += (mouseX - mapCamera.x) * (1 - 1/scaleAmount);
+                    mapCamera.y += (mouseY - mapCamera.y) * (1 - 1/scaleAmount);
+                }
+            }, {passive: false});
+
+            // Touch
+            mapCanvas.addEventListener('touchstart', e => {
+                if (e.touches.length === 1) {
+                    mapIsDragging = true;
+                    mapLastPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                } else if (e.touches.length === 2) {
+                    mapIsDragging = false;
+                    const dx = e.touches[0].clientX - e.touches[1].clientX;
+                    const dy = e.touches[0].clientY - e.touches[1].clientY;
+                    mapTouchDist = Math.hypot(dx, dy);
+                }
+            });
+            mapCanvas.addEventListener('touchmove', e => {
+                e.preventDefault();
+                if (e.touches.length === 1 && mapIsDragging) {
+                    const dx = e.touches[0].clientX - mapLastPos.x;
+                    const dy = e.touches[0].clientY - mapLastPos.y;
+                    mapCamera.x += dx;
+                    mapCamera.y += dy;
+                    mapLastPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                } else if (e.touches.length === 2) {
+                    const dx = e.touches[0].clientX - e.touches[1].clientX;
+                    const dy = e.touches[0].clientY - e.touches[1].clientY;
+                    const dist = Math.hypot(dx, dy);
+                    const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                    const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                    const rect = mapCanvas.getBoundingClientRect();
+                    const mouseX = centerX - rect.left;
+                    const mouseY = centerY - rect.top;
+                    const zoomFactor = dist / mapTouchDist;
+                    mapCamera.zoom *= zoomFactor;
+                    mapCamera.x -= (mouseX - mapCamera.x) * (zoomFactor - 1);
+                    mapCamera.y -= (mouseY - mapCamera.y) * (zoomFactor - 1);
+                    mapTouchDist = dist;
+                }
+            });
+            
+            // Map Click
+            mapCanvas.addEventListener('click', (e) => {
                 const rect = mapCanvas.getBoundingClientRect();
-                const mouseX = centerX - rect.left;
-                const mouseY = centerY - rect.top;
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                const worldX = (mouseX - mapCamera.x) / mapCamera.zoom;
+                const worldY = (mouseY - mapCamera.y) / mapCamera.zoom;
 
-                const zoomFactor = dist / mapTouchDist;
-                
-                mapCamera.zoom *= zoomFactor;
-                mapCamera.x -= (mouseX - mapCamera.x) * (zoomFactor - 1);
-                mapCamera.y -= (mouseY - mapCamera.y) * (zoomFactor - 1);
-                
-                mapTouchDist = dist;
-            }
-        });
-
-        // Double Click Zoom
-        mapCanvas.addEventListener('dblclick', (e) => {
-            const mouseX = e.offsetX;
-            const mouseY = e.offsetY;
-            const zoomAmount = 2;
-            mapCamera.zoom *= zoomAmount;
-            mapCamera.x -= (mouseX - mapCamera.x) * (zoomAmount - 1);
-            mapCamera.y -= (mouseY - mapCamera.y) * (zoomAmount - 1);
-        });
+                for (let i = bubbles.length - 1; i >= 0; i--) {
+                    let b = bubbles[i];
+                    let visible = true;
+                    if (activeFilter === 'small' && (b.isL2 || b.val >= 100000)) visible = false;
+                    if (activeFilter === 'whale' && (b.isL2 || b.val < 100000)) visible = false;
+                    if (activeFilter === 'l2' && !b.isL2) visible = false;
+                    if (visible && Math.hypot(b.x - worldX, b.y - worldY) < b.radius + 10) { openModal(b); bubbles.splice(i, 1); break; }
+                }
+            });
+        }
 
         class Bubble {
             constructor(label, val, color, hash, from, to, type, issuer) {
-                // Spawn across a wider virtual area so zooming out looks good
-                // Virtual width = canvas width * 3
                 this.x = (Math.random() * mapCanvas.width * 3) - mapCanvas.width; 
-                this.y = mapCanvas.height + 100; // Spawn below visual range
+                this.y = mapCanvas.height + 100;
                 let safeVal = parseFloat(val) || 1; 
                 this.radius = Math.max(10, Math.min(50, Math.log(safeVal + 10) * 3));
                 this.speed = 1 + Math.random() * 2;
@@ -1467,7 +1587,7 @@
                     this.icon.crossOrigin = "Anonymous";
                     this.icon.src = `https://xumm.app/avatar/${issuer}_200.png`;
                     this.icon.onload = () => { this.iconLoaded = true; };
-                    this.icon.onerror =  () => { this.iconLoaded = false; this.icon = null; };
+                    this.icon.onerror = () => { this.iconLoaded = false; this.icon = null; };
                 }
             }
             update() { this.y -= this.speed; this.life -= 0.002; }
@@ -1480,7 +1600,6 @@
                     mapCtx.fillStyle = this.color; mapCtx.fill();
                 }
                 mapCtx.strokeStyle = "#fff"; mapCtx.lineWidth = 1; mapCtx.stroke();
-                // Text LOD: Only show text if zoom is high enough or bubble is big
                 if ((this.radius * mapCamera.zoom) > 8) {
                     mapCtx.textAlign = "center"; mapCtx.font = "bold 9px monospace";
                     mapCtx.lineWidth = 3; mapCtx.strokeStyle = "black"; mapCtx.strokeText(this.label, this.x, this.y + 3);
@@ -1489,11 +1608,9 @@
             }
         }
         function loopMap() {
-            if (!mapActive) return;
+            if (!mapActive || !mapCanvas) return;
             requestAnimationFrame(loopMap);
             
-            // AUTO-RESIZE LOGIC (Fixes squishing)
-            // Check if internal canvas resolution matches displayed resolution
             if (mapCanvas.width !== mapCanvas.offsetWidth || mapCanvas.height !== mapCanvas.offsetHeight) {
                 mapCanvas.width = mapCanvas.offsetWidth;
                 mapCanvas.height = mapCanvas.offsetHeight;
@@ -1501,46 +1618,19 @@
             
             mapCtx.setTransform(1, 0, 0, 1, 0, 0);
             mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
-            
-            // Apply Camera Transform
             mapCtx.setTransform(mapCamera.zoom, 0, 0, mapCamera.zoom, mapCamera.x, mapCamera.y);
 
             for (let i = bubbles.length - 1; i >= 0; i--) {
                 let b = bubbles[i]; 
-                
                 let shouldDraw = true;
                 if (activeFilter === 'small' && (b.isL2 || b.val >= 100000)) shouldDraw = false;
                 if (activeFilter === 'whale' && (b.isL2 || b.val < 100000)) shouldDraw = false; 
                 if (activeFilter === 'l2' && !b.isL2) shouldDraw = false;
-                
                 b.update(); 
                 if (shouldDraw) b.draw();
-                
                 if (b.y < -500 || b.life <= 0) bubbles.splice(i, 1);
             }
         }
-        
-        // Handle Map Clicks with Transform
-        mapCanvas.addEventListener('click', (e) => {
-            // Can't use offsetX because transform applies
-            const rect = mapCanvas.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-            
-            // Transform mouse coords to world coords
-            const worldX = (mouseX - mapCamera.x) / mapCamera.zoom;
-            const worldY = (mouseY - mapCamera.y) / mapCamera.zoom;
-
-            for (let i = bubbles.length - 1; i >= 0; i--) {
-                let b = bubbles[i];
-                let visible = true;
-                if (activeFilter === 'small' && (b.isL2 || b.val >= 100000)) visible = false;
-                if (activeFilter === 'whale' && (b.isL2 || b.val < 100000)) visible = false;
-                if (activeFilter === 'l2' && !b.isL2) visible = false;
-                
-                if (visible && Math.hypot(b.x - worldX, b.y - worldY) < b.radius + 10) { openModal(b); bubbles.splice(i, 1); break; }
-            }
-        });
 
         // --- WEBSOCKET ---
         document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && isConnected && (!socket || socket.readyState !== WebSocket.OPEN)) { showToast("RE-ESTABLISHING UPLINK..."); startXRPL(); } });
@@ -1588,7 +1678,6 @@
                 if(d.type==='ledgerClosed' && document.getElementById('ledger-display')) document.getElementById('ledger-display').innerText = d.ledger_index; 
                 if(d.result && d.result.transactions) processTrace(d.result.account, d.result.transactions);
                 
-                // HVT BALANCE UPDATE HANDLER (v15.3)
                 if(d.id && d.id.startsWith("bal_")) {
                     const acc = d.id.replace("bal_", "");
                     const el = document.getElementById('bal-' + acc);
@@ -1598,7 +1687,7 @@
                         if (d.error === 'actNotFound') {
                             el.innerText = "[INACTIVE]";
                             el.style.color = "#666";
-                            row.classList.add('inactive'); // NEW: Visual dimming
+                            row.classList.add('inactive');
                         } else if(d.result && d.result.account_data) {
                             const bal = parseFloat(d.result.account_data.Balance) / 1000000;
                             if(bal < 1) {
@@ -1671,11 +1760,10 @@
             let str = ''; for (let i = 0; i < hex.length; i += 2) str += String.fromCharCode(parseInt(hex.substr(i, 2), 16)); return str.replace(/\0/g, '');
         }
 
-        // --- HELPER FUNCTIONS FOR REPORTS (RESTORED) ---
         function getReportType(amt, known) { 
-            if(known) return 'I'; // Identified/Institution
-            if(amt>5000000) return 'S'; // Super Whale
-            return 'R'; // Regular Whale
+            if(known) return 'I'; 
+            if(amt>5000000) return 'S'; 
+            return 'R'; 
         }
         function getOutflow(fromKnown, toKnown) { 
             if(fromKnown && !toKnown) return 'EXCH-OUT'; 
@@ -1687,7 +1775,6 @@
         function handleTx(tx, meta) {
             if (isPaused) return; 
             
-            // RLUSD TRACKER
             if (tx.TransactionType === 'TrustSet') {
                 const currency = tx.LimitAmount.currency;
                 if (currency === 'RLUSD' || currency.startsWith('524C555344')) {
@@ -1708,7 +1795,6 @@
             const hideFailed = document.getElementById('hide-failed').checked;
             if (hideFailed && !isSuccess) return;
 
-            // PARSE
             let type = "TSFR"; let color = "text-green-500"; let mapColor = "#00ff00"; let amt = 0; let isL2 = false; let tokenName = "XRP"; let issuer = null;
             let delivered = meta?.delivered_amount;
             
@@ -1738,25 +1824,20 @@
             const isWhale = !isL2 && amt >= 100000; 
             const isExchange = nameFrom || nameTo;
 
-            // --- SESSION METRICS UPDATE ---
             metrics.txCount++;
             let currentPrice = parseFloat(document.getElementById('price-display').innerText.replace('$','')) || 0;
 
             if (isL2) {
-                metrics.totalL2Vol += amt; // Add raw units
+                metrics.totalL2Vol += amt; 
                 metrics.l2TxCount++;
-                blackbox.totalL2 += amt; // BLACKBOX UPDATE
+                blackbox.totalL2 += amt; 
             } else {
                 metrics.totalXRPVol += amt;
                 metrics.totalUSDVol += (amt * currentPrice);
                 if (amt < 10000) metrics.fishCount++; else if (amt < 100000) metrics.sharkCount++; else metrics.whaleCount++;
-                
-                // BLACKBOX UPDATE
                 blackbox.totalXRP += amt;
                 blackbox.totalUSD += (amt * currentPrice);
                 blackbox.txCount++; 
-                
-                // UPDATE DAILY SNAPSHOT
                 const today = new Date().toISOString().split('T')[0];
                 if (blackbox.dailySnapshots[today]) {
                     blackbox.dailySnapshots[today].xrp += amt;
@@ -1767,7 +1848,6 @@
                 }
             }
 
-            // Update Report Tab (Background Process & Persistence)
             if (isSuccess && (amt >= 100000 || isHVT) && !isL2) {
                  const repTx = {
                      hash: tx.hash,
@@ -1784,7 +1864,6 @@
                  saveBlackbox(); 
             }
             
-            // Update HVT Tab & Blackbox Logs
             if (isHVT) { 
                 saveCase({hash:tx.hash, amt:amt, from:nameFrom||tx.Account, to:nameTo||tx.Destination, type:'HVT'}); 
                 addHVTRow(tx.hash, amt, nameFrom||tx.Account, nameTo||tx.Destination); 
@@ -1806,7 +1885,6 @@
             const dispFrom = nameFrom ? `<span class="entity-name">${nameFrom}</span>` : tx.Account ? tx.Account.substring(0,4)+'...' : '???';
             const dispTo = nameTo ? `<span class="entity-name">${nameTo}</span>` : tx.Destination ? tx.Destination.substring(0,4)+'...' : 'DEX';
             
-            // FEED FILTER LOGIC
             let showInFeed = true;
             if (activeFilter === 'small' && (isL2 || amt >= 100000)) showInFeed = false;
             if (activeFilter === 'whale' && (isL2 || amt < 100000)) showInFeed = false;
@@ -1860,13 +1938,11 @@
         function playAlert(type) { if(!alertsEnabled) return; if (type === 'HVT') { playTone(1200, 0.1); setTimeout(() => playTone(1200, 0.1), 150); setTimeout(() => playTone(1200, 0.2), 300); } else { playTone(400, 0.2, "sine"); } }
         
         function openModal(b) { 
-            // Generic fill for transaction
             document.getElementById('modal-title').innerText = "INTEL: " + (b.type || 'TX');
             document.getElementById('mod-amt').innerText = typeof b.val === 'number' ? b.val.toLocaleString() + " " + (b.label?.includes(' ') ? '' : 'XRP') : b.label; 
             document.getElementById('mod-amt').style.color = b.color || '#00ff00'; 
             document.getElementById('mod-type').innerText = b.type || 'TX'; 
             
-            // If it's a GRAPH NODE, adjust content
             if (b.nodeType === 'GRAPH_NODE') {
                 document.getElementById('modal-title').innerText = "TARGET NODE";
                 document.getElementById('mod-type').innerText = "WALLET ENTITY";
@@ -1874,12 +1950,11 @@
                 document.getElementById('mod-to').innerText = "NET LINKED";
                 document.getElementById('mod-trace-btn').innerText = "EXPAND NET";
                 document.getElementById('mod-trace-btn').onclick = () => traceWallet(b.id);
-                document.getElementById('mod-scan-btn').onclick = () => openScan('account/'+b.id); // Scan Account
+                document.getElementById('mod-scan-btn').onclick = () => openScan('account/'+b.id); 
                 document.getElementById('mod-copy-wallet').onclick = () => copyHash(b.id);
                 document.getElementById('mod-copy-hash').style.display = 'none';
                 document.getElementById('mod-save-btn').style.display = 'none';
             } else {
-                // Regular TX
                 document.getElementById('mod-from').innerText = b.from; 
                 document.getElementById('mod-to').innerText = b.to; 
                 document.getElementById('mod-trace-btn').innerText = "TRACE";
@@ -1893,31 +1968,6 @@
             }
             document.getElementById('bubble-modal').classList.add('modal-active'); 
         }
-
-        // GRAPH NODE CLICK INTERCEPTOR
-        graphCanvas.addEventListener('mousedown', (e) => {
-            const rect = graphCanvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            
-            // Adjust click coordinates for zoom/pan
-            const transformedX = (x - (graphCanvas.width/2) - graphPan.x) / graphZoom;
-            const transformedY = (y - (graphCanvas.height/2) - graphPan.y) / graphZoom;
-
-            for(let n of graphNodes) {
-                let dist = Math.hypot(n.x - transformedX, n.y - transformedY);
-                if(dist < 10) { 
-                    openModal({
-                        nodeType: 'GRAPH_NODE',
-                        id: n.id,
-                        label: 'TARGET',
-                        val: '---',
-                        color: n.color
-                    });
-                    break;
-                }
-            }
-        });
 
         function closeModal() { document.getElementById('bubble-modal').classList.remove('modal-active'); }
         
@@ -1943,7 +1993,6 @@
         }
         function saveCase(d) { if(!cases.some(c=>c.hash===d.hash)) { cases.push(d); renderCases(); saveBlackbox(); showToast("EVIDENCE SECURED"); } }
         
-        // --- NEW CLICKABLE CASES & EXPORT FIX ---
         function renderCases() { 
             const list = document.getElementById('case-list');
             list.innerHTML = '';
@@ -1993,7 +2042,6 @@
         function closeIntel() { document.getElementById('intel-dashboard').classList.remove('active'); }
         function copyIntelText() { const t = document.getElementById('intel-content'); t.select(); document.execCommand('copy'); showToast("REPORT COPIED"); }
         function shareIntel() { const text = document.getElementById('intel-content').value; if (navigator.share) { navigator.share({ title: 'Shadow Intel', text: text }).catch(err => { if (err.name !== 'AbortError') console.error('Share failed:', err); }); } else { copyIntelText(); showToast("SHARE API UNAVAILABLE. COPIED."); } }
-        init3D();
         const PRICE_SOURCES = [{url:'https://api.binance.us/api/v3/ticker/price?symbol=XRPUSDT',parse:d=>parseFloat(d.price)}];
         
         // FIXED: New Price Engine
