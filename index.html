@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v14.6 [SHARP HUD]</title>
+    <title>XRPMAN SHADOW WATCH // v14.7 [EVIDENCE FIX]</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -669,7 +669,8 @@
             <div id="view-case" class="view-panel">
                 <div class="flex justify-between p-3 border-b border-green-900 bg-black/20 flex-shrink-0">
                     <span class="text-xs text-green-700">SAVED ANOMALIES</span>
-                    <button onclick="exportJSON()" class="text-[10px] text-green-400 border border-green-600 px-3 rounded">EXPORT</button>
+                    <!-- UPDATED: Button now calls specific case export -->
+                    <button onclick="exportCasesJSON()" class="text-[10px] text-green-400 border border-green-600 px-3 rounded">EXPORT</button>
                 </div>
                 <div id="case-list" class="flex-grow overflow-y-auto space-y-1 p-2"></div>
                 <button onclick="clearCases()" class="text-red-500 text-xs py-4 bg-red-900/10 font-bold tracking-widest border-t border-red-900 flex-shrink-0">CLEAR LOCKER</button>
@@ -1732,7 +1733,45 @@
             else window.open(`https://xrpscan.com/tx/${h}`, '_blank'); 
         }
         function saveCase(d) { if(!cases.some(c=>c.hash===d.hash)) { cases.push(d); renderCases(); saveBlackbox(); showToast("EVIDENCE SECURED"); } }
-        function renderCases() { document.getElementById('case-list').innerHTML = cases.map(c => `<div class="p-3 border-l-2 border-yellow-500 bg-yellow-900/10 mb-1"><div class="flex justify-between font-bold text-yellow-400 text-xs"><span>${(c.amt||0).toLocaleString()} ${c.token || 'XRP'}</span><span class="text-[10px] text-gray-500 font-mono">${(c.hash||'').substring(0,8)}...</span></div></div>`).join(''); }
+        
+        // --- NEW CLICKABLE CASES & EXPORT FIX ---
+        function renderCases() { 
+            const list = document.getElementById('case-list');
+            list.innerHTML = '';
+            cases.forEach((c) => {
+                const row = document.createElement('div');
+                row.className = "p-3 border-l-2 border-yellow-500 bg-yellow-900/10 mb-1 cursor-pointer hover:bg-yellow-900/30 transition-colors";
+                row.innerHTML = `
+                    <div class="flex justify-between font-bold text-yellow-400 text-xs">
+                        <span>${(c.amt||0).toLocaleString()} ${c.token || 'XRP'}</span>
+                        <span class="text-[10px] text-gray-500 font-mono">${(c.hash||'').substring(0,8)}...</span>
+                    </div>`;
+                row.onclick = () => openModal({
+                    val: c.amt,
+                    label: (c.amt>=1000 ? (c.amt/1000).toFixed(1)+'k' : c.amt),
+                    color: '#ffd700',
+                    type: c.type || 'CASE-FILE',
+                    from: c.from,
+                    to: c.to,
+                    hash: c.hash,
+                    isL2: false 
+                });
+                list.appendChild(row);
+            });
+        }
+        
+        function exportCasesJSON() {
+            if(cases.length === 0) return showToast("NO EVIDENCE TO EXPORT");
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(cases, null, 2));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", `evidence_locker_${new Date().toISOString().slice(0,10)}.json`);
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+            showToast("EVIDENCE EXPORTED");
+        }
+        
         function clearCases() { cases=[]; renderCases(); saveBlackbox(); showToast("LOCKER CLEARED"); }
         function exportJSON() { const a = document.createElement('a'); a.href = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(blackbox)); a.download = `sentinel_blackbox_${new Date().toISOString().slice(0,10)}.json`; a.click(); }
         function renderReportRow(tx) { const list = document.getElementById('report-list'); const row = document.createElement('div'); row.className = "report-row"; row.innerHTML = `<div style="width: 25%" class="rep-val-green">${tx.amt.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:6})}</div><div style="width: 25%" class="rep-val-white">${tx.wallet.startsWith('r')?tx.wallet.substring(0,8):tx.wallet}</div><div class="rep-col-time rep-val-dim">${new Date(tx.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div><div class="rep-col-type text-white font-bold">${tx.type}</div><div class="rep-col-out font-bold" style="${tx.out==='EXCH-OUT'?'color:#ffaa00':(tx.out==='EXCH-IN'?'color:#00ffff':'color:#888')}">${tx.out}</div>`; row.onclick = () => openModal({val: tx.amt, label: (tx.amt/1000).toFixed(1)+'k', color: '#00ff00', type: `REP-${tx.type}`, from: tx.wallet, to: 'LINKED', hash: tx.hash}); list.prepend(row); if (list.children.length > 100) list.lastChild.remove(); }
