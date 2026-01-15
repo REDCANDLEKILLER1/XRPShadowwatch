@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>XRPMAN SHADOW WATCH // v15.8 [NO AUTO-DOC]</title>
+    <title>XRPMAN SHADOW WATCH // v16.2 [NEXUS INTEGRATED]</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -18,13 +18,13 @@
             --info-cyan: #00ffff;
             --dex-purple: #aa00ff;
             --gold-hvt: #ffd700;
-        }
+        } 
 
         body {
             margin: 0; overflow: hidden; background-color: #000;
             font-family: 'Rajdhani', sans-serif; color: var(--lime-main);
             touch-action: none; user-select: none;
-        }
+        } 
 
         /* --- SPLASH SCREEN --- */
         #splash-screen {
@@ -59,7 +59,7 @@
             cursor: pointer; display: block;
         }
         #skip-btn:hover { border-color: var(--lime-main); color: var(--lime-main); }
-        .fade-out { opacity: 0; pointer-events: none; }
+        .fade-out { opacity: 0; pointer-events: none; } 
 
         /* TUTORIAL OVERLAY */
         #tutorial-overlay {
@@ -91,14 +91,14 @@
             color: var(--lime-main); font-family: 'Orbitron'; font-weight: bold; cursor: pointer;
             font-size: 12px; letter-spacing: 1px;
         }
-        .tut-btn:hover { background: var(--lime-main); color: black; }
+        .tut-btn:hover { background: var(--lime-main); color: black; } 
 
         #app-background {
             position: absolute; inset: 0; z-index: 0;
             background: radial-gradient(circle at center, #002200 0%, #000000 70%);
         }
         #canvas-container { position: absolute; inset: 0; z-index: 1; opacity: 0.8; }
-        #alert-layer { position: absolute; inset: 0; z-index: 900; pointer-events: none; }
+        #alert-layer { position: absolute; inset: 0; z-index: 900; pointer-events: none; } 
 
         #toast {
             position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
@@ -108,7 +108,7 @@
             opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 6000;
             box-shadow: 0 0 30px var(--lime-main); font-weight: bold; text-align: center;
         }
-        .toast-show { opacity: 1 !important; }
+        .toast-show { opacity: 1 !important; } 
 
         /* INTEL DASHBOARD MODAL */
         #intel-dashboard {
@@ -126,7 +126,7 @@
         #intel-content { flex-grow: 1; background: #0a0a0a; border: 1px solid #113311; color: #00ff00; font-family: 'Share Tech Mono'; font-size: 12px; padding: 15px; overflow-y: auto; white-space: pre-wrap; box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8); }
         #intel-actions { display: flex; gap: 10px; margin-top: 15px; }
         .intel-action-btn { flex: 1; background: #001100; border: 1px solid var(--lime-main); color: var(--lime-main); padding: 12px; font-weight: bold; font-size: 12px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s; font-family: 'Orbitron'; display: flex; justify-content: center; align-items: center; gap: 5px; }
-        .intel-action-btn:hover { background: var(--lime-main); color: #000; box-shadow: 0 0 15px var(--lime-main); }
+        .intel-action-btn:hover { background: var(--lime-main); color: #000; box-shadow: 0 0 15px var(--lime-main); } 
 
         /* BUBBLE MODAL */
         #bubble-modal {
@@ -143,7 +143,7 @@
         .mod-btn { background: #001100; border: 1px solid var(--lime-main); color: var(--lime-main); padding: 10px; font-size: 10px; font-weight: bold; text-align: center; border-radius: 4px; font-family: 'Share Tech Mono'; cursor: pointer; transition: background 0.1s; }
         .mod-btn:active { background: var(--lime-main); color: black; }
         .mod-save { border-color: #ffaa00; color: #ffaa00; }
-        .mod-trace { border-color: #00ffff; color: #00ffff; }
+        .mod-trace { border-color: #00ffff; color: #00ffff; } 
 
         /* TIP MODAL */
         #tip-modal {
@@ -158,7 +158,7 @@
             background: #001100; border: 1px solid #335533; color: var(--lime-main); 
             padding: 10px; font-family: 'Share Tech Mono'; font-size: 10px; 
             word-break: break-all; text-align: center; width: 100%; border-radius: 4px;
-        }
+        } 
 
         /* XMEME VIDEO MODAL */
         #xmeme-modal {
@@ -187,9 +187,9 @@
         }
         .xmeme-controls button:hover { background: var(--lime-main); color: black; }
         #xmeme-body { width: 100%; background: black; }
-        #xmeme-video { width: 100%; display: block; }
+        #xmeme-video { width: 100%; display: block; } 
 
-        /* TRADINGVIEW CHART WINDOW (NEW) */
+        /* TRADINGVIEW CHART WINDOW */
         #tv-modal {
             position: fixed; top: 15%; left: 10%; width: 350px; height: 300px;
             background: rgba(0, 15, 0, 0.95); border: 2px solid var(--lime-main);
@@ -204,7 +204,24 @@
             border-bottom: 1px solid var(--lime-dim); cursor: grab;
         }
         #tv-header:active { cursor: grabbing; }
-        #tv-body { flex-grow: 1; background: #000; width: 100%; height: 100%; overflow: hidden; }
+        #tv-body { flex-grow: 1; background: #000; width: 100%; height: 100%; overflow: hidden; } 
+
+        /* NEXUS-9 MODAL (FLOATING) */
+        #nexus-modal {
+            position: fixed; top: 20%; left: 15%; width: 350px; height: 500px;
+            background: rgba(0, 15, 0, 0.95); border: 2px solid var(--lime-main);
+            border-radius: 8px; z-index: 9001; display: none; flex-direction: column;
+            box-shadow: 0 0 30px rgba(0,0,0,0.8);
+            resize: both; overflow: hidden; min-width: 300px; min-height: 250px;
+        }
+        #nexus-header {
+            background: #002200; color: var(--lime-main);
+            padding: 6px 10px; font-family: 'Orbitron'; font-size: 11px;
+            display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 1px solid var(--lime-dim); cursor: grab;
+        }
+        #nexus-header:active { cursor: grabbing; }
+        #nexus-body { flex-grow: 1; background: #000; width: 100%; height: 100%; overflow: hidden; }
 
         /* TOP HUD */
         #hud-top {
@@ -213,7 +230,7 @@
             padding-top: max(25px, env(safe-area-inset-top)); 
             padding-left: 15px; padding-right: 15px; padding-bottom: 20px;
             pointer-events: none; display: flex; flex-direction: column; gap: 8px;
-        }
+        } 
 
         #session-timer {
             position: absolute;
@@ -226,7 +243,7 @@
             letter-spacing: 1px;
             opacity: 0.8;
             z-index: 100;
-        }
+        } 
 
         .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; pointer-events: auto; margin-bottom: 5px; }
         .stat-box {
@@ -234,12 +251,12 @@
             padding: 8px; border-radius: 6px; backdrop-filter: blur(10px);
             display: flex; flex-direction: column; justify-content: center;
             box-shadow: 0 4px 10px rgba(0,0,0,0.6);
-            transition: border-color 0.2s; /* Add transition for hover */
+            transition: border-color 0.2s; 
         }
         
         /* INTERACTIVE PRICE BOX STYLE */
         #price-box { cursor: pointer; }
-        #price-box:hover { border-color: var(--lime-main); box-shadow: 0 0 15px rgba(0,255,0,0.3); }
+        #price-box:hover { border-color: var(--lime-main); box-shadow: 0 0 15px rgba(0,255,0,0.3); } 
 
         /* FIXED: Removed text-shadow to stop fuzziness */
         .price-text { 
@@ -277,16 +294,14 @@
             color: var(--lime-main);
             font-family: 'Orbitron'; font-size: 8px; font-weight: bold; width: auto; padding: 0 8px; 
         }
-        #tip-btn { animation: pulse-green 2s infinite; }
+        #tip-btn { animation: pulse-green 2s infinite; } 
 
         #report-btn {
             width: auto; padding: 0 20px; font-family: 'Orbitron'; font-size: 10px; font-weight: bold; letter-spacing: 1px;
             background: #001100; border-color: var(--lime-main); color: var(--lime-main);
             box-shadow: 0 0 5px rgba(0,255,0,0.3);
         }
-        #report-btn:hover { background: var(--lime-main); color: black; }
-
-        #chart-btn { width: auto; padding: 0 8px; font-family: 'Orbitron'; font-size: 9px; font-weight: bold; color: #00ffff; border-color: #00aaaa; }
+        #report-btn:hover { background: var(--lime-main); color: black; } 
 
         /* BOTTOM DECK */
         #hud-bottom { 
@@ -299,7 +314,7 @@
             height: 100vh;
             top: 0;
             z-index: 50;
-        }
+        } 
 
         #command-deck { flex-grow: 1; background: var(--glass-bg); border-top: 2px solid var(--lime-dim); backdrop-filter: blur(12px); display: flex; flex-direction: column; border-radius: 16px 16px 0 0; box-shadow: 0 -10px 40px rgba(0,0,0,0.8); overflow: hidden; }
         
@@ -310,7 +325,7 @@
         .tab-btn.active { background: #001100; color: var(--lime-main); border-bottom: 3px solid var(--lime-main); text-shadow: 0 0 5px var(--lime-main); }
         .tab-btn.active svg { stroke: var(--lime-main); stroke-width: 2; filter: drop-shadow(0 0 2px var(--lime-main)); }
         .tab-btn.hvt-active { color: var(--gold-hvt); }
-        .tab-btn.hvt-active svg { stroke: var(--gold-hvt); }
+        .tab-btn.hvt-active svg { stroke: var(--gold-hvt); } 
 
         .view-panel { display: none; flex-direction: column; height: 100%; padding: 0; position: relative; overflow: hidden; }
         .view-panel.active { display: flex; }
@@ -353,14 +368,14 @@
         #report-header { display: flex; justify-content: space-between; padding: 8px 10px; background: rgba(0, 50, 0, 0.5); border-bottom: 1px solid var(--lime-dim); font-size: 9px; font-weight: bold; color: #55aa55; font-family: 'Share Tech Mono'; }
         .report-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 10px; border-bottom: 1px solid #112211; font-size: 11px; font-family: 'Share Tech Mono'; cursor: pointer; transition: background 0.1s; }
         .report-row:hover { background: rgba(0, 255, 0, 0.1); }
-        .rep-val-green { color: #00ff00; font-weight: bold; font-size: 12px; } .rep-val-white { color: #ffffff; opacity: 0.8; } .rep-val-dim { color: #666666; }
+        .rep-val-green { color: #00ff00; font-weight: bold; font-size: 12px; } .rep-val-white { color: #ffffff; opacity: 0.8; } .rep-val-dim { color: #666666; } 
 
         /* GRAPH AND MAP CANVAS & ZOOM CONTROLS */
         #graph-canvas, #map-canvas { width: 100%; height: 100%; display: block; background: #000500; cursor: crosshair; touch-action: none; }
         .graph-controls { position: absolute; bottom: 35px; left: 10px; z-index: 50; display: flex; gap: 5px; align-items: center; } 
         .g-btn { background: rgba(0, 20, 0, 0.8); border: 1px solid #335533; color: #00ff00; font-size: 14px; width: 28px; height: 28px; display: flex; justify-content: center; align-items: center; cursor: pointer; border-radius: 4px; font-weight: bold; }
         .g-btn:active { background: #00ff00; color: black; }
-        .g-reset { font-size: 10px; width: auto; padding: 0 8px; }
+        .g-reset { font-size: 10px; width: auto; padding: 0 8px; } 
 
         /* COMPACT LEGEND (REWORKED) */
         #map-legend {
@@ -384,7 +399,7 @@
             display: flex; justify-content: center; align-items: center;
             cursor: pointer; font-weight: bold; font-family: 'Orbitron';
         }
-        .view-toggle-btn:hover { background: var(--lime-main); color: black; }
+        .view-toggle-btn:hover { background: var(--lime-main); color: black; } 
 
         /* MAP FILTER OVERLAY */
         #map-filter-overlay {
@@ -400,7 +415,7 @@
         }
         .map-filter-btn.active {
             background: var(--lime-main); color: black; box-shadow: 0 0 10px rgba(0, 255, 0, 0.4);
-        }
+        } 
 
         /* HVT ROW STYLES */
         .hvt-row {
@@ -419,7 +434,7 @@
         .hvt-btn {
             font-size: 9px; padding: 2px 8px; background: #001100; border: 1px solid #004400; color: #008800; cursor: pointer;
         }
-        .hvt-btn:hover { background: var(--lime-main); color: black; }
+        .hvt-btn:hover { background: var(--lime-main); color: black; } 
 
         @media print {
             body * { visibility: hidden; }
@@ -430,7 +445,7 @@
         }
     </style>
 </head>
-<body>
+<body> 
 
     <!-- VIDEO SPLASH SCREEN -->
     <div id="splash-screen">
@@ -441,7 +456,7 @@
         <div id="boot-container">
             <button id="boot-btn" onclick="bootSystem()">SYSTEM BOOT</button>
         </div>
-    </div>
+    </div> 
 
     <!-- TUTORIAL OVERLAY -->
     <div id="tutorial-overlay">
@@ -457,7 +472,7 @@
                 <button class="tut-btn" onclick="nextStep()">NEXT ></button>
             </div>
         </div>
-    </div>
+    </div> 
 
     <!-- INTEL DASHBOARD MODAL -->
     <div id="intel-dashboard">
@@ -470,7 +485,7 @@
             <button class="intel-action-btn" onclick="copyIntelText()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg> COPY</button>
             <button class="intel-action-btn" onclick="exportJSON()" style="border-color:#ffaa00; color:#ffaa00;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> SAVE JSON</button>
         </div>
-    </div>
+    </div> 
 
     <!-- TRADINGVIEW CHART WINDOW (NEW) -->
     <div id="tv-modal">
@@ -485,6 +500,20 @@
             <!-- Embedding TradingView Widget via Iframe for maximum compatibility -->
             <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tradingview_76d87&symbol=BINANCE%3AXRPUSDT&interval=D&hidesidetoolbar=1&hidetoptoolbar=1&symboledit=1&saveimage=1&toolbarbg=f1f3f6&studies=[]&theme=dark&style=1&timezone=Etc%2FUTC&studies_overrides={}&overrides={}&enabled_features=[]&disabled_features=[]&locale=en&utm_source=tradingview.com&utm_medium=widget&utm_campaign=chart&utm_term=BINANCE%3AXRPUSDT" 
             style="width: 100%; height: 100%; border: none;"></iframe>
+        </div>
+    </div> 
+
+    <!-- NEXUS-9 MODAL (FLOATING) -->
+    <div id="nexus-modal">
+        <div id="nexus-header">
+            <span>NEXUS-9 UPLINK</span>
+            <div class="flex gap-2">
+                <button onclick="toggleNexus()">_</button>
+                <button onclick="toggleNexus()">X</button>
+            </div>
+        </div>
+        <div id="nexus-body">
+            <iframe src="https://redcandlekiller1.github.io/Nexus-9/" style="width:100%; height:100%; border:none;"></iframe>
         </div>
     </div>
 
@@ -505,7 +534,7 @@
             <button id="mod-save-btn" class="mod-btn mod-save">SAVE EVID</button>
         </div>
         <button onclick="closeModal()" class="w-full text-red-500 text-xs mt-4">CLOSE INTEL</button>
-    </div>
+    </div> 
 
     <!-- TIP MODAL -->
     <div id="tip-modal">
@@ -516,7 +545,7 @@
         <div class="tip-addr-box">r9nepSD5tvQUCA4qQAJJDAoBB3j1gf4ibL</div>
         <button class="intel-action-btn w-full" onclick="copyTipAddress()">COPY ADDRESS</button>
         <button onclick="closeTipModal()" class="text-red-500 text-xs w-full mt-1">[ CLOSE LINK ]</button>
-    </div>
+    </div> 
 
     <!-- XMEME VIDEO MODAL -->
     <div id="xmeme-modal">
@@ -530,17 +559,17 @@
         <div id="xmeme-body">
             <video id="xmeme-video" controls src="https://jade-adverse-damselfly-13.mypinata.cloud/ipfs/bafybeih2ztocu3elh3m3khkllac7iqsxgmwed2zodu3icn2qsgu376ziga"></video>
         </div>
-    </div>
+    </div> 
 
     <div id="toast">NOTIFICATION</div>
     <div id="app-background"></div>
     <div id="canvas-container"></div>
-    <div id="alert-layer"></div>
+    <div id="alert-layer"></div> 
 
     <!-- TOP HUD -->
     <div id="hud-top">
         <!-- SESSION TIMER DISPLAY -->
-        <div id="session-timer">T+ 00:00:00</div>
+        <div id="session-timer">T+ 00:00:00</div> 
 
         <div class="stat-grid">
             <div id="price-box" class="stat-box" onclick="toggleTV()">
@@ -551,7 +580,7 @@
                 <div class="label-text">LEDGER INDEX</div>
                 <div id="ledger-display" class="price-text text-green-700">OFFLINE</div>
             </div>
-        </div>
+        </div> 
 
         <div class="header-section">
             <h1 class="glitch">XRPMAN SHADOW WATCH</h1>
@@ -575,6 +604,10 @@
                 <button id="xmeme-btn" class="tac-btn" onclick="openXmeme()" title="XMEME Feed">
                     XMEME
                 </button>
+                <!-- NEXUS-9 LINK BUTTON -->
+                <button id="nexus-btn" class="tac-btn" onclick="toggleNexus()" title="Nexus-9 Uplink">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                </button>
                 <!-- USER GUIDE BUTTON -->
                 <button id="guide-btn" class="tac-btn" onclick="window.open('https://docs.google.com/document/u/0/d/1VPvtI5Ig_MQ3CTNgnfTqosGvHsZvw99Pl_tnNdXkXK0/mobilebasic', '_blank')" title="Operator Manual">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
@@ -585,7 +618,7 @@
                 </button>
             </div>
         </div>
-    </div>
+    </div> 
 
     <!-- BOTTOM DECK -->
     <div id="hud-bottom">
@@ -616,7 +649,7 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>
                     EVIDENCE
                 </div>
-            </div>
+            </div> 
 
             <!-- LIVE TAB -->
             <div id="view-live" class="view-panel active">
@@ -842,6 +875,10 @@
         let tvDragging = false;
         let tvOffset = {x:0, y:0};
 
+        // --- NEXUS DRAG VARS (NEW) ---
+        let nexusDragging = false;
+        let nexusOffset = {x:0, y:0};
+
         // --- INITIALIZATION ---
         function initSystem() {
             // Map Canvas Init
@@ -892,6 +929,38 @@
                 }
             }, {passive: false});
 
+            // --- NEXUS MODAL DRAG LOGIC (DUPLICATED FOR SAFETY) ---
+            const nHeader = document.getElementById('nexus-header');
+            const nModal = document.getElementById('nexus-modal');
+            nHeader.addEventListener('mousedown', (e) => {
+                nexusDragging = true;
+                nexusOffset.x = e.clientX - nModal.offsetLeft;
+                nexusOffset.y = e.clientY - nModal.offsetTop;
+            });
+            window.addEventListener('mouseup', () => nexusDragging = false);
+            window.addEventListener('mousemove', (e) => {
+                if (nexusDragging) {
+                    nModal.style.left = (e.clientX - nexusOffset.x) + 'px';
+                    nModal.style.top = (e.clientY - nexusOffset.y) + 'px';
+                }
+            });
+            // Touch for Nexus
+            nHeader.addEventListener('touchstart', (e) => {
+                nexusDragging = true;
+                const touch = e.touches[0];
+                nexusOffset.x = touch.clientX - nModal.offsetLeft;
+                nexusOffset.y = touch.clientY - nModal.offsetTop;
+            });
+            window.addEventListener('touchend', () => nexusDragging = false);
+            window.addEventListener('touchmove', (e) => {
+                if (nexusDragging) {
+                    e.preventDefault();
+                    const touch = e.touches[0];
+                    nModal.style.left = (touch.clientX - nexusOffset.x) + 'px';
+                    nModal.style.top = (touch.clientY - nexusOffset.y) + 'px';
+                }
+            }, {passive: false});
+
             init3D();
             startRedundantPriceEngine();
         }
@@ -915,6 +984,16 @@
         function minTV() {
            // As per request, minimize effectively hides the window
            document.getElementById('tv-modal').style.display = 'none';
+        }
+
+        // --- NEXUS OPS (NEW) ---
+        function toggleNexus() {
+            const m = document.getElementById('nexus-modal');
+            if (m.style.display === 'flex') {
+                m.style.display = 'none';
+            } else {
+                m.style.display = 'flex';
+            }
         }
 
         // --- LOGIC FUNCTIONS ---
@@ -1094,6 +1173,9 @@
                     }
                 }
             });
+            
+            // Added mouseout to ensure dragging stops if cursor leaves canvas
+            graphCanvas.addEventListener('mouseout', () => isDragging = false);
         }
 
         function traceWallet(address) {
@@ -1249,7 +1331,7 @@
             // CHECK IF FIRST TIME COMPLETION
             if (!localStorage.getItem(TUT_STORAGE_KEY)) {
                 localStorage.setItem(TUT_STORAGE_KEY, "true"); // Set flag
-                // window.open(MANUAL_URL, '_blank'); // DISABLED AUTO-OPEN
+                // window.open(MANUAL_URL, '_blank'); // REMOVED: No longer auto-opens
             }
             
             document.getElementById('tutorial-overlay').classList.remove('tut-active'); 
@@ -1475,13 +1557,13 @@
             particles.geometry.attributes.position.needsUpdate = true;
             camera.position.x = Math.sin(Date.now()*0.0005)*2;
             renderer.render(scene, camera);
-        }
+        } 
 
         function resizeMap() {
             if(!mapCanvas || !mapCanvas.offsetParent) return;
             mapCanvas.width = mapCanvas.offsetWidth;
             mapCanvas.height = mapCanvas.offsetHeight;
-        }
+        } 
 
         function setupMapInteractions() {
             mapCanvas.addEventListener('mousedown', (e) => {
@@ -1511,7 +1593,7 @@
                     mapCamera.x += (mouseX - mapCamera.x) * (1 - 1/scaleAmount);
                     mapCamera.y += (mouseY - mapCamera.y) * (1 - 1/scaleAmount);
                 }
-            }, {passive: false});
+            }, {passive: false}); 
 
             // Touch
             mapCanvas.addEventListener('touchstart', e => {
@@ -1556,7 +1638,7 @@
                 const mouseX = e.clientX - rect.left;
                 const mouseY = e.clientY - rect.top;
                 const worldX = (mouseX - mapCamera.x) / mapCamera.zoom;
-                const worldY = (mouseY - mapCamera.y) / mapCamera.zoom;
+                const worldY = (mouseY - mapCamera.y) / mapCamera.zoom; 
 
                 for (let i = bubbles.length - 1; i >= 0; i--) {
                     let b = bubbles[i];
@@ -1567,7 +1649,7 @@
                     if (visible && Math.hypot(b.x - worldX, b.y - worldY) < b.radius + 10) { openModal(b); bubbles.splice(i, 1); break; }
                 }
             });
-        }
+        } 
 
         class Bubble {
             constructor(label, val, color, hash, from, to, type, issuer) {
@@ -1618,7 +1700,7 @@
             
             mapCtx.setTransform(1, 0, 0, 1, 0, 0);
             mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
-            mapCtx.setTransform(mapCamera.zoom, 0, 0, mapCamera.zoom, mapCamera.x, mapCamera.y);
+            mapCtx.setTransform(mapCamera.zoom, 0, 0, mapCamera.zoom, mapCamera.x, mapCamera.y); 
 
             for (let i = bubbles.length - 1; i >= 0; i--) {
                 let b = bubbles[i]; 
@@ -1630,12 +1712,12 @@
                 if (shouldDraw) b.draw();
                 if (b.y < -500 || b.life <= 0) bubbles.splice(i, 1);
             }
-        }
+        } 
 
         // --- WEBSOCKET ---
         document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && isConnected && (!socket || socket.readyState !== WebSocket.OPEN)) { showToast("RE-ESTABLISHING UPLINK..."); startXRPL(); } });
         setInterval(() => { if (isConnected && socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({command: "ping"})); }, 15000);
-        setInterval(() => { if (isConnected && (Date.now() - lastHeartbeat > 45000)) { showToast("SIGNAL LOST. RECONNECTING..."); startXRPL(); } }, 5000);
+        setInterval(() => { if (isConnected && (Date.now() - lastHeartbeat > 45000)) { showToast("SIGNAL LOST. RECONNECTING..."); startXRPL(); } }, 5000); 
 
         function startXRPL() {
             if(socket) {
@@ -1645,7 +1727,7 @@
                 socket.onopen = null;
                 socket.close();
                 socket = null;
-            }
+            } 
 
             const server = XRPL_SERVERS[currentServerIndex];
             
@@ -1710,7 +1792,7 @@
             
             socket.onerror = (e) => {
             };
-        }
+        } 
 
         function retryConnection() {
             const statusEl = document.getElementById('status-text');
@@ -1720,14 +1802,14 @@
             }
             currentServerIndex = (currentServerIndex + 1) % XRPL_SERVERS.length;
             setTimeout(startXRPL, 2000);
-        }
+        } 
 
         function processTrace(centerAccount, txs) {
             let center = graphNodes.find(n => n.id === centerAccount);
             if(!center) {
                 center = {id: centerAccount, x: 0, y: 0, type: 'CENTER', color: '#ffd700', vx:0, vy:0};
                 graphNodes.push(center);
-            }
+            } 
 
             txs.forEach(t => {
                 const tx = t.tx;
@@ -1740,7 +1822,7 @@
                 } else {
                     other = tx.Account;
                     color = '#00ffff'; 
-                }
+                } 
 
                 if(other && !graphNodes.find(n => n.id === other)) {
                     graphNodes.push({
@@ -1754,11 +1836,11 @@
                     graphEdges.push({source: centerAccount, target: other});
                 }
             });
-        }
+        } 
 
         function hexToASCII(hex) {
             let str = ''; for (let i = 0; i < hex.length; i += 2) str += String.fromCharCode(parseInt(hex.substr(i, 2), 16)); return str.replace(/\0/g, '');
-        }
+        } 
 
         function getReportType(amt, known) { 
             if(known) return 'I'; 
@@ -1770,7 +1852,7 @@
             if(!fromKnown && toKnown) return 'EXCH-IN'; 
             if(fromKnown && toKnown) return 'INTER-EXCH'; 
             return 'P2P'; 
-        }
+        } 
 
         function handleTx(tx, meta) {
             if (isPaused) return; 
@@ -1787,13 +1869,13 @@
                     if(feed.children.length > 40) feed.lastChild.remove();
                 } else { metrics.trustLines++; }
                 return;
-            }
+            } 
 
             if (tx.TransactionType !== 'Payment' && tx.TransactionType !== 'OfferCreate') return;
             
             let isSuccess = meta?.TransactionResult === 'tesSUCCESS';
             const hideFailed = document.getElementById('hide-failed').checked;
-            if (hideFailed && !isSuccess) return;
+            if (hideFailed && !isSuccess) return; 
 
             let type = "TSFR"; let color = "text-green-500"; let mapColor = "#00ff00"; let amt = 0; let isL2 = false; let tokenName = "XRP"; let issuer = null;
             let delivered = meta?.delivered_amount;
@@ -1816,16 +1898,16 @@
                 amt = val; 
                 if (amt < 1) return;
                 type = "DEX"; color = "text-purple-400"; mapColor = "#aa00ff";
-            }
+            } 
 
             const entFrom = KNOWN_WALLETS[tx.Account]; const entTo = KNOWN_WALLETS[tx.Destination];
             let nameFrom = entFrom ? entFrom.name : null; let nameTo = entTo ? entTo.name : null;
             const isHVT = (entFrom && entFrom.type === 'HVT') || (entTo && entTo.type === 'HVT');
             const isWhale = !isL2 && amt >= 100000; 
-            const isExchange = nameFrom || nameTo;
+            const isExchange = nameFrom || nameTo; 
 
             metrics.txCount++;
-            let currentPrice = parseFloat(document.getElementById('price-display').innerText.replace('$','')) || 0;
+            let currentPrice = parseFloat(document.getElementById('price-display').innerText.replace('$','')) || 0; 
 
             if (isL2) {
                 metrics.totalL2Vol += amt; 
@@ -1846,7 +1928,7 @@
                 } else {
                     blackbox.dailySnapshots[today] = { xrp: amt, usd: (amt*currentPrice), tx: 1 };
                 }
-            }
+            } 
 
             if (isSuccess && (amt >= 100000 || isHVT) && !isL2) {
                  const repTx = {
@@ -1867,7 +1949,7 @@
             if (isHVT) { 
                 saveCase({hash:tx.hash, amt:amt, from:nameFrom||tx.Account, to:nameTo||tx.Destination, type:'HVT'}); 
                 addHVTRow(tx.hash, amt, nameFrom||tx.Account, nameTo||tx.Destination); 
-                triggerHVTAlert(); 
+                playAlert('HVT'); 
                 color = "text-yellow-300"; 
 
                 blackbox.hvtHits.unshift({
@@ -1877,9 +1959,9 @@
                     desc: `${nameFrom||tx.Account} -> ${nameTo||tx.Destination}`
                 });
                 if(blackbox.hvtHits.length > 50) blackbox.hvtHits.pop();
-            }
+            } 
 
-            if (isWhale && isSuccess) { triggerWhaleAlert(); }
+            if (isWhale && isSuccess) { triggerWhaleAlert(); } 
 
             if(!isSuccess) { color = "text-gray-500"; mapColor = "#333333"; }
             const dispFrom = nameFrom ? `<span class="entity-name">${nameFrom}</span>` : tx.Account ? tx.Account.substring(0,4)+'...' : '???';
@@ -1889,7 +1971,7 @@
             if (activeFilter === 'small' && (isL2 || amt >= 100000)) showInFeed = false;
             if (activeFilter === 'whale' && (isL2 || amt < 100000)) showInFeed = false;
             if (activeFilter === 'exchange' && (!isL2 && !isExchange)) showInFeed = false;
-            if (activeFilter === 'l2' && !isL2) showInFeed = false;
+            if (activeFilter === 'l2' && !isL2) showInFeed = false; 
 
             if (showInFeed) {
                 const feed = document.getElementById('feed');
@@ -1902,10 +1984,10 @@
                 
                 feed.prepend(row);
                 if(feed.children.length > 40) feed.lastChild.remove();
-            }
+            } 
 
             if (mapActive && isSuccess) bubbles.push(new Bubble(isL2 ? tokenName : amt.toLocaleString(undefined, {maximumFractionDigits:0}), amt, mapColor, tx.hash, nameFrom||tx.Account, nameTo||tx.Destination, type, issuer));
-        }
+        } 
 
         // --- UI FUNCTIONS ---
         function toggleAlerts() {
@@ -1918,7 +2000,7 @@
                 btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><line x1="2" y1="2" x2="22" y2="22"></line></svg>`;
                 btn.classList.remove('tac-active');
             }
-        }
+        } 
 
         function toggleMute() {
             if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1967,7 +2049,7 @@
                 document.getElementById('mod-save-btn').onclick = () => { saveCase({hash:b.hash, amt:b.val, from:b.from, to:b.to}); closeModal(); showToast("EVIDENCE SECURED"); }; 
             }
             document.getElementById('bubble-modal').classList.add('modal-active'); 
-        }
+        } 
 
         function closeModal() { document.getElementById('bubble-modal').classList.remove('modal-active'); }
         
@@ -1977,14 +2059,14 @@
             btn.classList.add('active'); 
             document.getElementById('feed').innerHTML = ''; 
             showToast("FILTER: " + mode.toUpperCase()); 
-        }
+        } 
 
         function setMapFilter(mode, btn) {
             activeFilter = mode;
             document.querySelectorAll('.map-filter-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             showToast("MAP FILTER: " + mode.toUpperCase());
-        }
+        } 
 
         function showToast(msg) { const t = document.getElementById('toast'); t.innerText = msg; t.classList.add('toast-show'); setTimeout(() => t.classList.remove('toast-show'), 2000); }
         function openScan(h) { 
@@ -2042,6 +2124,7 @@
         function closeIntel() { document.getElementById('intel-dashboard').classList.remove('active'); }
         function copyIntelText() { const t = document.getElementById('intel-content'); t.select(); document.execCommand('copy'); showToast("REPORT COPIED"); }
         function shareIntel() { const text = document.getElementById('intel-content').value; if (navigator.share) { navigator.share({ title: 'Shadow Intel', text: text }).catch(err => { if (err.name !== 'AbortError') console.error('Share failed:', err); }); } else { copyIntelText(); showToast("SHARE API UNAVAILABLE. COPIED."); } }
+        init3D();
         const PRICE_SOURCES = [{url:'https://api.binance.us/api/v3/ticker/price?symbol=XRPUSDT',parse:d=>parseFloat(d.price)}];
         
         // FIXED: New Price Engine
@@ -2077,12 +2160,12 @@
         }
         function addWatch() { const v=document.getElementById('watch-input').value; if(v){watchlist.push(v);renderWatch();document.getElementById('watch-input').value='';showToast("TRACKING");} }
         function renderWatch() { document.getElementById('watch-list').innerHTML=watchlist.map((w,i)=>`<div class="flex justify-between p-3 bg-green-900/20 border-b border-green-900"><span class="font-mono text-xs text-green-300 truncate w-48">${w}</span><button onclick="watchlist.splice(${i},1);renderWatch()" class="text-red-500">X</button></div>`).join(''); }
-        function togglePause() { isPaused = !isPaused; const btn = document.getElementById('pause-btn'); const status = document.getElementById('status-text'); if(isPaused) { btn.innerText = "RESUME"; btn.classList.add('paused-mode'); status.innerText = "PAUSED"; status.classList.replace('text-green-500', 'text-yellow-500'); showToast("STREAM FROZEN"); } else { btn.innerText = "PAUSE STREAM"; btn.classList.remove('paused-mode'); status.innerText = "ACTIVE"; status.classList.replace('text-yellow-500', 'text-green-500'); showToast("STREAM RESUMED"); } }
+        function togglePause() { isPaused = !isPaused; const btn = document.getElementById('pause-btn'); const status = document.getElementById('status-text'); if(isPaused) { btn.innerText = "RESUME"; btn.classList.add('paused-mode'); status.innerText = "PAUSED"; status.classList.replace('text-green-500', 'text-yellow-500'); showToast("STREAM FROZEN"); } else { btn.innerText = "PAUSE STREAM"; btn.classList.remove('paused-mode'); status.innerText = "ACTIVE"; status.classList.replace('text-yellow-500', 'text-green-500'); showToast("STREAM RESUMED"); } } 
 
         // --- TIP FUNCTIONS ---
         function openTipModal() { document.getElementById('tip-modal').classList.add('modal-active'); }
         function closeTipModal() { document.getElementById('tip-modal').classList.remove('modal-active'); }
-        function copyTipAddress() { copyHash("r9nepSD5tvQUCA4qQAJJDAoBB3j1gf4ibL"); showToast("ADDRESS SECURED"); }
+        function copyTipAddress() { copyHash("r9nepSD5tvQUCA4qQAJJDAoBB3j1gf4ibL"); showToast("ADDRESS SECURED"); } 
 
         // --- XMEME FUNCTIONS ---
         function openXmeme() {
@@ -2092,14 +2175,23 @@
             document.getElementById('xmeme-body').style.display = 'block';
             document.getElementById('xmeme-video').play().catch(()=>{});
         }
-        function closeXmeme() {
-            const m = document.getElementById('xmeme-modal');
-            m.style.display = 'none';
-            document.getElementById('xmeme-video').pause();
-        }
         function minimizeXmeme() {
             const m = document.getElementById('xmeme-modal');
             m.classList.toggle('minimized');
+        }
+
+        // --- NEXUS OPS (NEW) ---
+        function toggleNexus() {
+            const m = document.getElementById('nexus-modal');
+            if (m.style.display === 'flex') {
+                m.style.display = 'none';
+            } else {
+                m.style.display = 'flex';
+            }
+        }
+        function closeXmeme() {
+            document.getElementById('xmeme-modal').style.display = 'none';
+            document.getElementById('xmeme-video').pause();
         }
     </script>
 </body>
