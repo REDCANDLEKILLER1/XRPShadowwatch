@@ -1132,11 +1132,15 @@
             #view-home.active {
                 display: grid;
                 grid-template-columns: 1fr 1fr;
-                grid-template-rows: auto 1fr 1fr 1fr 1fr auto;
+                /* v16.7.3: rows grow to fit content (min) but still stretch to fill the deck (1fr max),
+                   so two-line card titles + status badges are never clipped. Scrolls only if it truly
+                   can't fit, instead of cutting buttons off at the bottom. */
+                grid-template-rows: auto minmax(auto, 1fr) minmax(auto, 1fr) minmax(auto, 1fr) minmax(auto, 1fr) auto;
                 gap: 6px;
                 flex: 1 1 0;
                 min-height: 0;
-                overflow: hidden;
+                overflow-y: auto;
+                overflow-x: hidden;
                 padding: 4px 9px 6px;
                 align-content: stretch;
             }
