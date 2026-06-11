@@ -69,6 +69,11 @@
             background: radial-gradient(circle, rgba(0,42,0,0.55) 0%, rgba(0,12,0,0.88) 100%);
             box-shadow: inset 0 0 22px rgba(0,255,0,0.12); transition: box-shadow .2s, border-color .2s; }
         .ts-print svg { width: 60px; height: 60px; color: #2f8f2f; transition: color .2s, filter .2s; }
+        /* IPFS power-button video: round, zoomed to fill, not directly touchable
+           (taps pass through to #thumb-scan so the button still activates). */
+        .ts-print .ts-vid { position: absolute; inset: 0; width: 100%; height: 100%;
+            object-fit: cover; border-radius: 50%; display: block; pointer-events: none;
+            background: #000; }
         #thumb-scan.scanning .ts-print svg { color: #00ff00; filter: drop-shadow(0 0 6px #00ff00); }
         #thumb-scan.granted .ts-print { border-color: #00ff00; box-shadow: inset 0 0 26px rgba(0,255,0,0.28), 0 0 26px rgba(0,255,0,0.4); }
         #thumb-scan.granted .ts-print svg { color: #00ff00; filter: drop-shadow(0 0 12px #00ff00); }
@@ -126,12 +131,14 @@
         #alert-layer { position: absolute; inset: 0; z-index: 900; pointer-events: none; } 
 
         #toast {
-            position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
+            /* v16.7.2: moved off dead-center → bottom snackbar so it no longer covers the action buttons */
+            position: absolute; bottom: calc(76px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
             background: rgba(0, 50, 0, 0.95); border: 1px solid var(--lime-main);
             color: white; padding: 12px 24px; border-radius: 4px;
             font-family: 'Share Tech Mono'; font-size: 14px; letter-spacing: 1px;
             opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 6000;
             box-shadow: 0 0 30px var(--lime-main); font-weight: bold; text-align: center;
+            max-width: calc(100vw - 32px);
         }
         .toast-show { opacity: 1 !important; } 
 
@@ -1130,11 +1137,15 @@
             #view-home.active {
                 display: grid;
                 grid-template-columns: 1fr 1fr;
-                grid-template-rows: auto 1fr 1fr 1fr 1fr auto;
+                /* v16.7.3: rows grow to fit content (min) but still stretch to fill the deck (1fr max),
+                   so two-line card titles + status badges are never clipped. Scrolls only if it truly
+                   can't fit, instead of cutting buttons off at the bottom. */
+                grid-template-rows: auto minmax(auto, 1fr) minmax(auto, 1fr) minmax(auto, 1fr) minmax(auto, 1fr) auto;
                 gap: 6px;
                 flex: 1 1 0;
                 min-height: 0;
-                overflow: hidden;
+                overflow-y: auto;
+                overflow-x: hidden;
                 padding: 4px 9px 6px;
                 align-content: stretch;
             }
@@ -1298,11 +1309,11 @@
                 <div class="ts-ring">
                     <svg class="ts-prog" viewBox="0 0 140 140"><circle class="ts-prog-track" cx="70" cy="70" r="64"></circle><circle class="ts-prog-bar" cx="70" cy="70" r="64"></circle></svg>
                     <div class="ts-print">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12C2 6.5 6.5 2 12 2a10 10 0 0 1 8 4"></path><path d="M5 19.5C5.5 18 6 15 6 12c0-.7.12-1.37.34-2"></path><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"></path><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"></path><path d="M8.65 22c.21-.66.45-1.32.57-2"></path><path d="M14 13.12c0 2.38 0 6.38-1 8.88"></path><path d="M2 16h.01"></path><path d="M21.8 16c.2-2 .131-5.354 0-6"></path><path d="M9 6.8a6 6 0 0 1 9 5.2c0 .47 0 1.17-.02 2"></path></svg>
+                        <video class="ts-vid" src="https://ipfs.filebase.io/ipfs/Qma8uSsuAPYqhdwKwZS2h9ChougsR4haiLsHyaPgoJiFEx" autoplay loop muted playsinline preload="auto" disablepictureinpicture></video>
                         <div class="ts-scanline"></div>
                     </div>
                 </div>
-                <div class="ts-label">HOLD THUMB TO ACTIVATE</div>
+                <div class="ts-label">TAP TO ACTIVATE</div>
                 <div class="ts-status">XRPMAN LEDGER ARTIFACT • BIOMETRIC LOCK</div>
             </div>
         </div>
@@ -1856,9 +1867,10 @@
             totalUSD: 0,
             totalL2: 0,
             txCount: 0,
-            hvtHits: [], 
-            whaleHits: [], 
-            cases: []
+            hvtHits: [],
+            whaleHits: [],
+            cases: [],
+            history: null
         };
 
         const STORAGE_KEY = "XRPMAN_BLACKBOX_V2";
@@ -2159,6 +2171,9 @@
             if (!blackbox.dailySnapshots[today]) {
                 blackbox.dailySnapshots[today] = { xrp: 0, usd: 0, tx: 0 };
             }
+            // Seed the report with ~1y of REAL volume so a fresh install isn't all-zero.
+            _ensureHistory();
+            try { backfillHistory(); } catch (e) { console.error('backfill init', e); }
             setInterval(saveBlackbox, 5000);
         }
 
@@ -2166,6 +2181,242 @@
             blackbox.lastActive = new Date().toISOString();
             blackbox.cases = cases;
             localStorage.setItem(STORAGE_KEY, JSON.stringify(blackbox));
+        }
+
+        // ── HISTORICAL VOLUME BACKFILL (v16.8) ──────────────────────
+        // A fresh install has no observed data, so every report reads 0.
+        // We seed ~1y of REAL volume. Two sources, kept SEPARATE + labeled:
+        //   • EXCHANGE  – Binance.US daily klines (market trading volume)
+        //   • ON-CHAIN  – whale flow this scanner has observed live
+        //                 (no free historical ledger-volume feed exists)
+        const BACKFILL_SYMBOLS = ['XRPUSDT', 'XRPUSD'];
+        const BACKFILL_DAYS = 366;
+        let _backfillRunning = false;
+
+        function _ensureHistory() {
+            if (!blackbox.history) {
+                blackbox.history = {
+                    exch:  { xrp:0, usd:0, tx:0, days:0, updated:null, source:'Binance.US 1d', status:'pending' },
+                    chain: { xrp:0, tx:0, wallets:0, spanDays:0, updated:null, source:'XRPL account_tx (main wallets)', status:'pending' },
+                    daily: {}
+                };
+            }
+            return blackbox.history;
+        }
+
+        function _xrpShort(n){ n=Number(n)||0; if(n>=1e9) return (n/1e9).toFixed(2)+'B'; if(n>=1e6) return (n/1e6).toFixed(2)+'M'; if(n>=1e3) return (n/1e3).toFixed(1)+'K'; return Math.floor(n).toLocaleString(); }
+
+        async function backfillHistory(force) {
+            const h = _ensureHistory();
+            const todayKey = new Date().toISOString().split('T')[0];
+            // Refresh at most once per UTC day unless forced.
+            if (!force && h.exch.updated && h.exch.updated.split('T')[0] === todayKey && h.exch.status === 'ok') {
+                scanChainVolume(); renderHistoryBanner(); return;
+            }
+            if (_backfillRunning) return;
+            _backfillRunning = true;
+            _setBackfillLoading(true);
+            try {
+                let klines = null, used = null;
+                for (const sym of BACKFILL_SYMBOLS) {
+                    try {
+                        const r = await fetch('https://api.binance.us/api/v3/klines?symbol=' + sym + '&interval=1d&limit=' + BACKFILL_DAYS);
+                        if (!r.ok) continue;
+                        const d = await r.json();
+                        if (Array.isArray(d) && d.length) { klines = d; used = sym; break; }
+                    } catch (_) { /* try next symbol */ }
+                }
+                if (klines) {
+                    let xrp = 0, usd = 0, tx = 0, days = 0;
+                    klines.forEach(function(k){
+                        const day = new Date(k[0]).toISOString().split('T')[0];
+                        const bx  = parseFloat(k[5]) || 0;   // base volume  = XRP
+                        const qv  = parseFloat(k[7]) || 0;   // quote volume = USD
+                        const nt  = parseInt(k[8], 10) || 0; // trade count
+                        xrp += bx; usd += qv; tx += nt; days++;
+                        h.daily[day] = h.daily[day] || {};
+                        h.daily[day].exchXrp = bx;
+                        h.daily[day].exchUsd = qv;
+                    });
+                    h.exch = { xrp:xrp, usd:usd, tx:tx, days:days, updated:new Date().toISOString(),
+                               source:'Binance.US ' + used + ' 1d', status:'ok' };
+                } else {
+                    h.exch.status = 'unavailable';
+                    h.exch.updated = new Date().toISOString();
+                }
+                saveBlackbox();
+                // On-chain: actually search the ledger via the live WS uplink
+                // (sums real XRP payment volume across the main exchange wallets).
+                scanChainVolume();
+            } catch (e) {
+                console.error('backfillHistory failed', e);
+                h.exch.status = 'error';
+            } finally {
+                _backfillRunning = false;
+                _setBackfillLoading(false);
+                renderHistoryBanner();
+            }
+        }
+
+        function _setBackfillLoading(on) {
+            const list = document.getElementById('report-list');
+            if (!list) return;
+            let el = document.getElementById('hist-loading');
+            if (on) {
+                if (!el) {
+                    el = document.createElement('div');
+                    el.id = 'hist-loading';
+                    el.className = 'text-center text-gray-500 mt-6 font-tech text-xs tracking-widest';
+                    list.insertBefore(el, list.firstChild);
+                }
+                el.innerHTML = '<span style="color:var(--lime-main)">&#9700;&#9701;</span> LOADING HISTORICAL VOLUME (365D)&hellip;';
+            } else if (el) {
+                el.remove();
+            }
+        }
+
+        function renderHistoryBanner() {
+            const list = document.getElementById('report-list');
+            if (!list) return;
+            const h = _ensureHistory();
+            const old = document.getElementById('hist-banner');
+            if (old) old.remove();
+            const exch = h.exch, chain = h.chain;
+            const exchLine = (exch.status === 'ok')
+                ? (_xrpShort(exch.xrp) + ' XRP &nbsp;|&nbsp; $' + _xrpShort(exch.usd) + ' &nbsp;|&nbsp; ' + exch.days + 'd')
+                : (exch.status === 'unavailable' ? 'feed unavailable' : exch.status);
+            let chainLine;
+            if (chain.status === 'scanning') chainLine = '<span style="color:var(--lime-main)">&#9685;</span> scanning ledger&hellip;';
+            else if (chain.status === 'ok') chainLine = _xrpShort(chain.xrp) + ' XRP | ' + (chain.tx||0) + ' tx | ' + (chain.wallets||0) + ' wallets' + (chain.spanDays ? (' | ~' + chain.spanDays + 'd') : '');
+            else chainLine = (chain.status || 'pending');
+            // Drop the "WAITING…" placeholder once we have real data to show.
+            if (list.innerText.indexOf('WAITING') !== -1) {
+                Array.from(list.children).forEach(function(c){ if (c.innerText && c.innerText.indexOf('WAITING') !== -1) c.remove(); });
+            }
+            const banner = document.createElement('div');
+            banner.id = 'hist-banner';
+            banner.style.cssText = "margin:8px;padding:10px;border:1px solid var(--lime-dim);border-radius:8px;background:rgba(0,18,0,0.85);font-family:'Share Tech Mono';";
+            banner.innerHTML =
+                '<div style="font-size:9px;letter-spacing:1px;color:#55aa55;margin-bottom:6px;">HISTORICAL VOLUME &mdash; 365D BACKFILL</div>' +
+                '<div style="display:flex;justify-content:space-between;font-size:11px;color:#00ff00;padding:3px 0;"><span>EXCHANGE (Binance)</span><span>' + exchLine + '</span></div>' +
+                '<div style="display:flex;justify-content:space-between;font-size:11px;color:#00cccc;padding:3px 0;"><span>ON-CHAIN (main wallets)</span><span>' + chainLine + '</span></div>' +
+                '<div style="font-size:8px;color:#557755;margin-top:5px;line-height:1.4;">Exchange = market trading volume (Binance, backfilled). On-chain = real XRP payment volume sampled live from the main exchange wallets via account_tx.</div>';
+            list.insertBefore(banner, list.firstChild);
+        }
+
+        // On-chain volume: actually search the ledger. We already hold a live WS
+        // uplink, so query account_tx for the main exchange wallets and sum real
+        // XRP payment volume over the returned window — no guessing/claiming.
+        const CHAIN_SCAN_LIMIT = 200;      // txs pulled per wallet
+        const CHAIN_SCAN_WALLETS = 60;     // covers all main (EXCH) wallets
+        const CHAIN_SCAN_TIMEOUT = 35000;  // ms before finalizing with whatever arrived
+        let _chainScan = null;
+
+        function _mainWallets() {
+            try {
+                return (PRELOADED_HVTS || [])
+                    .filter(function(w){ return w && w.type === 'EXCH' && w.address; })
+                    .slice(0, CHAIN_SCAN_WALLETS);
+            } catch (_) { return []; }
+        }
+
+        function scanChainVolume(force) {
+            const h = _ensureHistory();
+            const todayKey = new Date().toISOString().split('T')[0];
+            // Already scanned today → instant, no spinner ("been here the day before").
+            if (!force && h.chain.updated && h.chain.updated.split('T')[0] === todayKey && h.chain.status === 'ok') return;
+            if (_chainScan && _chainScan.active) return;
+            // Uplink not ready yet — retry a few times, then give up quietly.
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                _chainScan = _chainScan || { retries: 0 };
+                if ((_chainScan.retries = (_chainScan.retries || 0) + 1) <= 12) {
+                    setTimeout(function(){ scanChainVolume(force); }, 2500);
+                }
+                return;
+            }
+            const wallets = _mainWallets();
+            if (!wallets.length) return;
+            _chainScan = { active:true, xrp:0, tx:0, minDate:null, maxDate:null, pending:{}, done:0, retries:0 };
+            wallets.forEach(function(w){ _chainScan.pending[w.address] = 1; });
+            h.chain.status = 'scanning';
+            _setBackfillLoading(true);
+            renderHistoryBanner();
+            var i = 0;
+            wallets.forEach(function(w){
+                setTimeout(function(){
+                    if (!socket || socket.readyState !== WebSocket.OPEN) { _chainScanDone(w.address); return; }
+                    try {
+                        socket.send(JSON.stringify({ id:'cvol_' + w.address, command:'account_tx',
+                            account:w.address, ledger_index_min:-1, ledger_index_max:-1,
+                            limit:CHAIN_SCAN_LIMIT, forward:false }));
+                    } catch (e) { _chainScanDone(w.address); }
+                }, (i++) * 140);
+            });
+            // Safety: finalize even if some wallets never answer.
+            _chainScan.timer = setTimeout(_chainScanFinalize, CHAIN_SCAN_TIMEOUT);
+        }
+
+        function _chainScanDone(addr) {
+            if (!_chainScan || !_chainScan.active) return;
+            if (_chainScan.pending[addr]) { delete _chainScan.pending[addr]; _chainScan.done++; }
+            if (Object.keys(_chainScan.pending).length === 0) _chainScanFinalize();
+        }
+
+        // Routed here from the WS onmessage handler for ids starting "cvol_".
+        function handleChainVolResp(d) {
+            if (!_chainScan || !_chainScan.active) return;
+            var addr = d.id.replace('cvol_', '');
+            try {
+                var txs = (d.result && d.result.transactions) || [];
+                txs.forEach(function(entry){
+                    var tx = entry.tx || entry.tx_json || entry;
+                    var meta = entry.meta || entry.metaData;
+                    if (!tx || tx.TransactionType !== 'Payment') return;
+                    // Prefer the amount actually delivered; fall back to Amount.
+                    var amt = (meta && (meta.delivered_amount || meta.DeliveredAmount)) || tx.Amount;
+                    if (typeof amt !== 'string') return; // object ⇒ issued currency, not XRP
+                    var xrp = parseFloat(amt) / 1000000;
+                    if (!isFinite(xrp) || xrp <= 0) return;
+                    _chainScan.xrp += xrp; _chainScan.tx++;
+                    if (typeof tx.date === 'number') {
+                        var ms = (tx.date + 946684800) * 1000; // XRPL epoch → unix ms
+                        if (_chainScan.minDate === null || ms < _chainScan.minDate) _chainScan.minDate = ms;
+                        if (_chainScan.maxDate === null || ms > _chainScan.maxDate) _chainScan.maxDate = ms;
+                    }
+                });
+            } catch (e) { console.error('chain vol parse', e); }
+            _chainScanDone(addr);
+        }
+
+        function _chainScanFinalize() {
+            if (!_chainScan || !_chainScan.active) return;
+            if (_chainScan.timer) { clearTimeout(_chainScan.timer); _chainScan.timer = null; }
+            _chainScan.active = false;
+            var h = _ensureHistory();
+            var spanDays = (_chainScan.minDate && _chainScan.maxDate)
+                ? Math.max(1, Math.round((_chainScan.maxDate - _chainScan.minDate) / 86400000)) : 0;
+            h.chain = {
+                xrp: Math.floor(_chainScan.xrp), tx: _chainScan.tx, wallets: _chainScan.done,
+                spanDays: spanDays, source: 'XRPL account_tx (main wallets)',
+                status: 'ok', updated: new Date().toISOString()
+            };
+            saveBlackbox();
+            _setBackfillLoading(false);
+            renderHistoryBanner();
+        }
+
+        function _histReportText() {
+            try {
+                var h = _ensureHistory(), e = h.exch, c = h.chain;
+                var el = (e.status === 'ok')
+                    ? (Math.floor(e.xrp).toLocaleString() + ' XRP / $' + Math.floor(e.usd).toLocaleString() + ' / ' + e.days + 'd')
+                    : ('UNAVAILABLE (' + e.status + ')');
+                var cl = (c.status === 'ok')
+                    ? (Math.floor(c.xrp||0).toLocaleString() + ' XRP / ' + (c.tx||0) + ' tx / ' + (c.wallets||0) + ' wallets' + (c.spanDays ? (' / ~' + c.spanDays + 'd') : ''))
+                    : (c.status === 'scanning' ? 'SCANNING LEDGER…' : (c.status || 'pending'));
+                return '> EXCHANGE (Binance): ' + el +
+                       '\n> ON-CHAIN (main wallets): ' + cl;
+            } catch (_) { return '> (no historical data)'; }
         }
 
         // --- MASSIVE HVT DATABASE (CLEANED v15.4) ---
@@ -2987,8 +3238,10 @@
                 try { d = JSON.parse(e.data); } catch(err){ return; }
                 if(d.type==='transaction') handleTx(d.transaction, d.meta); 
                 if(d.type==='ledgerClosed' && document.getElementById('ledger-display')) document.getElementById('ledger-display').innerText = d.ledger_index; 
-                if(d.result && d.result.transactions) processTrace(d.result.account, d.result.transactions);
+                if(d.result && d.result.transactions && !(d.id && d.id.indexOf("cvol_") === 0)) processTrace(d.result.account, d.result.transactions);
                 
+                if(d.id && d.id.indexOf("cvol_") === 0) { handleChainVolResp(d); return; }
+
                 if(d.id && d.id.startsWith("bal_")) {
                     const acc = d.id.replace("bal_", "");
                     const el = document.getElementById('bal-' + acc);
@@ -3349,7 +3602,7 @@
         function triggerHVTAlert() { if(!alertsEnabled) return; document.getElementById('alert-layer').classList.add('hvt-alert-anim'); showToast("HVT CONFIRMED"); setTimeout(() => document.getElementById('alert-layer').classList.remove('hvt-alert-anim'), 3000); }
         function copyHash(h) { if (!navigator.clipboard) { fallbackCopy(h); return; } navigator.clipboard.writeText(h).then(function() { showToast("HASH COPIED"); }, function(err) { fallbackCopy(h); }); }
         function fallbackCopy(text) { var textArea = document.createElement("textarea"); textArea.value = text; textArea.style.position = "fixed"; document.body.appendChild(textArea); textArea.focus(); textArea.select(); try { document.execCommand('copy'); showToast("HASH COPIED"); } catch (err) { showToast("COPY FAILED"); } document.body.removeChild(textArea); }
-        function openIntelDashboard() { const now = new Date().toISOString(); const hvtContainer = document.getElementById('hvt-list'); let hvtLog = (blackbox.hvtHits && blackbox.hvtHits.length) ? blackbox.hvtHits.slice(0,15).map(function(x){return '> '+((x.amt||0).toLocaleString())+' XRP | '+(x.desc||'');}).join('\n') : "NO HVT ACTIVITY."; const reportContainer = document.getElementById('report-list'); let whaleLog = reportContainer ? Array.from(reportContainer.children).slice(0, 15).map(r => r.innerText.replace(/\n/g, ' | ')).join('\n') : "NO DATA."; const finalReport = `*** SHADOW SENTINEL INTEL ***\nDATE: ${now}\nBLACK BOX GENESIS: ${blackbox.genesis || now}\n\n=== [ CURRENT SESSION (24H) ] ===\n> L1 XRP VOLUME:    ${Math.floor(metrics.totalXRPVol).toLocaleString()} XRP\n> EST. USD VALUE:    $${Math.floor(metrics.totalUSDVol).toLocaleString()}\n> L2 RAW VOLUME:    ${Math.floor(metrics.totalL2Vol).toLocaleString()} Units\n\n=== [ LIFETIME BLACK BOX ] ===\n> TOTAL OBSERVED XRP: ${Math.floor(blackbox.totalXRP).toLocaleString()}\n> TOTAL OBSERVED USD: $${Math.floor(blackbox.totalUSD).toLocaleString()}\n> TOTAL TRANSACTIONS: ${blackbox.txCount}\n\n[EVIDENCE LOCKER]\n${cases.map(c => `> ${c.type||'ANOMALY'} | ${(c.amt||0).toLocaleString()} | ${c.from}->${c.to}`).join('\n') || "NONE"}\n\n[WHALE FLOW (Top 15 - Session)]\n${whaleLog}`; document.getElementById('intel-content').value = finalReport; document.getElementById('intel-dashboard').classList.add('active'); }
+        function openIntelDashboard() { const now = new Date().toISOString(); const hvtContainer = document.getElementById('hvt-list'); let hvtLog = (blackbox.hvtHits && blackbox.hvtHits.length) ? blackbox.hvtHits.slice(0,15).map(function(x){return '> '+((x.amt||0).toLocaleString())+' XRP | '+(x.desc||'');}).join('\n') : "NO HVT ACTIVITY."; const reportContainer = document.getElementById('report-list'); let whaleLog = reportContainer ? Array.from(reportContainer.children).slice(0, 15).map(r => r.innerText.replace(/\n/g, ' | ')).join('\n') : "NO DATA."; const finalReport = `*** SHADOW SENTINEL INTEL ***\nDATE: ${now}\nBLACK BOX GENESIS: ${blackbox.genesis || now}\n\n=== [ CURRENT SESSION (24H) ] ===\n> L1 XRP VOLUME:    ${Math.floor(metrics.totalXRPVol).toLocaleString()} XRP\n> EST. USD VALUE:    $${Math.floor(metrics.totalUSDVol).toLocaleString()}\n> L2 RAW VOLUME:    ${Math.floor(metrics.totalL2Vol).toLocaleString()} Units\n\n=== [ LIFETIME BLACK BOX ] ===\n> TOTAL OBSERVED XRP: ${Math.floor(blackbox.totalXRP).toLocaleString()}\n> TOTAL OBSERVED USD: $${Math.floor(blackbox.totalUSD).toLocaleString()}\n> TOTAL TRANSACTIONS: ${blackbox.txCount}\n\n=== [ HISTORICAL VOLUME — 365D BACKFILL ] ===\n${_histReportText()}\n\n[EVIDENCE LOCKER]\n${cases.map(c => `> ${c.type||'ANOMALY'} | ${(c.amt||0).toLocaleString()} | ${c.from}->${c.to}`).join('\n') || "NONE"}\n\n[WHALE FLOW (Top 15 - Session)]\n${whaleLog}`; document.getElementById('intel-content').value = finalReport; document.getElementById('intel-dashboard').classList.add('active'); }
         function closeIntel() { document.getElementById('intel-dashboard').classList.remove('active'); }
         function copyIntelText() { const t = document.getElementById('intel-content'); t.select(); document.execCommand('copy'); showToast("REPORT COPIED"); }
         function shareIntel() { const text = document.getElementById('intel-content').value; if (navigator.share) { navigator.share({ title: 'Shadow Intel', text: text }).catch(err => { if (err.name !== 'AbortError') console.error('Share failed:', err); }); } else { copyIntelText(); showToast("SHARE API UNAVAILABLE. COPIED."); } }
@@ -3384,8 +3637,9 @@
             if (btn) btn.classList.add('active');
             
             // Logic for specific views
-            if(id==='map') { mapActive=true; resizeMap(); loopMap(); } else { mapActive=false; } 
-            if(id==='graph') { graphActive=true; resizeGraph(); updateGraph(); } else { graphActive=false; } 
+            if(id==='map') { mapActive=true; resizeMap(); loopMap(); } else { mapActive=false; }
+            if(id==='graph') { graphActive=true; resizeGraph(); updateGraph(); } else { graphActive=false; }
+            if(id==='report') { try { renderHistoryBanner(); backfillHistory(); } catch(e){ console.error('report backfill', e); } }
             try { if (window.xrpmanReact) window.xrpmanReact('screen-' + id); } catch(e){}
         }
         function addWatch() { const v=document.getElementById('watch-input').value; if(v){watchlist.push(v);renderWatch();document.getElementById('watch-input').value='';showToast("TRACKING");} }
@@ -3713,6 +3967,10 @@
     (function () {
       var pad = document.getElementById('thumb-scan');
       if (!pad) return;
+      var vid = pad.querySelector('.ts-vid');
+      // Muted autoplay is usually allowed, but kick it on first interaction as a fallback.
+      function kickVid(){ try { if (vid && vid.paused) { var p = vid.play(); if (p && p.catch) p.catch(function(){}); } } catch (e) {} }
+      if (vid) { kickVid(); document.addEventListener('pointerdown', kickVid, { once: true }); }
       var bar = pad.querySelector('.ts-prog-bar'),
           label = pad.querySelector('.ts-label');
       var R = 64, C = 2 * Math.PI * R;
