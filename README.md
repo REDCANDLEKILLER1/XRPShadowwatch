@@ -89,5 +89,18 @@ structure and a slim `index.html`, with zero behavior change and easy rollback.
 See [`docs/MIGRATION.md`](docs/MIGRATION.md) for the staged migration to ES
 modules (and optionally Vite), done file-by-file so the live app never breaks.
 
-Candidate features (not yet built): an on-demand **account / issuer risk
-assessment** panel, installable **PWA**, evidence export, alerting.
+### Included on this branch
+- **Account / Issuer Risk Assessment** (`src/js/risk.js`) — Menu → "RISK
+  ASSESSMENT". Pulls `account_info`, `gateway_balances`, `account_lines` and
+  `account_tx` for any r-address over the live socket and renders a scored,
+  heuristic verdict (issuer/blackhole status, flags, age, holder base, balance).
+- **PWA / installable app** — `manifest.webmanifest` + `sw.js` (app-shell
+  cache, stale-while-revalidate) + `src/js/pwa.js` (registration + an
+  "INSTALL APP" prompt). Adds home-screen install with the power-button icon.
+
+> SW note: bump `CACHE` in `sw.js` on each deploy so clients pick up new
+> assets. To fully remove the service worker later, unregister it in the
+> browser / ship a no-op SW.
+
+Still candidate (not built): evidence export, persistent watchlist + alerts,
+volume sparkline charts.

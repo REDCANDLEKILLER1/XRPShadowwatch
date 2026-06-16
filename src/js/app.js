@@ -1433,9 +1433,10 @@
                 try { d = JSON.parse(e.data); } catch(err){ return; }
                 if(d.type==='transaction') handleTx(d.transaction, d.meta); 
                 if(d.type==='ledgerClosed' && document.getElementById('ledger-display')) document.getElementById('ledger-display').innerText = d.ledger_index; 
-                if(d.result && d.result.transactions && !(d.id && d.id.indexOf("cvol_") === 0)) processTrace(d.result.account, d.result.transactions);
-                
+                if(d.result && d.result.transactions && !(d.id && (d.id.indexOf("cvol_") === 0 || d.id.indexOf("risk_") === 0))) processTrace(d.result.account, d.result.transactions);
+
                 if(d.id && d.id.indexOf("cvol_") === 0) { handleChainVolResp(d); return; }
+                if(d.id && d.id.indexOf("risk_") === 0) { if(window.__riskOnMessage) window.__riskOnMessage(d); return; }
 
                 if(d.id && d.id.startsWith("bal_")) {
                     const acc = d.id.replace("bal_", "");
