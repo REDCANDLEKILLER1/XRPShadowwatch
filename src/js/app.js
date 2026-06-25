@@ -1710,7 +1710,7 @@
                 document.getElementById('mod-to').innerText = "NET LINKED";
                 document.getElementById('mod-trace-btn').innerText = "EXPAND NET";
                 document.getElementById('mod-trace-btn').onclick = () => traceWallet(b.id);
-                document.getElementById('mod-scan-btn').onclick = () => openScan('account/'+b.id); 
+                document.getElementById('mod-scan-btn').onclick = () => { closeModal(); openRiskPanel(b.id); };
                 document.getElementById('mod-copy-wallet').onclick = () => copyHash(b.id);
                 document.getElementById('mod-copy-hash').style.display = 'none';
                 document.getElementById('mod-save-btn').style.display = 'none';
@@ -1719,7 +1719,7 @@
                 document.getElementById('mod-to').innerText = b.to; 
                 document.getElementById('mod-trace-btn').innerText = "TRACE";
                 document.getElementById('mod-trace-btn').onclick = () => traceWallet(b.from); 
-                document.getElementById('mod-scan-btn').onclick = () => openScan(b.hash); 
+                document.getElementById('mod-scan-btn').onclick = () => { closeModal(); openRiskPanel(b.from); };
                 document.getElementById('mod-copy-hash').style.display = 'block';
                 document.getElementById('mod-copy-hash').onclick = () => copyHash(b.hash); 
                 document.getElementById('mod-copy-wallet').onclick = () => copyHash(b.from); 
