@@ -531,15 +531,16 @@
         </div>
     </div>
 
-    <!-- KOI intelligence helpers (read-only): escape/util, token identity,
-         flow classification, wallet scoring, watchdog, tx-family counter.
-         Loaded before app.js so the engine can use window.SW.* -->
-    <script src="src/js/koi/sw-util.js"></script>
-    <script src="src/js/koi/sw-token-intel.js"></script>
-    <script src="src/js/koi/sw-txn-counter.js"></script>
-    <script src="src/js/koi/sw-flow-intel.js"></script>
-    <script src="src/js/koi/sw-wallet-score.js"></script>
-    <script src="src/js/koi/sw-watchdog-score.js"></script>
+    <!-- Shadow Watch intelligence helpers (read-only; scoring/classification
+         concepts adapted from KOI, re-implemented here): escape/util, token
+         identity, flow classification, wallet scoring, watchdog, tx-family
+         counter. Loaded before app.js so the engine can use window.SW.* -->
+    <script src="src/js/intel/sw-util.js"></script>
+    <script src="src/js/intel/sw-token-intel.js"></script>
+    <script src="src/js/intel/sw-txn-counter.js"></script>
+    <script src="src/js/intel/sw-flow-intel.js"></script>
+    <script src="src/js/intel/sw-wallet-score.js"></script>
+    <script src="src/js/intel/sw-watchdog-score.js"></script>
 
     <!-- OUTER APP = live tactical watcher (XRPMAN SHADOW WATCH v16.7.1).
          Deeper forensic/report engine lives in ./brief-console.html (BRIEF tab). -->

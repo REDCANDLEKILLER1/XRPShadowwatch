@@ -31,7 +31,7 @@ seed input, no API keys.
 - `https://dexscreener.com/xrpl/…` (built by `SW.token`, no keys)
 - `https://docs.google.com/…` — operator manual.
 
-## KOI intelligence helpers (`src/js/koi/*`)
+## KOI intelligence helpers (`src/js/intel/*`)
 Pure functions over data already fetched from the WS above. **They make no
 network calls of their own** — `SW.token` only *builds* explorer URLs; nothing
 is fetched until the user clicks. No API keys, no xrplmeta/DexScreener fetches
