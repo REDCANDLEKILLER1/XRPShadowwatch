@@ -1,6 +1,6 @@
 /* XRPMAN Shadow Watch — service worker (app shell cache for installable PWA).
    Bump CACHE on every deploy so clients pick up new assets. */
-const CACHE = 'shadowwatch-v4';
+const CACHE = 'shadowwatch-v5';
 const SHELL = [
   '/', '/index.html',
   '/src/css/styles.css',
@@ -49,17 +49,20 @@ self.addEventListener('fetch', (e) => {
   try { url = new URL(req.url); } catch (_) { return; }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
 
-  // Stale-while-revalidate: serve cache fast, refresh same-origin in background.
-  e.respondWith(
-    caches.match(req).then((cached) => {
-      const net = fetch(req).then((res) => {
-        if (res && res.status === 200 && url.origin === location.origin) {
+  if (url.origin === location.origin) {
+    // NETWORK-FIRST for our own HTML/JS/CSS so code fixes apply immediately when
+    // online; fall back to cache only when offline. (No more "deployed but stale".)
+    e.respondWith(
+      fetch(req).then((res) => {
+        if (res && res.status === 200) {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(req, copy));
         }
         return res;
-      }).catch(() => cached);
-      return cached || net;
-    })
-  );
+      }).catch(() => caches.match(req))
+    );
+  } else {
+    // Cross-origin (fonts/CDNs): cache-first, fall back to network.
+    e.respondWith(caches.match(req).then((c) => c || fetch(req)));
+  }
 });

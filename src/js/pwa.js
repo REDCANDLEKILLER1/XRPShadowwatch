@@ -8,6 +8,13 @@
         console.warn('[pwa] SW registration failed', e);
       });
     });
+    // When a new service worker takes control (new deploy), reload once so the
+    // page runs the latest code instead of a stale cached bundle.
+    var _reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (_reloaded) return; _reloaded = true;
+      window.location.reload();
+    });
   }
 
   var deferred = null;
