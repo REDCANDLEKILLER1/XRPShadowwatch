@@ -20416,8 +20416,6 @@ function migrateLayoutToScreens() {
       '<button class="xai-cmd-btn xai-cmd-btn-muted"   data-xai-cmd="open-system"     type="button">\u2699 Open System Console</button>' +
       '<button class="xai-cmd-btn xai-cmd-btn-muted"   data-xai-cmd="voice"           type="button" disabled title="Voice INPUT unavailable on this browser">\uD83C\uDF99 Voice Command</button>' +
     '</div>' +
-    '<input id="xaiCommandInput" class="xai-command-input" type="text" autocomplete="off" spellcheck="false"' +
-      ' placeholder="Type command: scan, report, wallets, richlist, debug">' +
     '<button id="xaiVoiceOutputToggle" class="xai-voice-toggle" type="button" data-voice-on="true" title="Toggle XRPMan AI voice output">VOICE OUTPUT</button>' +
     '<div id="xaiStatusStrip" class="xai-status-strip">' +
       'MODE READY \u00B7 WALLETS 0 \u00B7 QUEUE 0 \u00B7 HELPERS 0 \u00B7 ERRORS 0' +
@@ -25391,7 +25389,6 @@ function shadowWatchXrpmanAiCommandHeadSmokeTest() {
   check('#xaiDialogue exists',          !!document.getElementById('xaiDialogue'));
   check('#xaiLines exists',             !!document.getElementById('xaiLines'));
   check('#xaiCommandButtons exists',    !!document.getElementById('xaiCommandButtons'));
-  check('#xaiCommandInput exists',      !!document.getElementById('xaiCommandInput'));
   check('#xaiStatusStrip exists',       !!document.getElementById('xaiStatusStrip'));
 
   // ── 3. OLD HUD HIDDEN ON COMMAND SCREEN ────────────────────
@@ -25637,7 +25634,6 @@ function shadowWatchXrpmanAiBotAvatarSmokeTest() {
   check('#xaiDialogue exists',          !!document.getElementById('xaiDialogue'));
   check('#xaiLines exists',             !!document.getElementById('xaiLines'));
   check('#xaiCommandButtons exists',    !!document.getElementById('xaiCommandButtons'));
-  check('#xaiCommandInput exists',      !!document.getElementById('xaiCommandInput'));
   check('#xaiStatusStrip exists',       !!document.getElementById('xaiStatusStrip'));
 
   // ── 3. AVATAR IS ROBOT-STYLE (not human portrait) ─────────
