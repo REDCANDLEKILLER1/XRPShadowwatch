@@ -2087,7 +2087,16 @@ body.xai-command-mounted .main-grid{
                 <line class="hud-tick" x1="60" y1="7"  x2="60" y2="17" transform="rotate(180 60 60)"/>
                 <line class="hud-tick" x1="60" y1="7"  x2="60" y2="17" transform="rotate(240 60 60)"/>
                 <line class="hud-tick" x1="60" y1="7"  x2="60" y2="17" transform="rotate(300 60 60)"/>
+                <!-- v3.32: continuous radar sweep — always alive, independent of progress -->
+                <circle class="hud-arc-scan" cx="60" cy="60" r="46" />
               </svg>
+              <style>
+                .hud-arc-scan{fill:none;stroke:#7fffa0;stroke-width:3;stroke-linecap:round;stroke-dasharray:14 275;opacity:.85;filter:drop-shadow(0 0 6px #00ff88);transform-origin:60px 60px;animation:hudScanSpin 2.6s linear infinite;}
+                @keyframes hudScanSpin{to{transform:rotate(360deg);}}
+                .hud-arc-pct{animation:hudPctGlow 2.2s ease-in-out infinite;}
+                @keyframes hudPctGlow{0%,100%{text-shadow:0 0 8px rgba(0,255,120,.5);}50%{text-shadow:0 0 16px rgba(0,255,150,.95);}}
+                @media (prefers-reduced-motion:reduce){.hud-arc-scan{animation:none;}.hud-arc-pct{animation:none;}}
+              </style>
               <!-- v3.25: power button idle state + centered percent when scanning -->
               <div class="hud-arc-inner">
                 <!-- Power icon — IEC 60417-5009 standard power symbol (vertical bar + open circle) -->
@@ -2834,7 +2843,15 @@ function resetLog() { const el = $('statusFeed'); if (el) el.textContent = ''; }
 // pct text is still rAF-animated for the counting effect.
 // Phase mapping converts engine phase labels → 6 HUD segments.
 
-const _pctState = { current: 0, target: 0, animating: false, lastUpdate: 0 };
+const _pctState = { current: 0, target: 0, animating: false, lastUpdate: 0, active: false };
+
+function _ensureAnim() {
+  if (!_pctState.animating) {
+    _pctState.animating = true;
+    _pctState.lastUpdate = performance.now();
+    requestAnimationFrame(_animatePct);
+  }
+}
 
 // Arc circumference = 2π × 46 ≈ 289.03
 const HUD_ARC_CIRC = 289.03;
@@ -2890,24 +2907,35 @@ function _updatePhaseBar(hudPhase) {
 }
 
 function _animatePct() {
-  if (_pctState.current >= _pctState.target) {
-    _pctState.animating = false;
-    return;
-  }
   const now = performance.now();
-  const elapsed = now - _pctState.lastUpdate;
-  const gap = _pctState.target - _pctState.current;
-  const stepInterval = Math.max(20, 110 - gap * 4); // 20–110ms per +1%
-  if (elapsed >= stepInterval) {
-    _pctState.current = Math.min(_pctState.target, _pctState.current + 1);
-    // Update the pct text
-    const el = document.getElementById('orbPct');
-    if (el) el.textContent = _pctState.current + '%';
-    // Update the arc fill to match the animated pct
-    _updateArc(_pctState.current);
-    _pctState.lastUpdate = now;
+  const dt = Math.min(120, now - (_pctState.lastUpdate || now));
+  _pctState.lastUpdate = now;
+
+  // During stalls between phases, creep gently past the last reported target so
+  // the dial never looks frozen — but never past 99 until the scan finishes.
+  let ceil = _pctState.target;
+  const stalled = _pctState.current >= _pctState.target - 0.5;
+  if (stalled && _pctState.active && _pctState.target < 99) {
+    ceil = Math.min(99, _pctState.target + 7);
   }
-  requestAnimationFrame(_animatePct);
+
+  const gap = ceil - _pctState.current;
+  if (gap > 0.05) {
+    // Exponential ease-out: quick catch-up on real jumps, slow drift on creep.
+    const k = stalled ? 0.0018 : 0.011; // per ms — time constant ≈ 550ms / 90ms
+    _pctState.current = Math.min(ceil, _pctState.current + gap * (1 - Math.exp(-k * dt)));
+    const shown = Math.floor(_pctState.current);
+    const el = document.getElementById('orbPct');
+    if (el && el.textContent !== shown + '%') el.textContent = shown + '%';
+    _updateArc(_pctState.current);
+  }
+
+  // Keep the loop alive while a scan is active or we're still easing to target.
+  if (_pctState.active || _pctState.current < _pctState.target - 0.05) {
+    requestAnimationFrame(_animatePct);
+  } else {
+    _pctState.animating = false;
+  }
 }
 
 function shadowSay(status, phase, pctVal) {
@@ -2922,19 +2950,17 @@ function shadowSay(status, phase, pctVal) {
   const target = Math.round(pctVal);
   if (target > _pctState.target) {
     _pctState.target = target;
-    if (!_pctState.animating) {
-      _pctState.animating = true;
-      _pctState.lastUpdate = performance.now();
-      requestAnimationFrame(_animatePct);
-    }
-  } else if (target < _pctState.current) {
-    // Reset (new scan) — snap arc and pct immediately
-    _pctState.current = target;
-    _pctState.target  = target;
+    _pctState.active = target < 100;
+    _ensureAnim();
+  } else if (target <= _pctState.current - 25) {
+    // A big drop = a genuinely new scan: snap back to the low value and go.
+    _pctState.current = target; _pctState.target = target; _pctState.active = true;
     const el = document.getElementById('orbPct');
     if (el) el.textContent = target + '%';
     _updateArc(target);
+    _ensureAnim();
   }
+  // Minor backward targets are ignored (monotonic — no 69↔70 bounce).
 }
 
 // Sub-progress: bumps within a phase band
@@ -2943,16 +2969,13 @@ function shadowProgress(phaseStart, phaseEnd, fraction) {
   const target = Math.round(phaseStart + (phaseEnd - phaseStart) * f);
   if (target > _pctState.target) {
     _pctState.target = target;
-    if (!_pctState.animating) {
-      _pctState.animating = true;
-      _pctState.lastUpdate = performance.now();
-      requestAnimationFrame(_animatePct);
-    }
+    _pctState.active = target < 100;
+    _ensureAnim();
   }
 }
 
 function shadowReset() {
-  _pctState.current = 0; _pctState.target = 0; _pctState.animating = false;
+  _pctState.current = 0; _pctState.target = 0; _pctState.animating = false; _pctState.active = false;
   const el = document.getElementById('orbPct');
   if (el) el.textContent = '0%';
   _updateArc(0);
