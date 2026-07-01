@@ -119,4 +119,15 @@ Phase 1: decode embedded Brief Console into a real file
 Phase 2+3: safe HTML escaping + read-only intelligence helpers
 Detect escrow unlocks (EscrowFinish) in both Shadow Watches
 Rename src/js/koi -> src/js/intel (naming clarity)
+Add docs/AUDIT.md: before/after change summary for auditor
+Audit cleanup: neutral flow labels, OfferCreate direction, escaping, docs
 ```
+
+## 8. Audit cleanup (post‑review)
+- Flow labels are **neutral route/flow descriptors** only (no buy/sell); Shadow Watch
+  is a watchdog/classifier and does not trade/sign/submit/execute.
+- `OfferCreate` route direction corrected: source/sold = `TakerGets`, dest/bought = `TakerPays`.
+- Operator‑provided strings (manual HVT labels, entity labels, report wallet names,
+  operator‑typed watchlist) are escaped via `_htmlEsc` before `innerHTML`.
+- `docs/ENDPOINTS.md` split into Part A (Outer Watcher) and Part B (Brief Console) so
+  both engines' endpoints are covered.
