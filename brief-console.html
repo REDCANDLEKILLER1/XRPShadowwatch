@@ -9409,8 +9409,10 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     var voiceBtn = document.getElementById('xaiVoiceOutputToggle');
     if (voiceBtn && !voiceBtn._wired) {
       voiceBtn._wired = true;
-      // Initial state reflects what's actually possible
-      var initial = !!(window.XAI_VOICE_SETTINGS && window.XAI_VOICE_SETTINGS.voiceOutput);
+      // Initial state reflects whether voice is actually audible (on AND not muted).
+      // Voice is muted by default, so this starts OFF unless the user previously enabled it.
+      var _vs = window.XAI_VOICE_SETTINGS || {};
+      var initial = !!(_vs.voiceOutput && !_vs.muted);
       voiceBtn.setAttribute('data-voice-on', initial ? 'true' : 'false');
       voiceBtn.textContent = initial ? '\uD83D\uDD0A VOICE OUTPUT ON' : '\uD83D\uDD07 VOICE OUTPUT OFF';
       voiceBtn.addEventListener('click', function() {
@@ -9419,7 +9421,12 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         if (window.XAI_NARRATION_ROUTER && typeof window.XAI_NARRATION_ROUTER.setVoiceOutput === 'function') {
           window.XAI_NARRATION_ROUTER.setVoiceOutput(nxt);
         }
-        if (window.XAI_VOICE_SETTINGS) window.XAI_VOICE_SETTINGS.voiceOutput = nxt;
+        if (window.XAI_VOICE_SETTINGS) {
+          window.XAI_VOICE_SETTINGS.voiceOutput = nxt;
+          window.XAI_VOICE_SETTINGS.muted = !nxt;   // flip the master mute in lock-step
+        }
+        try { localStorage.setItem('SW_VOICE_ON', nxt ? '1' : '0'); } catch (_) {}
+        if (!nxt) { try { if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel(); } catch (_) {} }
         voiceBtn.setAttribute('data-voice-on', nxt ? 'true' : 'false');
         voiceBtn.textContent = nxt ? '\uD83D\uDD0A VOICE OUTPUT ON' : '\uD83D\uDD07 VOICE OUTPUT OFF';
       });
@@ -9481,10 +9488,14 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
   var _hasSpeech = (typeof window !== 'undefined') &&
                    ('speechSynthesis' in window) &&
                    (typeof SpeechSynthesisUtterance !== 'undefined');
+  // Voice is MUTED by default in Shadow Watch. Only unmute if the user has
+  // previously turned it on (persisted in localStorage as SW_VOICE_ON).
+  var _voiceUserOn = false;
+  try { _voiceUserOn = (localStorage.getItem('SW_VOICE_ON') === '1'); } catch (_) {}
   var XAI_VOICE_SETTINGS = {
     voiceOutput:   !!_hasSpeech,
     voiceCommands: false,
-    muted:         false,
+    muted:         !_voiceUserOn,   // master mute — none of the force-on paths clear this
     speechAvailable: !!_hasSpeech
   };
   if (typeof window !== 'undefined') window.XAI_VOICE_SETTINGS = XAI_VOICE_SETTINGS;
@@ -12898,7 +12909,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
   // Ensure XAI_VOICE_SETTINGS exists with voiceOutput=true on first load
   if (typeof window !== 'undefined') {
     if (!window.XAI_VOICE_SETTINGS) {
-      window.XAI_VOICE_SETTINGS = { voiceOutput: true, muted: false };
+      window.XAI_VOICE_SETTINGS = { voiceOutput: true, muted: (function(){ try { return localStorage.getItem('SW_VOICE_ON') !== '1'; } catch (_) { return true; } })() };
     } else {
       // If voiceOutput is undefined, default to true (don't override explicit false)
       if (window.XAI_VOICE_SETTINGS.voiceOutput === undefined ||
@@ -13002,7 +13013,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       // Fix 2 — ensure voiceOutput defaults to true on first load
       if (typeof window !== 'undefined') {
         if (!window.XAI_VOICE_SETTINGS) {
-          window.XAI_VOICE_SETTINGS = { voiceOutput: true, muted: false };
+          window.XAI_VOICE_SETTINGS = { voiceOutput: true, muted: (function(){ try { return localStorage.getItem('SW_VOICE_ON') !== '1'; } catch (_) { return true; } })() };
         } else if (window.XAI_VOICE_SETTINGS.voiceOutput === undefined ||
                    window.XAI_VOICE_SETTINGS.voiceOutput === null) {
           window.XAI_VOICE_SETTINGS.voiceOutput = true;
