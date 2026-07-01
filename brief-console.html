@@ -3203,13 +3203,27 @@ async function scanWallets(ws) {
       for (const item of txRows) {
         const t = item.tx_json || item.tx || {}, iso = t.date ? rip(t.date) : '';
         if (!iso) continue;
-        let amt = 0, cur = 'XRP';
+        let amt = 0, cur = 'XRP', escrowDest = '';
         if (typeof t.Amount === 'string') amt = drops(t.Amount);
         else if (t.Amount && typeof t.Amount === 'object') { cur = t.Amount.currency || 'TOKEN'; amt = n(t.Amount.value || 0); }
+        else if (t.TransactionType === 'EscrowFinish' || t.TransactionType === 'EscrowCreate') {
+          // Released/locked XRP lives in metadata (the created/deleted Escrow node), not t.Amount.
+          const meta = item.meta || item.metaData || {};
+          for (const nd of (meta.AffectedNodes || [])) {
+            const en = nd.DeletedNode || nd.CreatedNode;
+            if (en && en.LedgerEntryType === 'Escrow') {
+              const ff = en.FinalFields || en.NewFields || {};
+              if (typeof ff.Amount === 'string') amt = drops(ff.Amount);
+              if (ff.Destination) escrowDest = ff.Destination;
+              break;
+            }
+          }
+          if (!amt && typeof t.Amount === 'string') amt = drops(t.Amount);
+        }
         state.txs.push({
           account: row.address, label: row.label, cat: row.cat,
           type: t.TransactionType, hash: t.hash || item.hash || '',
-          date: iso, from: t.Account || '', to: t.Destination || '',
+          date: iso, from: t.Account || '', to: escrowDest || t.Destination || '',
           amount: amt, currency: cur, destination_tag: t.DestinationTag ?? ''
         });
       }

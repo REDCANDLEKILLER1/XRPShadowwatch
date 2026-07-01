@@ -1571,6 +1571,53 @@
                 return;
             } 
 
+            // ── ESCROW UNLOCK / LOCK (catches Ripple's monthly escrow releases) ──
+            if (tx.TransactionType === 'EscrowFinish' || tx.TransactionType === 'EscrowCreate') {
+                if (meta && meta.TransactionResult && meta.TransactionResult !== 'tesSUCCESS') return;
+                var isFinish = (tx.TransactionType === 'EscrowFinish');
+                var escXrp = 0, escOwner = tx.Account, escDest = null;
+                try {
+                    var _nodes = (meta && meta.AffectedNodes) || [];
+                    for (var _i = 0; _i < _nodes.length; _i++) {
+                        var _n = _nodes[_i].DeletedNode || _nodes[_i].CreatedNode;
+                        if (_n && _n.LedgerEntryType === 'Escrow') {
+                            var _ff = _n.FinalFields || _n.NewFields || {};
+                            if (typeof _ff.Amount === 'string') escXrp = parseInt(_ff.Amount, 10) / 1000000;
+                            if (_ff.Destination) escDest = _ff.Destination;
+                            if (_ff.Account) escOwner = _ff.Account;
+                            break;
+                        }
+                    }
+                } catch (e) {}
+                if (!isFinish && escXrp <= 0 && typeof tx.Amount === 'string') escXrp = parseInt(tx.Amount, 10) / 1000000;
+                if (!(escXrp > 0)) return;  // non-XRP or undeterminable escrow
+                var escTo = isFinish ? (escDest || escOwner) : escOwner;
+                var eFromName = (KNOWN_WALLETS[escOwner] && KNOWN_WALLETS[escOwner].name) || null;
+                var eToName = (KNOWN_WALLETS[escTo] && KNOWN_WALLETS[escTo].name) || null;
+                var eLabel = isFinish ? 'ESCROW UNLOCK' : 'ESCROW LOCK';
+
+                var efeed = document.getElementById('feed');
+                if (efeed) {
+                    if (efeed.innerText.includes('AWAITING')) efeed.innerHTML = '';
+                    var erow = document.createElement('div'); erow.className = 'tx-row';
+                    var eColor = isFinish ? 'text-yellow-300' : 'text-orange-400';
+                    erow.innerHTML = '<div class="row-top ' + eColor + '"><div class="flex items-center gap-2"><span class="font-bold text-base text-shadow-lime">' + escXrp.toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' XRP</span><span class="tag-pill ' + (isFinish ? 'tag-hvt' : 'tag-dep') + '">' + eLabel + '</span></div><div class="text-[10px] font-mono text-gray-500">' + new Date().toLocaleTimeString() + '</div></div><div class="flex justify-between text-[11px] font-mono text-gray-400"><span>' + SWE(eFromName || (escOwner ? escOwner.substring(0, 8) + '…' : '?')) + ' ➔ ' + SWE(eToName || (escTo ? escTo.substring(0, 8) + '…' : '?')) + '</span></div><div class="btn-row"><button class="action-btn trace-btn" onclick="traceWallet(\'' + escTo + '\')">TRACE</button><button class="action-btn" onclick="openScan(\'' + tx.hash + '\')">SCAN</button></div>';
+                    efeed.prepend(erow);
+                    if (efeed.children.length > 40) efeed.lastChild.remove();
+                }
+                if (escXrp >= 100000) {
+                    var eRep = { hash: tx.hash, amt: escXrp, wallet: eToName || escTo || escOwner, type: eLabel, out: getOutflow(eFromName, eToName), time: new Date().toISOString() };
+                    renderReportRow(eRep);
+                    if (!blackbox.whaleHits) blackbox.whaleHits = [];
+                    blackbox.whaleHits.unshift(eRep);
+                    if (blackbox.whaleHits.length > 100) blackbox.whaleHits.pop();
+                    saveCase({ hash: tx.hash, amt: escXrp, from: eFromName || escOwner, to: eToName || escTo, type: eLabel });
+                    triggerWhaleAlert(); playAlert('HVT');
+                    blackbox.txCount++; saveBlackbox();
+                }
+                return;
+            }
+
             if (tx.TransactionType !== 'Payment' && tx.TransactionType !== 'OfferCreate') return;
             
             let isSuccess = meta?.TransactionResult === 'tesSUCCESS';
