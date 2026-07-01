@@ -5,6 +5,10 @@
 was added to the repo. Everything below is **read‑only** with respect to the XRP Ledger:
 no key handling, no signing, no `submit`/`submitAndWait`, no seed input, no API keys.
 
+> Shadow Watch is a **watchdog / classifier**. It does **not** buy, sell, trade, sign,
+> submit, or execute anything on the ledger. Flow labels are neutral route descriptors,
+> not trade signals.
+
 > Provenance note: some scoring/classification **concepts** in `src/js/intel/` were
 > re-implemented from a reference project ("KOI"). None of that project's files are in
 > this repo; only ideas (formulas, tx-type maps) were adapted into new Shadow Watch code.
@@ -65,7 +69,7 @@ a scored verdict (issuer/blackhole status, account flags, age, balance vs reserv
 ### 3.6 Intelligence helpers (`src/js/intel/`, read‑only)
 Pure functions; **no network calls of their own** (URL builders only, fetched on user click):
 - `sw-token-intel.js` — currency decode (hex/ASCII) + explorer link builders.
-- `sw-flow-intel.js` — per‑tx flow/route classification (direct‑swap/bridge/stable/meme/transfer + buy/sell side).
+- `sw-flow-intel.js` — per‑tx **neutral flow/route classification** (XRP transfer, token transfer, FLOW XRP→TOKEN / TOKEN→XRP, STABLE ROUTE, TOKEN ROUTE, DEX ROUTE). No buy/sell/trade semantics.
 - `sw-wallet-score.js` — 8‑point wallet score (age/balance/activation/cancel‑ratio → green/yellow/red).
 - `sw-watchdog-score.js` — burst / counterparty‑concentration / unique‑takers / reversal / token‑health.
 - `sw-txn-counter.js` — tx‑family counter (Money/Markets/NFTs/Accounts).

@@ -1104,7 +1104,7 @@
                 
                 div.innerHTML = `
                     <div class="flex flex-col">
-                        <span class="hvt-label">${t.label}</span>
+                        <span class="hvt-label">${_htmlEsc(t.label)}</span>
                         <span class="hvt-addr">${t.address.substring(0,8)}...${t.address.substring(t.address.length-6)}</span>
                     </div>
                     <div class="text-right">
@@ -1711,8 +1711,8 @@
             if (isWhale && isSuccess) { triggerWhaleAlert(); } 
 
             if(!isSuccess) { color = "text-gray-500"; mapColor = "#333333"; }
-            const dispFrom = nameFrom ? `<span class="entity-name">${nameFrom}</span>` : tx.Account ? tx.Account.substring(0,4)+'...' : '???';
-            const dispTo = nameTo ? `<span class="entity-name">${nameTo}</span>` : tx.Destination ? tx.Destination.substring(0,4)+'...' : 'DEX';
+            const dispFrom = nameFrom ? `<span class="entity-name">${_htmlEsc(nameFrom)}</span>` : tx.Account ? tx.Account.substring(0,4)+'...' : '???';
+            const dispTo = nameTo ? `<span class="entity-name">${_htmlEsc(nameTo)}</span>` : tx.Destination ? tx.Destination.substring(0,4)+'...' : 'DEX';
             
             let showInFeed = true;
             if (activeFilter === 'small' && (isL2 || amt >= 100000)) showInFeed = false;
@@ -1861,7 +1861,7 @@
         
         function clearCases() { cases=[]; renderCases(); saveBlackbox(); showToast("LOCKER CLEARED"); }
         function exportJSON() { const a = document.createElement('a'); a.href = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(blackbox)); a.download = `sentinel_blackbox_${new Date().toISOString().slice(0,10)}.json`; a.click(); }
-        function renderReportRow(tx) { const list = document.getElementById('report-list'); const row = document.createElement('div'); row.className = "report-row"; row.innerHTML = `<div style="width: 25%" class="rep-val-green">${tx.amt.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:6})}</div><div style="width: 25%" class="rep-val-white">${tx.wallet.startsWith('r')?tx.wallet.substring(0,8):tx.wallet}</div><div class="rep-col-time rep-val-dim">${new Date(tx.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div><div class="rep-col-type text-white font-bold">${tx.type}</div><div class="rep-col-out font-bold" style="${tx.out==='EXCH-OUT'?'color:#ffaa00':(tx.out==='EXCH-IN'?'color:#00ffff':'color:#888')}">${tx.out}</div>`; row.onclick = () => openModal({val: tx.amt, label: (tx.amt/1000).toFixed(1)+'k', color: '#00ff00', type: `REP-${tx.type}`, from: tx.wallet, to: 'LINKED', hash: tx.hash}); list.prepend(row); if (list.children.length > 100) list.lastChild.remove(); }
+        function renderReportRow(tx) { const list = document.getElementById('report-list'); const row = document.createElement('div'); row.className = "report-row"; row.innerHTML = `<div style="width: 25%" class="rep-val-green">${tx.amt.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:6})}</div><div style="width: 25%" class="rep-val-white">${tx.wallet.startsWith('r')?tx.wallet.substring(0,8):_htmlEsc(tx.wallet)}</div><div class="rep-col-time rep-val-dim">${new Date(tx.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div><div class="rep-col-type text-white font-bold">${tx.type}</div><div class="rep-col-out font-bold" style="${tx.out==='EXCH-OUT'?'color:#ffaa00':(tx.out==='EXCH-IN'?'color:#00ffff':'color:#888')}">${tx.out}</div>`; row.onclick = () => openModal({val: tx.amt, label: (tx.amt/1000).toFixed(1)+'k', color: '#00ff00', type: `REP-${tx.type}`, from: tx.wallet, to: 'LINKED', hash: tx.hash}); list.prepend(row); if (list.children.length > 100) list.lastChild.remove(); }
         function addHVTRow(hash, amt, from, to) { /* v16.7.1: HVT intercepts belong in the Evidence Locker, never the HVT watchlist. Route to saveCase (deduped by hash). */ try { saveCase({hash:hash, amt:amt, from:from, to:to, type:'HVT'}); } catch(e){} }
         function triggerWhaleAlert() { if(!alertsEnabled) return; document.getElementById('alert-layer').classList.add('whale-alert-anim'); setTimeout(() => document.getElementById('alert-layer').classList.remove('whale-alert-anim'), 3000); }
         function triggerHVTAlert() { if(!alertsEnabled) return; document.getElementById('alert-layer').classList.add('hvt-alert-anim'); showToast("HVT CONFIRMED"); setTimeout(() => document.getElementById('alert-layer').classList.remove('hvt-alert-anim'), 3000); }
@@ -1908,7 +1908,7 @@
             try { if (window.xrpmanReact) window.xrpmanReact('screen-' + id); } catch(e){}
         }
         function addWatch() { const v=document.getElementById('watch-input').value; if(v){watchlist.push(v);renderWatch();document.getElementById('watch-input').value='';showToast("TRACKING");} }
-        function renderWatch() { document.getElementById('watch-list').innerHTML=watchlist.map((w,i)=>`<div class="flex justify-between p-3 bg-green-900/20 border-b border-green-900"><span class="font-mono text-xs text-green-300 truncate w-48">${w}</span><button onclick="watchlist.splice(${i},1);renderWatch()" class="text-red-500">X</button></div>`).join(''); }
+        function renderWatch() { document.getElementById('watch-list').innerHTML=watchlist.map((w,i)=>`<div class="flex justify-between p-3 bg-green-900/20 border-b border-green-900"><span class="font-mono text-xs text-green-300 truncate w-48">${_htmlEsc(w)}</span><button onclick="watchlist.splice(${i},1);renderWatch()" class="text-red-500">X</button></div>`).join(''); }
 
         // ── v16.3 UI MODE (beginner / pro) ─────────────────────────
         var _SW_MODE_KEY = 'SHADOWWATCH_UI_MODE';

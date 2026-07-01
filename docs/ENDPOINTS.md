@@ -1,15 +1,21 @@
 # External endpoints audit
 
-Every external endpoint the **outer app** (`index.html` + `src/`) touches.
-All are **read-only** (ledger reads, market data, static embeds, or links the
-user clicks). No private keys, no signing, no `submit`/`submitAndWait`, no
-seed input, no API keys.
+Shadow Watch is two apps in one repo, so this audit is split by engine:
+- **Part A — Outer Watcher** (`index.html` + `src/`)
+- **Part B — Brief Console** (`brief-console.html`, loaded in the BRIEF tab)
+
+All endpoints in both parts are **read-only** (ledger reads, market/news data,
+static embeds, or links the user clicks). No private keys, no signing, no
+`submit`/`submitAndWait`, no seed input, no API keys, no writes.
+
+---
+
+# Part A — Outer Watcher (`index.html` + `src/`)
 
 ## Live ledger (read-only, WebSocket)
 - `wss://s1.ripple.com`, `wss://s2.ripple.com`, `wss://xrplcluster.com`, `wss://xrpl.ws`
-  — transaction/ledger subscribe, `account_info`, `account_tx`, `account_lines`,
-  `gateway_balances`. Used by the live feed, graph trace, chain-volume scan, and
-  the Risk Assessment panel. Read-only public commands only.
+  — subscribe + `account_info`, `account_tx`, `account_lines`, `gateway_balances`.
+  Read-only public commands only.
 
 ## Market data (read-only, HTTPS GET)
 - `https://api.binance.us/api/v3/ticker/price` — XRP price.
@@ -31,18 +37,46 @@ seed input, no API keys.
 - `https://dexscreener.com/xrpl/…` (built by `SW.token`, no keys)
 - `https://docs.google.com/…` — operator manual.
 
-## KOI intelligence helpers (`src/js/intel/*`)
+## Intelligence helpers (`src/js/intel/*`)
 Pure functions over data already fetched from the WS above. **They make no
 network calls of their own** — `SW.token` only *builds* explorer URLs; nothing
-is fetched until the user clicks. No API keys, no xrplmeta/DexScreener fetches
-were imported (deliberately deferred per the ticket).
+is fetched until the user clicks. No API keys.
 
-## Deliberately NOT imported from KOI
-Live trading, `Wallet.fromSeed`, `submitAndWait`, OpenClaw agents, X posting,
-Resend email, Firebase, Docker/PM2, and any API-key-gated service.
+---
 
-## Separate app: `brief-console.html`
-The Brief Console (v3.31, loaded in the BRIEF tab iframe) is a **separate
-application** with its own endpoints (xrplmeta, DexScreener, news feeds). It was
-extracted verbatim from the former base64 blob and is **not** modified by the
-KOI work here. Audit it separately before wiring KOI into it (Phase 3b).
+# Part B — Brief Console (`brief-console.html`)
+
+The Brief Console is a separate application (v3.31) that generates a daily
+report. It is **watchlist-scoped** and read-only. Its outbound calls:
+
+## Live ledger (read-only, WebSocket)
+- `wss://s1.ripple.com`, `wss://s2.ripple.com`, `wss://xrplcluster.com`
+  — `account_info`, `account_tx`, `account_lines` for watched wallets.
+- `https://api.xrpscan.com/…` — supplementary XRPL account/metrics reads (GET).
+
+## Market / price data (read-only, HTTPS GET)
+- `https://api.coingecko.com`, `https://api.coinbase.com`, `https://api.coincap.io`,
+  `https://api.coinpaprika.com`, `https://min-api.cryptocompare.com`,
+  `https://api.llama.fi` (DefiLlama).
+
+## News / signal data (read-only, HTTPS GET)
+- `https://api.gdeltproject.org` (GDELT), `https://news.google.com` (RSS), and
+  headline sources referenced/fetched: coindesk.com, cointelegraph.com, decrypt.co,
+  u.today, coingape.com, coinpedia.org, cryptoslate.com, newsbtc.com, bitcoinist.com,
+  thedefiant.io, beincrypto.com, reuters.com, ripple.com.
+- Social references: `twitter.com` / `x.com` (link references, not authenticated).
+
+## Third-party CORS relays (read-only passthrough)
+Used to fetch some of the public GET endpoints above from the browser:
+`api.allorigins.win`, `api.codetabs.com`, `api.cors.lol`, `proxy.killcors.com`,
+`thingproxy.freeboard.io` / `thingproxy.io`.
+> Audit note: these are third-party relays — read requests (and their responses)
+> transit those hosts. No credentials or private data are sent; only public
+> market/news reads. Worth documenting for a privacy review.
+
+---
+
+## Deliberately NOT used (either engine)
+Live trading, `Wallet.fromSeed`, `submitAndWait`, OpenClaw agents, X posting
+automation, Resend email, Firebase, Docker/PM2, and any API-key-gated service.
+Shadow Watch does not buy, sell, trade, sign, submit, or execute anything.

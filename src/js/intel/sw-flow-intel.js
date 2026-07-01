@@ -34,14 +34,15 @@
   function isDirectXrpSwap(s, d) { return (s === 'XRP' && d === 'RLUSD') || (s === 'RLUSD' && d === 'XRP'); }
 
   // Classify a transaction into a compact flow descriptor.
-  // Returns { family, kind, route, side, label, confidence } or null.
+  // Returns { family, kind, route, label, confidence } or null. Labels are
+  // neutral flow/route descriptors only (no buy/sell — this is a watchdog).
   function classify(txData, meta) {
     if (!txData) return null;
     var type = txData.TransactionType;
 
     if (type === 'TrustSet') {
       var tc = txData.LimitAmount && norm(txData.LimitAmount.currency);
-      return { family: 'accounts', kind: 'trustline', route: tc || '', side: '', label: 'TRUSTLINE' + (tc ? ' · ' + tc : ''), confidence: 'high' };
+      return { family: 'accounts', kind: 'trustline', route: tc || '', label: 'TRUSTLINE' + (tc ? ' · ' + tc : ''), confidence: 'high' };
     }
 
     var source = null, dest = null;
@@ -49,35 +50,40 @@
       source = parseAmount(txData.SendMax) || parseAmount(txData.Amount);
       dest = parseAmount((meta && meta.delivered_amount)) || parseAmount(txData.Amount);
     } else if (type === 'OfferCreate') {
-      source = parseAmount(txData.TakerPays); // what the maker pays
-      dest = parseAmount(txData.TakerGets);   // what the maker gets
+      // XRPL OfferCreate semantics: TakerGets = currency being sold (source),
+      // TakerPays = currency being bought (dest). Read-only classification only.
+      source = parseAmount(txData.TakerGets);
+      dest = parseAmount(txData.TakerPays);
     } else {
-      return { family: (SW.txn ? SW.txn.familyOf(type) : 'other'), kind: 'other', route: '', side: '', label: (type || 'TX').toUpperCase(), confidence: 'low' };
+      return { family: (SW.txn ? SW.txn.familyOf(type) : 'other'), kind: 'other', route: '', label: (type || 'TX').toUpperCase(), confidence: 'low' };
     }
     if (!source || !dest) return null;
 
     var s = norm(source.currency), d = norm(dest.currency);
-    var crossCurrency = !(s === d && source.issuer === dest.issuer);
-
-    var kind, conf = 'med';
-    if (!crossCurrency) { kind = (s === 'XRP') ? 'xrp-transfer' : 'token-transfer'; conf = 'high'; }
-    else if (isDirectXrpSwap(s, d)) { kind = 'direct-swap'; conf = 'high'; }
-    else if (isMemeRoute(s, d)) { kind = 'meme-route'; conf = 'med'; }
-    else if (STABLE.has(s) || STABLE.has(d)) { kind = 'stable-bridge'; conf = 'med'; }
-    else { kind = 'bridge'; conf = 'med'; }
-
-    // Buy/sell side inference relative to XRP (KOI: token buy = XRP->token).
-    var side = '';
-    if (s === 'XRP' && d !== 'XRP') side = 'buy ' + d;
-    else if (d === 'XRP' && s !== 'XRP') side = 'sell ' + s;
-
     var route = s + '→' + d;
+    var crossCurrency = !(s === d && source.issuer === dest.issuer);
+    var xrpSide = (s === 'XRP' || d === 'XRP');
+    var stable = STABLE.has(s) || STABLE.has(d);
     var family = (type === 'OfferCreate') ? 'markets' : 'money_movement';
-    var label = kind === 'xrp-transfer' ? 'XRP TRANSFER'
-      : kind === 'token-transfer' ? (d + ' TRANSFER')
-      : (route + (side ? ' · ' + side.toUpperCase() : ''));
 
-    return { family: family, kind: kind, route: route, side: side, label: label, confidence: conf };
+    // Neutral flow/route labels only — Shadow Watch classifies, it never trades.
+    var kind, label, conf = 'med';
+    if (type === 'OfferCreate') {
+      kind = 'dex'; conf = 'high'; label = 'DEX ROUTE';
+    } else if (!crossCurrency) {
+      if (s === 'XRP') { kind = 'xrp-transfer'; label = 'XRP TRANSFER'; }
+      else { kind = 'token-transfer'; label = 'TOKEN TRANSFER'; }
+      conf = 'high';
+    } else if (xrpSide) {
+      kind = 'xrp-token'; conf = 'high';
+      label = (s === 'XRP') ? 'FLOW XRP→TOKEN' : 'FLOW TOKEN→XRP';
+    } else if (stable) {
+      kind = 'stable-route'; label = 'STABLE ROUTE';
+    } else {
+      kind = 'token-route'; label = 'TOKEN ROUTE';
+    }
+
+    return { family: family, kind: kind, route: route, label: label, confidence: conf };
   }
 
   SW.flow = { classify: classify, parseAmount: parseAmount, isMemeRoute: isMemeRoute, isDirectXrpSwap: isDirectXrpSwap, KNOWN: KNOWN };
