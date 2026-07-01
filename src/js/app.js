@@ -1771,7 +1771,7 @@
         
         function openModal(b) { 
             document.getElementById('modal-title').innerText = "INTEL: " + (b.type || 'TX');
-            document.getElementById('mod-amt').innerText = typeof b.val === 'number' ? b.val.toLocaleString() + " " + (b.label?.includes(' ') ? '' : 'XRP') : b.label; 
+            document.getElementById('mod-amt').innerText = typeof b.val === 'number' ? b.val.toLocaleString() + " " + (String(b.label == null ? '' : b.label).includes(' ') ? '' : 'XRP') : b.label;
             document.getElementById('mod-amt').style.color = b.color || '#00ff00'; 
             document.getElementById('mod-type').innerText = b.type || 'TX'; 
             

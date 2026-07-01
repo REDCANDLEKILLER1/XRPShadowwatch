@@ -4378,6 +4378,24 @@ function buildEscrowWatchSection(p) {
   return L.join('\n');
 }
 
+// News-style escrow paragraph for the Morning Story (Coffee & Crypto read).
+function buildEscrowNarrative(pack) {
+  let list = (state.escrow && state.escrow.length) ? state.escrow.slice() : (function () { const b = {}; loadEscrowHistory().forEach(e => { if (e && e.hash) b[e.hash] = e; }); escrowFromTxs(b); return Object.values(b); })();
+  const hrs = Math.round(escrowLookbackMs() / 3600000);
+  const cut = Date.now() - escrowLookbackMs();
+  const win = list.filter(e => (e.ts || 0) >= cut).sort((a, b) => (b.xrp || 0) - (a.xrp || 0));
+  if (!win.length) return 'No Ripple escrow unlocks or locks detected in the last ' + hrs + 'h — the supply side was quiet. Treasury movement, when it happens, is context, not a trade signal.';
+  const unlocks = win.filter(e => e.type === 'UNLOCK'), locks = win.filter(e => e.type === 'LOCK');
+  const totU = unlocks.reduce((a, e) => a + (e.xrp || 0), 0), totL = locks.reduce((a, e) => a + (e.xrp || 0), 0);
+  const largest = win[0];
+  const dest = largest.dest ? (String(largest.dest).slice(0, 10) + '…') : 'an unlabeled wallet';
+  const parts = [];
+  parts.push('Ripple treasury was active in the last ' + hrs + 'h: ' + unlocks.length + ' unlock' + (unlocks.length === 1 ? '' : 's') + ' totaling ' + fmt(totU, 0) + ' XRP' + (locks.length ? (', and ' + locks.length + ' lock' + (locks.length === 1 ? '' : 's') + ' totaling ' + fmt(totL, 0) + ' XRP') : '') + '.');
+  parts.push('The largest single event was ' + fmt(largest.xrp, 0) + ' XRP (' + largest.type + ') to ' + dest + ' — XRPSCAN: https://xrpscan.com/tx/' + largest.hash + '.');
+  parts.push('This is treasury / supply movement, not a buy, sell, or trade signal. The tell is what the destination does next — exchange routing (currently: ' + escrowFollowOn(largest.dest) + '), relocks, or large downstream transfers.');
+  return parts.join(' ');
+}
+
 // ── v3.9: CONSOLIDATED XRP MAIN REPORT — NARRATIVE FORMAT ─────
 // Mirrors the report style operator wants: Executive Summary, Ledger
 // Diagnostics, Shadow Watch (group bullets with 🟢🟡🔴), Anomaly Detection,
@@ -16134,6 +16152,11 @@ function buildMorningStoryText(pack) {
   // Ledger Story
   r.push('LEDGER STORY');
   r.push(buildLedgerNarrativeParagraph(pack));
+  r.push('');
+
+  // Escrow Watch — treasury / supply movement (news context, not a trade signal)
+  r.push('ESCROW WATCH');
+  r.push(buildEscrowNarrative(pack));
   r.push('');
 
   // Pattern Memory
