@@ -89,12 +89,13 @@
     if (!addr) return status('Enter an r... address.', true);
     if (!ADDR_RE.test(addr)) return status('"' + addr + '" is not a valid XRPL r-address.', true);
     if (!socketReady()) return status('Ledger uplink not ready — activate / wait for ACTIVE, then retry.', true);
-    R = { addr: addr, info: null, gw: null, lines: null, tx: null, pending: { info: 1, gw: 1, lines: 1, tx: 1 } };
+    R = { addr: addr, info: null, gw: null, lines: null, tx: null, first: null, pending: { info: 1, gw: 1, lines: 1, tx: 1, first: 1 } };
     status('◐ Scanning ledger for ' + addr.slice(0, 10) + '…');
     var ok = send({ id: 'risk_info_' + addr, command: 'account_info', account: addr, ledger_index: 'validated' })
       && send({ id: 'risk_gw_' + addr, command: 'gateway_balances', account: addr, ledger_index: 'validated' })
       && send({ id: 'risk_lines_' + addr, command: 'account_lines', account: addr, limit: 400 })
-      && send({ id: 'risk_tx_' + addr, command: 'account_tx', account: addr, ledger_index_min: -1, ledger_index_max: -1, limit: 200, forward: false });
+      && send({ id: 'risk_tx_' + addr, command: 'account_tx', account: addr, ledger_index_min: -1, ledger_index_max: -1, limit: 200, forward: false })
+      && send({ id: 'risk_first_' + addr, command: 'account_tx', account: addr, ledger_index_min: -1, ledger_index_max: -1, limit: 1, forward: true });
     if (!ok) return status('Uplink dropped mid-request — retry.', true);
     R.timer = setTimeout(finalize, 15000);
   }
@@ -107,6 +108,7 @@
     else if (d.id === 'risk_gw_' + a) { R.gw = d; delete R.pending.gw; }
     else if (d.id === 'risk_lines_' + a) { R.lines = d; delete R.pending.lines; }
     else if (d.id === 'risk_tx_' + a) { R.tx = d; delete R.pending.tx; }
+    else if (d.id === 'risk_first_' + a) { R.first = d; delete R.pending.first; }
     else return;
     if (Object.keys(R.pending).length === 0) finalize();
   };
@@ -204,6 +206,44 @@
     if (txs.length === 0) { find.push(['warn', 'No recent transactions returned.']); score += 8; }
 
     if (ad.Domain) find.push(['neu', 'Domain set: ' + hexToStr(ad.Domain) + ' (verify it independently — domains can be spoofed).']);
+
+    // ── KOI wallet score + watchdog (read-only enrichment) ──
+    try {
+      if (window.SW && SW.wallet) {
+        var oc = 0, ox = 0, dates = [], cps = [], pairs = [];
+        txs.forEach(function (e) {
+          var t = e.tx || e.tx_json || e; if (!t) return;
+          if (t.TransactionType === 'OfferCreate') oc++;
+          if (t.TransactionType === 'OfferCancel') ox++;
+          if (typeof t.date === 'number') dates.push((t.date + 946684800) * 1000);
+          var other = (t.Account === r.addr) ? t.Destination : t.Account;
+          if (other) cps.push(other);
+          if (t.Account && t.Destination) pairs.push([t.Account, t.Destination]);
+        });
+        var actExch = null, koiAgeYears = (ageDays != null) ? ageDays / 365 : 0;
+        var ft = r.first && r.first.result && r.first.result.transactions && r.first.result.transactions[0];
+        if (ft) {
+          var ftx = ft.tx || ft.tx_json || ft;
+          if (ftx && ftx.Account) actExch = SW.wallet.activationExchange(ftx.Account);
+          var fdate = ft.close_time_iso ? Date.parse(ft.close_time_iso) : (ftx && typeof ftx.date === 'number' ? (ftx.date + 946684800) * 1000 : null);
+          if (fdate) koiAgeYears = (Date.now() - fdate) / (365.25 * 864e5);
+        }
+        var ws = SW.wallet.score({ balanceXrp: bal, accountAgeYears: koiAgeYears, activationExchange: actExch, offerCreateCount: oc, offerCancelCount: ox });
+        stats['KOI wallet score'] = ws.rating.toUpperCase() + ' (' + ws.score + '/' + ws.maxScore + ')';
+        if (actExch) stats['Activation source'] = actExch;
+        var sev = ws.rating === 'green' ? 'good' : (ws.rating === 'yellow' ? 'warn' : 'bad');
+        find.push([sev, 'KOI wallet rating ' + ws.rating.toUpperCase() + ' (' + ws.score + '/' + ws.maxScore + '): ' + ws.breakdown.map(function (b) { return b[1]; }).join(', ') + '.']);
+
+        if (SW.watchdog) {
+          var burst = SW.watchdog.burstScore(dates), conc = SW.watchdog.concentrationScore(cps), rev = SW.watchdog.reversalFlag(pairs);
+          stats['Burst (1h peak)'] = Math.round(burst * 100) + '%';
+          stats['Top counterparty'] = Math.round(conc * 100) + '%';
+          if (burst >= 0.7) find.push(['warn', 'Watchdog — burst activity: ' + Math.round(burst * 100) + '% of sampled tx in one hour.']);
+          if (conc >= 0.6) find.push(['warn', 'Watchdog — counterparty concentration: ' + Math.round(conc * 100) + '% with a single address.']);
+          if (rev) find.push(['warn', 'Watchdog — circular/reversal behaviour (A→B and B→A in sample).']);
+        }
+      }
+    } catch (e) { /* KOI enrichment is best-effort */ }
 
     if (!find.some(function (f) { return f[0] === 'bad' || f[0] === 'warn'; })) find.push(['good', 'No major red flags detected in the sampled data.']);
 

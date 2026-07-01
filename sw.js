@@ -1,6 +1,6 @@
 /* XRPMAN Shadow Watch — service worker (app shell cache for installable PWA).
    Bump CACHE on every deploy so clients pick up new assets. */
-const CACHE = 'shadowwatch-v2';
+const CACHE = 'shadowwatch-v3';
 const SHELL = [
   '/', '/index.html',
   '/src/css/styles.css',
@@ -10,6 +10,12 @@ const SHELL = [
   '/src/js/boot-scanner.js',
   '/src/js/risk.js',
   '/src/js/pwa.js',
+  '/src/js/koi/sw-util.js',
+  '/src/js/koi/sw-token-intel.js',
+  '/src/js/koi/sw-txn-counter.js',
+  '/src/js/koi/sw-flow-intel.js',
+  '/src/js/koi/sw-wallet-score.js',
+  '/src/js/koi/sw-watchdog-score.js',
   '/brief-console.html',
   '/manifest.webmanifest',
   '/src/assets/icon-192.png',
