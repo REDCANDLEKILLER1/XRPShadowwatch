@@ -94,6 +94,13 @@ modules (and optionally Vite), done file-by-file so the live app never breaks.
   ASSESSMENT". Pulls `account_info`, `gateway_balances`, `account_lines` and
   `account_tx` for any r-address over the live socket and renders a scored,
   heuristic verdict (issuer/blackhole status, flags, age, holder base, balance).
+- **Escrow Watch** (`src/js/escrow-watch.js` + Brief Console) — tracks Ripple's
+  escrow LOCK/UNLOCK treasury movements across **both** apps. Main app: Menu →
+  "ESCROW WATCH" panel (totals, largest event, per-event details, XRPSCAN links,
+  Save-to-Evidence); persists to `localStorage` (`XRPMAN_ESCROW_HISTORY_V1`,
+  deduped, 30-day). Brief Console: an "ESCROW WATCH — COFFEE & CRYPTO" report
+  section. Read-only (`account_tx` + metadata parse); 36h window (96h weekend/
+  Monday). Treasury/supply movement — **not a trade signal**.
 - **PWA / installable app** — `manifest.webmanifest` + `sw.js` (app-shell
   cache, stale-while-revalidate) + `src/js/pwa.js` (registration + an
   "INSTALL APP" prompt). Adds home-screen install with the power-button icon.

@@ -4268,6 +4268,116 @@ DISCLAIMER: On-chain forensic scan only. Not financial advice. No signing, no tr
   return report;
 }
 
+// ── ESCROW WATCH — COFFEE & CRYPTO (read-only) ───────────────────
+// Parse EscrowFinish/EscrowCreate from account_tx metadata for known Ripple
+// escrow wallets. Treasury/supply movement — NOT a trade signal. No signing,
+// no trading, no writes. Shared 30-day history with the main app.
+const ESCROW_KEY = 'XRPMAN_ESCROW_HISTORY_V1';
+const ESCROW_DAY = 86400000;
+
+function escrowLookbackMs() { const d = new Date().getUTCDay(); return (d === 6 || d === 0 || d === 1) ? 96 * 3600000 : 36 * 3600000; }
+
+function escrowWallets() {
+  const out = [], seen = {};
+  try { (WATCHLIST || []).forEach(w => { if (Array.isArray(w) && w[2] === 'escrow' && w[1] && !seen[w[1]]) { seen[w[1]] = 1; out.push(w[1]); } }); } catch (e) {}
+  ['r9NpyVfLfUG8hatuCCHKzosyDtKnBdsEN3', 'rMhkqz3DeU7GUUJKGZofusbrTwZe6bDyb1',
+   'rMQ98K56yXJbDGv49ZSmW51sLn94Xe1mu1', 'rKveEyR1SrkWbJX214xcfH43ZsoGMb3PEv'].forEach(a => { if (!seen[a]) { seen[a] = 1; out.push(a); } });
+  return out.slice(0, 24);
+}
+
+function parseEscrowItem(item) {
+  const t = item.tx_json || item.tx || {}, meta = item.meta || item.metaData || {};
+  const type = t.TransactionType;
+  if (type !== 'EscrowFinish' && type !== 'EscrowCreate') return null;
+  if (meta.TransactionResult && meta.TransactionResult !== 'tesSUCCESS') return null;
+  const isFinish = type === 'EscrowFinish';
+  let xrp = 0, owner = t.Account, dest = null;
+  for (const nd of (meta.AffectedNodes || [])) {
+    const en = nd.DeletedNode || nd.CreatedNode;
+    if (en && en.LedgerEntryType === 'Escrow') {
+      const ff = en.FinalFields || en.NewFields || {};
+      if (typeof ff.Amount === 'string') xrp = drops(ff.Amount);
+      if (ff.Destination) dest = ff.Destination;
+      if (ff.Account) owner = ff.Account;
+      break;
+    }
+  }
+  if (!isFinish && !xrp && typeof t.Amount === 'string') xrp = drops(t.Amount);
+  if (!(xrp > 0)) return null;
+  const iso = item.close_time_iso || (t.date ? rip(t.date) : '');
+  const ts = iso ? new Date(iso).getTime() : Date.now();
+  return { hash: t.hash || item.hash || '', type: isFinish ? 'UNLOCK' : 'LOCK', xrp: Math.floor(xrp),
+    owner, dest: isFinish ? (dest || null) : null, ts: ts || Date.now(), ledger: t.ledger_index || null };
+}
+
+function loadEscrowHistory() { try { const a = JSON.parse(localStorage.getItem(ESCROW_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+function saveEscrowHistory(list) { try { const cut = Date.now() - 30 * ESCROW_DAY; localStorage.setItem(ESCROW_KEY, JSON.stringify(list.filter(e => (e.ts || 0) >= cut))); } catch (e) {} }
+
+function escrowFromTxs(byHash) {
+  (state.txs || []).forEach(t => {
+    if (/Escrow(Finish|Create)/.test(t.type || '') && t.amount > 0 && t.hash && !byHash[t.hash])
+      byHash[t.hash] = { hash: t.hash, type: /Finish/.test(t.type) ? 'UNLOCK' : 'LOCK', xrp: Math.floor(t.amount),
+        owner: t.from, dest: t.to || null, ts: t.date ? new Date(t.date).getTime() : Date.now(), ledger: null };
+  });
+}
+
+// Read-only escrow backfill: runs before report generation.
+async function escrowBackfill(ws) {
+  const byHash = {};
+  loadEscrowHistory().forEach(e => { if (e && e.hash) byHash[e.hash] = e; });
+  escrowFromTxs(byHash);
+  for (const addr of escrowWallets()) {
+    try {
+      const res = await xrpl(ws, { command: 'account_tx', account: addr, ledger_index_min: -1, ledger_index_max: -1, limit: 40, forward: false });
+      for (const item of (res.transactions || [])) { const e = parseEscrowItem(item); if (e && e.hash && !byHash[e.hash]) byHash[e.hash] = e; }
+    } catch (e) { log('escrow backfill miss: ' + addr.slice(0, 8) + ' (' + e.message + ')'); }
+  }
+  const all = Object.values(byHash).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  state.escrow = all;
+  saveEscrowHistory(all);
+  log('Escrow backfill: ' + all.length + ' event(s) in 30d history.');
+}
+
+// Best-effort, read-only follow-on status from already-scanned state.
+function escrowFollowOn(dest) {
+  if (!dest) return 'pending';
+  try {
+    if (KNOWN[dest] && KNOWN[dest].cat === 'exchange') return 'routed to exchange';
+    if ((state.txs || []).some(t => t.from === dest && t.amount > 0)) return 'downstream transfers seen';
+  } catch (e) {}
+  return 'pending';
+}
+
+function buildEscrowWatchSection(p) {
+  let list = (state.escrow && state.escrow.length) ? state.escrow.slice() : (function () { const b = {}; loadEscrowHistory().forEach(e => { if (e && e.hash) b[e.hash] = e; }); escrowFromTxs(b); return Object.values(b); })();
+  const hrs = Math.round(escrowLookbackMs() / 3600000);
+  const cut = Date.now() - escrowLookbackMs();
+  const win = list.filter(e => (e.ts || 0) >= cut).sort((a, b) => (b.xrp || 0) - (a.xrp || 0));
+  if (!win.length) return 'ESCROW WATCH — COFFEE & CRYPTO\nESCROW WATCH: No escrow unlocks or locks detected in this scan window (' + hrs + 'h).';
+  const unlocks = win.filter(e => e.type === 'UNLOCK'), locks = win.filter(e => e.type === 'LOCK');
+  const totU = unlocks.reduce((a, e) => a + (e.xrp || 0), 0), totL = locks.reduce((a, e) => a + (e.xrp || 0), 0);
+  const largest = win[0];
+  const L = ['ESCROW WATCH — COFFEE & CRYPTO'];
+  L.push('- Unlocks detected: ' + unlocks.length);
+  L.push('- Total unlocked: ' + fmt(totU, 0) + ' XRP');
+  L.push('- Locks detected: ' + locks.length);
+  L.push('- Total locked: ' + fmt(totL, 0) + ' XRP');
+  L.push('- Largest event: ' + fmt(largest.xrp, 0) + ' XRP (' + largest.type + ')');
+  L.push('- Owner: ' + (largest.owner || '?'));
+  if (largest.dest) L.push('- Destination: ' + largest.dest);
+  L.push('- Tx: ' + (largest.hash || '?'));
+  if (largest.hash) L.push('- XRPSCAN: https://xrpscan.com/tx/' + largest.hash);
+  L.push('- Follow-on movement: ' + escrowFollowOn(largest.dest));
+  if (win.length > 1) {
+    L.push('  Events (' + hrs + 'h window):');
+    win.slice(0, 8).forEach(e => L.push('   • ESCROW ' + e.type + ' ' + fmt(e.xrp, 0) + ' XRP → ' + String(e.dest || e.owner || '?').slice(0, 12) + ' | https://xrpscan.com/tx/' + e.hash));
+  }
+  L.push('');
+  L.push('Talking point:');
+  L.push('Ripple escrow movement detected. This is treasury / supply movement, not a buy, sell, or trade signal. Watch the destination wallet for follow-on flows, exchange routing, relocks, or large downstream transfers.');
+  return L.join('\n');
+}
+
 // ── v3.9: CONSOLIDATED XRP MAIN REPORT — NARRATIVE FORMAT ─────
 // Mirrors the report style operator wants: Executive Summary, Ledger
 // Diagnostics, Shadow Watch (group bullets with 🟢🟡🔴), Anomaly Detection,
@@ -4327,6 +4437,10 @@ function buildXRPMainReport(p) {
   if (p && p.risk_score && n(p.risk_score.score) > 0) {
     r.push('• Risk: ' + publicRiskLabel(p));
   }
+  r.push('');
+
+  // ═══ ESCROW WATCH — COFFEE & CRYPTO (treasury/supply movement, not a trade signal) ═══
+  r.push(buildEscrowWatchSection(p));
   r.push('');
 
   // ═══ 2. LEDGER DIAGNOSTICS — only print lines with data ═══
@@ -19589,6 +19703,9 @@ async function run() {
     log('Scanning ' + getActiveWatchlist().length + ' wallets (parallel x' + SCAN_PARALLEL + ', tier-based pages, smart skip)...');
     await scanWallets(ws);
     analyzeFlags();
+
+    shadowSay('Escrow watch — treasury movements…', 'ESCROW', 78);
+    try { await escrowBackfill(ws); } catch (e) { elog('escrowBackfill', e); log('escrow backfill failed: ' + e.message); }
 
     shadowSay('Following large moves…', 'FLOW', 80);
     log('Running flow + DEX + offers scans in parallel...');

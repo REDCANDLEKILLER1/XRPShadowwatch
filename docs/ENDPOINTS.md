@@ -76,6 +76,14 @@ Used to fetch some of the public GET endpoints above from the browser:
 
 ---
 
+## Escrow Watch backfill (both engines) — read-only
+The Escrow Watch panel (main app) and the "ESCROW WATCH — COFFEE & CRYPTO"
+report section (Brief Console) add **no new endpoints**. Their backfill reuses
+the existing XRPL WebSocket with the read-only `account_tx` command for known
+Ripple/escrow wallets; escrow amounts are parsed from transaction metadata
+(`meta.AffectedNodes`). Results persist only to `localStorage`
+(`XRPMAN_ESCROW_HISTORY_V1`). No writes, no new hosts, no keys.
+
 ## Deliberately NOT used (either engine)
 Live trading, `Wallet.fromSeed`, `submitAndWait`, OpenClaw agents, X posting
 automation, Resend email, Firebase, Docker/PM2, and any API-key-gated service.

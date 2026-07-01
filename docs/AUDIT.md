@@ -121,6 +121,7 @@ Detect escrow unlocks (EscrowFinish) in both Shadow Watches
 Rename src/js/koi -> src/js/intel (naming clarity)
 Add docs/AUDIT.md: before/after change summary for auditor
 Audit cleanup: neutral flow labels, OfferCreate direction, escaping, docs
+Escrow Watch: main-app panel + Brief Console Coffee & Crypto report (read-only)
 ```
 
 ## 8. Audit cleanup (post‑review)
@@ -131,3 +132,36 @@ Audit cleanup: neutral flow labels, OfferCreate direction, escaping, docs
   operator‑typed watchlist) are escaped via `_htmlEsc` before `innerHTML`.
 - `docs/ENDPOINTS.md` split into Part A (Outer Watcher) and Part B (Brief Console) so
   both engines' endpoints are covered.
+
+## 9. Escrow Watch (two surfaces, read-only)
+Escrow LOCK/UNLOCK events (Ripple's monthly treasury movements) are now visible and
+useful in **both** apps, not just parsed. Released/locked amount comes from
+`meta.AffectedNodes` (the created/deleted `Escrow` node), which the tx body doesn't carry.
+
+**Main app — Escrow Watch panel** (`src/js/escrow-watch.js`)
+- Dedicated panel: **Menu → "ESCROW WATCH"** (`window.openEscrowWatch()`). Shows totals
+  unlocked/locked in the lookback window, largest event, per-event owner/destination/time/
+  ledger/tx hash, XRPSCAN link, and a **Save to Evidence Locker** button.
+- Live feed still shows `ESCROW UNLOCK` / `ESCROW LOCK` rows; events also persist here.
+- Storage: `localStorage` key `XRPMAN_ESCROW_HISTORY_V1`, **deduped by tx hash**, **30-day**
+  retention (permanent only if saved to Evidence).
+- Read-only backfill: `account_tx` for known Ripple/escrow wallets already in the app's DB
+  (fills events that happened while the app was closed).
+- Label: “Treasury / supply movement. Not a trade signal.”
+
+**Brief Console — "ESCROW WATCH — COFFEE & CRYPTO"** (`brief-console.html`)
+- Dedicated report section near the top (after the executive/market summary, before whale/
+  wallet-flow sections). Shows unlocks/locks counts + totals, largest event, owner/destination,
+  tx hash, XRPSCAN link, follow-on movement status (pending / routed to exchange / downstream
+  transfers seen), and a plain-English talking point.
+- Runs a read-only escrow backfill (`account_tx` for known Ripple/escrow wallets) **before**
+  report generation; shares the same 30-day `XRPMAN_ESCROW_HISTORY_V1` history.
+- If no events: “ESCROW WATCH: No escrow unlocks or locks detected in this scan window.”
+
+**Lookback / retention (both):** normal window **36h**; Sat/Sun/Mon window **96h** (uses
+`close_time_iso`, falling back to `tx.date`). Recent history kept **30 days**; permanent only
+via Evidence Locker.
+
+**Known test case:** the real 500,000,000 XRP `EscrowFinish` parses to 500,000,000 XRP and
+appears in both the main-app panel and the Coffee & Crypto report section (verified in a Node
+shim and headless browser).

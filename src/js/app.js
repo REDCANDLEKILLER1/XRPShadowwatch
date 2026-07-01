@@ -1448,10 +1448,11 @@
                 try { d = JSON.parse(e.data); } catch(err){ return; }
                 if(d.type==='transaction') handleTx(d.transaction, d.meta); 
                 if(d.type==='ledgerClosed' && document.getElementById('ledger-display')) document.getElementById('ledger-display').innerText = d.ledger_index; 
-                if(d.result && d.result.transactions && !(d.id && (d.id.indexOf("cvol_") === 0 || d.id.indexOf("risk_") === 0))) processTrace(d.result.account, d.result.transactions);
+                if(d.result && d.result.transactions && !(d.id && (d.id.indexOf("cvol_") === 0 || d.id.indexOf("risk_") === 0 || d.id.indexOf("esc_") === 0))) processTrace(d.result.account, d.result.transactions);
 
                 if(d.id && d.id.indexOf("cvol_") === 0) { handleChainVolResp(d); return; }
                 if(d.id && d.id.indexOf("risk_") === 0) { if(window.__riskOnMessage) window.__riskOnMessage(d); return; }
+                if(d.id && d.id.indexOf("esc_") === 0) { if(window.SW_ESCROW) SW_ESCROW.handleResp(d); return; }
 
                 if(d.id && d.id.startsWith("bal_")) {
                     const acc = d.id.replace("bal_", "");
@@ -1595,6 +1596,8 @@
                 var eFromName = (KNOWN_WALLETS[escOwner] && KNOWN_WALLETS[escOwner].name) || null;
                 var eToName = (KNOWN_WALLETS[escTo] && KNOWN_WALLETS[escTo].name) || null;
                 var eLabel = isFinish ? 'ESCROW UNLOCK' : 'ESCROW LOCK';
+                // Persist into the Escrow Watch panel (read-only, deduped by hash).
+                try { if (window.SW_ESCROW) SW_ESCROW.record({ hash: tx.hash, type: isFinish ? 'UNLOCK' : 'LOCK', xrp: Math.floor(escXrp), owner: escOwner, dest: isFinish ? (escDest || null) : null, ts: (typeof tx.date === 'number' ? (tx.date + 946684800) * 1000 : Date.now()), ledger: tx.ledger_index || null }); } catch (e) {}
 
                 var efeed = document.getElementById('feed');
                 if (efeed) {
