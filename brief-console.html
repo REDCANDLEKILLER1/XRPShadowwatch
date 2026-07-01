@@ -130,6 +130,70 @@ body::before{
   50%    { opacity:0.9; transform:scale(1.08); }
 }
 
+/* ═══ v3.33: command-room overhaul — square trigger, scan reflow, tighten,
+   draggable/fill-screen report (main-app tactical look) ═══ */
+
+/* C. Power trigger -> compact SQUARE tactical button (was a big neon circle) */
+.xai-scan-hub{ width:120px !important; height:120px !important; margin:8px auto 10px !important; }
+.xai-power-btn{
+  border-radius:12px !important;
+  border:1px solid rgba(0,255,90,.5) !important;
+  background-color:#001206 !important;
+  background-image:
+    linear-gradient(#00ff5a,#00ff5a) 4px 4px/12px 2px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) 4px 4px/2px 12px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) calc(100% - 4px) 4px/12px 2px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) calc(100% - 4px) 4px/2px 12px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) 4px calc(100% - 4px)/12px 2px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) 4px calc(100% - 4px)/2px 12px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) calc(100% - 4px) calc(100% - 4px)/12px 2px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) calc(100% - 4px) calc(100% - 4px)/2px 12px no-repeat,
+    linear-gradient(180deg,rgba(0,34,14,.6),rgba(0,12,5,.85)) !important;
+  box-shadow:0 0 14px rgba(0,255,90,.3), inset 0 0 16px rgba(0,60,20,.4) !important;
+}
+.xai-power-btn::before{ border-radius:12px !important; inset:-3px !important; }
+.xai-power-btn::after{ content:'RUN SCAN' !important; bottom:10px !important; font-family:'Orbitron',monospace !important;
+  font-size:9px !important; letter-spacing:2px !important; color:#00ff5a !important; }
+.xai-power-btn svg{ width:44px !important; height:44px !important; margin-bottom:10px !important; }
+.xai-power-btn:hover{ transform:none !important; box-shadow:0 0 22px rgba(0,255,90,.55), inset 0 0 18px rgba(0,80,26,.5) !important; }
+
+/* B. Reflow UP while scanning: collapse tall idle content, reactor+status to top */
+body.scanning #xaiAvatarShell, body.building #xaiAvatarShell,
+body.scanning .xai-nameplate,  body.building .xai-nameplate,
+body.scanning #xaiDialogue,     body.building #xaiDialogue,
+body.scanning .xai-cmd-head,    body.building .xai-cmd-head,
+body.scanning .xai-title-stack, body.building .xai-title-stack,
+body.scanning .xai-dialogue-screen, body.building .xai-dialogue-screen,
+body.scanning #xaiVoiceControls,body.building #xaiVoiceControls,
+body.scanning #xaiVoiceMeta,    body.building #xaiVoiceMeta,
+body.scanning #xaiScanHub,      body.building #xaiScanHub{ display:none !important; }
+body.scanning #xaiMissionProgress, body.building #xaiMissionProgress{ order:-2 !important; margin-top:6px !important; }
+body.scanning #xaiStatusStrip,  body.building #xaiStatusStrip{ order:-1 !important; }
+
+/* D. Tighten idle overhead (smaller avatar, less gap) */
+#xaiAvatarShell{ width:min(120px,32vw) !important; height:min(120px,32vw) !important; }
+#xrpmanAiCommandRoom{ gap:8px !important; }
+#xaiDialogue{ max-height:70px !important; }
+
+/* A. Report window — fill-screen / drag / resize + HUD corner brackets */
+.morning-report-float{ resize:both; overflow:hidden; min-width:320px; min-height:140px;
+  background-image:
+    linear-gradient(#00ff5a,#00ff5a) 6px 6px/18px 2px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) 6px 6px/2px 18px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) calc(100% - 6px) 6px/18px 2px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) calc(100% - 6px) 6px/2px 18px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) 6px calc(100% - 6px)/18px 2px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) 6px calc(100% - 6px)/2px 18px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) calc(100% - 6px) calc(100% - 6px)/18px 2px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) calc(100% - 6px) calc(100% - 6px)/2px 18px no-repeat; }
+.mrf-header{ cursor:grab; user-select:none; }
+.morning-report-float.mrf-fullscreen{
+  left:8px !important; top:8px !important; right:8px; bottom:8px;
+  transform:none !important; width:auto !important; height:auto !important;
+  max-width:none !important; max-height:none !important; border-radius:10px; resize:none; }
+.morning-report-float.mrf-fullscreen .mrf-body,
+.morning-report-float.mrf-large .mrf-body{ max-height:none; flex:1 1 auto; }
+
 /* Scan-active state: power button fades out, quantum gauge fades in */
 .xai-scan-hub[data-scan-active="false"] #xaiQuantumGauge{
   opacity: 0;
@@ -9655,6 +9719,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
           '<div class="mrf-subtitle">Coffee \u0026 Crypto with \uD835\uDC12\uD835\uDC13\u039F\u039D\u0395 \u00B7 Lady K\u2019s Excellent XRPL Update</div>' +
         '</div>' +
         '<div class="mrf-controls">' +
+          '<button class="mrf-ctrl" id="mrfFullBtn"     type="button" title="Fill screen">⛶ Full</button>' +
           '<button class="mrf-ctrl" id="mrfCollapseBtn" type="button">Collapse</button>' +
           '<button class="mrf-ctrl" id="mrfResizeBtn"   type="button">Resize</button>' +
           '<button class="mrf-ctrl mrf-close" id="mrfCloseBtn" type="button">Close</button>' +
@@ -9684,9 +9749,11 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     var btnDownload = $$('mrfDownloadBtn');
     var btnOpenFull = $$('mrfOpenFullBtn');
     var btnDlTotal  = $$('mrfDownloadTotalBtn');
+    var btnFull     = $$('mrfFullBtn');
     if (btnClose)    btnClose.onclick    = function() { MORNING_REPORT_FLOAT.hide(); };
     if (btnCollapse) btnCollapse.onclick = function() { MORNING_REPORT_FLOAT.collapse(); };
     if (btnResize)   btnResize.onclick   = function() { MORNING_REPORT_FLOAT.toggleSize(); };
+    if (btnFull)     btnFull.onclick     = function() { MORNING_REPORT_FLOAT.toggleFull(); };
     if (btnCopy)     btnCopy.onclick     = function() { MORNING_REPORT_FLOAT.copy(); };
     if (btnDownload) btnDownload.onclick = function() { MORNING_REPORT_FLOAT.download(); };
     if (btnOpenFull) btnOpenFull.onclick = function() {
@@ -9701,6 +9768,42 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         else if (window.downloadShadowWatchTotalFile) window.downloadShadowWatchTotalFile();
       } catch (_) {}
     };
+    _wireMrfDrag();
+  }
+
+  // Drag-to-move the report window by its header (PC mouse + touch). Switches from
+  // centered transform to left/top on first drag so the window follows the pointer.
+  function _wireMrfDrag() {
+    if (!_mrfDom || _mrfDom._dragWired) return;
+    var header = _mrfDom.querySelector('#mrfHeader');
+    if (!header) return;
+    _mrfDom._dragWired = true;
+    var dragging = false, ox = 0, oy = 0;
+    var pt = function(e){ return (e.touches && e.touches[0]) ? e.touches[0] : e; };
+    var down = function(e){
+      if (e.target && e.target.closest && e.target.closest('.mrf-ctrl')) return; // let buttons work
+      var r = _mrfDom.getBoundingClientRect();
+      _mrfDom.style.transform = 'none';
+      _mrfDom.style.left = r.left + 'px';
+      _mrfDom.style.top  = r.top + 'px';
+      var p = pt(e); ox = p.clientX - r.left; oy = p.clientY - r.top;
+      dragging = true; header.style.cursor = 'grabbing';
+      if (e.cancelable) e.preventDefault();
+    };
+    var move = function(e){
+      if (!dragging) return;
+      var p = pt(e);
+      _mrfDom.style.left = (p.clientX - ox) + 'px';
+      _mrfDom.style.top  = (p.clientY - oy) + 'px';
+      if (e.cancelable) e.preventDefault();
+    };
+    var up = function(){ dragging = false; header.style.cursor = 'grab'; };
+    header.addEventListener('mousedown', down);
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    header.addEventListener('touchstart', down, { passive: false });
+    window.addEventListener('touchmove', move, { passive: false });
+    window.addEventListener('touchend', up);
   }
 
   function _renderSources(sources) {
@@ -9758,12 +9861,12 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         _mrfState.lastReport  = String(reportText || '');
         _mrfState.lastSources = Array.isArray(sources) ? sources.slice() : [];
         _mrfState.lastPack    = pack || null;
-        _renderBody(reportText);
-        _renderSources(sources);
-        _mrfDom.classList.remove('mrf-hidden','mrf-collapsed','mrf-large');
-        _mrfState.open      = true;
-        _mrfState.collapsed = false;
-        _mrfState.large     = false;
+        // Un-hide + size FIRST so a render hiccup can't leave the window hidden.
+        _mrfDom.classList.remove('mrf-hidden','mrf-collapsed','mrf-large','mrf-fullscreen');
+        _mrfState.open = true; _mrfState.collapsed = false; _mrfState.large = false; _mrfState.full = false;
+        // On PC, open at the larger size so the report reads without cramped scrolling.
+        if (window.innerWidth >= 760) { _mrfDom.classList.add('mrf-large'); _mrfState.large = true; }
+        try { _renderBody(reportText); _renderSources(sources); } catch (_) {}
       } catch (_) {}
     },
     hide:     function() { if (_mrfDom) { _mrfDom.classList.add('mrf-hidden'); } _mrfState.open = false; },
@@ -9779,6 +9882,12 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       _mrfState.large = !_mrfState.large;
       if (_mrfState.large) _mrfDom.classList.add('mrf-large');
       else                 _mrfDom.classList.remove('mrf-large');
+    },
+    toggleFull: function() {
+      _ensureMrfDom();
+      _mrfState.full = !_mrfState.full;
+      if (_mrfState.full) { _mrfDom.classList.add('mrf-fullscreen'); _mrfDom.style.transform = 'none'; }
+      else                { _mrfDom.classList.remove('mrf-fullscreen'); }
     },
     renderSources: function(srcs) { _renderSources(srcs); },
     copy: function() {
