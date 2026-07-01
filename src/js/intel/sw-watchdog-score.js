@@ -1,6 +1,6 @@
 /* ════════════════════════════════════════════════════════════════════
    SW.watchdog — read-only behavioural scores over a transaction sample.
-   Concepts from KOI watchdog: burst activity, counterparty concentration,
+   Behavioural scores: burst activity, counterparty concentration,
    unique takers, reversal/circular behaviour, token health tier. Pure
    functions; feed only "confidence / evidence / watch level" — never trades.
    ════════════════════════════════════════════════════════════════════ */

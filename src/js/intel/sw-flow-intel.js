@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════════════════════════
    SW.flow — flow / route classification for a single transaction (read-only)
-   Ported concepts from KOI flow-detector.ts: parseAmount, KNOWN_CURRENCIES,
-   isMemeRoute, isDirectXrpSwap, and cross-currency route shape. Returns a
+   Parses amounts, recognizes known currencies, and derives the
+   cross-currency route shape for a transaction. Returns a
    compact flow label; does not trade, sign, or submit anything.
    ════════════════════════════════════════════════════════════════════ */
 (function () {
@@ -10,7 +10,7 @@
   var norm = function (c) { return (SW.token && SW.token.normalizeCurrency) ? SW.token.normalizeCurrency(c) : String(c || '???'); };
 
   // Recognized currencies (stablecoins / major fiat / native). Anything else
-  // is treated as a meme/unknown token. (from KOI KNOWN_CURRENCIES)
+  // is treated as a meme/unknown token.
   var KNOWN = new Set([
     'RLUSD', 'USD', 'USDC', 'USDT',
     'EUR', 'GBP', 'JPY', 'CNY', 'KRW', 'BRL', 'BBRL',

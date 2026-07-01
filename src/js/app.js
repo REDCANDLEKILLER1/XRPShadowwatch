@@ -614,7 +614,7 @@
             } catch (_) { return '> (no historical data)'; }
         }
 
-        // KOI txn-counter: live ledger activity by family, for the intel report.
+        // Shadow intel tx-family counter: live ledger activity by family, for the intel report.
         function _txnFamiliesText() {
             try {
                 if (!window.SW || !SW.txn) return '> (counter unavailable)';
@@ -1551,11 +1551,11 @@
         function handleTx(tx, meta) {
             if (isPaused) return;
 
-            // KOI: count every validated tx type into families (Money/Markets/NFTs/Accounts)
+            // Shadow intel: count every validated tx type into families (Money/Markets/NFTs/Accounts)
             try { if (window.SW && SW.txn) SW.txn.record(tx.TransactionType); } catch(e){}
             // Safe HTML escaper for live-XRPL-derived strings (token names, etc.)
             var SWE = (window.SW && SW.escapeHtml) ? SW.escapeHtml : function(x){ return String(x==null?'':x); };
-            // KOI: classify the flow/route for this tx (read-only label)
+            // Shadow intel: classify the flow/route for this tx (read-only label)
             var _flow = null; try { if (window.SW && SW.flow) _flow = SW.flow.classify(tx, meta); } catch(e){}
 
             if (tx.TransactionType === 'TrustSet') {
@@ -1870,7 +1870,7 @@
         function triggerHVTAlert() { if(!alertsEnabled) return; document.getElementById('alert-layer').classList.add('hvt-alert-anim'); showToast("HVT CONFIRMED"); setTimeout(() => document.getElementById('alert-layer').classList.remove('hvt-alert-anim'), 3000); }
         function copyHash(h) { if (!navigator.clipboard) { fallbackCopy(h); return; } navigator.clipboard.writeText(h).then(function() { showToast("HASH COPIED"); }, function(err) { fallbackCopy(h); }); }
         function fallbackCopy(text) { var textArea = document.createElement("textarea"); textArea.value = text; textArea.style.position = "fixed"; document.body.appendChild(textArea); textArea.focus(); textArea.select(); try { document.execCommand('copy'); showToast("HASH COPIED"); } catch (err) { showToast("COPY FAILED"); } document.body.removeChild(textArea); }
-        function openIntelDashboard() { const now = new Date().toISOString(); const hvtContainer = document.getElementById('hvt-list'); let hvtLog = (blackbox.hvtHits && blackbox.hvtHits.length) ? blackbox.hvtHits.slice(0,15).map(function(x){return '> '+((x.amt||0).toLocaleString())+' XRP | '+(x.desc||'');}).join('\n') : "NO HVT ACTIVITY."; const reportContainer = document.getElementById('report-list'); let whaleLog = reportContainer ? Array.from(reportContainer.children).slice(0, 15).map(r => r.innerText.replace(/\n/g, ' | ')).join('\n') : "NO DATA."; const finalReport = `*** SHADOW SENTINEL INTEL ***\nDATE: ${now}\nBLACK BOX GENESIS: ${blackbox.genesis || now}\n\n=== [ CURRENT SESSION (24H) ] ===\n> L1 XRP VOLUME:    ${Math.floor(metrics.totalXRPVol).toLocaleString()} XRP\n> EST. USD VALUE:    $${Math.floor(metrics.totalUSDVol).toLocaleString()}\n> L2 RAW VOLUME:    ${Math.floor(metrics.totalL2Vol).toLocaleString()} Units\n\n=== [ LIFETIME BLACK BOX ] ===\n> TOTAL OBSERVED XRP: ${Math.floor(blackbox.totalXRP).toLocaleString()}\n> TOTAL OBSERVED USD: $${Math.floor(blackbox.totalUSD).toLocaleString()}\n> TOTAL TRANSACTIONS: ${blackbox.txCount}\n\n=== [ HISTORICAL VOLUME — 365D BACKFILL ] ===\n${_histReportText()}\n\n=== [ LEDGER ACTIVITY — LIVE (KOI families) ] ===\n${_txnFamiliesText()}\n\n[EVIDENCE LOCKER]\n${cases.map(c => `> ${c.type||'ANOMALY'} | ${(c.amt||0).toLocaleString()} | ${c.from}->${c.to}`).join('\n') || "NONE"}\n\n[WHALE FLOW (Top 15 - Session)]\n${whaleLog}`; document.getElementById('intel-content').value = finalReport; document.getElementById('intel-dashboard').classList.add('active'); }
+        function openIntelDashboard() { const now = new Date().toISOString(); const hvtContainer = document.getElementById('hvt-list'); let hvtLog = (blackbox.hvtHits && blackbox.hvtHits.length) ? blackbox.hvtHits.slice(0,15).map(function(x){return '> '+((x.amt||0).toLocaleString())+' XRP | '+(x.desc||'');}).join('\n') : "NO HVT ACTIVITY."; const reportContainer = document.getElementById('report-list'); let whaleLog = reportContainer ? Array.from(reportContainer.children).slice(0, 15).map(r => r.innerText.replace(/\n/g, ' | ')).join('\n') : "NO DATA."; const finalReport = `*** SHADOW SENTINEL INTEL ***\nDATE: ${now}\nBLACK BOX GENESIS: ${blackbox.genesis || now}\n\n=== [ CURRENT SESSION (24H) ] ===\n> L1 XRP VOLUME:    ${Math.floor(metrics.totalXRPVol).toLocaleString()} XRP\n> EST. USD VALUE:    $${Math.floor(metrics.totalUSDVol).toLocaleString()}\n> L2 RAW VOLUME:    ${Math.floor(metrics.totalL2Vol).toLocaleString()} Units\n\n=== [ LIFETIME BLACK BOX ] ===\n> TOTAL OBSERVED XRP: ${Math.floor(blackbox.totalXRP).toLocaleString()}\n> TOTAL OBSERVED USD: $${Math.floor(blackbox.totalUSD).toLocaleString()}\n> TOTAL TRANSACTIONS: ${blackbox.txCount}\n\n=== [ HISTORICAL VOLUME — 365D BACKFILL ] ===\n${_histReportText()}\n\n=== [ LEDGER ACTIVITY — LIVE (SHADOW FAMILIES) ] ===\n${_txnFamiliesText()}\n\n[EVIDENCE LOCKER]\n${cases.map(c => `> ${c.type||'ANOMALY'} | ${(c.amt||0).toLocaleString()} | ${c.from}->${c.to}`).join('\n') || "NONE"}\n\n[WHALE FLOW (Top 15 - Session)]\n${whaleLog}`; document.getElementById('intel-content').value = finalReport; document.getElementById('intel-dashboard').classList.add('active'); }
         function closeIntel() { document.getElementById('intel-dashboard').classList.remove('active'); }
         function copyIntelText() { const t = document.getElementById('intel-content'); t.select(); document.execCommand('copy'); showToast("REPORT COPIED"); }
         function shareIntel() { const text = document.getElementById('intel-content').value; if (navigator.share) { navigator.share({ title: 'Shadow Intel', text: text }).catch(err => { if (err.name !== 'AbortError') console.error('Share failed:', err); }); } else { copyIntelText(); showToast("SHARE API UNAVAILABLE. COPIED."); } }

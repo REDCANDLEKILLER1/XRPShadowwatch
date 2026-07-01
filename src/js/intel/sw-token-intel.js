@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════════════════════════
    SW.token — token / currency identity (read-only)
-   Ported concepts from KOI flow-detector.ts (HEX_CURRENCY_MAP,
-   normalizeCurrency) + explorer link builders. No API keys, no network
+   Token / currency identity: hex + ASCII currency decode and explorer
+   link builders. No API keys, no network
    calls here — pure functions + link builders. Enrichment is optional and
    cached by the caller.
    ════════════════════════════════════════════════════════════════════ */
@@ -9,7 +9,7 @@
   'use strict';
   var SW = (window.SW = window.SW || {});
 
-  // Known hex currency codes (from KOI flow-detector HEX_CURRENCY_MAP)
+  // Known hex currency codes
   var HEX_MAP = {
     '524C555344000000000000000000000000000000': 'RLUSD',
     '4555520000000000000000000000000000000000': 'EUR',

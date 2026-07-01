@@ -1,6 +1,6 @@
 /* ════════════════════════════════════════════════════════════════════
    SW.wallet — wallet scorer (read-only)
-   Ported from KOI wallet-scorer.ts calculateScore(): scores a wallet on
+   Scores a wallet on
    account age, balance, activation source (known exchange), and offer
    cancel ratio → 0..8, rated green / yellow / red. Pure function over
    already-fetched ledger data — no network here.
@@ -10,7 +10,7 @@
   var SW = (window.SW = window.SW || {});
   var MAX_SCORE = 8;
 
-  // Known exchange activation wallets (from KOI wallet-scorer.ts). If a
+  // Known exchange activation wallets. If a
   // wallet's first funder is one of these, it's exchange-activated (+2).
   var KNOWN_EXCHANGES = {
     'rDsbeomae4FXwgQTJp9Rs64Qg9vDiTCdBv': 'Bitstamp', 'rUobSiUpYH2S97Mgb4E7b7HuzQj2uzZ3aD': 'Bitstamp',

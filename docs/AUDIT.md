@@ -10,7 +10,7 @@ no key handling, no signing, no `submit`/`submitAndWait`, no seed input, no API 
 > not trade signals.
 
 > Provenance note: some scoring/classification **concepts** in `src/js/intel/` were
-> re-implemented from a reference project ("KOI"). None of that project's files are in
+> re-implemented from an external reference implementation. None of those files are in
 > this repo; only ideas (formulas, tx-type maps) were adapted into new Shadow Watch code.
 
 ---
@@ -118,7 +118,7 @@ Wire modal SCAN LEDGER button to in-app Risk Assessment
 Phase 1: decode embedded Brief Console into a real file
 Phase 2+3: safe HTML escaping + read-only intelligence helpers
 Detect escrow unlocks (EscrowFinish) in both Shadow Watches
-Rename src/js/koi -> src/js/intel (naming clarity)
+Rename intelligence-helpers folder to src/js/intel (naming clarity)
 Add docs/AUDIT.md: before/after change summary for auditor
 Audit cleanup: neutral flow labels, OfferCreate direction, escaping, docs
 Escrow Watch: main-app panel + Brief Console Coffee & Crypto report (read-only)

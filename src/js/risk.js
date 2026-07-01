@@ -207,7 +207,7 @@
 
     if (ad.Domain) find.push(['neu', 'Domain set: ' + hexToStr(ad.Domain) + ' (verify it independently — domains can be spoofed).']);
 
-    // ── KOI wallet score + watchdog (read-only enrichment) ──
+    // ── Shadow wallet score + watchdog (read-only enrichment) ──
     try {
       if (window.SW && SW.wallet) {
         var oc = 0, ox = 0, dates = [], cps = [], pairs = [];
@@ -220,19 +220,19 @@
           if (other) cps.push(other);
           if (t.Account && t.Destination) pairs.push([t.Account, t.Destination]);
         });
-        var actExch = null, koiAgeYears = (ageDays != null) ? ageDays / 365 : 0;
+        var actExch = null, walletAgeYears = (ageDays != null) ? ageDays / 365 : 0;
         var ft = r.first && r.first.result && r.first.result.transactions && r.first.result.transactions[0];
         if (ft) {
           var ftx = ft.tx || ft.tx_json || ft;
           if (ftx && ftx.Account) actExch = SW.wallet.activationExchange(ftx.Account);
           var fdate = ft.close_time_iso ? Date.parse(ft.close_time_iso) : (ftx && typeof ftx.date === 'number' ? (ftx.date + 946684800) * 1000 : null);
-          if (fdate) koiAgeYears = (Date.now() - fdate) / (365.25 * 864e5);
+          if (fdate) walletAgeYears = (Date.now() - fdate) / (365.25 * 864e5);
         }
-        var ws = SW.wallet.score({ balanceXrp: bal, accountAgeYears: koiAgeYears, activationExchange: actExch, offerCreateCount: oc, offerCancelCount: ox });
-        stats['KOI wallet score'] = ws.rating.toUpperCase() + ' (' + ws.score + '/' + ws.maxScore + ')';
+        var ws = SW.wallet.score({ balanceXrp: bal, accountAgeYears: walletAgeYears, activationExchange: actExch, offerCreateCount: oc, offerCancelCount: ox });
+        stats['Shadow wallet score'] = ws.rating.toUpperCase() + ' (' + ws.score + '/' + ws.maxScore + ')';
         if (actExch) stats['Activation source'] = actExch;
         var sev = ws.rating === 'green' ? 'good' : (ws.rating === 'yellow' ? 'warn' : 'bad');
-        find.push([sev, 'KOI wallet rating ' + ws.rating.toUpperCase() + ' (' + ws.score + '/' + ws.maxScore + '): ' + ws.breakdown.map(function (b) { return b[1]; }).join(', ') + '.']);
+        find.push([sev, 'Shadow wallet rating ' + ws.rating.toUpperCase() + ' (' + ws.score + '/' + ws.maxScore + '): ' + ws.breakdown.map(function (b) { return b[1]; }).join(', ') + '.']);
 
         if (SW.watchdog) {
           var burst = SW.watchdog.burstScore(dates), conc = SW.watchdog.concentrationScore(cps), rev = SW.watchdog.reversalFlag(pairs);
@@ -243,7 +243,7 @@
           if (rev) find.push(['warn', 'Watchdog — circular/reversal behaviour (A→B and B→A in sample).']);
         }
       }
-    } catch (e) { /* KOI enrichment is best-effort */ }
+    } catch (e) { /* Shadow enrichment is best-effort */ }
 
     if (!find.some(function (f) { return f[0] === 'bad' || f[0] === 'warn'; })) find.push(['good', 'No major red flags detected in the sampled data.']);
 

@@ -1,6 +1,6 @@
 /* ════════════════════════════════════════════════════════════════════
    SW.txn — transaction-family counter (read-only)
-   Ported from KOI txn-counter.ts FAMILY_MAP. In-memory rolling counts of
+   Transaction-family map + in-memory rolling counts of
    every validated tx type seen on the live stream, grouped into families
    (Money / Markets / NFTs / Accounts). No SQLite/DB — session only.
    ════════════════════════════════════════════════════════════════════ */
