@@ -2,19 +2,15 @@
 (function () {
   'use strict';
 
+  // DE-CACHE MODE: we no longer register a caching service worker (it kept
+  // serving stale code during active development). Instead, force any worker a
+  // user already has to re-check /sw.js — which is now a self-retiring worker
+  // that clears caches and unregisters. We do NOT register a new one, so there
+  // is no reload loop.
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', function () {
-      navigator.serviceWorker.register('/sw.js').catch(function (e) {
-        console.warn('[pwa] SW registration failed', e);
-      });
-    });
-    // When a new service worker takes control (new deploy), reload once so the
-    // page runs the latest code instead of a stale cached bundle.
-    var _reloaded = false;
-    navigator.serviceWorker.addEventListener('controllerchange', function () {
-      if (_reloaded) return; _reloaded = true;
-      window.location.reload();
-    });
+    navigator.serviceWorker.getRegistrations()
+      .then(function (regs) { regs.forEach(function (r) { try { r.update(); } catch (e) {} }); })
+      .catch(function () {});
   }
 
   var deferred = null;
