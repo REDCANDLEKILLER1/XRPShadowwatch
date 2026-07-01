@@ -777,34 +777,84 @@ body[data-active-screen="command"] .app-screen[data-screen="command"]{
   --xai-pct: 0%;
   --xai-glow: 0,255,0;
 }
-/* v3.32: SCAN MONITOR — retire the circular gauge/spinner; the linear mission
-   readout becomes a terminal-style monitor (reliably a normal block element). */
+/* v3.32b: REACTOR CORE GAUGE — replaces the circular spinner AND the plain bar.
+   CSS-only reskin driven by the existing mission ids (#xaiMissionFill width /
+   #xaiMissionPct text set every tick by the smoother). */
 .xai-quantum-gauge{ display:none !important; }
+
+/* compact the scan hub so there's no dead 168px square */
+.xai-scan-hub{ margin:10px auto 8px !important; }
+.xai-scan-hub[data-scan-active="true"]{ width:72px !important; height:72px !important; margin:8px auto !important; }
+
+/* ── reactor panel (angled neon corner brackets via layered gradients) ── */
 .xai-mission-progress{
-  background:linear-gradient(180deg,#001a06,#000c03) !important;
-  border:2px solid #0a5 !important; border-radius:10px !important;
-  padding:24px 14px 14px !important; margin:8px auto !important; max-width:460px !important;
+  max-width:420px !important; margin:8px auto !important; padding:22px 16px 12px !important;
   position:relative !important; overflow:hidden !important;
-  box-shadow:0 0 22px rgba(0,255,90,.25), inset 0 0 30px rgba(0,60,20,.4) !important;
+  border:1px solid rgba(0,255,90,.28) !important; border-radius:10px !important;
   font-family:'Share Tech Mono',monospace !important;
+  background:
+    linear-gradient(#00ff5a,#00ff5a) 0 0/16px 2px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) 0 0/2px 16px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) 100% 0/16px 2px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) 100% 0/2px 16px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) 0 100%/16px 2px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) 0 100%/2px 16px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) 100% 100%/16px 2px no-repeat,
+    linear-gradient(#00ff5a,#00ff5a) 100% 100%/2px 16px no-repeat,
+    linear-gradient(180deg,#001a06,#000c03) !important;
+  box-shadow:0 0 22px rgba(0,255,90,.22), inset 0 0 26px rgba(0,60,20,.4) !important;
+  animation:reactorBreathe 3.2s ease-in-out infinite;
 }
-.xai-mission-progress::before{ content:"SHADOW SCAN // FORENSIC CORE"; position:absolute; top:8px; left:14px;
-  font-size:10px; letter-spacing:2px; color:#5fd68a; z-index:2; }
+@keyframes reactorBreathe{ 0%,100%{ box-shadow:0 0 18px rgba(0,255,90,.18), inset 0 0 26px rgba(0,60,20,.4) } 50%{ box-shadow:0 0 30px rgba(0,255,90,.4), inset 0 0 30px rgba(0,80,26,.5) } }
+.xai-mission-progress::before{ content:"REACTOR CORE // SHADOW SCAN"; position:absolute; top:7px; left:16px;
+  font-size:10px; letter-spacing:2px; color:#5fd68a; z-index:3; }
 .xai-mission-progress::after{ content:""; position:absolute; inset:0; pointer-events:none; z-index:0;
   background:repeating-linear-gradient(0deg, rgba(0,255,90,.05) 0 1px, transparent 1px 3px); opacity:.5; }
 .xai-mission-progress .xai-mission-row{ display:flex !important; justify-content:space-between !important;
-  align-items:baseline !important; position:relative; z-index:1; }
-.xai-mission-progress #xaiMissionStep{ color:#00ff5a !important; font-size:13px !important; letter-spacing:1px !important; font-weight:700 !important; }
-.xai-mission-progress #xaiMissionPct{ color:#8fffb0 !important; font-size:30px !important; font-weight:700 !important;
-  text-shadow:0 0 12px rgba(0,255,120,.7) !important; font-variant-numeric:tabular-nums; line-height:1 !important; }
-.xai-mission-progress .xai-mission-bar{ height:16px !important; background:#021c0a !important; border:1px solid #085 !important;
-  border-radius:4px !important; margin-top:10px !important; overflow:hidden !important; position:relative; z-index:1; }
-.xai-mission-progress #xaiMissionFill{ height:100% !important;
-  background-image:linear-gradient(90deg,#0c6,#3fffa0), repeating-linear-gradient(90deg, rgba(255,255,255,.16) 0 6px, transparent 6px 12px) !important;
-  background-size:100% 100%, 24px 100% !important; box-shadow:0 0 12px rgba(0,255,120,.7) !important;
-  animation:swMonBarFlow .8s linear infinite; }
-@keyframes swMonBarFlow{ from{ background-position:0 0, 0 0 } to{ background-position:0 0, 24px 0 } }
-.xai-mission-progress .xai-mission-next{ color:#7fe6a0 !important; font-size:11px !important; margin-top:8px !important; position:relative; z-index:1; }
+  align-items:baseline !important; position:relative; z-index:2; margin-top:8px; }
+.xai-mission-progress #xaiMissionStep{ color:#00ffff !important; font-family:'Orbitron','Share Tech Mono',sans-serif !important;
+  font-size:12px !important; letter-spacing:2px !important; font-weight:700 !important; text-shadow:0 0 8px rgba(0,255,255,.5) !important; }
+.xai-mission-progress #xaiMissionPct{ color:#ffe58a !important; font-size:34px !important; font-weight:700 !important;
+  font-variant-numeric:tabular-nums; line-height:1 !important; text-shadow:0 0 14px rgba(255,215,0,.6) !important; }
+
+/* ── reactor meter: chevron cells, cyan trail -> GOLD leading edge ── */
+.xai-mission-progress .xai-mission-bar{ height:18px !important; margin-top:10px !important;
+  background:#02160a !important; border:1px solid rgba(0,255,90,.3) !important; border-radius:3px !important;
+  overflow:hidden !important; position:relative !important; z-index:2; }
+.xai-mission-progress #xaiMissionFill{ height:100% !important; width:0%;
+  background:linear-gradient(90deg,#00d8ff 0%,#00ff66 55%,#8dff4a 82%,#ffd700 100%) !important;
+  box-shadow:0 0 14px rgba(0,255,120,.7), 8px 0 18px rgba(255,215,0,.55) !important;
+  transition:width .35s cubic-bezier(.4,0,.2,1) !important; animation:none !important; }
+.xai-mission-progress .xai-mission-bar::after{ content:""; position:absolute; inset:0; z-index:3; pointer-events:none;
+  background:repeating-linear-gradient(110deg, transparent 0 12px, rgba(0,16,7,.88) 12px 14px); }
+.xai-mission-progress .xai-mission-bar::before{ content:""; position:absolute; top:0; bottom:0; width:3px; left:0; z-index:4; pointer-events:none;
+  background:linear-gradient(180deg,transparent,#eaffb0,transparent); box-shadow:0 0 12px 2px rgba(255,240,150,.8); opacity:0; }
+.xai-mission-progress[data-mission-state="INIT"] .xai-mission-bar::before,
+.xai-mission-progress[data-mission-state="LEDGER"] .xai-mission-bar::before,
+.xai-mission-progress[data-mission-state="WALLET_PROGRESS"] .xai-mission-bar::before,
+.xai-mission-progress[data-mission-state="BALANCE"] .xai-mission-bar::before,
+.xai-mission-progress[data-mission-state="FLOW"] .xai-mission-bar::before,
+.xai-mission-progress[data-mission-state="NEWS"] .xai-mission-bar::before,
+.xai-mission-progress[data-mission-state="DISCOVERY"] .xai-mission-bar::before,
+.xai-mission-progress[data-mission-state="REPORTING"] .xai-mission-bar::before{ opacity:1; animation:reactorSweep 1.4s linear infinite; }
+@keyframes reactorSweep{ from{ left:0 } to{ left:100% } }
+.xai-mission-progress .xai-mission-next{ color:#7fe6a0 !important; font-size:11px !important; margin-top:9px !important; position:relative; z-index:2; letter-spacing:.5px; }
+
+/* FAILED -> red reactor */
+.xai-mission-progress[data-mission-state="FAILED"] #xaiMissionFill,
+.xai-mission-progress[data-mission-state="ERROR_WAIT"] #xaiMissionFill{ background:linear-gradient(90deg,#600,#ff5555) !important; box-shadow:0 0 14px rgba(255,60,60,.7) !important; }
+.xai-mission-progress[data-mission-state="FAILED"] #xaiMissionPct{ color:#ff8a8a !important; text-shadow:0 0 14px rgba(255,60,60,.6) !important; }
+
+/* live stat cells — reskin existing #xaiStatusStrip */
+#xaiStatusStrip{ display:flex !important; justify-content:center !important; gap:14px !important;
+  max-width:420px; margin:8px auto 0 !important; padding:6px 12px !important;
+  background:rgba(0,12,2,.6) !important; border:1px solid rgba(0,255,0,.16) !important; border-radius:8px !important;
+  font-family:'Share Tech Mono',monospace !important; font-size:10px !important; letter-spacing:1px !important; color:#bdf7c8 !important; }
+
+@media (prefers-reduced-motion:reduce){
+  .xai-mission-progress{ animation:none !important; }
+  .xai-mission-progress .xai-mission-bar::before{ animation:none !important; }
+}
 @media (prefers-reduced-motion:reduce){ .xai-mission-progress #xaiMissionFill{ animation:none } }
 .xai-gauge-ring{
   width:100%;height:100%;
@@ -2905,6 +2955,20 @@ function _animatePct() {
   }
 }
 
+// Legacy shadowSay phase → XAI mobile-HUD phase (ceilings ascend). Bridges the
+// two progress systems so the mobile gauge actually advances during a scan.
+const XAI_PHASE_BRIDGE = {
+  BOOT: 'INIT', INIT: 'INIT', MARKET: 'INIT', WAITING: 'INIT', SCANNING: 'INIT',
+  BALANCES: 'LEDGER', LEDGER: 'LEDGER',
+  WALLETS: 'WALLET_PROGRESS',
+  TX_SCAN: 'BALANCE',
+  ESCROW: 'FLOW', FLOW: 'FLOW', TX: 'FLOW',
+  OFFERS: 'DISCOVERY', AMM: 'DISCOVERY', DEX: 'DISCOVERY',
+  MEMORY: 'DISCOVERY', ANALYSIS: 'DISCOVERY', PATTERN: 'DISCOVERY', DISCOVERY: 'DISCOVERY',
+  SEAL: 'REPORTING', BUILDING: 'REPORTING',
+  SEALED: 'SEALED', DONE: 'DONE', READY: 'DONE', ERROR: 'FAILED'
+};
+
 function shadowSay(status, phase, pctVal) {
   setText('orbStatus', status);
   const rawPhase = (phase || 'SCANNING').toUpperCase();
@@ -2928,6 +2992,26 @@ function shadowSay(status, phase, pctVal) {
     _ensureAnim();
   }
   // Minor backward targets are ignored (monotonic — no 69↔70 bounce).
+
+  // ── Bridge legacy orb HUD → XAI mobile HUD (fixes "stuck at 13%") ──
+  // run() only calls shadowSay(), so advance the mobile phase state machine here.
+  try {
+    var xp = XAI_PHASE_BRIDGE[rawPhase];
+    if (xp && typeof window.safeXaiProgress === 'function') {
+      var st = null;
+      if (xp === 'WALLET_PROGRESS' && window.XAI_SCAN_PROGRESS &&
+          !window.XAI_SCAN_PROGRESS.walletsTotal &&
+          typeof KNOWN !== 'undefined' && KNOWN) {
+        st = { walletsTotal: Object.keys(KNOWN).length };
+      }
+      window.safeXaiProgress(xp, st);
+      if (window.XAI_PROGRESS_SMOOTHER &&
+          typeof window.XAI_PROGRESS_SMOOTHER.setTarget === 'function' &&
+          typeof pctVal === 'number' && !isNaN(pctVal)) {
+        window.XAI_PROGRESS_SMOOTHER.setTarget(Math.round(pctVal));
+      }
+    }
+  } catch (_) { /* HUD bridge must never break a scan */ }
 }
 
 // Sub-progress: bumps within a phase band
