@@ -10,15 +10,10 @@
         if (_loaded) return;
         _loaded = true;
         try {
-          var b64 = window.__BRIEF_CONSOLE_B64 || '';
-          var bin = atob(b64);
-          var n = bin.length;
-          var bytes = new Uint8Array(n);
-          for (var i = 0; i < n; i++) bytes[i] = bin.charCodeAt(i);
-          var blob = new Blob([bytes], { type: 'text/html' });
-          var url = URL.createObjectURL(blob);
+          // Brief Console (XRPMAN SHADOW WATCH v3.31) is now a real file loaded
+          // directly into the iframe, instead of a base64 Blob decoded at runtime.
           var frame = document.getElementById('brief-frame');
-          if (frame) frame.src = url;
+          if (frame) frame.src = './brief-console.html';
         } catch (e) {
           _loaded = false;
           try { console.error('[BRIEF] load failed:', e); } catch(_){}
@@ -29,4 +24,3 @@
         }
       };
     })();
-    

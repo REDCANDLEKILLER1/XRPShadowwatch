@@ -531,17 +531,18 @@
         </div>
     </div>
 
+    <!-- OUTER APP = live tactical watcher (XRPMAN SHADOW WATCH v16.7.1).
+         Deeper forensic/report engine lives in ./brief-console.html (BRIEF tab). -->
     <script src="src/js/app.js"></script>
     <script src="src/js/risk.js"></script>
 
     <!-- ════════════════════════════════════════════════════════════
-         XRPMan AI DAILY BRIEF - embedded consumer console
-         Lazy-loaded into #brief-frame on first BRIEF tab tap.
-         Self-contained: base64 -> Blob -> object URL. IPFS-safe.
-         Does not touch the main app engine.
+         XRPMan AI DAILY BRIEF - deeper forensic/report console (v3.31).
+         Now a real file: ./brief-console.html, lazy-loaded into #brief-frame
+         on first BRIEF tab tap (see src/js/brief-fullscreen.js).
+         Separate app from the outer live watcher; does not touch its engine.
          ════════════════════════════════════════════════════════════ -->
     <script src="src/js/brief-fullscreen.js"></script>
-    <script src="src/assets/brief-console.b64.js"></script>
 
     <!-- v16.6.2 MENU OVERLAY (wired to existing functions only; no fake data) -->
     <div id="menu-modal" style="display:none;position:fixed;inset:0;z-index:9300;background:rgba(0,0,0,0.93);flex-direction:column;">
