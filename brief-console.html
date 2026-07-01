@@ -133,11 +133,12 @@ body::before{
 /* ═══ v3.33: command-room overhaul — square trigger, scan reflow, tighten,
    draggable/fill-screen report (main-app tactical look) ═══ */
 
-/* C. Power trigger -> compact SQUARE tactical button (was a big neon circle) */
-.xai-scan-hub{ width:120px !important; height:120px !important; margin:8px auto 10px !important; }
+/* C. Power trigger -> compact RECTANGLE tactical button with attention glow (v3.35)
+   (was a big neon circle -> square -> now a slim horizontal bar that grabs the eye) */
+.xai-scan-hub{ width:210px !important; height:58px !important; margin:6px auto 12px !important; }
 .xai-power-btn{
-  border-radius:12px !important;
-  border:1px solid rgba(0,255,90,.5) !important;
+  border-radius:10px !important;
+  border:1px solid rgba(0,255,90,.6) !important;
   background-color:#001206 !important;
   background-image:
     linear-gradient(#00ff5a,#00ff5a) 4px 4px/12px 2px no-repeat,
@@ -148,14 +149,24 @@ body::before{
     linear-gradient(#00ff5a,#00ff5a) 4px calc(100% - 4px)/2px 12px no-repeat,
     linear-gradient(#00ff5a,#00ff5a) calc(100% - 4px) calc(100% - 4px)/12px 2px no-repeat,
     linear-gradient(#00ff5a,#00ff5a) calc(100% - 4px) calc(100% - 4px)/2px 12px no-repeat,
-    linear-gradient(180deg,rgba(0,34,14,.6),rgba(0,12,5,.85)) !important;
-  box-shadow:0 0 14px rgba(0,255,90,.3), inset 0 0 16px rgba(0,60,20,.4) !important;
+    linear-gradient(180deg,rgba(0,40,18,.7),rgba(0,12,5,.9)) !important;
+  flex-direction:row !important;
+  gap:9px !important;
+  animation: swPowerGlow 1.6s ease-in-out infinite !important;
 }
-.xai-power-btn::before{ border-radius:12px !important; inset:-3px !important; }
-.xai-power-btn::after{ content:'RUN SCAN' !important; bottom:10px !important; font-family:'Orbitron',monospace !important;
-  font-size:9px !important; letter-spacing:2px !important; color:#00ff5a !important; }
-.xai-power-btn svg{ width:44px !important; height:44px !important; margin-bottom:10px !important; }
-.xai-power-btn:hover{ transform:none !important; box-shadow:0 0 22px rgba(0,255,90,.55), inset 0 0 18px rgba(0,80,26,.5) !important; }
+.xai-power-btn::before{ border-radius:10px !important; inset:-3px !important; animation:none !important; }
+.xai-power-btn::after{ content:'RUN SCAN' !important; position:static !important; transform:none !important;
+  bottom:auto !important; left:auto !important; font-family:'Orbitron',monospace !important;
+  font-size:13px !important; letter-spacing:3px !important; color:#00ff5a !important;
+  text-shadow:0 0 8px rgba(0,255,90,.7) !important; }
+.xai-power-btn svg{ width:26px !important; height:26px !important; margin:0 !important;
+  filter:drop-shadow(0 0 6px rgba(0,255,90,.8)) !important; }
+.xai-power-btn:hover{ transform:none !important;
+  box-shadow:0 0 32px rgba(0,255,90,.8), inset 0 0 18px rgba(0,80,26,.5) !important; }
+@keyframes swPowerGlow{
+  0%,100%{ box-shadow:0 0 12px rgba(0,255,90,.35), inset 0 0 14px rgba(0,60,20,.4); }
+  50%    { box-shadow:0 0 28px rgba(0,255,90,.85), 0 0 56px rgba(0,255,90,.32), inset 0 0 18px rgba(0,90,30,.5); }
+}
 
 /* B. Reflow UP while scanning: collapse tall idle content, reactor+status to top */
 body.scanning #xaiAvatarShell, body.building #xaiAvatarShell,
@@ -193,6 +204,8 @@ body.scanning #xaiStatusStrip,  body.building #xaiStatusStrip{ order:-1 !importa
   max-width:none !important; max-height:none !important; border-radius:10px; resize:none; }
 .morning-report-float.mrf-fullscreen .mrf-body,
 .morning-report-float.mrf-large .mrf-body{ max-height:none; flex:1 1 auto; }
+/* Fullscreen: keep the report's download/close clear of the app's fixed "X EXIT" (top-right). */
+.morning-report-float.mrf-fullscreen .mrf-header{ padding-right:86px !important; }
 /* v3.34: report nav — hamburger menu, small DL, compact header, report-first */
 .mrf-header{ align-items:center !important; gap:8px !important; padding:8px 10px !important; }
 .mrf-ico{ flex:0 0 auto; background:rgba(0,18,6,.85); color:#00FF00; border:1px solid rgba(0,255,0,.45);
