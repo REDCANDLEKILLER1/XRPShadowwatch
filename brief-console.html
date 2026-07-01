@@ -193,6 +193,29 @@ body.scanning #xaiStatusStrip,  body.building #xaiStatusStrip{ order:-1 !importa
   max-width:none !important; max-height:none !important; border-radius:10px; resize:none; }
 .morning-report-float.mrf-fullscreen .mrf-body,
 .morning-report-float.mrf-large .mrf-body{ max-height:none; flex:1 1 auto; }
+/* v3.34: report nav — hamburger menu, small DL, compact header, report-first */
+.mrf-header{ align-items:center !important; gap:8px !important; padding:8px 10px !important; }
+.mrf-ico{ flex:0 0 auto; background:rgba(0,18,6,.85); color:#00FF00; border:1px solid rgba(0,255,0,.45);
+  border-radius:6px; width:34px; height:34px; font-size:16px; line-height:1; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; font-family:'Share Tech Mono',monospace; }
+.mrf-ico:hover{ background:rgba(0,40,12,.95); border-color:#00FF00; }
+.mrf-ico.mrf-close{ color:#ffb86a; border-color:rgba(255,150,0,.5); }
+.mrf-titleblock{ flex:1 1 auto; min-width:0; text-align:left; }
+.mrf-title{ font-size:13px !important; letter-spacing:2px !important; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mrf-subtitle{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mrf-menu{ position:absolute; top:52px; left:10px; z-index:5; min-width:230px;
+  background:rgba(0,12,4,.98); border:1px solid rgba(0,255,0,.4); border-radius:8px;
+  box-shadow:0 8px 26px rgba(0,0,0,.6), 0 0 18px rgba(0,255,0,.2); padding:6px; display:flex; flex-direction:column; gap:2px; }
+.mrf-menu-hidden{ display:none !important; }
+.mrf-menu-item{ background:transparent; color:#c8f5c8; border:1px solid transparent; border-radius:6px;
+  font-family:'Share Tech Mono',monospace; font-size:12px; letter-spacing:.5px; text-align:left; padding:9px 10px; cursor:pointer; }
+.mrf-menu-item:hover{ background:rgba(0,40,12,.9); border-color:rgba(0,255,0,.35); }
+.mrf-body{ font-size:13px !important; }
+@media (max-width:600px){
+  .mrf-title{ font-size:12px !important; letter-spacing:1px !important; }
+  .mrf-subtitle{ font-size:9px !important; }
+  .mrf-body{ font-size:12.5px !important; }
+}
 
 /* Scan-active state: power button fades out, quantum gauge fades in */
 .xai-scan-hub[data-scan-active="false"] #xaiQuantumGauge{
@@ -9714,25 +9737,24 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     el.className = 'morning-report-float mrf-hidden';
     el.innerHTML =
       '<div class="mrf-header" id="mrfHeader">' +
+        '<button class="mrf-ico" id="mrfMenuBtn" type="button" title="Menu">\u2630</button>' +
         '<div class="mrf-titleblock">' +
           '<div class="mrf-title">\u2615 WHILE YOU WERE SLEEPING</div>' +
-          '<div class="mrf-subtitle">Coffee \u0026 Crypto with \uD835\uDC12\uD835\uDC13\u039F\u039D\u0395 \u00B7 Lady K\u2019s Excellent XRPL Update</div>' +
+          '<div class="mrf-subtitle">Coffee \u0026 Crypto with \uD835\uDC12\uD835\uDC13\u039F\u039D\u0395 \u00B7 Lady K\u2019s XRPL Update</div>' +
         '</div>' +
-        '<div class="mrf-controls">' +
-          '<button class="mrf-ctrl" id="mrfFullBtn"     type="button" title="Fill screen">⛶ Full</button>' +
-          '<button class="mrf-ctrl" id="mrfCollapseBtn" type="button">Collapse</button>' +
-          '<button class="mrf-ctrl" id="mrfResizeBtn"   type="button">Resize</button>' +
-          '<button class="mrf-ctrl mrf-close" id="mrfCloseBtn" type="button">Close</button>' +
-        '</div>' +
+        '<button class="mrf-ico" id="mrfDlBtn" type="button" title="Download report">\u2B07</button>' +
+        '<button class="mrf-ico mrf-close" id="mrfCloseBtn" type="button" title="Close">\u2715</button>' +
+      '</div>' +
+      '<div class="mrf-menu mrf-menu-hidden" id="mrfMenu">' +
+        '<button class="mrf-menu-item" id="mrfFullBtn"          type="button">\u26F6 Fill screen</button>' +
+        '<button class="mrf-menu-item" id="mrfCollapseBtn"      type="button">\u2015 Minimize</button>' +
+        '<button class="mrf-menu-item" id="mrfResizeBtn"        type="button">\u2922 Resize window</button>' +
+        '<button class="mrf-menu-item" id="mrfCopyBtn"          type="button">\uD83D\uDCCB Copy report</button>' +
+        '<button class="mrf-menu-item" id="mrfOpenFullBtn"      type="button">\u25CE More reports (Report Desk)</button>' +
+        '<button class="mrf-menu-item" id="mrfDownloadTotalBtn" type="button">\u2B07 Download total report</button>' +
       '</div>' +
       '<div id="mrfBody"    class="mrf-body"></div>' +
-      '<div id="mrfSources" class="mrf-sources"></div>' +
-      '<div class="mrf-actions">' +
-        '<button id="mrfCopyBtn"          class="mrf-action" type="button">\uD83D\uDCCB Copy Morning Report</button>' +
-        '<button id="mrfDownloadBtn"      class="mrf-action" type="button">\u2B07 Download Morning Report</button>' +
-        '<button id="mrfOpenFullBtn"      class="mrf-action" type="button">\u25CE Open Full Report</button>' +
-        '<button id="mrfDownloadTotalBtn" class="mrf-action" type="button">\u2B07 Download One Total Report</button>' +
-      '</div>';
+      '<div id="mrfSources" class="mrf-sources"></div>';
     document.body.appendChild(el);
     _mrfDom = el;
     _wireMrf();
@@ -9742,32 +9764,32 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
   function _wireMrf() {
     if (!_mrfDom) return;
     var $$ = function(id) { return _mrfDom.querySelector('#' + id); };
-    var btnClose    = $$('mrfCloseBtn');
-    var btnCollapse = $$('mrfCollapseBtn');
-    var btnResize   = $$('mrfResizeBtn');
-    var btnCopy     = $$('mrfCopyBtn');
-    var btnDownload = $$('mrfDownloadBtn');
-    var btnOpenFull = $$('mrfOpenFullBtn');
-    var btnDlTotal  = $$('mrfDownloadTotalBtn');
-    var btnFull     = $$('mrfFullBtn');
-    if (btnClose)    btnClose.onclick    = function() { MORNING_REPORT_FLOAT.hide(); };
-    if (btnCollapse) btnCollapse.onclick = function() { MORNING_REPORT_FLOAT.collapse(); };
-    if (btnResize)   btnResize.onclick   = function() { MORNING_REPORT_FLOAT.toggleSize(); };
-    if (btnFull)     btnFull.onclick     = function() { MORNING_REPORT_FLOAT.toggleFull(); };
-    if (btnCopy)     btnCopy.onclick     = function() { MORNING_REPORT_FLOAT.copy(); };
-    if (btnDownload) btnDownload.onclick = function() { MORNING_REPORT_FLOAT.download(); };
-    if (btnOpenFull) btnOpenFull.onclick = function() {
-      try {
-        if (typeof showScreen === 'function') showScreen('report');
-        MORNING_REPORT_FLOAT.hide();
-      } catch (_) {}
-    };
-    if (btnDlTotal)  btnDlTotal.onclick  = function() {
-      try {
-        if (typeof downloadShadowWatchTotalFile === 'function') downloadShadowWatchTotalFile();
-        else if (window.downloadShadowWatchTotalFile) window.downloadShadowWatchTotalFile();
-      } catch (_) {}
-    };
+    var menu    = $$('mrfMenu');
+    var btnMenu = $$('mrfMenuBtn');
+    var btnDl   = $$('mrfDlBtn');
+    var btnClose= $$('mrfCloseBtn');
+    var closeMenu = function() { if (menu) menu.classList.add('mrf-menu-hidden'); };
+    var item = function(id, fn) { var b = $$(id); if (b) b.onclick = function() { try { fn(); } catch (_) {} closeMenu(); }; };
+    if (btnMenu)  btnMenu.onclick  = function(e) { if (menu) menu.classList.toggle('mrf-menu-hidden'); if (e) e.stopPropagation(); };
+    if (btnDl)    btnDl.onclick     = function() { MORNING_REPORT_FLOAT.download(); };
+    if (btnClose) btnClose.onclick  = function() { MORNING_REPORT_FLOAT.hide(); };
+    item('mrfFullBtn',          function() { MORNING_REPORT_FLOAT.toggleFull(); });
+    item('mrfCollapseBtn',      function() { MORNING_REPORT_FLOAT.collapse(); });
+    item('mrfResizeBtn',        function() { MORNING_REPORT_FLOAT.toggleSize(); });
+    item('mrfCopyBtn',          function() { MORNING_REPORT_FLOAT.copy(); });
+    item('mrfOpenFullBtn',      function() { if (typeof showScreen === 'function') showScreen('report'); MORNING_REPORT_FLOAT.hide(); });
+    item('mrfDownloadTotalBtn', function() {
+      if (typeof downloadShadowWatchTotalFile === 'function') downloadShadowWatchTotalFile();
+      else if (window.downloadShadowWatchTotalFile) window.downloadShadowWatchTotalFile();
+    });
+    if (!_mrfDom._menuOutsideWired) {
+      _mrfDom._menuOutsideWired = true;
+      document.addEventListener('click', function(ev) {
+        if (menu && !menu.classList.contains('mrf-menu-hidden') &&
+            !menu.contains(ev.target) && ev.target !== btnMenu &&
+            !(btnMenu && btnMenu.contains(ev.target))) closeMenu();
+      });
+    }
     _wireMrfDrag();
   }
 
@@ -9781,7 +9803,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     var dragging = false, ox = 0, oy = 0;
     var pt = function(e){ return (e.touches && e.touches[0]) ? e.touches[0] : e; };
     var down = function(e){
-      if (e.target && e.target.closest && e.target.closest('.mrf-ctrl')) return; // let buttons work
+      if (e.target && e.target.closest && e.target.closest('.mrf-ico')) return; // let header buttons work
       var r = _mrfDom.getBoundingClientRect();
       _mrfDom.style.transform = 'none';
       _mrfDom.style.left = r.left + 'px';
@@ -9865,7 +9887,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         _mrfDom.classList.remove('mrf-hidden','mrf-collapsed','mrf-large','mrf-fullscreen');
         _mrfState.open = true; _mrfState.collapsed = false; _mrfState.large = false; _mrfState.full = false;
         // On PC, open at the larger size so the report reads without cramped scrolling.
-        if (window.innerWidth >= 760) { _mrfDom.classList.add('mrf-large'); _mrfState.large = true; }
+        if (window.innerWidth < 760) { _mrfDom.classList.add('mrf-fullscreen'); _mrfState.full = true; _mrfDom.style.transform = 'none'; }
+        else { _mrfDom.classList.add('mrf-large'); _mrfState.large = true; }
         try { _renderBody(reportText); _renderSources(sources); } catch (_) {}
       } catch (_) {}
     },

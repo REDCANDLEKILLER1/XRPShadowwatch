@@ -197,6 +197,9 @@
                 <button id="mute-btn" class="tac-btn" onclick="toggleMute()" title="Mute Audio">
                     <svg id="icon-vol" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
                 </button>
+                <button id="song-btn" class="tac-btn tac-active" onclick="toggleSong()" title="Mute / Unmute Theme">
+                    <svg id="icon-song" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+                </button>
                 <button id="help-btn" class="tac-btn" onclick="startTutorial()" title="Help">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
                 </button>
@@ -541,6 +544,9 @@
     <script src="src/js/intel/sw-flow-intel.js"></script>
     <script src="src/js/intel/sw-wallet-score.js"></script>
     <script src="src/js/intel/sw-watchdog-score.js"></script>
+
+    <!-- App theme song — starts on activation (user gesture), muteable via #song-btn. -->
+    <audio id="app-song" loop preload="auto" playsinline src="https://ipfs.filebase.io/ipfs/QmXNCGkEB3qw5QFZrUNk6yEKY6br4MhBr1LHNVvCEqG9FD"></audio>
 
     <!-- OUTER APP = live tactical watcher (XRPMAN SHADOW WATCH v16.7.1).
          Deeper forensic/report engine lives in ./brief-console.html (BRIEF tab). -->

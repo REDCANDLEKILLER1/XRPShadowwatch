@@ -943,6 +943,18 @@
             const splash = document.getElementById('splash-screen');
             if (!splash || splash.dataset.done === '1') return;
             splash.dataset.done = '1';
+            // Start the theme song on activation (this tap is the user gesture
+            // browsers require for audio). Respect a saved mute preference.
+            try {
+                const _song = document.getElementById('app-song');
+                const _muted = localStorage.getItem('SW_SONG_MUTED') === '1';
+                if (_song) {
+                    _song.volume = 0.55; _song.muted = _muted;
+                    _song.play().catch(function(){});
+                    const _sb = document.getElementById('song-btn');
+                    if (_sb) _sb.classList.toggle('tac-active', !_muted);
+                }
+            } catch(e){}
             splash.classList.add('fade-out');
             setTimeout(() => {
                 splash.style.display = 'none';
@@ -1751,6 +1763,22 @@
                 btn.classList.remove('tac-active');
             }
         } 
+
+        function toggleSong() {
+            const song = document.getElementById('app-song');
+            const btn = document.getElementById('song-btn');
+            if (!song) return;
+            const willMute = !song.muted && !song.paused; // currently audible → mute
+            if (willMute) {
+                song.muted = true;
+            } else {
+                song.muted = false; song.volume = 0.55;
+                if (song.paused) song.play().catch(function(){});
+            }
+            try { localStorage.setItem('SW_SONG_MUTED', song.muted ? '1' : '0'); } catch(e){}
+            if (btn) btn.classList.toggle('tac-active', !song.muted);
+            try { showToast(song.muted ? 'THEME MUTED' : 'THEME ON'); } catch(e){}
+        }
 
         function toggleMute() {
             if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
