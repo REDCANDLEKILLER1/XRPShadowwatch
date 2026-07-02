@@ -71,6 +71,9 @@
         const STORAGE_KEY = "XRPMAN_BLACKBOX_V2";
         const CUSTOM_HVT_KEY = "XRPMAN_CUSTOM_HVTS";
         const TUT_STORAGE_KEY = "shadow_watch_v13_3_reset"; // NEW KEY FORCED RESET
+        // Bump this id whenever there's a new update briefing to show. Anyone whose
+        // stored value != this id gets the "What's New" walkthrough on next open.
+        const WHATS_NEW_KEY = "sw_whats_new_2026_07";
         const MANUAL_URL = "https://docs.google.com/document/u/0/d/1kGHvpj9H0CdkS2jc_eQYjDWqyJSSv0INN7Ka9yi96_k/mobilebasic";
 
         // --- MAP CAMERA VARS ---
@@ -700,8 +703,15 @@
             { label: "Binance", address: "rhWj9gaovwu2hZxYW7p388P8GRbuXFLQkK", type: "EXCH" },
             { label: "Bybit", address: "rJn2zAPdFA193sixJwuFixRkYDUtx3apQh", type: "EXCH" },
             { label: "Gemini", address: "raBQUYdAhnnojJQ6Xi3eXztZ74ot24RDq1", type: "EXCH" },
-            { label: "Ripple", address: "rBg2FuZT91C52Nny68houguJ4vt5x1o91m", type: "RIPPLE" },
-            { label: "Bitso", address: "rLSn6Z3T8uCxbcd1oxwfGQN1Fdn5CyGujK", type: "EXCH" }
+            { label: "Main 300M Reserve", address: "rBg2FuZT91C52Nny68houguJ4vt5x1o91m", type: "RIPPLE" },
+            { label: "Bitso", address: "rLSn6Z3T8uCxbcd1oxwfGQN1Fdn5CyGujK", type: "EXCH" },
+            // ── Watchlist cluster: 300M reserve (rBg2… above) → 100M outbound → 20M splits ──
+            { label: "100M Outbound Receiver", address: "rfRms8V4gNsJDdg4VtWrjxsgrQPQ9ZF8n8", type: "HVT" },
+            { label: "20M Split 1", address: "rwtzRvvadGpwEazxbsmXTRd2n1gzTmmrG9", type: "HVT" },
+            { label: "20M Split 2", address: "raZ9f6d7y8WvUnbs2fjH26xZitMXSjdfCT", type: "HVT" },
+            { label: "20M Split 3", address: "rLaGqBWs3e7S9qBNGYW22FziPc5bkduvcq", type: "HVT" },
+            { label: "20M Split 4", address: "rDKARnQjP7D9oaFTjdvp33cBmZDjUV1ioc", type: "HVT" },
+            { label: "20M Split 5", address: "rKNmnVCtm1CuN1YikiVhrdgEyqecGdKL94", type: "HVT" }
         ];
         /* ════ v16.7.0-wallet-intel1 — WALLET INTELLIGENCE PACK (cold lookup + resolver labels + discovery seed) ════ */
         const SW_INTEL_VERSION = "v16.7.1-hvt-locker-fix1";
@@ -979,28 +989,84 @@
         function checkTutorial() {
             if(!localStorage.getItem(TUT_STORAGE_KEY)) {
                 startTutorial();
+            } else if (localStorage.getItem(WHATS_NEW_KEY) !== WHATS_NEW_KEY) {
+                // Returning operator who hasn't seen the latest update briefing.
+                showWhatsNew();
             } else {
                 autoStartSystem();
                 applyUiMode();   // v16.3: restore mode on reload
             }
         }
-        function startTutorial() { 
-            tutStep = 0; 
-            document.getElementById('tutorial-overlay').classList.add('tut-active'); 
-            updateTutorial(); 
+        function startTutorial() {
+            tutStep = 0;
+            var _c = document.getElementById('tut-card');
+            if (_c) _c.classList.remove('tut-scroll');   // tour steps use the bottom-anchored card
+            document.getElementById('tutorial-overlay').classList.add('tut-active');
+            updateTutorial();
         }
         
-        function endTutorial() { 
+        function endTutorial() {
             // CHECK IF FIRST TIME COMPLETION
             if (!localStorage.getItem(TUT_STORAGE_KEY)) {
                 localStorage.setItem(TUT_STORAGE_KEY, "true"); // Set flag
                 // window.open(MANUAL_URL, '_blank'); // REMOVED: No longer auto-opens
             }
-            
-            document.getElementById('tutorial-overlay').classList.remove('tut-active'); 
-            document.querySelectorAll('.highlight-element').forEach(e => e.classList.remove('highlight-element')); 
+            // Brand-new operators just saw the full tour, so mark the current update
+            // briefing as seen too — no need to double-prompt them.
+            try { localStorage.setItem(WHATS_NEW_KEY, WHATS_NEW_KEY); } catch(e){}
+
+            document.getElementById('tutorial-overlay').classList.remove('tut-active');
+            document.querySelectorAll('.highlight-element').forEach(e => e.classList.remove('highlight-element'));
             autoStartSystem(); // Start system
             applyUiMode();   // v16.3: route to home if beginner
+        }
+
+        // --- "WHAT'S NEW" UPDATE BRIEFING ---
+        // A version-gated walkthrough shown to ANY operator (new installs are
+        // covered by the tour above; returning operators see this once) so
+        // everyone is caught up on the latest changes. Re-openable from the ★ button.
+        const WHATS_NEW_HTML =
+            "<div style='text-align:left;line-height:1.5'>" +
+            "<div style='color:#00ff00;font-weight:bold;margin-bottom:8px'>Here's what changed since your last visit:</div>" +
+            "<div style='margin:10px 0'><span style='color:#ffcc00'>🪙 WALLET TRANSACTION RANKING</span><br>" +
+            "Every wallet is now scored <b>0&ndash;8</b> from on-chain data &mdash; account age, balance, " +
+            "exchange-activation source, and offer-cancel behavior &mdash; then rated " +
+            "<b style='color:#00ff00'>GREEN</b> / <b style='color:#ffcc00'>YELLOW</b> / <b style='color:#ff5555'>RED</b> " +
+            "so you can read trust at a glance.</div>" +
+            "<div style='margin:10px 0'><span style='color:#ffcc00'>☕ SHADOW WATCH DAILY REPORT</span><br>" +
+            "Rebuilt report window: a slim menu (☰), a one-tap <b>Download</b> and <b>Copy</b> on the report itself, " +
+            "full-screen on phone with its own nav, and text that reads without cramped scrolling.</div>" +
+            "<div style='margin:10px 0'><span style='color:#ffcc00'>⚡ CLEANER SCAN CONSOLE</span><br>" +
+            "The scan trigger is now a compact glowing <b>RUN SCAN</b> bar, the old command-input line is gone, " +
+            "and nothing hides behind the EXIT button anymore.</div>" +
+            "<div style='margin:10px 0'><span style='color:#ffcc00'>🎵 THEME &amp; 🔇 VOICE</span><br>" +
+            "A theme song now plays when you activate the app (tap the music button to mute &mdash; it's remembered). " +
+            "The AI narrator now starts <b>muted by default</b>; tap <b>VOICE OUTPUT</b> to switch it on.</div>" +
+            "</div>";
+
+        function showWhatsNew() {
+            const overlay = document.getElementById('tutorial-overlay');
+            const title = document.getElementById('tut-title');
+            const text = document.getElementById('tut-text');
+            const controls = document.querySelector('.tut-controls');
+            if (!overlay || !title || !text || !controls) { autoStartSystem(); applyUiMode(); return; }
+            document.querySelectorAll('.highlight-element').forEach(e => e.classList.remove('highlight-element'));
+            title.innerText = "WHAT'S NEW";
+            text.innerHTML = WHATS_NEW_HTML;
+            controls.innerHTML = "<button class=\"tut-btn\" onclick=\"dismissWhatsNew()\">GOT IT ✓</button>";
+            const card = document.getElementById('tut-card');
+            if (card) card.classList.add('tut-scroll');
+            overlay.classList.add('tut-active');
+        }
+
+        function dismissWhatsNew() {
+            try { localStorage.setItem(WHATS_NEW_KEY, WHATS_NEW_KEY); } catch(e){}
+            const overlay = document.getElementById('tutorial-overlay');
+            const card = document.getElementById('tut-card');
+            if (card) card.classList.remove('tut-scroll');
+            if (overlay) overlay.classList.remove('tut-active');
+            // Only auto-start if the system isn't already running (button re-open case).
+            if (!isConnected) { autoStartSystem(); applyUiMode(); }
         }
         
         function nextStep() { tutStep++; updateTutorial(); }
@@ -1231,24 +1297,34 @@
         function init3D() {
             const container = document.getElementById('canvas-container');
             if (!container) return;
-            scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x000000, 0.01); 
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-            camera.position.set(0, -10, 30); camera.lookAt(0, 10, 0);
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            container.appendChild(renderer.domElement);
-            const pGeo = new THREE.BufferGeometry();
-            const pos = [], speeds = [];
-            for(let i=0; i<particleCount; i++) {
-                pos.push((Math.random()-0.5)*50, (Math.random()-0.5)*10-20, (Math.random()-0.5)*30);
-                speeds.push(0.1 + Math.random() * 0.4);
+            // Fail-safe: the 3D particle background is purely decorative. If three.js
+            // didn't load (CDN blocked/slow) or the device can't create a WebGL context
+            // (low-end phones, hardware acceleration off), skip it silently instead of
+            // throwing — a throw here would abort app init and stall scans/reports.
+            if (typeof THREE === 'undefined') { try { console.warn('[3D] three.js unavailable — skipping background.'); } catch(_){} return; }
+            try {
+                scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x000000, 0.01);
+                camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+                camera.position.set(0, -10, 30); camera.lookAt(0, 10, 0);
+                renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                container.appendChild(renderer.domElement);
+                const pGeo = new THREE.BufferGeometry();
+                const pos = [], speeds = [];
+                for(let i=0; i<particleCount; i++) {
+                    pos.push((Math.random()-0.5)*50, (Math.random()-0.5)*10-20, (Math.random()-0.5)*30);
+                    speeds.push(0.1 + Math.random() * 0.4);
+                }
+                pGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+                pGeo.setAttribute('speed', new THREE.Float32BufferAttribute(speeds, 1));
+                particles = new THREE.Points(pGeo, new THREE.PointsMaterial({ color: 0x00ff00, size: 0.4, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending }));
+                scene.add(particles);
+                animate();
+                window.addEventListener('resize', () => { try { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); } catch(_){} });
+            } catch (e) {
+                particles = null;
+                try { console.warn('[3D] background init failed — continuing without it:', e && e.message); } catch(_){}
             }
-            pGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-            pGeo.setAttribute('speed', new THREE.Float32BufferAttribute(speeds, 1));
-            particles = new THREE.Points(pGeo, new THREE.PointsMaterial({ color: 0x00ff00, size: 0.4, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending }));
-            scene.add(particles);
-            animate();
-            window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
         }
         function animate() {
             requestAnimationFrame(animate);
