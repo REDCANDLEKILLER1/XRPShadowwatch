@@ -1290,24 +1290,34 @@
         function init3D() {
             const container = document.getElementById('canvas-container');
             if (!container) return;
-            scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x000000, 0.01); 
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-            camera.position.set(0, -10, 30); camera.lookAt(0, 10, 0);
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            container.appendChild(renderer.domElement);
-            const pGeo = new THREE.BufferGeometry();
-            const pos = [], speeds = [];
-            for(let i=0; i<particleCount; i++) {
-                pos.push((Math.random()-0.5)*50, (Math.random()-0.5)*10-20, (Math.random()-0.5)*30);
-                speeds.push(0.1 + Math.random() * 0.4);
+            // Fail-safe: the 3D particle background is purely decorative. If three.js
+            // didn't load (CDN blocked/slow) or the device can't create a WebGL context
+            // (low-end phones, hardware acceleration off), skip it silently instead of
+            // throwing — a throw here would abort app init and stall scans/reports.
+            if (typeof THREE === 'undefined') { try { console.warn('[3D] three.js unavailable — skipping background.'); } catch(_){} return; }
+            try {
+                scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x000000, 0.01);
+                camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+                camera.position.set(0, -10, 30); camera.lookAt(0, 10, 0);
+                renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                container.appendChild(renderer.domElement);
+                const pGeo = new THREE.BufferGeometry();
+                const pos = [], speeds = [];
+                for(let i=0; i<particleCount; i++) {
+                    pos.push((Math.random()-0.5)*50, (Math.random()-0.5)*10-20, (Math.random()-0.5)*30);
+                    speeds.push(0.1 + Math.random() * 0.4);
+                }
+                pGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+                pGeo.setAttribute('speed', new THREE.Float32BufferAttribute(speeds, 1));
+                particles = new THREE.Points(pGeo, new THREE.PointsMaterial({ color: 0x00ff00, size: 0.4, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending }));
+                scene.add(particles);
+                animate();
+                window.addEventListener('resize', () => { try { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); } catch(_){} });
+            } catch (e) {
+                particles = null;
+                try { console.warn('[3D] background init failed — continuing without it:', e && e.message); } catch(_){}
             }
-            pGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-            pGeo.setAttribute('speed', new THREE.Float32BufferAttribute(speeds, 1));
-            particles = new THREE.Points(pGeo, new THREE.PointsMaterial({ color: 0x00ff00, size: 0.4, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending }));
-            scene.add(particles);
-            animate();
-            window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
         }
         function animate() {
             requestAnimationFrame(animate);
