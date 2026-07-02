@@ -703,8 +703,15 @@
             { label: "Binance", address: "rhWj9gaovwu2hZxYW7p388P8GRbuXFLQkK", type: "EXCH" },
             { label: "Bybit", address: "rJn2zAPdFA193sixJwuFixRkYDUtx3apQh", type: "EXCH" },
             { label: "Gemini", address: "raBQUYdAhnnojJQ6Xi3eXztZ74ot24RDq1", type: "EXCH" },
-            { label: "Ripple", address: "rBg2FuZT91C52Nny68houguJ4vt5x1o91m", type: "RIPPLE" },
-            { label: "Bitso", address: "rLSn6Z3T8uCxbcd1oxwfGQN1Fdn5CyGujK", type: "EXCH" }
+            { label: "Main 300M Reserve", address: "rBg2FuZT91C52Nny68houguJ4vt5x1o91m", type: "RIPPLE" },
+            { label: "Bitso", address: "rLSn6Z3T8uCxbcd1oxwfGQN1Fdn5CyGujK", type: "EXCH" },
+            // ── Watchlist cluster: 300M reserve (rBg2… above) → 100M outbound → 20M splits ──
+            { label: "100M Outbound Receiver", address: "rfRms8V4gNsJDdg4VtWrjxsgrQPQ9ZF8n8", type: "HVT" },
+            { label: "20M Split 1", address: "rwtzRvvadGpwEazxbsmXTRd2n1gzTmmrG9", type: "HVT" },
+            { label: "20M Split 2", address: "raZ9f6d7y8WvUnbs2fjH26xZitMXSjdfCT", type: "HVT" },
+            { label: "20M Split 3", address: "rLaGqBWs3e7S9qBNGYW22FziPc5bkduvcq", type: "HVT" },
+            { label: "20M Split 4", address: "rDKARnQjP7D9oaFTjdvp33cBmZDjUV1ioc", type: "HVT" },
+            { label: "20M Split 5", address: "rKNmnVCtm1CuN1YikiVhrdgEyqecGdKL94", type: "HVT" }
         ];
         /* ════ v16.7.0-wallet-intel1 — WALLET INTELLIGENCE PACK (cold lookup + resolver labels + discovery seed) ════ */
         const SW_INTEL_VERSION = "v16.7.1-hvt-locker-fix1";
