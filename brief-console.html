@@ -13673,7 +13673,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
             text = text.replace('\nCONFIDENCE FRAME\n', '\n\n' + summary + '\n\nCONFIDENCE FRAME\n');
           }
         } catch (_) {}
-        return text;
+        return (typeof window._humanizePublicText === 'function') ? window._humanizePublicText(text) : text;
       };
       // v32 guard — propagate ALL prior flags so subsequent guard checks on this outer wrapper work
       window.buildMorningStoryText._v32HelperWrapped   = true;
@@ -13688,6 +13688,40 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       }
     } catch (_) {}
   }
+
+  // ─── v3.33 — humanize the public report (final pass) ──────────────
+  // Make the report read like a story, not a data dump: title-case the shouty
+  // section headers and internal classification tokens. Runs as the last step
+  // of the legacy chain, so both the report view and copy/download get it.
+  window._humanizePublicText = function(t){
+    if(!t || typeof t !== 'string') return t;
+    var HEADERS={ 'MARKET SNAPSHOT':'Market Snapshot','LEDGER STORY':'Ledger Story',
+      'ESCROW WATCH':'Escrow Watch','PATTERN MEMORY':'Pattern Memory','NEWS + MACRO':'News & Macro',
+      'REAL NEWS':'Real News','DISCOVERY':'Discovery','WHAT CHANGED':'What Changed',
+      'WATCH NEXT':'Watch Next','VERDICT':'Verdict','CONFIDENCE FRAME':'Confidence','SOURCES':'Sources' };
+    // Title-case shouty section headers (they were ALL-CAPS anchors for internal wraps).
+    t = t.replace(/^[A-Z][A-Z +&]{2,}$/gm, function(line){ return HEADERS[line.trim()] || line; });
+    // Humanize internal classification tokens.
+    t = t.replace(/\bEXCHANGE_OUTFLOW\b/g,'exchange outflow')
+         .replace(/\bEXCHANGE_INFLOW\b/g,'exchange inflow')
+         .replace(/\bLARGE_EXCHANGE_OUTFLOW\b/g,'large exchange outflow')
+         .replace(/\bLARGE_TRANSFER_RECEIVER\b/g,'large-transfer receiver')
+         .replace(/\bRECEIVER_STILL_HOLDING_SIZE\b/g,'still holding size')
+         .replace(/\bNEXT_HOP_[A-Z_]+\b/g, function(m){ return m.toLowerCase().replace(/_/g,' '); })
+         .replace(/\bUNKNOWN_FLOW\b/g,'unclassified flow')
+         .replace(/\bCRYPTO_COM\b/g,'Crypto.com')
+         .replace(/\s*\[(HIGH|MEDIUM|LOW|CRITICAL)\]/g, function(_m,g){ return ' (' + g.toLowerCase() + ' confidence)'; });
+    // Soften ALL-CAPS risk labels; leave standalone acronyms (XRP, RLUSD, USD) alone.
+    t = t.replace(/\b(BLACK|ORANGE|YELLOW|GREEN|RED|HIGH|ELEVATED|MODERATE|LOW)\s*\/\s*(EXTREME|ACTIVE|WATCH|QUIET|MONITOR|FORENSICS WATCH)\b/g,
+      function(_m,a,b){ var tc=function(s){ return s.split(/\s+/).map(function(w){ return w.charAt(0)+w.slice(1).toLowerCase(); }).join(' '); }; return tc(a)+' / '+tc(b); });
+    // Safety net: never leak a stray NaN into the public report.
+    t = t.replace(/\bNaN\b/g,'—');
+    return t;
+  };
+  // v3.33: the V1 audit pipeline never passed its OWN audit (its headers exceed
+  // the ALL-CAPS limit), so it always fell back to legacy while spamming the dev
+  // log with "Halting render". Disable it — the humanized legacy report is final.
+  try { if (window.SW_PIPELINE_V1_KILL === undefined) window.SW_PIPELINE_V1_KILL = true; } catch(_) {}
 
   // ─── BOOT ─────────────────────────────────────────────────────────
   function _bootV32() {
