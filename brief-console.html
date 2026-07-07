@@ -10844,9 +10844,10 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
           });
           return lines.join('\n');
         }
-        // Fallback
-        return 'REAL NEWS\nNo strong public news match cleared the governor this run. Ledger evidence stands alone: ' +
-               this._ledgerFallback(pack);
+        // Fallback — v3.32c: do NOT restate the ledger numbers here. LEDGER STORY
+        // already carries the transfer count / shadow volume / net flow; repeating
+        // them in REAL NEWS is what made the report read as a data dump.
+        return 'REAL NEWS\nNo public headline cleared the news governor this run — the ledger carries the story on its own.';
       } catch (_) { return 'REAL NEWS\nNo strong public news match cleared the governor this run.'; }
     },
 
@@ -16215,7 +16216,7 @@ function _buildOpeningParagraph(i, lead) {
       const flowVerb = i.netDelta >= 0
         ? 'took in ' + flowAmt + ' XRP net'
         : 'pushed out ' + flowAmt + ' XRP net';
-      return `The forensic risk score reached ${n(i.risk.score)}/100 — ${i.risk.label} — putting today's scan at the highest alert level. Price moved ${deltaStr || 'modestly'} on ${i.tape}, but the ledger signal was not quiet. Watched wallets ${flowVerb} across the window. The evidence below is what the data actually shows, not what the chart suggests.`;
+      return `The board lit up ${i.risk.label} this morning — the highest alert level we flag. Price barely moved (${deltaStr || 'flat'}) on ${i.tape}, but the ledger was anything but quiet: watched wallets showed ${i.flowDir} across the window. Here's what the data actually shows — not what the chart suggests. (Score and drivers in the verdict below.)`;
     }
     case 'LARGE_FLOW':
       return `${i.largeTxs.length} transfers above threshold moved ${fmt(i.shadowVol, 0)} XRP in shadow volume overnight. Price was on ${i.tape} at ${priceStr}${deltaStr ? ' (' + deltaStr + ')' : ''}, but the bigger story was in the ledger — not the candle. The strongest signal was where those transfers landed and whether receivers split or held.`;
@@ -16226,7 +16227,7 @@ function _buildOpeningParagraph(i, lead) {
     case 'SOURCE_DEGRADED':
       return `Today's ledger scan ran with degraded news coverage — ${i.healthResult.failed.slice(0, 3).join(', ')} failed during the run. The on-chain evidence remains primary. Price was on ${i.tape} at ${priceStr}. What follows is ledger-first analysis; news context is partial.`;
     default: {
-      const flowVerb = netDelta >= 0
+      const flowVerb = i.netDelta >= 0
         ? 'took in ' + flowAmt + ' XRP net'
         : 'pushed out ' + flowAmt + ' XRP net';
       return `XRP opened the session on ${i.tape} at ${priceStr}${deltaStr ? ' (' + deltaStr + ')' : ''}. The ledger showed ${i.flowDir} — watched wallets ${flowVerb} across the window. The evidence is presented below — evidence first, pattern second, thesis third.`;
@@ -16370,9 +16371,11 @@ function buildMorningVerdictParagraph(pack) {
 
   let verdict = 'Risk: ' + riskLine + sentiment;
   if (drivers) verdict += ' Primary drivers: ' + drivers + '.';
-  if (largeCt > 0) verdict += ' ' + largeCt + ' large transfer' + (largeCt === 1 ? '' : 's') + ' above threshold flagged in this window.';
-  if (netDelta > 500_000) verdict += ' Net inflow of ' + fmt(netDelta, 0) + ' XRP suggests accumulation or routing inward.';
-  else if (netDelta < -500_000) verdict += ' Net outflow of ' + fmt(Math.abs(netDelta), 0) + ' XRP suggests distribution or routing outward.';
+  // v3.32c: the transfer count and the net-flow figure are already stated in the
+  // opening and LEDGER STORY — keep the verdict qualitative so the report stops
+  // repeating the same numbers three and four times.
+  if (netDelta > 500_000) verdict += ' The net inflow above reads as accumulation or inward routing.';
+  else if (netDelta < -500_000) verdict += ' The net outflow above reads as distribution or outward routing.';
   verdict += '\nLedger evidence is the primary record. News provides context, not causation.';
   return verdict;
 }
