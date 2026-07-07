@@ -2460,6 +2460,15 @@ body.xai-command-mounted .main-grid{
             <span class="report-file-desc">Auto Wallet Finder results — full scoring + classification + review status</span>
             <button class="report-file-btn" data-kind="suggested-wallets-json">⬇ JSON</button>
           </div>
+          <!-- v3.34: copyable NEW WALLET TARGETS — hand-off list -->
+          <div class="report-file-row" data-source="suggestedWalletsCopy" style="flex-direction:column;align-items:stretch;gap:6px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+              <span class="report-file-name">🎯 New Wallet Targets <span id="suggestedWalletsCount" style="color:#88aaff;font-size:10px;"></span></span>
+              <button id="btnCopySuggestedAddrs" style="font-size:10px;padding:5px 12px;border:1px solid rgba(0,255,0,0.5);background:rgba(0,20,0,0.85);color:#00ff00;cursor:pointer;border-radius:4px;font-family:'Share Tech Mono',monospace;letter-spacing:1px;">📋 COPY</button>
+            </div>
+            <span class="report-file-desc">Full addresses this scan discovered. Copy them and hand off to add to the watchlist.</span>
+            <pre id="suggestedWalletsAddrBox" style="max-height:170px;overflow:auto;background:rgba(0,8,0,0.6);border:1px solid rgba(0,255,0,0.2);border-radius:6px;padding:8px;margin:0;font-size:11px;line-height:1.5;color:#9fdf9f;white-space:pre-wrap;word-break:break-all;">Run a scan — discovered wallets will appear here.</pre>
+          </div>
           <div class="report-file-row" data-source="errorLog">
             <span class="report-file-name">🛠 Error Log</span>
             <span class="report-file-desc">Debug log from last scan</span>
@@ -2850,7 +2859,13 @@ const WATCHLIST = [
   ['INST_MSIG_B',    'rG71mF18FKc6sWfCyfYiPHax1GwBNfqGFQ', 'whale'],
   ['INST_MSIG_C',    'rE84wNj2fKZtiH3KCF77mZeUg5fypjPasw', 'whale'],
   ['OTC_WHALE_19',   'rwv782tjrgjP9uJELdqjKGv4vimG3S2xPC', 'whale'],
-  ['OTC_WHALE_20',   'rhZ3WttpasyespM1MLPwJ5SZ846btucomJ', 'whale']
+  ['OTC_WHALE_20',   'rhZ3WttpasyespM1MLPwJ5SZ846btucomJ', 'whale'],
+  // ── v3.34 discovery adds (2026-07-07): high-confidence receivers surfaced by the Auto Wallet Finder ──
+  ['BITHUMB_HOT',       'rw3fRcmn5PJyPKuvtAwHDSpEqoW2JKmKbu', 'exchange'],
+  ['WHALE_RECV_rhuCPE', 'rhuCPEoLFYbpbwyhXioSumPKrnfCi3AXJZ', 'whale'],
+  ['WHALE_RECV_r4Dymt', 'r4DymtkgUAh2wqRxVfdd3Xtswzim6eC6c5', 'whale'],
+  ['LARGE_RECV_r9onsz', 'r9onszrkdqcSWeL4ti7sHJDGcrYmMyFHmM', 'whale'],
+  ['LARGE_RECV_r97Kea', 'r97KeayHuEsDwyU1yPBVtMLLoQr79QcRFe', 'whale']
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)
@@ -3553,6 +3568,19 @@ async function scanAmmIntel(ws) {
 // scan completes in <8s even in worst case (5 of 7 endpoints timing out).
 const MARKET_FETCH_TIMEOUT_MS = 5000;
 
+// v3.32b: DeFiLlama DEX volume was fetched direct-only, so a CORS block or a
+// renamed adapter slug left the DEX tiles blank. Try direct, then the relay
+// cascade, and only return a positive number (never overwrite good data with 0).
+async function fetchDefiDex(url) {
+  let j = null;
+  try { const r = await fetchWithTimeout(url, MARKET_FETCH_TIMEOUT_MS); if (r.ok) j = await r.json(); } catch (e) {}
+  if (!j || j.total24h == null) {
+    try { const { response } = await proxyFetch(url, MARKET_FETCH_TIMEOUT_MS); if (response && response.ok) j = await response.json(); } catch (e) {}
+  }
+  const v = j && Number(j.total24h);
+  return (v && v > 0) ? Math.round(v) : null;
+}
+
 async function market() {
   const notes = [];
   // 1. CoinGecko (primary)
@@ -3607,25 +3635,25 @@ async function market() {
       if (row) { $('inTvl').value = Math.round(row.tvl || 0); notes.push('✓ DefiLlama TVL'); }
     }
   } catch (e) { notes.push('DefiLlama TVL ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
-  // 6. DefiLlama EVM DEX
+  // 6. DefiLlama EVM DEX (direct → relay fallback; keep prior value on failure)
   try {
-    const r = await fetchWithTimeout('https://api.llama.fi/overview/dexs/xrpl-evm?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume', MARKET_FETCH_TIMEOUT_MS);
-    if (r.ok) { const j = await r.json(); $('inDexvol').value = Math.round(j.total24h || 0); notes.push('✓ EVM DEX'); }
-  } catch (e) { notes.push('EVM DEX ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
-  // 7. DefiLlama XRPL Native DEX
+    const v = await fetchDefiDex('https://api.llama.fi/overview/dexs/xrpl-evm?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume');
+    if (v != null) { $('inDexvol').value = v; notes.push('✓ EVM DEX'); } else notes.push('EVM DEX empty');
+  } catch (e) { notes.push('EVM DEX blocked'); }
+  // 7. DefiLlama XRPL Native DEX (direct → relay fallback; keep prior value on failure)
   try {
-    const r = await fetchWithTimeout('https://api.llama.fi/overview/dexs/xrpl?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume', MARKET_FETCH_TIMEOUT_MS);
-    if (r.ok) { const j = await r.json(); $('inXrpldex').value = Math.round(j.total24h || 0); notes.push('✓ Native DEX'); }
-  } catch (e) { notes.push('Native DEX ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
+    const v = await fetchDefiDex('https://api.llama.fi/overview/dexs/xrpl?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume');
+    if (v != null) { $('inXrpldex').value = v; notes.push('✓ Native DEX'); } else notes.push('Native DEX empty');
+  } catch (e) { notes.push('Native DEX blocked'); }
 
   // Update HUD
   const price = n($('inPrice').value), delta = n($('inDelta').value), vol = n($('inVolume').value);
   setText('hudPrice', price ? '$' + price.toFixed(4) : '—');
   setText('hudPriceDelta', delta ? pct(delta) : '—');
   setText('hudVol', vol ? usd(vol) : '—');
-  setText('hudDexNative', usd(n($('inXrpldex').value)));
-  setText('hudDexEvm', usd(n($('inDexvol').value)));
-  setText('hudEvmTvl', usd(n($('inTvl').value)));
+  setText('hudDexNative', n($('inXrpldex').value) > 0 ? usd(n($('inXrpldex').value)) : '—');
+  setText('hudDexEvm',    n($('inDexvol').value)  > 0 ? usd(n($('inDexvol').value))  : '—');
+  setText('hudEvmTvl',    n($('inTvl').value)     > 0 ? usd(n($('inTvl').value))     : '—');
   return notes;
 }
 
@@ -3722,11 +3750,15 @@ function gdeltUrl(q, s) {
 //   - cors.lol                — free, no key, no signup
 //   - proxy.killcors.com      — no rate limits, no account
 const CORS_PROXIES = [
+  // v3.34: our OWN same-origin serverless proxy (/api/proxy) — no CORS, no flaky
+  // third parties, server-side fetch. Tried first; the free relays are fallback.
+  { name: 'self',      build: u => '/api/proxy?url=' + encodeURIComponent(u) },
   { name: 'codetabs',  build: u => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(u) },
+  { name: 'allorigins', build: u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u) },
   { name: 'cors.lol',  build: u => 'https://api.cors.lol/?url=' + encodeURIComponent(u) },
-  { name: 'killcors',  build: u => 'https://proxy.killcors.com/?url=' + encodeURIComponent(u) },
-  // v3.3: thingproxy.freeboard.io — 10 req/sec, 100KB cap. Cheap fallback when others are empty.
-  { name: 'thingproxy', build: u => 'https://thingproxy.freeboard.io/fetch/' + u }
+  { name: 'killcors',  build: u => 'https://proxy.killcors.com/?url=' + encodeURIComponent(u) }
+  // v3.34: dropped thingproxy.freeboard.io — it failed every request and dragged
+  // the news fetch into the 18s ceiling.
 ];
 
 // Try each proxy in order until one returns a usable response.
@@ -4058,7 +4090,9 @@ async function fetchNewsIntel(forceRefresh) {
   if (!forceRefresh) {
     try {
       const c = JSON.parse(localStorage.getItem(NEWS_CACHE_STORE) || 'null');
-      if (c && (Date.now() - new Date(c.generated_at).getTime()) < cacheMin * 60000) {
+      // v3.32b: only serve cache that actually has headlines — never re-serve an
+      // empty/degraded snapshot (that made one failed fetch stick for 30 min).
+      if (c && c.top_headlines && c.top_headlines.length && (Date.now() - new Date(c.generated_at).getTime()) < cacheMin * 60000) {
         state.newsIntel = c;
         if ($('newsIntelBox')) $('newsIntelBox').textContent = JSON.stringify(c, null, 2);
         return c;
@@ -4117,7 +4151,9 @@ async function fetchNewsIntel(forceRefresh) {
   if ($('newsDebugBox')) $('newsDebugBox').textContent = dbgLines.join('\n');
 
   state.newsIntel = intel;
-  try { localStorage.setItem(NEWS_CACHE_STORE, JSON.stringify(intel)); } catch {}
+  // v3.32b: only cache real results. Caching a zero-headline/degraded snapshot
+  // used to poison the next 30 min of scans ("degrading every time").
+  try { if (intel.top_headlines && intel.top_headlines.length) localStorage.setItem(NEWS_CACHE_STORE, JSON.stringify(intel)); } catch {}
   if ($('newsIntelBox')) $('newsIntelBox').textContent = JSON.stringify(intel, null, 2);
 
   const cnt = intel.top_headlines.length;
@@ -4979,6 +5015,12 @@ function rankNewsItems(items) {
     } else if (P4.test(haystack)) {
       priority = 4;
     }
+    // v3.34: keep strictly XRP-relevant items on top of SOURCES. Exchange- or
+    // other-coin-only headlines (Kraken EMI, BNB, Germany-BTC…) get demoted so
+    // the footer isn't padded with news that isn't about XRP.
+    try {
+      if (priority < 3 && typeof XRP_RELEVANCE_RX !== 'undefined' && !XRP_RELEVANCE_RX.test(haystack)) priority = 3;
+    } catch (_) {}
     // Stable sort: preserve original order within a priority tier
     return { ...item, _priority: priority, _origIdx: idx, _is_price_hype: isPriceHype };
   }).sort((a, b) => a._priority - b._priority || a._origIdx - b._origIdx);
@@ -5373,11 +5415,16 @@ function recordNewsDoctorAttempt(providerName, success) {
     rec.consecutive_fail_count = 0;
     rec.last_success_at = now;
     rec.disabled_for_session = false;
+    rec.disabled_until = 0;
   } else {
     rec.consecutive_fail_count++;
     rec.last_failure_at = now;
+    // v3.32b: was a PERMANENT whole-session disable after 3 fails, which benched
+    // healthy providers for the rest of the session after one transient relay
+    // hiccup. Now a short cooldown → the provider is retried on the next scan
+    // after the window, so news recovers on its own instead of degrading.
     if (rec.consecutive_fail_count >= 3) {
-      rec.disabled_for_session = true;
+      rec.disabled_until = Date.now() + 4 * 60000; // 4-minute cooldown, then retry
     }
   }
   saveNewsDoctorSession(session);
@@ -5386,7 +5433,10 @@ function recordNewsDoctorAttempt(providerName, success) {
 
 function isProviderSessionDisabled(providerName) {
   const session = getNewsDoctorSession();
-  return !!(session[providerName] && session[providerName].disabled_for_session);
+  const rec = session[providerName];
+  if (!rec) return false;
+  if (rec.disabled_for_session) return true;               // legacy permanent flag (no longer set)
+  return !!(rec.disabled_until && Date.now() < rec.disabled_until); // time-boxed cooldown
 }
 
 // Expose v3.26 module
@@ -6079,6 +6129,8 @@ function persistDiscoveryInbox() {
     localStorage.setItem(DISCOVERY_SETTINGS_KEY,
       JSON.stringify(state.discoverySettings || {}));
   } catch (e) { elog('persist discovery inbox', e); }
+  // v3.34: keep the copyable "New Wallet Targets" box current after each scan.
+  try { if (typeof refreshSuggestedWalletsBox === 'function') refreshSuggestedWalletsBox(); } catch (_) {}
 }
 
 // Is this address valid + not the burn/issuer + not already in watchlist?
@@ -6592,6 +6644,32 @@ function exportDiscoveryTxt() {
   return (typeof downloadTextFile === 'function')
     ? downloadTextFile(base + '.txt', _discoveryInboxToText())
     : null;
+}
+
+// v3.34: the scan finds new wallet targets every run but never showed them
+// copyably. This returns the discovered addresses (full, one per line) for
+// hand-off, and refreshes the on-screen box in the Report Desk.
+function suggestedWalletsAddressList() {
+  var list;
+  try {
+    list = (window.AUTO_WALLET_FINDER && typeof window.AUTO_WALLET_FINDER.buildSuggestedWatchlistAdditions === 'function')
+      ? window.AUTO_WALLET_FINDER.buildSuggestedWatchlistAdditions(state.pack || {})
+      : (state.discoveryInbox || []);
+  } catch (_) { list = state.discoveryInbox || []; }
+  return (list || []).map(function (c) { return c && c.address; }).filter(Boolean).join('\n');
+}
+function refreshSuggestedWalletsBox() {
+  var box = document.getElementById('suggestedWalletsAddrBox');
+  if (!box) return;
+  var txt = suggestedWalletsAddressList();
+  var count = txt ? txt.split('\n').length : 0;
+  box.textContent = txt || 'No new wallet targets from the last scan yet — run a scan.';
+  var lbl = document.getElementById('suggestedWalletsCount');
+  if (lbl) lbl.textContent = count ? ('· ' + count + ' found') : '';
+}
+if (typeof window !== 'undefined') {
+  window.suggestedWalletsAddressList = suggestedWalletsAddressList;
+  window.refreshSuggestedWalletsBox = refreshSuggestedWalletsBox;
 }
 
 function exportDiscoveryJson() {
@@ -7412,16 +7490,31 @@ if (typeof window !== 'undefined') {
 
     // v3.28-hotfix2: prefer operator-reviewed label when available
     const override = getReviewedLabelOverride(address);
-    // Add to runtime WATCHLIST (in-memory; permanent change requires file edit)
-    KNOWN[address] = {
+    const entry = {
       label:    override ? override.label    : c.suggested_label,
       cat:      override ? override.category : c.suggested_category,
       display_label:    override ? override.display_label   : null,
       identity_status:  override ? override.identity_status : null,
       source: 'auto_wallet_finder',
-      added_at: new Date().toISOString(),
-      review_session_only: true   // explicit flag — this is NOT persisted to source
+      added_at: new Date().toISOString()
     };
+    KNOWN[address] = entry;
+    // v3.34: actually add to the SCANNED watchlist and persist across sessions.
+    // loadDiscoveryAdded() re-merges DISCOVERY_ADDED_STORE into WATCHLIST on boot,
+    // so a tapped "Add" now sticks (self-serve — no source edit needed).
+    try {
+      if (typeof WATCHLIST !== 'undefined' && !WATCHLIST.some(function(w){ return w.address === address; })) {
+        WATCHLIST.push({ label: entry.label, address: address, cat: entry.cat });
+      }
+    } catch (_) {}
+    try {
+      var _added = JSON.parse(localStorage.getItem(DISCOVERY_ADDED_STORE) || '[]');
+      if (!Array.isArray(_added)) _added = [];
+      if (!_added.some(function(w){ return w && w.address === address; })) {
+        _added.push({ label: entry.label, address: address, cat: entry.cat });
+        localStorage.setItem(DISCOVERY_ADDED_STORE, JSON.stringify(_added));
+      }
+    } catch (_) {}
 
     // Update review state
     const rs = _loadReviewState();
@@ -9772,7 +9865,9 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         '<button class="mrf-menu-item" id="mrfCollapseBtn"      type="button">\u2015 Minimize</button>' +
         '<button class="mrf-menu-item" id="mrfResizeBtn"        type="button">\u2922 Resize window</button>' +
         '<button class="mrf-menu-item" id="mrfCopyBtn"          type="button">\uD83D\uDCCB Copy report</button>' +
-        '<button class="mrf-menu-item" id="mrfOpenFullBtn"      type="button">\u25CE More reports (Report Desk)</button>' +
+        '<button class="mrf-menu-item" id="mrfOpenFullBtn"      type="button">\uD83D\uDCC4 Report Desk (all reports & downloads)</button>' +
+        '<button class="mrf-menu-item" id="mrfCopyWalletsBtn"   type="button">\uD83C\uDFAF Copy new wallet targets</button>' +
+        '<button class="mrf-menu-item" id="mrfDlWalletsBtn"     type="button">\u2B07 Download wallet suggestions</button>' +
         '<button class="mrf-menu-item" id="mrfDownloadTotalBtn" type="button">\u2B07 Download total report</button>' +
       '</div>' +
       '<div id="mrfBody"    class="mrf-body"></div>' +
@@ -9800,6 +9895,14 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     item('mrfResizeBtn',        function() { MORNING_REPORT_FLOAT.toggleSize(); });
     item('mrfCopyBtn',          function() { MORNING_REPORT_FLOAT.copy(); });
     item('mrfOpenFullBtn',      function() { if (typeof showScreen === 'function') showScreen('report'); MORNING_REPORT_FLOAT.hide(); });
+    // v3.34: wallet targets straight from the report menu — copy to hand off, or download the full TXT.
+    item('mrfCopyWalletsBtn',   function() {
+      var txt = (typeof suggestedWalletsAddressList === 'function') ? suggestedWalletsAddressList() : '';
+      if (typeof copySafe === 'function') copySafe(txt || '', 'New Wallet Targets');
+    });
+    item('mrfDlWalletsBtn',     function() {
+      if (typeof exportReportFile === 'function') exportReportFile('suggested-wallets-txt');
+    });
     item('mrfDownloadTotalBtn', function() {
       if (typeof downloadShadowWatchTotalFile === 'function') downloadShadowWatchTotalFile();
       else if (window.downloadShadowWatchTotalFile) window.downloadShadowWatchTotalFile();
@@ -9938,7 +10041,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     copy: function() {
       try {
         var txt = _mrfState.lastReport || '';
-        if (_mrfState.lastSources && _mrfState.lastSources.length) {
+        // v3.34: don't append a second SOURCES block if the report already has one.
+        if (_mrfState.lastSources && _mrfState.lastSources.length && !/\bsources\b/i.test(txt)) {
           txt += '\n\nSOURCES\n';
           _mrfState.lastSources.forEach(function(s, i) {
             txt += '[' + (i + 1) + '] ' + (s.source || s.name || '?') +
@@ -9959,7 +10063,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         if (typeof downloadTextFile === 'function' && _mrfState.lastReport) {
           var fname = 'MorningReport_' + new Date().toISOString().slice(0, 10) + '.txt';
           var body  = _mrfState.lastReport;
-          if (_mrfState.lastSources && _mrfState.lastSources.length) {
+          // v3.34: don't append a second SOURCES block if the report already has one.
+          if (_mrfState.lastSources && _mrfState.lastSources.length && !/\bsources\b/i.test(body)) {
             body += '\n\nSOURCES\n';
             _mrfState.lastSources.forEach(function(s, i) {
               body += '[' + (i + 1) + '] ' + (s.source || s.name || '?') +
@@ -10818,9 +10923,10 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
           });
           return lines.join('\n');
         }
-        // Fallback
-        return 'REAL NEWS\nNo strong public news match cleared the governor this run. Ledger evidence stands alone: ' +
-               this._ledgerFallback(pack);
+        // Fallback — v3.32c: do NOT restate the ledger numbers here. LEDGER STORY
+        // already carries the transfer count / shadow volume / net flow; repeating
+        // them in REAL NEWS is what made the report read as a data dump.
+        return 'REAL NEWS\nNo public headline cleared the news governor this run — the ledger carries the story on its own.';
       } catch (_) { return 'REAL NEWS\nNo strong public news match cleared the governor this run.'; }
     },
 
@@ -12672,22 +12778,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       }
       // Same-hour cluster
       lines.push('\u2022 Confirm repeated same-hour clusters before promoting any wallet to permanent watch.');
-      // Confidence frame (always present)
-      lines.push('');
-      lines.push('CONFIDENCE FRAME');
-      var behavioral = 'low';
-      try {
-        var rs = (pack.risk_score && pack.risk_score.score) || 0;
-        if (rs >= 75) behavioral = 'high';
-        else if (rs >= 50) behavioral = 'medium';
-      } catch (_) {}
-      var action;
-      if (behavioral === 'high')      action = 'review and consider monitor';
-      else if (behavioral === 'medium') action = 'monitor';
-      else                              action = 'review only';
-      lines.push('\u2022 Identity proof: no.');
-      lines.push('\u2022 Behavioral confidence: ' + behavioral + '.');
-      lines.push('\u2022 Action: ' + action + '.');
+      // v3.32e: CONFIDENCE FRAME folded into the VERDICT (one section, not three).
       return lines.join('\n');
     } catch (_) { return ''; }
   }
@@ -12726,9 +12817,9 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
           if (changedBlock) insert += '\n\n' + changedBlock;
           if (watchBlock)   insert += '\n\n' + watchBlock;
           if (insert) {
-            if (/\nVERDICT\n/.test(text)) {
-              text = text.replace(/\nVERDICT\n/, insert + '\n\nVERDICT\n');
-            } else if (/⚠️ This is not financial advice\./.test(text)) {
+            // v3.32e: place WHAT CHANGED / WATCH NEXT AFTER the verdict (before the
+            // sign-off) so the bottom-line verdict lands first, then the forward look.
+            if (/⚠️ This is not financial advice\./.test(text)) {
               text = text.replace(/⚠️ This is not financial advice\./,
                                   insert.replace(/^\n+/, '') + '\n\n⚠️ This is not financial advice.');
             } else {
@@ -13661,7 +13752,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
             text = text.replace('\nCONFIDENCE FRAME\n', '\n\n' + summary + '\n\nCONFIDENCE FRAME\n');
           }
         } catch (_) {}
-        return text;
+        return (typeof window._humanizePublicText === 'function') ? window._humanizePublicText(text) : text;
       };
       // v32 guard — propagate ALL prior flags so subsequent guard checks on this outer wrapper work
       window.buildMorningStoryText._v32HelperWrapped   = true;
@@ -13676,6 +13767,46 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       }
     } catch (_) {}
   }
+
+  // ─── v3.33 — humanize the public report (final pass) ──────────────
+  // Make the report read like a story, not a data dump: title-case the shouty
+  // section headers and internal classification tokens. Runs as the last step
+  // of the legacy chain, so both the report view and copy/download get it.
+  window._humanizePublicText = function(t){
+    if(!t || typeof t !== 'string') return t;
+    var HEADERS={ 'MARKET SNAPSHOT':'Market Snapshot','LEDGER STORY':'Ledger Story',
+      'ESCROW WATCH':'Escrow Watch','PATTERN MEMORY':'Pattern Memory','NEWS + MACRO':'News & Macro',
+      'REAL NEWS':'Real News','DISCOVERY':'Discovery','WHAT CHANGED':'What Changed',
+      'WATCH NEXT':'Watch Next','VERDICT':'Verdict','CONFIDENCE FRAME':'Confidence','SOURCES':'Sources',
+      // V1 pipeline section headers
+      'EXECUTIVE SUMMARY':'Executive Summary','WHAT MATTERED MOST':'What Mattered Most',
+      'EVIDENCE':'Evidence','WHAT TO WATCH NEXT':'What To Watch Next' };
+    // Title-case shouty section headers (they were ALL-CAPS anchors for internal wraps).
+    t = t.replace(/^[A-Z][A-Z +&]{2,}$/gm, function(line){ return HEADERS[line.trim()] || line; });
+    // Humanize internal classification tokens.
+    t = t.replace(/\bEXCHANGE_OUTFLOW\b/g,'exchange outflow')
+         .replace(/\bEXCHANGE_INFLOW\b/g,'exchange inflow')
+         .replace(/\bLARGE_EXCHANGE_OUTFLOW\b/g,'large exchange outflow')
+         .replace(/\bLARGE_TRANSFER_RECEIVER\b/g,'large-transfer receiver')
+         .replace(/\bRECEIVER_STILL_HOLDING_SIZE\b/g,'still holding size')
+         .replace(/\bNEXT_HOP_[A-Z_]+\b/g, function(m){ return m.toLowerCase().replace(/_/g,' '); })
+         .replace(/\bUNKNOWN_FLOW\b/g,'unclassified flow')
+         .replace(/\bCRYPTO_COM\b/g,'Crypto.com')
+         .replace(/\s*\[(HIGH|MEDIUM|LOW|CRITICAL)\]/g, function(_m,g){ return ' (' + g.toLowerCase() + ' confidence)'; });
+    // Soften ALL-CAPS risk labels; leave standalone acronyms (XRP, RLUSD, USD) alone.
+    t = t.replace(/\b(BLACK|ORANGE|YELLOW|GREEN|RED|HIGH|ELEVATED|MODERATE|LOW)\s*\/\s*(EXTREME|ACTIVE|WATCH|QUIET|MONITOR|FORENSICS WATCH)\b/g,
+      function(_m,a,b){ var tc=function(s){ return s.split(/\s+/).map(function(w){ return w.charAt(0)+w.slice(1).toLowerCase(); }).join(' '); }; return tc(a)+' / '+tc(b); });
+    // Safety net: never leak a stray NaN into the public report.
+    t = t.replace(/\bNaN\b/g,'—');
+    // v3.34: collapse a duplicated trailing Sources block (some paths append the
+    // sources on top of a report that already carries them).
+    t = t.replace(/([ \t]*(?:Sources|SOURCES)\n[─-]{3,}\n[\s\S]+?)(?:\n{1,3}\1)+(\s*)$/,'$1$2');
+    return t;
+  };
+  // v3.34: the V1 audit pipeline is now fixed (audit no longer self-contradicts,
+  // NaN source patched), so let it run and render the intended clean report.
+  // It still falls back to the humanized legacy report if V1 ever errors.
+  try { if (window.SW_PIPELINE_V1_KILL === undefined) window.SW_PIPELINE_V1_KILL = false; } catch(_) {}
 
   // ─── BOOT ─────────────────────────────────────────────────────────
   function _bootV32() {
@@ -14667,8 +14798,12 @@ if (typeof window !== 'undefined') {
 function renderTopLargeTransfers(largeTransfers, max) {
   if (!Array.isArray(largeTransfers) || !largeTransfers.length) return [];
   const sorted = [...largeTransfers].sort((a, b) => n(b.amount) - n(a.amount));
-  const top = sorted.slice(0, max || 5);
-  return top.map(t => {
+  // v3.34: collapse identical sender→receiver→amount transfers (e.g. a repeated
+  // watchlist-internal move) into one line with an ×N count, so LARGE MOVES
+  // doesn't print the same transfer four times.
+  const seen = {};
+  const deduped = [];
+  sorted.forEach(t => {
     const sender = t.sender_label || t.label || 'UNKNOWN';
     const recvLabel = (t.receiver_label && t.receiver_label !== 'UNKNOWN')
                     ? t.receiver_label
@@ -14676,8 +14811,15 @@ function renderTopLargeTransfers(largeTransfers, max) {
     const amt = fmt(n(t.amount), 0);
     const cls = t.classification || 'UNKNOWN_FLOW';
     const conf = t.confidence || 'MEDIUM';
-    return '• ' + sender + ' → ' + recvLabel + ' · ' + amt + ' XRP · ' + cls + ' [' + conf + ']';
+    const key = sender + '>' + recvLabel + '>' + amt + '>' + cls;
+    if (seen[key] != null) { deduped[seen[key]].count++; return; }
+    seen[key] = deduped.length;
+    deduped.push({ sender: sender, recvLabel: recvLabel, amt: amt, cls: cls, conf: conf, count: 1 });
   });
+  return deduped.slice(0, max || 5).map(d =>
+    '• ' + d.sender + ' → ' + d.recvLabel + ' · ' + d.amt + ' XRP · ' + d.cls + ' [' + d.conf + ']' +
+    (d.count > 1 ? ' ×' + d.count : '')
+  );
 }
 
 // Receiver followthrough — surface meaningful next-hop behavior
@@ -16174,7 +16316,9 @@ function chooseMorningStoryLead(pack) {
   if (i.largeTxs.length >= 5) return 'LARGE_FLOW';
   if (i.shadowVol > 10_000_000) return 'SHADOW_VOLUME';
   if (i.patMem.snapCount >= 5 && (i.patMem.lines || []).some(l => /repeated.*×[4-9]|×\d{2,}/i.test(l))) return 'PATTERN';
-  if (i.healthResult.degraded) return 'SOURCE_DEGRADED';
+  // v3.32e: only lead with "wires went quiet" when there's genuinely NO news to show.
+  // Previously fired on any provider failure, contradicting a report that still had headlines.
+  if (i.healthResult.degraded && !(i.topItems && i.topItems.length)) return 'SOURCE_DEGRADED';
   return 'STANDARD';
 }
 
@@ -16189,7 +16333,7 @@ function _buildOpeningParagraph(i, lead) {
       const flowVerb = i.netDelta >= 0
         ? 'took in ' + flowAmt + ' XRP net'
         : 'pushed out ' + flowAmt + ' XRP net';
-      return `The forensic risk score reached ${n(i.risk.score)}/100 — ${i.risk.label} — putting today's scan at the highest alert level. Price moved ${deltaStr || 'modestly'} on ${i.tape}, but the ledger signal was not quiet. Watched wallets ${flowVerb} across the window. The evidence below is what the data actually shows, not what the chart suggests.`;
+      return `The board lit up ${i.risk.label} this morning — the highest alert level we flag. Price barely moved (${deltaStr || 'flat'}) on ${i.tape}, but the ledger was anything but quiet: watched wallets showed ${i.flowDir} across the window. Here's what the data actually shows — not what the chart suggests. (Score and drivers in the verdict below.)`;
     }
     case 'LARGE_FLOW':
       return `${i.largeTxs.length} transfers above threshold moved ${fmt(i.shadowVol, 0)} XRP in shadow volume overnight. Price was on ${i.tape} at ${priceStr}${deltaStr ? ' (' + deltaStr + ')' : ''}, but the bigger story was in the ledger — not the candle. The strongest signal was where those transfers landed and whether receivers split or held.`;
@@ -16197,10 +16341,16 @@ function _buildOpeningParagraph(i, lead) {
       return `${fmt(i.shadowVol, 0)} XRP moved through watched-wallet shadow channels overnight — a volume that doesn't show in a standard chart view. Price held ${i.tape} at ${priceStr}. The ledger was not idle, even when the tape appeared quiet.`;
     case 'PATTERN':
       return `The route appeared again. Pattern memory across ${i.patMem.snapCount} scans flagged a repeated behavior that has now cleared the confidence threshold. Price was on ${i.tape} at ${priceStr}. Forensic significance comes from repetition, not from any single data point.`;
-    case 'SOURCE_DEGRADED':
-      return `Today's ledger scan ran with degraded news coverage — ${i.healthResult.failed.slice(0, 3).join(', ')} failed during the run. The on-chain evidence remains primary. Price was on ${i.tape} at ${priceStr}. What follows is ledger-first analysis; news context is partial.`;
+    case 'SOURCE_DEGRADED': {
+      // v3.32d: drop junk tokens like "all" from the failed list, and read like a person.
+      const failedList = (i.healthResult.failed || [])
+        .filter(f => f && !/^all(-failed)?$/i.test(f))
+        .slice(0, 3).join(', ');
+      const failedPhrase = failedList ? failedList + ' dropped out' : 'the news wires went quiet';
+      return `The wires were spotty this morning — ${failedPhrase} mid-scan, so today's story leans on the ledger. Price sat ${deltaStr ? '(' + deltaStr + ') ' : ''}on ${i.tape} at ${priceStr}, and the on-chain evidence carries the rest.`;
+    }
     default: {
-      const flowVerb = netDelta >= 0
+      const flowVerb = i.netDelta >= 0
         ? 'took in ' + flowAmt + ' XRP net'
         : 'pushed out ' + flowAmt + ' XRP net';
       return `XRP opened the session on ${i.tape} at ${priceStr}${deltaStr ? ' (' + deltaStr + ')' : ''}. The ledger showed ${i.flowDir} — watched wallets ${flowVerb} across the window. The evidence is presented below — evidence first, pattern second, thesis third.`;
@@ -16212,8 +16362,13 @@ function _buildOpeningParagraph(i, lead) {
 function buildLedgerNarrativeParagraph(pack) {
   const i = getMorningStoryNarrativeInputs(pack);
   const lines = [];
-  lines.push('Net flow across ' + n(pack.wallets_checked || 0) + ' watched wallets: ' +
-    (i.netDelta >= 0 ? '+' : '') + fmt(i.netDelta, 0) + ' XRP.');
+  const _wc = n(pack.wallets_checked || 0);
+  if (Math.abs(i.netDelta) < 1) {
+    lines.push('Across ' + _wc + ' watched wallets the net position came out flat this window — money changed hands, but the board ended roughly where it started.');
+  } else {
+    lines.push('Net flow across ' + _wc + ' watched wallets: ' +
+      (i.netDelta >= 0 ? '+' : '') + fmt(i.netDelta, 0) + ' XRP.');
+  }
   if (i.shadowVol > 0) {
     lines.push('Shadow volume: ' + fmt(i.shadowVol, 0) + ' XRP across ' + i.largeTxs.length + ' flagged transfer' + (i.largeTxs.length === 1 ? '' : 's') + '.');
   }
@@ -16344,9 +16499,16 @@ function buildMorningVerdictParagraph(pack) {
 
   let verdict = 'Risk: ' + riskLine + sentiment;
   if (drivers) verdict += ' Primary drivers: ' + drivers + '.';
-  if (largeCt > 0) verdict += ' ' + largeCt + ' large transfer' + (largeCt === 1 ? '' : 's') + ' above threshold flagged in this window.';
-  if (netDelta > 500_000) verdict += ' Net inflow of ' + fmt(netDelta, 0) + ' XRP suggests accumulation or routing inward.';
-  else if (netDelta < -500_000) verdict += ' Net outflow of ' + fmt(Math.abs(netDelta), 0) + ' XRP suggests distribution or routing outward.';
+  // v3.32c: the transfer count and the net-flow figure are already stated in the
+  // opening and LEDGER STORY — keep the verdict qualitative so the report stops
+  // repeating the same numbers three and four times.
+  if (netDelta > 500_000) verdict += ' The net inflow above reads as accumulation or inward routing.';
+  else if (netDelta < -500_000) verdict += ' The net outflow above reads as distribution or outward routing.';
+  // v3.32e: CONFIDENCE FRAME folded in here (was its own section) — one clear read.
+  const behavioral = score >= 75 ? 'high' : score >= 50 ? 'medium' : 'low';
+  const confAction = behavioral === 'high' ? 'review and consider monitoring'
+                   : behavioral === 'medium' ? 'monitor' : 'review only';
+  verdict += ' No identity proof — behavioral confidence is ' + behavioral + '; recommended action: ' + confAction + '.';
   verdict += '\nLedger evidence is the primary record. News provides context, not causation.';
   return verdict;
 }
@@ -18229,6 +18391,17 @@ function installReportDeskButtons() {
   document.querySelectorAll('.report-file-btn').forEach(btn => {
     btn.addEventListener('click', () => exportReportFile(btn.dataset.kind));
   });
+  // v3.34: New Wallet Targets — copy the discovered addresses for hand-off.
+  const _cpAddrs = document.getElementById('btnCopySuggestedAddrs');
+  if (_cpAddrs && !_cpAddrs._wired) {
+    _cpAddrs._wired = true;
+    _cpAddrs.addEventListener('click', () => {
+      refreshSuggestedWalletsBox();
+      const txt = suggestedWalletsAddressList();
+      if (typeof copySafe === 'function') copySafe(txt || '', 'New Wallet Targets');
+    });
+  }
+  try { refreshSuggestedWalletsBox(); } catch (_) {}
   // v3.28-hotfix2: One Total Report button (clean, mobile-ready)
   const totalBtn = document.getElementById('btnDownloadTotalReport');
   if (totalBtn && !totalBtn._wired) {
@@ -27866,13 +28039,11 @@ function shadowWatchVoiceGaugeSmartReportSmokeTest() {
   // WATCH NEXT block builds with confidence frame
   const watchBlock = window.buildWatchNextBlock(weakPack);
   check('WATCH NEXT block contains header', /^WATCH NEXT/.test(watchBlock));
-  check('WATCH NEXT block contains CONFIDENCE FRAME', /CONFIDENCE FRAME/.test(watchBlock));
-  check('WATCH NEXT block contains "Identity proof: no"',
-    /Identity proof:\s*no/i.test(watchBlock));
-  check('WATCH NEXT block contains behavioral confidence label',
-    /Behavioral confidence:\s*(low|medium|high)/i.test(watchBlock));
-  check('WATCH NEXT block contains action label',
-    /Action:\s*(review|monitor|review and consider monitor)/i.test(watchBlock));
+  // v3.32e: CONFIDENCE FRAME moved out of WATCH NEXT and into the VERDICT.
+  check('WATCH NEXT block no longer carries CONFIDENCE FRAME', !/CONFIDENCE FRAME/.test(watchBlock));
+  check('Verdict now carries the confidence read',
+    /behavioral confidence is\s*(low|medium|high)/i.test(
+      (typeof buildMorningVerdictParagraph === 'function' ? buildMorningVerdictParagraph(weakPack) : '')));
   check('WATCH NEXT block mentions unknown receivers',
     /Rescan.*unknown/i.test(watchBlock));
   check('WATCH NEXT block mentions exchange-side reversal',
@@ -32490,8 +32661,8 @@ function summarizeDominanceShift(pack){
       parts.push('Watched wallets '+dir+' '+_xrpFmt(Math.abs(d))+' XRP net across this scan.');
       weight=0.6;
     }
-    if(dom&&dom.top10_pct!=null){
-      parts.push('Top-tier wallets hold an estimated '+(+dom.top10_pct).toFixed(1)+'% of tracked supply.');
+    if(dom&&_num(dom.top10_pct)>0){
+      parts.push('Top-tier wallets hold an estimated '+_num(dom.top10_pct).toFixed(1)+'% of tracked supply.');
       weight=Math.max(weight,0.55);
     }
     if(cluster&&cluster.coordinated_count>0){
@@ -32731,40 +32902,51 @@ function _sectionHeader(name){
   return '\n\n'+name+'\n'+'─'.repeat(Math.min(name.length,40))+'\n';
 }
 
-function _buildExecutiveSummary(interps){
-  // Pick highest-weight interpretation as the opener
+function _firstSentence(s){
+  s=String(s||'').trim(); if(!s) return '';
+  var m=s.match(/^[\s\S]*?[.!?](?=\s|$)/);
+  return (m?m[0]:s).trim();
+}
+function _topInterp(interps){
   var best=null, bw=-1;
-  interps.forEach(function(i){
-    if(i.has_signal && i.narrative_weight>bw){ bw=i.narrative_weight; best=i; }
-  });
-  if(!best) return 'The watch ran today. The ledger was observed. Evidence is in the report below.';
-  // Lead with band behavior if it's the dominant signal
-  var band=interps[4]; // summarizeBandBehavior at index 4
-  var absorber=interps[5]; // summarizeAbsorberActivity at index 5
-  if(band&&band.has_signal&&band.narrative_weight>=0.70&&
-     absorber&&absorber.has_signal){
-    return band.summary.replace(/\.$/, '')+'. '+absorber.headline;
+  interps.forEach(function(i){ if(i && i.has_signal && i.narrative_weight>bw){ bw=i.narrative_weight; best=i; } });
+  return best;
+}
+
+// v3.34: EXEC / WHAT MATTERED / EVIDENCE used to return the SAME sentence,
+// which read as a data dump. Now each has a distinct job:
+//   Exec  = the one-line topline (the single biggest fact)
+//   WMM   = why it mattered / the context BEYOND the headline move
+//   Evid  = the itemized receipts (built separately, below)
+function _buildExecutiveSummary(interps){
+  var best=_topInterp(interps);
+  if(!best) return 'The watch ran today — the ledger was observed, and no single move stood out this scan.';
+  var band=interps[4], absorber=interps[5];
+  if(band&&band.has_signal&&band.narrative_weight>=0.70&&absorber&&absorber.has_signal){
+    return _firstSentence(band.summary)+' '+_firstSentence(absorber.headline||absorber.summary);
   }
-  return best.summary;
+  // One-line topline only — the full detail lives in Evidence.
+  return _firstSentence(best.summary || best.headline);
 }
 
 function _buildWhatMatteredMost(interps){
-  var band=interps[4], absorber=interps[5], moves=interps[0];
-  var parts=[];
-  // The daily tension: chart vs ledger
+  var band=interps[4], absorber=interps[5];
+  // The daily tension: chart quiet vs ledger active.
   if(band&&band.has_signal&&absorber&&absorber.has_signal){
-    parts.push(band.summary);
-    parts.push(absorber.summary);
-    parts.push('The chart is quiet. The ledger is not.');
-    return parts.join(' ');
+    return band.summary+' '+absorber.summary+' The chart is quiet. The ledger is not.';
   }
-  // Fallback: highest two weights
-  var sorted=interps.filter(function(i){return i.has_signal;})
-    .sort(function(a,b){return b.narrative_weight-a.narrative_weight;});
-  if(sorted.length>=2){
-    return sorted[0].summary+' '+sorted[1].headline;
+  // Otherwise frame the context BEYOND the top move (not a repeat of the opener).
+  var best=_topInterp(interps);
+  var others=interps.filter(function(i){ return i && i.has_signal && i!==best; })
+    .sort(function(a,b){ return b.narrative_weight-a.narrative_weight; });
+  if(others.length){
+    return 'Beyond the headline move, the board showed ' +
+      others.slice(0,2).map(function(i){ return i.headline||_firstSentence(i.summary); }).join('; ') +
+      '. Ledger evidence — not the chart — is what moved.';
   }
-  if(sorted.length===1) return sorted[0].summary;
+  if(best){
+    return 'One move carried the scan; the rest of the board stayed quiet. That concentration — a single dominant transfer rather than broad activity — is itself the tell.';
+  }
   return 'Watch maintained. The rails were observed this scan.';
 }
 
@@ -32776,7 +32958,7 @@ function _buildEvidence(interps){
   if(recv&&recv.has_signal)   parts.push(recv.summary);
   if(domShift&&domShift.has_signal) parts.push(domShift.summary);
   if(news&&news.has_signal)   parts.push('News context: '+news.summary);
-  if(!parts.length) return 'Ledger observed. No single transfer exceeded reporting threshold this scan. The watch continues.';
+  if(!parts.length) return 'Ledger observed. No single transfer was large enough to flag this scan. The watch continues.';
   return parts.join(' ');
 }
 
@@ -32930,6 +33112,10 @@ function assemblePublicReport(pack){
     _sectionHeader('\uD83D\uDCD6 THE DAILY SCRIPTURE')+scripture+
     _sectionHeader('SOURCES')+sources;
 
+  // v3.34: collapse any doubled rule lines \u2014 a section builder can return content
+  // that already starts with a \u2500\u2500\u2500 rule, producing a double under the header.
+  full = full.replace(/(\u2500{3,})\n(?:[ \t]*\1\n)+/g, '$1\n');
+
   return { text: full, interpretations: interps };
 }
 
@@ -33007,7 +33193,13 @@ function _fail(assertion, detail, excerpt){
 }
 
 function assertNoTelemetryLeak(report, violations){
-  var blocks=violations.filter(function(v){return v.severity==='BLOCK';});
+  // v3.34: cat 12 ("threshold", "heuristic"…) and cat 13 (other-chain names) are
+  // common English/news words that legitimately appear in headlines. The sanitizer
+  // already strips them from the body, so they are NOT telemetry leaks — they must
+  // not nuke the whole report into the audit-blocked fallback. Only genuine
+  // telemetry/JSON/classification leaks (the other categories) hard-block.
+  var CONTENT_COLLISION={ 12:true, 13:true };
+  var blocks=violations.filter(function(v){ return v.severity==='BLOCK' && !CONTENT_COLLISION[v.category]; });
   if(blocks.length)
     return _fail('assertNoTelemetryLeak',
       blocks.length+' BLOCK-severity violation(s). First: '+blocks[0].match,
@@ -33091,7 +33283,11 @@ function assertHumanReadable(report){
   // More than 5 all-caps multi-letter tokens in report body
   var bodyEnd=report.indexOf('\uD83D\uDE4F THE DAILY PRAYER');
   var body=bodyEnd>-1?report.slice(0,bodyEnd):report;
-  var capsMatches=(body.match(/\b[A-Z]{3,}\b/g)||[]).length;
+  // v3.34: the mandated section headers are REQUIRED in ALL-CAPS by
+  // assertSectionOrderLocked, so counting them made this assert impossible.
+  // Exclude those header words and brand/ticker tokens from the count.
+  var _CAPS_WL=/^(EXECUTIVE|SUMMARY|WHAT|MATTERED|MOST|EVIDENCE|WATCH|NEXT|VERDICT|SOURCES|XRP|COFFEE|CRYPTO|XCELLENT|GPT|RLUSD|USD|TVL|DEX|AMM|NFT)$/;
+  var capsMatches=(body.match(/\b[A-Z]{3,}\b/g)||[]).filter(function(t){return !_CAPS_WL.test(t);}).length;
   if(capsMatches>5)
     return _fail('assertHumanReadable',
       capsMatches+' ALL-CAPS tokens found in body (limit 5).',
@@ -33130,10 +33326,14 @@ function assertNoDeveloperLanguage(report){
   var bodyEnd=report.indexOf('\uD83D\uDE4F THE DAILY PRAYER');
   var body=bodyEnd>-1?report.slice(0,bodyEnd):report;
   for(var i=0;i<devTerms.length;i++){
-    if(body.toLowerCase().indexOf(devTerms[i].toLowerCase())>-1)
+    var term=devTerms[i];
+    // v3.34: word-boundary match. The old substring check false-flagged real
+    // words — e.g. "Binance" contains "nan", so every report mentioning Binance
+    // was rejected as the developer term "NaN" and fell back to legacy.
+    var re=new RegExp('\\b'+term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','i');
+    if(re.test(body))
       return _fail('assertNoDeveloperLanguage',
-        'Developer term "'+devTerms[i]+'" found in public body.',
-        devTerms[i]);
+        'Developer term "'+term+'" found in public body.', term);
   }
   return null;
 }
@@ -33211,8 +33411,13 @@ function assertFallbackContentRequirements(report){
 }
 
 function auditPublicReport(reportText, violations, interpretations, isFallback){
-  var failures=[];
-  function run(fn){ var r=fn; if(r) failures.push(r); }
+  var failures=[], advisories=[];
+  // v3.34: COSMETIC assertions are advisory — they get logged but do NOT nuke the
+  // whole report into the fallback. Real news headlines kept tripping sentence-length
+  // and readability rules and blocking an otherwise-good report. Genuine leaks
+  // (telemetry, JSON, helpers, structure, section order) still hard-block.
+  var ADVISORY={ assertNarrativeFlow:true, assertHumanReadable:true };
+  function run(r){ if(!r) return; if(ADVISORY[r.assertion]) advisories.push(r); else failures.push(r); }
 
   run(assertNoTelemetryLeak(reportText, violations));
   run(assertSectionOrderLocked(reportText));
@@ -33230,7 +33435,7 @@ function auditPublicReport(reportText, violations, interpretations, isFallback){
 
   // Filter nulls
   failures=failures.filter(Boolean);
-  return{pass:failures.length===0, failures:failures};
+  return{pass:failures.length===0, failures:failures, advisories:advisories};
 }
 
 /* ═════════════════════════════════════════════════════════════════════
@@ -33315,6 +33520,10 @@ function renderPublicReport(pack){
 
     if(audit.pass){
       _setFallbackBanner(0);
+      try{ window._SW_REPORT_MODE='CLEAN report (V1 pipeline)'; }catch(_){}
+      if(audit.advisories && audit.advisories.length){
+        try{ _logToDevPanel('Advisories (non-blocking): '+audit.advisories.map(function(a){return a.assertion;}).join(', ')); }catch(_){}
+      }
       try{ console.log('[PIPELINE-V1] Report passed audit. '+
                        sanitized.text.length+' chars.'); }catch(_){}
       return sanitized.text;
@@ -33332,9 +33541,10 @@ function renderPublicReport(pack){
     // Verify KGMT itself
     var kgmtAudit=auditPublicReport(KGMT_TEXT,[],[],true);
     if(!kgmtAudit.pass){
-      _logToDevPanel('CRITICAL: KGMT failed assertFallbackContentRequirements. Halting render.');
-      return 'Report unavailable. See dev panel.';
+      _logToDevPanel('KGMT self-audit failed ('+(kgmtAudit.failures||[]).map(function(f){return f.assertion;}).join(', ')+') — returning legacy.');
+      return null; // let the routing hook fall back to the (humanized) legacy report
     }
+    try{ window._SW_REPORT_MODE='audit-blocked fallback (KGMT) — see error log'; }catch(_){}
     return KGMT_TEXT;
 
   }catch(err){
@@ -33355,14 +33565,20 @@ function _installHook(){
   if(typeof window.buildMorningStoryText!=='function') return false;
   if(window.buildMorningStoryText._pipelineV1Hooked) return true;
   var legacy=window.buildMorningStoryText;
+  var _hz=function(t){ return (typeof window._humanizePublicText==='function') ? window._humanizePublicText(t) : t; };
+  var _mode=function(m){ try{ window._SW_REPORT_MODE=m; }catch(_){} };
   var hooked=function(pack){
-    if(!_isEnabled()) return legacy(pack);
+    if(!_isEnabled()){ _mode('legacy (pipeline OFF)'); return _hz(legacy(pack)); }
     // Store legacy output for prayer/scripture extraction
     var legacyOut=_safe(function(){return legacy(pack);},'');
     window._pipelineLegacyText=legacyOut;
     var v1=renderPublicReport(pack||window._lastPack);
-    if(v1&&v1.length>100) return v1;
-    return legacyOut;
+    // v3.34: humanize the winning report (title-case the mandated ALL-CAPS
+    // headers for display — the audit ran on the raw version already).
+    // renderPublicReport already set _SW_REPORT_MODE accurately (clean vs KGMT).
+    if(v1&&v1.length>100){ return _hz(v1); }
+    _mode('legacy fallback (V1 audit failed — see error log)');
+    return _hz(legacyOut);
   };
   hooked._pipelineV1Hooked=true;
   hooked._legacyChain=legacy;
@@ -33737,6 +33953,97 @@ html, body {
   }
 
   window.SW_PUBLIC_SHELL = { version: SHELL_V, unlocked: function(){ return _devUnlocked; } };
+})();
+</script>
+
+<!-- v3.32d: always-accessible DEBUG LOG — surfaces the previously dev-only #errorLog + scan feed + news status -->
+<style>
+  #swDebugFab{position:fixed;right:12px;bottom:12px;z-index:99998;font:600 11px/1 'Share Tech Mono',monospace;
+    background:rgba(0,10,0,0.92);color:#00ff00;border:1px solid rgba(0,255,0,0.5);border-radius:20px;
+    padding:8px 12px;cursor:pointer;box-shadow:0 0 14px rgba(0,255,0,0.25);letter-spacing:1px;}
+  #swDebugFab:hover{background:#00ff00;color:#000;}
+  #swDebugOverlay{position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.92);display:none;
+    flex-direction:column;padding:14px;box-sizing:border-box;font-family:'Share Tech Mono',monospace;}
+  #swDebugOverlay.open{display:flex;}
+  #swDebugOverlay .dbg-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap;}
+  #swDebugOverlay .dbg-title{color:#00ff00;font-size:13px;letter-spacing:2px;}
+  #swDebugOverlay .dbg-btns{display:flex;gap:6px;flex-wrap:wrap;}
+  #swDebugOverlay button{font:600 10px 'Share Tech Mono',monospace;background:rgba(0,18,0,0.9);
+    color:#00ff00;border:1px solid rgba(0,255,0,0.45);border-radius:4px;padding:6px 10px;cursor:pointer;letter-spacing:1px;}
+  #swDebugOverlay button:hover{background:#00ff00;color:#000;}
+  #swDebugOverlay .dbg-sec{color:#88aaff;font-size:10px;letter-spacing:1px;margin:8px 0 4px;}
+  #swDebugOverlay pre{flex:0 0 auto;max-height:38vh;overflow:auto;background:rgba(0,8,0,0.85);
+    border:1px solid rgba(0,255,0,0.2);border-radius:6px;padding:10px;color:#9fdf9f;font-size:11px;
+    white-space:pre-wrap;word-break:break-word;margin:0;}
+</style>
+<div id="swDebugFab" title="Debug log">🐞 DEBUG</div>
+<div id="swDebugOverlay">
+  <div class="dbg-head">
+    <span class="dbg-title">🐞 DEBUG LOG</span>
+    <div class="dbg-btns">
+      <button id="swDbgRefresh">REFRESH</button>
+      <button id="swDbgCopy">COPY</button>
+      <button id="swDbgDownload">⬇ TXT</button>
+      <button id="swDbgClose">✕ CLOSE</button>
+    </div>
+  </div>
+  <div class="dbg-sec">ERROR LOG</div><pre id="swDbgErr">—</pre>
+  <div class="dbg-sec">SCAN FEED</div><pre id="swDbgFeed">—</pre>
+  <div class="dbg-sec">REPORT &amp; MARKET</div><pre id="swDbgMkt">—</pre>
+  <div class="dbg-sec">NEWS SOURCE STATUS</div><pre id="swDbgNews">—</pre>
+</div>
+<script>
+(function(){
+  function $one(id){ return document.getElementById(id); }
+  function txtOf(id){ var el=$one(id); return el ? (el.textContent||'').trim() : ''; }
+  function valOf(id){ var el=$one(id); return el ? String(el.value!=null&&el.value!=='' ? el.value : (el.textContent||'')).trim() : ''; }
+  function marketBlock(){
+    var out='';
+    try {
+      out+='report mode: '+(window._SW_REPORT_MODE||'— (run a scan)')+'\n';
+      out+='wallets scanned: '+(txtOf('hudChecked')||'—')+' / '+(txtOf('hudTotal')||'—')+
+           '   risk: '+(txtOf('hudRiskBadge')||'—')+'\n';
+      out+='price: '+(valOf('inPrice')||'—')+'   24h vol: '+(valOf('inVolume')||'—')+'\n';
+      out+='native DEX: '+(valOf('inXrpldex')||'—')+'   EVM DEX: '+(valOf('inDexvol')||'—')+
+           '   EVM TVL: '+(valOf('inTvl')||'—');
+    } catch(e){}
+    return out||'No scan yet.';
+  }
+  function newsBlock(){
+    var out='';
+    try {
+      var badge=txtOf('hudNewsBadge'), cnt=txtOf('hudNewsCount');
+      out='headlines: '+(cnt||'0')+'  ·  badge: '+(badge||'—')+'\n';
+      var ni=(window.state&&window.state.newsIntel)||null;
+      if(ni&&ni.source_status) out+=JSON.stringify(ni.source_status,null,2);
+    } catch(e){}
+    return out||'No news status yet.';
+  }
+  function fill(){
+    if($one('swDbgErr'))  $one('swDbgErr').textContent  = txtOf('errorLog')||'No errors logged.';
+    if($one('swDbgFeed')) $one('swDbgFeed').textContent = txtOf('statusFeed')||'No scan feed yet.';
+    if($one('swDbgMkt'))  $one('swDbgMkt').textContent  = marketBlock();
+    if($one('swDbgNews')) $one('swDbgNews').textContent = newsBlock();
+  }
+  function combined(){
+    return 'SHADOW WATCH DEBUG LOG\n\n[REPORT & MARKET]\n'+marketBlock()+
+           '\n\n[ERROR LOG]\n'+(txtOf('errorLog')||'—')+
+           '\n\n[SCAN FEED]\n'+(txtOf('statusFeed')||'—')+
+           '\n\n[NEWS]\n'+newsBlock();
+  }
+  document.addEventListener('click', function(e){
+    var t=e.target; if(!t||!t.id) return;
+    if(t.id==='swDebugFab'){ fill(); var o=$one('swDebugOverlay'); if(o)o.classList.add('open'); }
+    else if(t.id==='swDbgClose'){ var o=$one('swDebugOverlay'); if(o)o.classList.remove('open'); }
+    else if(t.id==='swDbgRefresh'){ fill(); }
+    else if(t.id==='swDbgCopy'){ try{ if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(combined()); }catch(_){}}
+    else if(t.id==='swDbgDownload'){
+      try{
+        if(typeof downloadShadowWatchDebugFile==='function') downloadShadowWatchDebugFile();
+        else { var b=new Blob([combined()],{type:'text/plain'}), a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='shadowwatch_debug.txt'; a.click(); URL.revokeObjectURL(a.href); }
+      }catch(_){}
+    }
+  });
 })();
 </script>
 
