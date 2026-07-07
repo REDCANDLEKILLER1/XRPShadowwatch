@@ -3747,9 +3747,9 @@ const CORS_PROXIES = [
   { name: 'codetabs',  build: u => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(u) },
   { name: 'allorigins', build: u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u) },
   { name: 'cors.lol',  build: u => 'https://api.cors.lol/?url=' + encodeURIComponent(u) },
-  { name: 'killcors',  build: u => 'https://proxy.killcors.com/?url=' + encodeURIComponent(u) },
-  // v3.3: thingproxy.freeboard.io — 10 req/sec, 100KB cap. Cheap fallback when others are empty.
-  { name: 'thingproxy', build: u => 'https://thingproxy.freeboard.io/fetch/' + u }
+  { name: 'killcors',  build: u => 'https://proxy.killcors.com/?url=' + encodeURIComponent(u) }
+  // v3.34: dropped thingproxy.freeboard.io — it fails every request now and just
+  // dragged the news fetch into the 18s ceiling.
 ];
 
 // Try each proxy in order until one returns a usable response.
@@ -32891,7 +32891,7 @@ function _buildEvidence(interps){
   if(recv&&recv.has_signal)   parts.push(recv.summary);
   if(domShift&&domShift.has_signal) parts.push(domShift.summary);
   if(news&&news.has_signal)   parts.push('News context: '+news.summary);
-  if(!parts.length) return 'Ledger observed. No single transfer exceeded reporting threshold this scan. The watch continues.';
+  if(!parts.length) return 'Ledger observed. No single transfer was large enough to flag this scan. The watch continues.';
   return parts.join(' ');
 }
 
@@ -33249,10 +33249,14 @@ function assertNoDeveloperLanguage(report){
   var bodyEnd=report.indexOf('\uD83D\uDE4F THE DAILY PRAYER');
   var body=bodyEnd>-1?report.slice(0,bodyEnd):report;
   for(var i=0;i<devTerms.length;i++){
-    if(body.toLowerCase().indexOf(devTerms[i].toLowerCase())>-1)
+    var term=devTerms[i];
+    // v3.34: word-boundary match. The old substring check false-flagged real
+    // words — e.g. "Binance" contains "nan", so every report mentioning Binance
+    // was rejected as the developer term "NaN" and fell back to legacy.
+    var re=new RegExp('\\b'+term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','i');
+    if(re.test(body))
       return _fail('assertNoDeveloperLanguage',
-        'Developer term "'+devTerms[i]+'" found in public body.',
-        devTerms[i]);
+        'Developer term "'+term+'" found in public body.', term);
   }
   return null;
 }
