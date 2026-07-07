@@ -9835,7 +9835,9 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         '<button class="mrf-menu-item" id="mrfCollapseBtn"      type="button">\u2015 Minimize</button>' +
         '<button class="mrf-menu-item" id="mrfResizeBtn"        type="button">\u2922 Resize window</button>' +
         '<button class="mrf-menu-item" id="mrfCopyBtn"          type="button">\uD83D\uDCCB Copy report</button>' +
-        '<button class="mrf-menu-item" id="mrfOpenFullBtn"      type="button">\u25CE More reports (Report Desk)</button>' +
+        '<button class="mrf-menu-item" id="mrfOpenFullBtn"      type="button">\uD83D\uDCC4 Report Desk (all reports & downloads)</button>' +
+        '<button class="mrf-menu-item" id="mrfCopyWalletsBtn"   type="button">\uD83C\uDFAF Copy new wallet targets</button>' +
+        '<button class="mrf-menu-item" id="mrfDlWalletsBtn"     type="button">\u2B07 Download wallet suggestions</button>' +
         '<button class="mrf-menu-item" id="mrfDownloadTotalBtn" type="button">\u2B07 Download total report</button>' +
       '</div>' +
       '<div id="mrfBody"    class="mrf-body"></div>' +
@@ -9863,6 +9865,14 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     item('mrfResizeBtn',        function() { MORNING_REPORT_FLOAT.toggleSize(); });
     item('mrfCopyBtn',          function() { MORNING_REPORT_FLOAT.copy(); });
     item('mrfOpenFullBtn',      function() { if (typeof showScreen === 'function') showScreen('report'); MORNING_REPORT_FLOAT.hide(); });
+    // v3.34: wallet targets straight from the report menu — copy to hand off, or download the full TXT.
+    item('mrfCopyWalletsBtn',   function() {
+      var txt = (typeof suggestedWalletsAddressList === 'function') ? suggestedWalletsAddressList() : '';
+      if (typeof copySafe === 'function') copySafe(txt || '', 'New Wallet Targets');
+    });
+    item('mrfDlWalletsBtn',     function() {
+      if (typeof exportReportFile === 'function') exportReportFile('suggested-wallets-txt');
+    });
     item('mrfDownloadTotalBtn', function() {
       if (typeof downloadShadowWatchTotalFile === 'function') downloadShadowWatchTotalFile();
       else if (window.downloadShadowWatchTotalFile) window.downloadShadowWatchTotalFile();
