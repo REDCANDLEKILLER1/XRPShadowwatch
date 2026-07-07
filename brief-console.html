@@ -2460,6 +2460,15 @@ body.xai-command-mounted .main-grid{
             <span class="report-file-desc">Auto Wallet Finder results — full scoring + classification + review status</span>
             <button class="report-file-btn" data-kind="suggested-wallets-json">⬇ JSON</button>
           </div>
+          <!-- v3.34: copyable NEW WALLET TARGETS — hand-off list -->
+          <div class="report-file-row" data-source="suggestedWalletsCopy" style="flex-direction:column;align-items:stretch;gap:6px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+              <span class="report-file-name">🎯 New Wallet Targets <span id="suggestedWalletsCount" style="color:#88aaff;font-size:10px;"></span></span>
+              <button id="btnCopySuggestedAddrs" style="font-size:10px;padding:5px 12px;border:1px solid rgba(0,255,0,0.5);background:rgba(0,20,0,0.85);color:#00ff00;cursor:pointer;border-radius:4px;font-family:'Share Tech Mono',monospace;letter-spacing:1px;">📋 COPY</button>
+            </div>
+            <span class="report-file-desc">Full addresses this scan discovered. Copy them and hand off to add to the watchlist.</span>
+            <pre id="suggestedWalletsAddrBox" style="max-height:170px;overflow:auto;background:rgba(0,8,0,0.6);border:1px solid rgba(0,255,0,0.2);border-radius:6px;padding:8px;margin:0;font-size:11px;line-height:1.5;color:#9fdf9f;white-space:pre-wrap;word-break:break-all;">Run a scan — discovered wallets will appear here.</pre>
+          </div>
           <div class="report-file-row" data-source="errorLog">
             <span class="report-file-name">🛠 Error Log</span>
             <span class="report-file-desc">Debug log from last scan</span>
@@ -6105,6 +6114,8 @@ function persistDiscoveryInbox() {
     localStorage.setItem(DISCOVERY_SETTINGS_KEY,
       JSON.stringify(state.discoverySettings || {}));
   } catch (e) { elog('persist discovery inbox', e); }
+  // v3.34: keep the copyable "New Wallet Targets" box current after each scan.
+  try { if (typeof refreshSuggestedWalletsBox === 'function') refreshSuggestedWalletsBox(); } catch (_) {}
 }
 
 // Is this address valid + not the burn/issuer + not already in watchlist?
@@ -6618,6 +6629,32 @@ function exportDiscoveryTxt() {
   return (typeof downloadTextFile === 'function')
     ? downloadTextFile(base + '.txt', _discoveryInboxToText())
     : null;
+}
+
+// v3.34: the scan finds new wallet targets every run but never showed them
+// copyably. This returns the discovered addresses (full, one per line) for
+// hand-off, and refreshes the on-screen box in the Report Desk.
+function suggestedWalletsAddressList() {
+  var list;
+  try {
+    list = (window.AUTO_WALLET_FINDER && typeof window.AUTO_WALLET_FINDER.buildSuggestedWatchlistAdditions === 'function')
+      ? window.AUTO_WALLET_FINDER.buildSuggestedWatchlistAdditions(state.pack || {})
+      : (state.discoveryInbox || []);
+  } catch (_) { list = state.discoveryInbox || []; }
+  return (list || []).map(function (c) { return c && c.address; }).filter(Boolean).join('\n');
+}
+function refreshSuggestedWalletsBox() {
+  var box = document.getElementById('suggestedWalletsAddrBox');
+  if (!box) return;
+  var txt = suggestedWalletsAddressList();
+  var count = txt ? txt.split('\n').length : 0;
+  box.textContent = txt || 'No new wallet targets from the last scan yet — run a scan.';
+  var lbl = document.getElementById('suggestedWalletsCount');
+  if (lbl) lbl.textContent = count ? ('· ' + count + ' found') : '';
+}
+if (typeof window !== 'undefined') {
+  window.suggestedWalletsAddressList = suggestedWalletsAddressList;
+  window.refreshSuggestedWalletsBox = refreshSuggestedWalletsBox;
 }
 
 function exportDiscoveryJson() {
@@ -18298,6 +18335,17 @@ function installReportDeskButtons() {
   document.querySelectorAll('.report-file-btn').forEach(btn => {
     btn.addEventListener('click', () => exportReportFile(btn.dataset.kind));
   });
+  // v3.34: New Wallet Targets — copy the discovered addresses for hand-off.
+  const _cpAddrs = document.getElementById('btnCopySuggestedAddrs');
+  if (_cpAddrs && !_cpAddrs._wired) {
+    _cpAddrs._wired = true;
+    _cpAddrs.addEventListener('click', () => {
+      refreshSuggestedWalletsBox();
+      const txt = suggestedWalletsAddressList();
+      if (typeof copySafe === 'function') copySafe(txt || '', 'New Wallet Targets');
+    });
+  }
+  try { refreshSuggestedWalletsBox(); } catch (_) {}
   // v3.28-hotfix2: One Total Report button (clean, mobile-ready)
   const totalBtn = document.getElementById('btnDownloadTotalReport');
   if (totalBtn && !totalBtn._wired) {
