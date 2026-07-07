@@ -14795,8 +14795,12 @@ if (typeof window !== 'undefined') {
 function renderTopLargeTransfers(largeTransfers, max) {
   if (!Array.isArray(largeTransfers) || !largeTransfers.length) return [];
   const sorted = [...largeTransfers].sort((a, b) => n(b.amount) - n(a.amount));
-  const top = sorted.slice(0, max || 5);
-  return top.map(t => {
+  // v3.34: collapse identical sender→receiver→amount transfers (e.g. a repeated
+  // watchlist-internal move) into one line with an ×N count, so LARGE MOVES
+  // doesn't print the same transfer four times.
+  const seen = {};
+  const deduped = [];
+  sorted.forEach(t => {
     const sender = t.sender_label || t.label || 'UNKNOWN';
     const recvLabel = (t.receiver_label && t.receiver_label !== 'UNKNOWN')
                     ? t.receiver_label
@@ -14804,8 +14808,15 @@ function renderTopLargeTransfers(largeTransfers, max) {
     const amt = fmt(n(t.amount), 0);
     const cls = t.classification || 'UNKNOWN_FLOW';
     const conf = t.confidence || 'MEDIUM';
-    return '• ' + sender + ' → ' + recvLabel + ' · ' + amt + ' XRP · ' + cls + ' [' + conf + ']';
+    const key = sender + '>' + recvLabel + '>' + amt + '>' + cls;
+    if (seen[key] != null) { deduped[seen[key]].count++; return; }
+    seen[key] = deduped.length;
+    deduped.push({ sender: sender, recvLabel: recvLabel, amt: amt, cls: cls, conf: conf, count: 1 });
   });
+  return deduped.slice(0, max || 5).map(d =>
+    '• ' + d.sender + ' → ' + d.recvLabel + ' · ' + d.amt + ' XRP · ' + d.cls + ' [' + d.conf + ']' +
+    (d.count > 1 ? ' ×' + d.count : '')
+  );
 }
 
 // Receiver followthrough — surface meaningful next-hop behavior
