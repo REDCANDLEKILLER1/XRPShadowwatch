@@ -7481,16 +7481,31 @@ if (typeof window !== 'undefined') {
 
     // v3.28-hotfix2: prefer operator-reviewed label when available
     const override = getReviewedLabelOverride(address);
-    // Add to runtime WATCHLIST (in-memory; permanent change requires file edit)
-    KNOWN[address] = {
+    const entry = {
       label:    override ? override.label    : c.suggested_label,
       cat:      override ? override.category : c.suggested_category,
       display_label:    override ? override.display_label   : null,
       identity_status:  override ? override.identity_status : null,
       source: 'auto_wallet_finder',
-      added_at: new Date().toISOString(),
-      review_session_only: true   // explicit flag — this is NOT persisted to source
+      added_at: new Date().toISOString()
     };
+    KNOWN[address] = entry;
+    // v3.34: actually add to the SCANNED watchlist and persist across sessions.
+    // loadDiscoveryAdded() re-merges DISCOVERY_ADDED_STORE into WATCHLIST on boot,
+    // so a tapped "Add" now sticks (self-serve — no source edit needed).
+    try {
+      if (typeof WATCHLIST !== 'undefined' && !WATCHLIST.some(function(w){ return w.address === address; })) {
+        WATCHLIST.push({ label: entry.label, address: address, cat: entry.cat });
+      }
+    } catch (_) {}
+    try {
+      var _added = JSON.parse(localStorage.getItem(DISCOVERY_ADDED_STORE) || '[]');
+      if (!Array.isArray(_added)) _added = [];
+      if (!_added.some(function(w){ return w && w.address === address; })) {
+        _added.push({ label: entry.label, address: address, cat: entry.cat });
+        localStorage.setItem(DISCOVERY_ADDED_STORE, JSON.stringify(_added));
+      }
+    } catch (_) {}
 
     // Update review state
     const rs = _loadReviewState();
@@ -10017,7 +10032,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     copy: function() {
       try {
         var txt = _mrfState.lastReport || '';
-        if (_mrfState.lastSources && _mrfState.lastSources.length) {
+        // v3.34: don't append a second SOURCES block if the report already has one.
+        if (_mrfState.lastSources && _mrfState.lastSources.length && !/\bsources\b/i.test(txt)) {
           txt += '\n\nSOURCES\n';
           _mrfState.lastSources.forEach(function(s, i) {
             txt += '[' + (i + 1) + '] ' + (s.source || s.name || '?') +
@@ -10038,7 +10054,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         if (typeof downloadTextFile === 'function' && _mrfState.lastReport) {
           var fname = 'MorningReport_' + new Date().toISOString().slice(0, 10) + '.txt';
           var body  = _mrfState.lastReport;
-          if (_mrfState.lastSources && _mrfState.lastSources.length) {
+          // v3.34: don't append a second SOURCES block if the report already has one.
+          if (_mrfState.lastSources && _mrfState.lastSources.length && !/\bsources\b/i.test(body)) {
             body += '\n\nSOURCES\n';
             _mrfState.lastSources.forEach(function(s, i) {
               body += '[' + (i + 1) + '] ' + (s.source || s.name || '?') +
@@ -32862,40 +32879,51 @@ function _sectionHeader(name){
   return '\n\n'+name+'\n'+'─'.repeat(Math.min(name.length,40))+'\n';
 }
 
-function _buildExecutiveSummary(interps){
-  // Pick highest-weight interpretation as the opener
+function _firstSentence(s){
+  s=String(s||'').trim(); if(!s) return '';
+  var m=s.match(/^[\s\S]*?[.!?](?=\s|$)/);
+  return (m?m[0]:s).trim();
+}
+function _topInterp(interps){
   var best=null, bw=-1;
-  interps.forEach(function(i){
-    if(i.has_signal && i.narrative_weight>bw){ bw=i.narrative_weight; best=i; }
-  });
-  if(!best) return 'The watch ran today. The ledger was observed. Evidence is in the report below.';
-  // Lead with band behavior if it's the dominant signal
-  var band=interps[4]; // summarizeBandBehavior at index 4
-  var absorber=interps[5]; // summarizeAbsorberActivity at index 5
-  if(band&&band.has_signal&&band.narrative_weight>=0.70&&
-     absorber&&absorber.has_signal){
-    return band.summary.replace(/\.$/, '')+'. '+absorber.headline;
+  interps.forEach(function(i){ if(i && i.has_signal && i.narrative_weight>bw){ bw=i.narrative_weight; best=i; } });
+  return best;
+}
+
+// v3.34: EXEC / WHAT MATTERED / EVIDENCE used to return the SAME sentence,
+// which read as a data dump. Now each has a distinct job:
+//   Exec  = the one-line topline (the single biggest fact)
+//   WMM   = why it mattered / the context BEYOND the headline move
+//   Evid  = the itemized receipts (built separately, below)
+function _buildExecutiveSummary(interps){
+  var best=_topInterp(interps);
+  if(!best) return 'The watch ran today — the ledger was observed, and no single move stood out this scan.';
+  var band=interps[4], absorber=interps[5];
+  if(band&&band.has_signal&&band.narrative_weight>=0.70&&absorber&&absorber.has_signal){
+    return _firstSentence(band.summary)+' '+_firstSentence(absorber.headline||absorber.summary);
   }
-  return best.summary;
+  // One-line topline only — the full detail lives in Evidence.
+  return _firstSentence(best.summary || best.headline);
 }
 
 function _buildWhatMatteredMost(interps){
-  var band=interps[4], absorber=interps[5], moves=interps[0];
-  var parts=[];
-  // The daily tension: chart vs ledger
+  var band=interps[4], absorber=interps[5];
+  // The daily tension: chart quiet vs ledger active.
   if(band&&band.has_signal&&absorber&&absorber.has_signal){
-    parts.push(band.summary);
-    parts.push(absorber.summary);
-    parts.push('The chart is quiet. The ledger is not.');
-    return parts.join(' ');
+    return band.summary+' '+absorber.summary+' The chart is quiet. The ledger is not.';
   }
-  // Fallback: highest two weights
-  var sorted=interps.filter(function(i){return i.has_signal;})
-    .sort(function(a,b){return b.narrative_weight-a.narrative_weight;});
-  if(sorted.length>=2){
-    return sorted[0].summary+' '+sorted[1].headline;
+  // Otherwise frame the context BEYOND the top move (not a repeat of the opener).
+  var best=_topInterp(interps);
+  var others=interps.filter(function(i){ return i && i.has_signal && i!==best; })
+    .sort(function(a,b){ return b.narrative_weight-a.narrative_weight; });
+  if(others.length){
+    return 'Beyond the headline move, the board showed ' +
+      others.slice(0,2).map(function(i){ return i.headline||_firstSentence(i.summary); }).join('; ') +
+      '. Ledger evidence — not the chart — is what moved.';
   }
-  if(sorted.length===1) return sorted[0].summary;
+  if(best){
+    return 'One move carried the scan; the rest of the board stayed quiet. That concentration — a single dominant transfer rather than broad activity — is itself the tell.';
+  }
   return 'Watch maintained. The rails were observed this scan.';
 }
 
@@ -33060,6 +33088,10 @@ function assemblePublicReport(pack){
     _sectionHeader('\uD83D\uDE4F THE DAILY PRAYER')+prayer+
     _sectionHeader('\uD83D\uDCD6 THE DAILY SCRIPTURE')+scripture+
     _sectionHeader('SOURCES')+sources;
+
+  // v3.34: collapse any doubled rule lines \u2014 a section builder can return content
+  // that already starts with a \u2500\u2500\u2500 rule, producing a double under the header.
+  full = full.replace(/(\u2500{3,})\n(?:[ \t]*\1\n)+/g, '$1\n');
 
   return { text: full, interpretations: interps };
 }
