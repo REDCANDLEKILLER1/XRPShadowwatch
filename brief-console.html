@@ -33179,7 +33179,13 @@ function _fail(assertion, detail, excerpt){
 }
 
 function assertNoTelemetryLeak(report, violations){
-  var blocks=violations.filter(function(v){return v.severity==='BLOCK';});
+  // v3.34: cat 12 ("threshold", "heuristic"…) and cat 13 (other-chain names) are
+  // common English/news words that legitimately appear in headlines. The sanitizer
+  // already strips them from the body, so they are NOT telemetry leaks — they must
+  // not nuke the whole report into the audit-blocked fallback. Only genuine
+  // telemetry/JSON/classification leaks (the other categories) hard-block.
+  var CONTENT_COLLISION={ 12:true, 13:true };
+  var blocks=violations.filter(function(v){ return v.severity==='BLOCK' && !CONTENT_COLLISION[v.category]; });
   if(blocks.length)
     return _fail('assertNoTelemetryLeak',
       blocks.length+' BLOCK-severity violation(s). First: '+blocks[0].match,
@@ -33495,6 +33501,7 @@ function renderPublicReport(pack){
 
     if(audit.pass){
       _setFallbackBanner(0);
+      try{ window._SW_REPORT_MODE='CLEAN report (V1 pipeline)'; }catch(_){}
       try{ console.log('[PIPELINE-V1] Report passed audit. '+
                        sanitized.text.length+' chars.'); }catch(_){}
       return sanitized.text;
@@ -33515,6 +33522,7 @@ function renderPublicReport(pack){
       _logToDevPanel('KGMT self-audit failed ('+(kgmtAudit.failures||[]).map(function(f){return f.assertion;}).join(', ')+') — returning legacy.');
       return null; // let the routing hook fall back to the (humanized) legacy report
     }
+    try{ window._SW_REPORT_MODE='audit-blocked fallback (KGMT) — see error log'; }catch(_){}
     return KGMT_TEXT;
 
   }catch(err){
@@ -33545,7 +33553,8 @@ function _installHook(){
     var v1=renderPublicReport(pack||window._lastPack);
     // v3.34: humanize the winning report (title-case the mandated ALL-CAPS
     // headers for display — the audit ran on the raw version already).
-    if(v1&&v1.length>100){ _mode('CLEAN report (V1 pipeline)'); return _hz(v1); }
+    // renderPublicReport already set _SW_REPORT_MODE accurately (clean vs KGMT).
+    if(v1&&v1.length>100){ return _hz(v1); }
     _mode('legacy fallback (V1 audit failed — see error log)');
     return _hz(legacyOut);
   };
