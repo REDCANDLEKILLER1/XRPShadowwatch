@@ -3553,6 +3553,19 @@ async function scanAmmIntel(ws) {
 // scan completes in <8s even in worst case (5 of 7 endpoints timing out).
 const MARKET_FETCH_TIMEOUT_MS = 5000;
 
+// v3.32b: DeFiLlama DEX volume was fetched direct-only, so a CORS block or a
+// renamed adapter slug left the DEX tiles blank. Try direct, then the relay
+// cascade, and only return a positive number (never overwrite good data with 0).
+async function fetchDefiDex(url) {
+  let j = null;
+  try { const r = await fetchWithTimeout(url, MARKET_FETCH_TIMEOUT_MS); if (r.ok) j = await r.json(); } catch (e) {}
+  if (!j || j.total24h == null) {
+    try { const { response } = await proxyFetch(url, MARKET_FETCH_TIMEOUT_MS); if (response && response.ok) j = await response.json(); } catch (e) {}
+  }
+  const v = j && Number(j.total24h);
+  return (v && v > 0) ? Math.round(v) : null;
+}
+
 async function market() {
   const notes = [];
   // 1. CoinGecko (primary)
@@ -3607,16 +3620,16 @@ async function market() {
       if (row) { $('inTvl').value = Math.round(row.tvl || 0); notes.push('✓ DefiLlama TVL'); }
     }
   } catch (e) { notes.push('DefiLlama TVL ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
-  // 6. DefiLlama EVM DEX
+  // 6. DefiLlama EVM DEX (direct → relay fallback; keep prior value on failure)
   try {
-    const r = await fetchWithTimeout('https://api.llama.fi/overview/dexs/xrpl-evm?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume', MARKET_FETCH_TIMEOUT_MS);
-    if (r.ok) { const j = await r.json(); $('inDexvol').value = Math.round(j.total24h || 0); notes.push('✓ EVM DEX'); }
-  } catch (e) { notes.push('EVM DEX ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
-  // 7. DefiLlama XRPL Native DEX
+    const v = await fetchDefiDex('https://api.llama.fi/overview/dexs/xrpl-evm?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume');
+    if (v != null) { $('inDexvol').value = v; notes.push('✓ EVM DEX'); } else notes.push('EVM DEX empty');
+  } catch (e) { notes.push('EVM DEX blocked'); }
+  // 7. DefiLlama XRPL Native DEX (direct → relay fallback; keep prior value on failure)
   try {
-    const r = await fetchWithTimeout('https://api.llama.fi/overview/dexs/xrpl?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume', MARKET_FETCH_TIMEOUT_MS);
-    if (r.ok) { const j = await r.json(); $('inXrpldex').value = Math.round(j.total24h || 0); notes.push('✓ Native DEX'); }
-  } catch (e) { notes.push('Native DEX ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
+    const v = await fetchDefiDex('https://api.llama.fi/overview/dexs/xrpl?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume');
+    if (v != null) { $('inXrpldex').value = v; notes.push('✓ Native DEX'); } else notes.push('Native DEX empty');
+  } catch (e) { notes.push('Native DEX blocked'); }
 
   // Update HUD
   const price = n($('inPrice').value), delta = n($('inDelta').value), vol = n($('inVolume').value);
@@ -3723,6 +3736,7 @@ function gdeltUrl(q, s) {
 //   - proxy.killcors.com      — no rate limits, no account
 const CORS_PROXIES = [
   { name: 'codetabs',  build: u => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(u) },
+  { name: 'allorigins', build: u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u) },
   { name: 'cors.lol',  build: u => 'https://api.cors.lol/?url=' + encodeURIComponent(u) },
   { name: 'killcors',  build: u => 'https://proxy.killcors.com/?url=' + encodeURIComponent(u) },
   // v3.3: thingproxy.freeboard.io — 10 req/sec, 100KB cap. Cheap fallback when others are empty.
@@ -4058,7 +4072,9 @@ async function fetchNewsIntel(forceRefresh) {
   if (!forceRefresh) {
     try {
       const c = JSON.parse(localStorage.getItem(NEWS_CACHE_STORE) || 'null');
-      if (c && (Date.now() - new Date(c.generated_at).getTime()) < cacheMin * 60000) {
+      // v3.32b: only serve cache that actually has headlines — never re-serve an
+      // empty/degraded snapshot (that made one failed fetch stick for 30 min).
+      if (c && c.top_headlines && c.top_headlines.length && (Date.now() - new Date(c.generated_at).getTime()) < cacheMin * 60000) {
         state.newsIntel = c;
         if ($('newsIntelBox')) $('newsIntelBox').textContent = JSON.stringify(c, null, 2);
         return c;
@@ -4117,7 +4133,9 @@ async function fetchNewsIntel(forceRefresh) {
   if ($('newsDebugBox')) $('newsDebugBox').textContent = dbgLines.join('\n');
 
   state.newsIntel = intel;
-  try { localStorage.setItem(NEWS_CACHE_STORE, JSON.stringify(intel)); } catch {}
+  // v3.32b: only cache real results. Caching a zero-headline/degraded snapshot
+  // used to poison the next 30 min of scans ("degrading every time").
+  try { if (intel.top_headlines && intel.top_headlines.length) localStorage.setItem(NEWS_CACHE_STORE, JSON.stringify(intel)); } catch {}
   if ($('newsIntelBox')) $('newsIntelBox').textContent = JSON.stringify(intel, null, 2);
 
   const cnt = intel.top_headlines.length;
@@ -5373,11 +5391,16 @@ function recordNewsDoctorAttempt(providerName, success) {
     rec.consecutive_fail_count = 0;
     rec.last_success_at = now;
     rec.disabled_for_session = false;
+    rec.disabled_until = 0;
   } else {
     rec.consecutive_fail_count++;
     rec.last_failure_at = now;
+    // v3.32b: was a PERMANENT whole-session disable after 3 fails, which benched
+    // healthy providers for the rest of the session after one transient relay
+    // hiccup. Now a short cooldown → the provider is retried on the next scan
+    // after the window, so news recovers on its own instead of degrading.
     if (rec.consecutive_fail_count >= 3) {
-      rec.disabled_for_session = true;
+      rec.disabled_until = Date.now() + 4 * 60000; // 4-minute cooldown, then retry
     }
   }
   saveNewsDoctorSession(session);
@@ -5386,7 +5409,10 @@ function recordNewsDoctorAttempt(providerName, success) {
 
 function isProviderSessionDisabled(providerName) {
   const session = getNewsDoctorSession();
-  return !!(session[providerName] && session[providerName].disabled_for_session);
+  const rec = session[providerName];
+  if (!rec) return false;
+  if (rec.disabled_for_session) return true;               // legacy permanent flag (no longer set)
+  return !!(rec.disabled_until && Date.now() < rec.disabled_until); // time-boxed cooldown
 }
 
 // Expose v3.26 module
