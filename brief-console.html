@@ -33408,8 +33408,13 @@ function assertFallbackContentRequirements(report){
 }
 
 function auditPublicReport(reportText, violations, interpretations, isFallback){
-  var failures=[];
-  function run(fn){ var r=fn; if(r) failures.push(r); }
+  var failures=[], advisories=[];
+  // v3.34: COSMETIC assertions are advisory — they get logged but do NOT nuke the
+  // whole report into the fallback. Real news headlines kept tripping sentence-length
+  // and readability rules and blocking an otherwise-good report. Genuine leaks
+  // (telemetry, JSON, helpers, structure, section order) still hard-block.
+  var ADVISORY={ assertNarrativeFlow:true, assertHumanReadable:true };
+  function run(r){ if(!r) return; if(ADVISORY[r.assertion]) advisories.push(r); else failures.push(r); }
 
   run(assertNoTelemetryLeak(reportText, violations));
   run(assertSectionOrderLocked(reportText));
@@ -33427,7 +33432,7 @@ function auditPublicReport(reportText, violations, interpretations, isFallback){
 
   // Filter nulls
   failures=failures.filter(Boolean);
-  return{pass:failures.length===0, failures:failures};
+  return{pass:failures.length===0, failures:failures, advisories:advisories};
 }
 
 /* ═════════════════════════════════════════════════════════════════════
@@ -33513,6 +33518,9 @@ function renderPublicReport(pack){
     if(audit.pass){
       _setFallbackBanner(0);
       try{ window._SW_REPORT_MODE='CLEAN report (V1 pipeline)'; }catch(_){}
+      if(audit.advisories && audit.advisories.length){
+        try{ _logToDevPanel('Advisories (non-blocking): '+audit.advisories.map(function(a){return a.assertion;}).join(', ')); }catch(_){}
+      }
       try{ console.log('[PIPELINE-V1] Report passed audit. '+
                        sanitized.text.length+' chars.'); }catch(_){}
       return sanitized.text;
