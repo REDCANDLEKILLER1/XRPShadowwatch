@@ -16224,8 +16224,14 @@ function _buildOpeningParagraph(i, lead) {
       return `${fmt(i.shadowVol, 0)} XRP moved through watched-wallet shadow channels overnight — a volume that doesn't show in a standard chart view. Price held ${i.tape} at ${priceStr}. The ledger was not idle, even when the tape appeared quiet.`;
     case 'PATTERN':
       return `The route appeared again. Pattern memory across ${i.patMem.snapCount} scans flagged a repeated behavior that has now cleared the confidence threshold. Price was on ${i.tape} at ${priceStr}. Forensic significance comes from repetition, not from any single data point.`;
-    case 'SOURCE_DEGRADED':
-      return `Today's ledger scan ran with degraded news coverage — ${i.healthResult.failed.slice(0, 3).join(', ')} failed during the run. The on-chain evidence remains primary. Price was on ${i.tape} at ${priceStr}. What follows is ledger-first analysis; news context is partial.`;
+    case 'SOURCE_DEGRADED': {
+      // v3.32d: drop junk tokens like "all" from the failed list, and read like a person.
+      const failedList = (i.healthResult.failed || [])
+        .filter(f => f && !/^all(-failed)?$/i.test(f))
+        .slice(0, 3).join(', ');
+      const failedPhrase = failedList ? failedList + ' dropped out' : 'the news wires went quiet';
+      return `The wires were spotty this morning — ${failedPhrase} mid-scan, so today's story leans on the ledger. Price sat ${deltaStr ? '(' + deltaStr + ') ' : ''}on ${i.tape} at ${priceStr}, and the on-chain evidence carries the rest.`;
+    }
     default: {
       const flowVerb = i.netDelta >= 0
         ? 'took in ' + flowAmt + ' XRP net'
@@ -16239,8 +16245,13 @@ function _buildOpeningParagraph(i, lead) {
 function buildLedgerNarrativeParagraph(pack) {
   const i = getMorningStoryNarrativeInputs(pack);
   const lines = [];
-  lines.push('Net flow across ' + n(pack.wallets_checked || 0) + ' watched wallets: ' +
-    (i.netDelta >= 0 ? '+' : '') + fmt(i.netDelta, 0) + ' XRP.');
+  const _wc = n(pack.wallets_checked || 0);
+  if (Math.abs(i.netDelta) < 1) {
+    lines.push('Across ' + _wc + ' watched wallets the net position came out flat this window — money changed hands, but the board ended roughly where it started.');
+  } else {
+    lines.push('Net flow across ' + _wc + ' watched wallets: ' +
+      (i.netDelta >= 0 ? '+' : '') + fmt(i.netDelta, 0) + ' XRP.');
+  }
   if (i.shadowVol > 0) {
     lines.push('Shadow volume: ' + fmt(i.shadowVol, 0) + ' XRP across ' + i.largeTxs.length + ' flagged transfer' + (i.largeTxs.length === 1 ? '' : 's') + '.');
   }
@@ -33766,6 +33777,81 @@ html, body {
   }
 
   window.SW_PUBLIC_SHELL = { version: SHELL_V, unlocked: function(){ return _devUnlocked; } };
+})();
+</script>
+
+<!-- v3.32d: always-accessible DEBUG LOG — surfaces the previously dev-only #errorLog + scan feed + news status -->
+<style>
+  #swDebugFab{position:fixed;right:12px;bottom:12px;z-index:99998;font:600 11px/1 'Share Tech Mono',monospace;
+    background:rgba(0,10,0,0.92);color:#00ff00;border:1px solid rgba(0,255,0,0.5);border-radius:20px;
+    padding:8px 12px;cursor:pointer;box-shadow:0 0 14px rgba(0,255,0,0.25);letter-spacing:1px;}
+  #swDebugFab:hover{background:#00ff00;color:#000;}
+  #swDebugOverlay{position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.92);display:none;
+    flex-direction:column;padding:14px;box-sizing:border-box;font-family:'Share Tech Mono',monospace;}
+  #swDebugOverlay.open{display:flex;}
+  #swDebugOverlay .dbg-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap;}
+  #swDebugOverlay .dbg-title{color:#00ff00;font-size:13px;letter-spacing:2px;}
+  #swDebugOverlay .dbg-btns{display:flex;gap:6px;flex-wrap:wrap;}
+  #swDebugOverlay button{font:600 10px 'Share Tech Mono',monospace;background:rgba(0,18,0,0.9);
+    color:#00ff00;border:1px solid rgba(0,255,0,0.45);border-radius:4px;padding:6px 10px;cursor:pointer;letter-spacing:1px;}
+  #swDebugOverlay button:hover{background:#00ff00;color:#000;}
+  #swDebugOverlay .dbg-sec{color:#88aaff;font-size:10px;letter-spacing:1px;margin:8px 0 4px;}
+  #swDebugOverlay pre{flex:0 0 auto;max-height:38vh;overflow:auto;background:rgba(0,8,0,0.85);
+    border:1px solid rgba(0,255,0,0.2);border-radius:6px;padding:10px;color:#9fdf9f;font-size:11px;
+    white-space:pre-wrap;word-break:break-word;margin:0;}
+</style>
+<div id="swDebugFab" title="Debug log">🐞 DEBUG</div>
+<div id="swDebugOverlay">
+  <div class="dbg-head">
+    <span class="dbg-title">🐞 DEBUG LOG</span>
+    <div class="dbg-btns">
+      <button id="swDbgRefresh">REFRESH</button>
+      <button id="swDbgCopy">COPY</button>
+      <button id="swDbgDownload">⬇ TXT</button>
+      <button id="swDbgClose">✕ CLOSE</button>
+    </div>
+  </div>
+  <div class="dbg-sec">ERROR LOG</div><pre id="swDbgErr">—</pre>
+  <div class="dbg-sec">SCAN FEED</div><pre id="swDbgFeed">—</pre>
+  <div class="dbg-sec">NEWS SOURCE STATUS</div><pre id="swDbgNews">—</pre>
+</div>
+<script>
+(function(){
+  function $one(id){ return document.getElementById(id); }
+  function txtOf(id){ var el=$one(id); return el ? (el.textContent||'').trim() : ''; }
+  function newsBlock(){
+    var out='';
+    try {
+      var badge=txtOf('hudNewsBadge'), cnt=txtOf('hudNewsCount');
+      out='headlines: '+(cnt||'0')+'  ·  badge: '+(badge||'—')+'\n';
+      var ni=(window.state&&window.state.newsIntel)||null;
+      if(ni&&ni.source_status) out+=JSON.stringify(ni.source_status,null,2);
+    } catch(e){}
+    return out||'No news status yet.';
+  }
+  function fill(){
+    if($one('swDbgErr'))  $one('swDbgErr').textContent  = txtOf('errorLog')||'No errors logged.';
+    if($one('swDbgFeed')) $one('swDbgFeed').textContent = txtOf('statusFeed')||'No scan feed yet.';
+    if($one('swDbgNews')) $one('swDbgNews').textContent = newsBlock();
+  }
+  function combined(){
+    return 'SHADOW WATCH DEBUG LOG\n\n[ERROR LOG]\n'+(txtOf('errorLog')||'—')+
+           '\n\n[SCAN FEED]\n'+(txtOf('statusFeed')||'—')+
+           '\n\n[NEWS]\n'+newsBlock();
+  }
+  document.addEventListener('click', function(e){
+    var t=e.target; if(!t||!t.id) return;
+    if(t.id==='swDebugFab'){ fill(); var o=$one('swDebugOverlay'); if(o)o.classList.add('open'); }
+    else if(t.id==='swDbgClose'){ var o=$one('swDebugOverlay'); if(o)o.classList.remove('open'); }
+    else if(t.id==='swDbgRefresh'){ fill(); }
+    else if(t.id==='swDbgCopy'){ try{ if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(combined()); }catch(_){}}
+    else if(t.id==='swDbgDownload'){
+      try{
+        if(typeof downloadShadowWatchDebugFile==='function') downloadShadowWatchDebugFile();
+        else { var b=new Blob([combined()],{type:'text/plain'}), a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='shadowwatch_debug.txt'; a.click(); URL.revokeObjectURL(a.href); }
+      }catch(_){}
+    }
+  });
 })();
 </script>
 
