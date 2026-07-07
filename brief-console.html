@@ -3651,9 +3651,9 @@ async function market() {
   setText('hudPrice', price ? '$' + price.toFixed(4) : '—');
   setText('hudPriceDelta', delta ? pct(delta) : '—');
   setText('hudVol', vol ? usd(vol) : '—');
-  setText('hudDexNative', usd(n($('inXrpldex').value)));
-  setText('hudDexEvm', usd(n($('inDexvol').value)));
-  setText('hudEvmTvl', usd(n($('inTvl').value)));
+  setText('hudDexNative', n($('inXrpldex').value) > 0 ? usd(n($('inXrpldex').value)) : '—');
+  setText('hudDexEvm',    n($('inDexvol').value)  > 0 ? usd(n($('inDexvol').value))  : '—');
+  setText('hudEvmTvl',    n($('inTvl').value)     > 0 ? usd(n($('inTvl').value))     : '—');
   return notes;
 }
 
@@ -3750,12 +3750,15 @@ function gdeltUrl(q, s) {
 //   - cors.lol                — free, no key, no signup
 //   - proxy.killcors.com      — no rate limits, no account
 const CORS_PROXIES = [
+  // v3.34: our OWN same-origin serverless proxy (/api/proxy) — no CORS, no flaky
+  // third parties, server-side fetch. Tried first; the free relays are fallback.
+  { name: 'self',      build: u => '/api/proxy?url=' + encodeURIComponent(u) },
   { name: 'codetabs',  build: u => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(u) },
   { name: 'allorigins', build: u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u) },
   { name: 'cors.lol',  build: u => 'https://api.cors.lol/?url=' + encodeURIComponent(u) },
   { name: 'killcors',  build: u => 'https://proxy.killcors.com/?url=' + encodeURIComponent(u) }
-  // v3.34: dropped thingproxy.freeboard.io — it fails every request now and just
-  // dragged the news fetch into the 18s ceiling.
+  // v3.34: dropped thingproxy.freeboard.io — it failed every request and dragged
+  // the news fetch into the 18s ceiling.
 ];
 
 // Try each proxy in order until one returns a usable response.
@@ -5012,6 +5015,12 @@ function rankNewsItems(items) {
     } else if (P4.test(haystack)) {
       priority = 4;
     }
+    // v3.34: keep strictly XRP-relevant items on top of SOURCES. Exchange- or
+    // other-coin-only headlines (Kraken EMI, BNB, Germany-BTC…) get demoted so
+    // the footer isn't padded with news that isn't about XRP.
+    try {
+      if (priority < 3 && typeof XRP_RELEVANCE_RX !== 'undefined' && !XRP_RELEVANCE_RX.test(haystack)) priority = 3;
+    } catch (_) {}
     // Stable sort: preserve original order within a priority tier
     return { ...item, _priority: priority, _origIdx: idx, _is_price_hype: isPriceHype };
   }).sort((a, b) => a._priority - b._priority || a._origIdx - b._origIdx);
@@ -33527,15 +33536,17 @@ function _installHook(){
   if(window.buildMorningStoryText._pipelineV1Hooked) return true;
   var legacy=window.buildMorningStoryText;
   var _hz=function(t){ return (typeof window._humanizePublicText==='function') ? window._humanizePublicText(t) : t; };
+  var _mode=function(m){ try{ window._SW_REPORT_MODE=m; }catch(_){} };
   var hooked=function(pack){
-    if(!_isEnabled()) return _hz(legacy(pack));
+    if(!_isEnabled()){ _mode('legacy (pipeline OFF)'); return _hz(legacy(pack)); }
     // Store legacy output for prayer/scripture extraction
     var legacyOut=_safe(function(){return legacy(pack);},'');
     window._pipelineLegacyText=legacyOut;
     var v1=renderPublicReport(pack||window._lastPack);
     // v3.34: humanize the winning report (title-case the mandated ALL-CAPS
     // headers for display — the audit ran on the raw version already).
-    if(v1&&v1.length>100) return _hz(v1);
+    if(v1&&v1.length>100){ _mode('CLEAN report (V1 pipeline)'); return _hz(v1); }
+    _mode('legacy fallback (V1 audit failed — see error log)');
     return _hz(legacyOut);
   };
   hooked._pipelineV1Hooked=true;
@@ -33947,12 +33958,26 @@ html, body {
   </div>
   <div class="dbg-sec">ERROR LOG</div><pre id="swDbgErr">—</pre>
   <div class="dbg-sec">SCAN FEED</div><pre id="swDbgFeed">—</pre>
+  <div class="dbg-sec">REPORT &amp; MARKET</div><pre id="swDbgMkt">—</pre>
   <div class="dbg-sec">NEWS SOURCE STATUS</div><pre id="swDbgNews">—</pre>
 </div>
 <script>
 (function(){
   function $one(id){ return document.getElementById(id); }
   function txtOf(id){ var el=$one(id); return el ? (el.textContent||'').trim() : ''; }
+  function valOf(id){ var el=$one(id); return el ? String(el.value!=null&&el.value!=='' ? el.value : (el.textContent||'')).trim() : ''; }
+  function marketBlock(){
+    var out='';
+    try {
+      out+='report mode: '+(window._SW_REPORT_MODE||'— (run a scan)')+'\n';
+      out+='wallets scanned: '+(txtOf('hudChecked')||'—')+' / '+(txtOf('hudTotal')||'—')+
+           '   risk: '+(txtOf('hudRiskBadge')||'—')+'\n';
+      out+='price: '+(valOf('inPrice')||'—')+'   24h vol: '+(valOf('inVolume')||'—')+'\n';
+      out+='native DEX: '+(valOf('inXrpldex')||'—')+'   EVM DEX: '+(valOf('inDexvol')||'—')+
+           '   EVM TVL: '+(valOf('inTvl')||'—');
+    } catch(e){}
+    return out||'No scan yet.';
+  }
   function newsBlock(){
     var out='';
     try {
@@ -33966,10 +33991,12 @@ html, body {
   function fill(){
     if($one('swDbgErr'))  $one('swDbgErr').textContent  = txtOf('errorLog')||'No errors logged.';
     if($one('swDbgFeed')) $one('swDbgFeed').textContent = txtOf('statusFeed')||'No scan feed yet.';
+    if($one('swDbgMkt'))  $one('swDbgMkt').textContent  = marketBlock();
     if($one('swDbgNews')) $one('swDbgNews').textContent = newsBlock();
   }
   function combined(){
-    return 'SHADOW WATCH DEBUG LOG\n\n[ERROR LOG]\n'+(txtOf('errorLog')||'—')+
+    return 'SHADOW WATCH DEBUG LOG\n\n[REPORT & MARKET]\n'+marketBlock()+
+           '\n\n[ERROR LOG]\n'+(txtOf('errorLog')||'—')+
            '\n\n[SCAN FEED]\n'+(txtOf('statusFeed')||'—')+
            '\n\n[NEWS]\n'+newsBlock();
   }
