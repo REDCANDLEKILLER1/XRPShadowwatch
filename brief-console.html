@@ -33059,11 +33059,13 @@ function assemblePublicReport(pack){
     _safe(function(){return summarizeAbsorberActivity(pack);}, _blank())
   ];
 
-  var BANNER='\uD83E\uDE78 \u211C\u1D07\u1D05\u1D04\u1D00\u1D21\u1D05\u029C\u1D0F\u029C\u1D1B\u1D07\u0280 \uD83E\uDE78\n'+
-             '\uFF33\uFF28\uFF21\uFF24\uFF2F\uFF37\u3000\uFF37\uFF21\uFF34\uFF23\uFF28\n'+
-             '\u2615 COFFEE & CRYPTO with \uD835\uDCC2\uD835\uDD3B\uD835\uDD46\uFF2E\uD835\uDCC2 \u2022 '+
-             '\uD835\uDD43 XRP\uD835\uDD44\u1D00\uD835\uDD2C \uD835\uDD43\u{1F1BD}XCELLENT!\n'+
-             _today();
+  // v16.8: use the canonical branded header (RedCandleKiller / Lady K's / COFFEE
+  // & CRYPTO with STONE) instead of the old hand-typed banner whose Unicode was
+  // garbled ("\u211C\u1D07\u1D05\u1D04\u1D00\u1D21\u1D05\u029C\u1D0F\u029C\u1D1B\u1D07\u0280", "with \uD835\uDCC2\uD835\uDD3B\uD835\uDD46\uFF2E\uD835\uDCC2").
+  var BANNER=((typeof buildBrandedHeader==='function')
+                ? buildBrandedHeader()
+                : '\uD83E\uDE78 \u211C\u1D07\u1D05\u1D04\u1D00\u1D0D\u1D05\u029C\u1D0F\u029C\u1D1B\u1D07\u0280 \uD83E\uDE78\n\uFF33\uFF28\uFF21\uFF24\uFF2F\uFF37 \uFF37\uFF21\uFF34\uFF23\uFF28')
+             + '\n' + _today();
 
   var exec  = _buildExecutiveSummary(interps);
   var wmm   = _buildWhatMatteredMost(interps);

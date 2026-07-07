@@ -7,6 +7,20 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <!-- v16.8: critical splash CSS inlined so the boot screen paints correctly on
+         first frame. Without this, the external stylesheet loads a beat late and
+         the activate-video renders at its native (giant) size for a split second. -->
+    <style>
+      #splash-screen{position:fixed;inset:0;z-index:9999;background:#000;display:flex;flex-direction:column;justify-content:center;align-items:center;}
+      #boot-container{display:flex;flex-direction:column;gap:20px;align-items:center;}
+      #boot-greeter{width:min(380px,90vw);margin:0 auto;}
+      #thumb-scan{display:flex;flex-direction:column;align-items:center;gap:14px;cursor:pointer;padding:4px;}
+      .ts-ring{position:relative;width:140px;height:140px;display:flex;align-items:center;justify-content:center;}
+      .ts-print{position:relative;width:120px;height:120px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle,rgba(0,42,0,0.55) 0%,rgba(0,12,0,0.88) 100%);border:1px solid rgba(0,255,0,0.28);}
+      .ts-print .ts-vid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;pointer-events:none;background:#000;}
+      .ts-print svg{width:60px;height:60px;}
+      .ts-label{font-family:'Orbitron',sans-serif;font-size:13px;font-weight:700;letter-spacing:2px;color:#00ff00;}
+    </style>
     <link rel="stylesheet" href="src/css/styles.css">
     <!-- PWA / installable app -->
     <link rel="manifest" href="manifest.webmanifest">
