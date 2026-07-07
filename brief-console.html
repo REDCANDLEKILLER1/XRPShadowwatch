@@ -13698,7 +13698,10 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     var HEADERS={ 'MARKET SNAPSHOT':'Market Snapshot','LEDGER STORY':'Ledger Story',
       'ESCROW WATCH':'Escrow Watch','PATTERN MEMORY':'Pattern Memory','NEWS + MACRO':'News & Macro',
       'REAL NEWS':'Real News','DISCOVERY':'Discovery','WHAT CHANGED':'What Changed',
-      'WATCH NEXT':'Watch Next','VERDICT':'Verdict','CONFIDENCE FRAME':'Confidence','SOURCES':'Sources' };
+      'WATCH NEXT':'Watch Next','VERDICT':'Verdict','CONFIDENCE FRAME':'Confidence','SOURCES':'Sources',
+      // V1 pipeline section headers
+      'EXECUTIVE SUMMARY':'Executive Summary','WHAT MATTERED MOST':'What Mattered Most',
+      'EVIDENCE':'Evidence','WHAT TO WATCH NEXT':'What To Watch Next' };
     // Title-case shouty section headers (they were ALL-CAPS anchors for internal wraps).
     t = t.replace(/^[A-Z][A-Z +&]{2,}$/gm, function(line){ return HEADERS[line.trim()] || line; });
     // Humanize internal classification tokens.
@@ -13718,10 +13721,10 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     t = t.replace(/\bNaN\b/g,'—');
     return t;
   };
-  // v3.33: the V1 audit pipeline never passed its OWN audit (its headers exceed
-  // the ALL-CAPS limit), so it always fell back to legacy while spamming the dev
-  // log with "Halting render". Disable it — the humanized legacy report is final.
-  try { if (window.SW_PIPELINE_V1_KILL === undefined) window.SW_PIPELINE_V1_KILL = true; } catch(_) {}
+  // v3.34: the V1 audit pipeline is now fixed (audit no longer self-contradicts,
+  // NaN source patched), so let it run and render the intended clean report.
+  // It still falls back to the humanized legacy report if V1 ever errors.
+  try { if (window.SW_PIPELINE_V1_KILL === undefined) window.SW_PIPELINE_V1_KILL = false; } catch(_) {}
 
   // ─── BOOT ─────────────────────────────────────────────────────────
   function _bootV32() {
@@ -32554,8 +32557,8 @@ function summarizeDominanceShift(pack){
       parts.push('Watched wallets '+dir+' '+_xrpFmt(Math.abs(d))+' XRP net across this scan.');
       weight=0.6;
     }
-    if(dom&&dom.top10_pct!=null){
-      parts.push('Top-tier wallets hold an estimated '+(+dom.top10_pct).toFixed(1)+'% of tracked supply.');
+    if(dom&&_num(dom.top10_pct)>0){
+      parts.push('Top-tier wallets hold an estimated '+_num(dom.top10_pct).toFixed(1)+'% of tracked supply.');
       weight=Math.max(weight,0.55);
     }
     if(cluster&&cluster.coordinated_count>0){
@@ -33155,7 +33158,11 @@ function assertHumanReadable(report){
   // More than 5 all-caps multi-letter tokens in report body
   var bodyEnd=report.indexOf('\uD83D\uDE4F THE DAILY PRAYER');
   var body=bodyEnd>-1?report.slice(0,bodyEnd):report;
-  var capsMatches=(body.match(/\b[A-Z]{3,}\b/g)||[]).length;
+  // v3.34: the mandated section headers are REQUIRED in ALL-CAPS by
+  // assertSectionOrderLocked, so counting them made this assert impossible.
+  // Exclude those header words and brand/ticker tokens from the count.
+  var _CAPS_WL=/^(EXECUTIVE|SUMMARY|WHAT|MATTERED|MOST|EVIDENCE|WATCH|NEXT|VERDICT|SOURCES|XRP|COFFEE|CRYPTO|XCELLENT|GPT|RLUSD|USD|TVL|DEX|AMM|NFT)$/;
+  var capsMatches=(body.match(/\b[A-Z]{3,}\b/g)||[]).filter(function(t){return !_CAPS_WL.test(t);}).length;
   if(capsMatches>5)
     return _fail('assertHumanReadable',
       capsMatches+' ALL-CAPS tokens found in body (limit 5).',
@@ -33396,8 +33403,8 @@ function renderPublicReport(pack){
     // Verify KGMT itself
     var kgmtAudit=auditPublicReport(KGMT_TEXT,[],[],true);
     if(!kgmtAudit.pass){
-      _logToDevPanel('CRITICAL: KGMT failed assertFallbackContentRequirements. Halting render.');
-      return 'Report unavailable. See dev panel.';
+      _logToDevPanel('KGMT self-audit failed ('+(kgmtAudit.failures||[]).map(function(f){return f.assertion;}).join(', ')+') — returning legacy.');
+      return null; // let the routing hook fall back to the (humanized) legacy report
     }
     return KGMT_TEXT;
 
@@ -33419,14 +33426,17 @@ function _installHook(){
   if(typeof window.buildMorningStoryText!=='function') return false;
   if(window.buildMorningStoryText._pipelineV1Hooked) return true;
   var legacy=window.buildMorningStoryText;
+  var _hz=function(t){ return (typeof window._humanizePublicText==='function') ? window._humanizePublicText(t) : t; };
   var hooked=function(pack){
-    if(!_isEnabled()) return legacy(pack);
+    if(!_isEnabled()) return _hz(legacy(pack));
     // Store legacy output for prayer/scripture extraction
     var legacyOut=_safe(function(){return legacy(pack);},'');
     window._pipelineLegacyText=legacyOut;
     var v1=renderPublicReport(pack||window._lastPack);
-    if(v1&&v1.length>100) return v1;
-    return legacyOut;
+    // v3.34: humanize the winning report (title-case the mandated ALL-CAPS
+    // headers for display — the audit ran on the raw version already).
+    if(v1&&v1.length>100) return _hz(v1);
+    return _hz(legacyOut);
   };
   hooked._pipelineV1Hooked=true;
   hooked._legacyChain=legacy;
