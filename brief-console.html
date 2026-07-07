@@ -13798,6 +13798,9 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       function(_m,a,b){ var tc=function(s){ return s.split(/\s+/).map(function(w){ return w.charAt(0)+w.slice(1).toLowerCase(); }).join(' '); }; return tc(a)+' / '+tc(b); });
     // Safety net: never leak a stray NaN into the public report.
     t = t.replace(/\bNaN\b/g,'—');
+    // v3.34: collapse a duplicated trailing Sources block (some paths append the
+    // sources on top of a report that already carries them).
+    t = t.replace(/([ \t]*(?:Sources|SOURCES)\n[─-]{3,}\n[\s\S]+?)(?:\n{1,3}\1)+(\s*)$/,'$1$2');
     return t;
   };
   // v3.34: the V1 audit pipeline is now fixed (audit no longer self-contradicts,
