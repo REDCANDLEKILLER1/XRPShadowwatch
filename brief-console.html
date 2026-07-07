@@ -12699,22 +12699,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       }
       // Same-hour cluster
       lines.push('\u2022 Confirm repeated same-hour clusters before promoting any wallet to permanent watch.');
-      // Confidence frame (always present)
-      lines.push('');
-      lines.push('CONFIDENCE FRAME');
-      var behavioral = 'low';
-      try {
-        var rs = (pack.risk_score && pack.risk_score.score) || 0;
-        if (rs >= 75) behavioral = 'high';
-        else if (rs >= 50) behavioral = 'medium';
-      } catch (_) {}
-      var action;
-      if (behavioral === 'high')      action = 'review and consider monitor';
-      else if (behavioral === 'medium') action = 'monitor';
-      else                              action = 'review only';
-      lines.push('\u2022 Identity proof: no.');
-      lines.push('\u2022 Behavioral confidence: ' + behavioral + '.');
-      lines.push('\u2022 Action: ' + action + '.');
+      // v3.32e: CONFIDENCE FRAME folded into the VERDICT (one section, not three).
       return lines.join('\n');
     } catch (_) { return ''; }
   }
@@ -12753,9 +12738,9 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
           if (changedBlock) insert += '\n\n' + changedBlock;
           if (watchBlock)   insert += '\n\n' + watchBlock;
           if (insert) {
-            if (/\nVERDICT\n/.test(text)) {
-              text = text.replace(/\nVERDICT\n/, insert + '\n\nVERDICT\n');
-            } else if (/⚠️ This is not financial advice\./.test(text)) {
+            // v3.32e: place WHAT CHANGED / WATCH NEXT AFTER the verdict (before the
+            // sign-off) so the bottom-line verdict lands first, then the forward look.
+            if (/⚠️ This is not financial advice\./.test(text)) {
               text = text.replace(/⚠️ This is not financial advice\./,
                                   insert.replace(/^\n+/, '') + '\n\n⚠️ This is not financial advice.');
             } else {
@@ -16201,7 +16186,9 @@ function chooseMorningStoryLead(pack) {
   if (i.largeTxs.length >= 5) return 'LARGE_FLOW';
   if (i.shadowVol > 10_000_000) return 'SHADOW_VOLUME';
   if (i.patMem.snapCount >= 5 && (i.patMem.lines || []).some(l => /repeated.*×[4-9]|×\d{2,}/i.test(l))) return 'PATTERN';
-  if (i.healthResult.degraded) return 'SOURCE_DEGRADED';
+  // v3.32e: only lead with "wires went quiet" when there's genuinely NO news to show.
+  // Previously fired on any provider failure, contradicting a report that still had headlines.
+  if (i.healthResult.degraded && !(i.topItems && i.topItems.length)) return 'SOURCE_DEGRADED';
   return 'STANDARD';
 }
 
@@ -16387,6 +16374,11 @@ function buildMorningVerdictParagraph(pack) {
   // repeating the same numbers three and four times.
   if (netDelta > 500_000) verdict += ' The net inflow above reads as accumulation or inward routing.';
   else if (netDelta < -500_000) verdict += ' The net outflow above reads as distribution or outward routing.';
+  // v3.32e: CONFIDENCE FRAME folded in here (was its own section) — one clear read.
+  const behavioral = score >= 75 ? 'high' : score >= 50 ? 'medium' : 'low';
+  const confAction = behavioral === 'high' ? 'review and consider monitoring'
+                   : behavioral === 'medium' ? 'monitor' : 'review only';
+  verdict += ' No identity proof — behavioral confidence is ' + behavioral + '; recommended action: ' + confAction + '.';
   verdict += '\nLedger evidence is the primary record. News provides context, not causation.';
   return verdict;
 }
@@ -27906,13 +27898,11 @@ function shadowWatchVoiceGaugeSmartReportSmokeTest() {
   // WATCH NEXT block builds with confidence frame
   const watchBlock = window.buildWatchNextBlock(weakPack);
   check('WATCH NEXT block contains header', /^WATCH NEXT/.test(watchBlock));
-  check('WATCH NEXT block contains CONFIDENCE FRAME', /CONFIDENCE FRAME/.test(watchBlock));
-  check('WATCH NEXT block contains "Identity proof: no"',
-    /Identity proof:\s*no/i.test(watchBlock));
-  check('WATCH NEXT block contains behavioral confidence label',
-    /Behavioral confidence:\s*(low|medium|high)/i.test(watchBlock));
-  check('WATCH NEXT block contains action label',
-    /Action:\s*(review|monitor|review and consider monitor)/i.test(watchBlock));
+  // v3.32e: CONFIDENCE FRAME moved out of WATCH NEXT and into the VERDICT.
+  check('WATCH NEXT block no longer carries CONFIDENCE FRAME', !/CONFIDENCE FRAME/.test(watchBlock));
+  check('Verdict now carries the confidence read',
+    /behavioral confidence is\s*(low|medium|high)/i.test(
+      (typeof buildMorningVerdictParagraph === 'function' ? buildMorningVerdictParagraph(weakPack) : '')));
   check('WATCH NEXT block mentions unknown receivers',
     /Rescan.*unknown/i.test(watchBlock));
   check('WATCH NEXT block mentions exchange-side reversal',
