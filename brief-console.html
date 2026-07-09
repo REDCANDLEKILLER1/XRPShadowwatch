@@ -14350,29 +14350,25 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     // Override copy: NEVER include sources in copy by default
     var _origCopy = MRF.copy.bind(MRF);
     MRF.copy = function() {
+      // v16.8: robust copy. Pull from the sealed report (with state.morningStoryReport
+      // as a fallback), and ALWAYS route through copySafe — which falls back to a
+      // textarea+execCommand copy if the async clipboard API is blocked. Previously
+      // a blocked clipboard write failed silently with no fallback ("won't copy").
+      var txt = MRF._copyLastReport ||
+                (typeof state !== 'undefined' && state.morningStoryReport) || '';
       try {
-        var state = MRF._state || {};
-        // Read the internal state via direct getter calls (lastReport closure
-        // is private; we mirror it via show() which we re-wire below)
-        var txt = MRF._copyLastReport || '';
-        if (!txt) {
-          // Fallback to original behavior
-          return _origCopy();
-        }
-        // copy mode = 'none' → strip sources
+        if (typeof copySafe === 'function') { copySafe(txt, 'Morning Report'); return; }
         if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(txt).then(function() {
-            if (typeof window.speakXaiLine === 'function')
-              window.speakXaiLine('Morning Report copied. Sources omitted by default.', { priority: 'CMD' });
-          }, function() {});
-        }
-      } catch (_) { return _origCopy(); }
+          navigator.clipboard.writeText(txt).catch(function(){ if (typeof fallbackCopy==='function') fallbackCopy(txt,'Morning Report'); });
+        } else if (typeof fallbackCopy === 'function') { fallbackCopy(txt, 'Morning Report'); }
+      } catch (_) { try { if (typeof fallbackCopy==='function') fallbackCopy(txt,'Morning Report'); } catch(__){} }
     };
     // Override download: compact NEWS USED block only if governor cleared real news
     var _origDownload = MRF.download.bind(MRF);
     MRF.download = function() {
       try {
-        var txt = MRF._copyLastReport || '';
+        var txt = MRF._copyLastReport ||
+                  (typeof state !== 'undefined' && state.morningStoryReport) || '';
         var sources = MRF._copyLastSources || [];
         var pack    = MRF._copyLastPack   || (typeof state !== 'undefined' && state.pack) || {};
         if (!txt) return _origDownload();
@@ -14398,12 +14394,17 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
             });
           }
         }
+        var fname = 'MorningReport_' + new Date().toISOString().slice(0, 10) + '.txt';
         if (typeof downloadTextFile === 'function') {
-          var fname = 'MorningReport_' + new Date().toISOString().slice(0, 10) + '.txt';
           downloadTextFile(fname, body);
-          if (typeof window.speakXaiLine === 'function')
-            window.speakXaiLine('Morning Report downloaded.', { priority: 'CMD' });
+        } else {
+          var _b = new Blob([body], { type: 'text/plain;charset=utf-8' }), _a = document.createElement('a');
+          _a.href = URL.createObjectURL(_b); _a.download = fname;
+          document.body.appendChild(_a); _a.click(); _a.remove();
+          setTimeout(function(){ URL.revokeObjectURL(_a.href); }, 1000);
         }
+        if (typeof window.speakXaiLine === 'function')
+          window.speakXaiLine('Morning Report downloaded.', { priority: 'CMD' });
       } catch (_) { return _origDownload(); }
     };
     // Mirror lastReport/lastSources/lastPack into public slots so wrappers can read them
@@ -32918,15 +32919,20 @@ function _topInterp(interps){
 //   Exec  = the one-line topline (the single biggest fact)
 //   WMM   = why it mattered / the context BEYOND the headline move
 //   Evid  = the itemized receipts (built separately, below)
-function _buildExecutiveSummary(interps){
+function _buildExecutiveSummary(interps, pack){
   var best=_topInterp(interps);
   if(!best) return 'The watch ran today — the ledger was observed, and no single move stood out this scan.';
   var band=interps[4], absorber=interps[5];
   if(band&&band.has_signal&&band.narrative_weight>=0.70&&absorber&&absorber.has_signal){
     return _firstSentence(band.summary)+' '+_firstSentence(absorber.headline||absorber.summary);
   }
-  // One-line topline only — the full detail lives in Evidence.
-  return _firstSentence(best.summary || best.headline);
+  // Topline move + a one-line risk posture (the full detail lives in Evidence).
+  var lead=_firstSentence(best.summary || best.headline);
+  var score=_num(pack&&pack.risk_score&&pack.risk_score.score);
+  var posture=score>=75?' Risk is at the highest alert level today.':
+              score>=50?' Risk is elevated above baseline.':
+              score>=25?' Risk is moderate — nothing extreme.':'';
+  return lead+posture;
 }
 
 function _buildWhatMatteredMost(interps){
@@ -32950,13 +32956,23 @@ function _buildWhatMatteredMost(interps){
   return 'Watch maintained. The rails were observed this scan.';
 }
 
-function _buildEvidence(interps){
+function _buildEvidence(interps, pack){
   var moves=interps[0], domShift=interps[1], news=interps[2],
       recv=interps[3];
   var parts=[];
   if(moves&&moves.has_signal) parts.push(moves.summary);
   if(recv&&recv.has_signal)   parts.push(recv.summary);
   if(domShift&&domShift.has_signal) parts.push(domShift.summary);
+  // v16.8: surface newly-discovered related wallets so the report says more.
+  try {
+    var inbox=(typeof state!=='undefined' && _arr(state.discoveryInbox)) ||
+              _arr(pack&&pack.discovery_candidates);
+    var fresh=inbox.filter(function(c){ return c && c.review_status!=='REJECTED' && c.review_status!=='SUPPRESSED'; });
+    if(fresh.length){
+      parts.push(fresh.length+' new related wallet'+(fresh.length===1?'':'s')+
+        ' surfaced from these flows — parked for review, behavioral evidence only, nothing auto-trusted.');
+    }
+  } catch(_){}
   if(news&&news.has_signal)   parts.push('News context: '+news.summary);
   if(!parts.length) return 'Ledger observed. No single transfer was large enough to flag this scan. The watch continues.';
   return parts.join(' ');
@@ -32983,17 +32999,20 @@ function _buildWatchNext(interps){
 }
 
 function _buildVerdict(interps, pack){
-  var risk=_num(pack&&(pack.risk_score||pack.score));
-  var verbal=risk>=75?'highest forensic alert — sustained heavy activity detected':
+  // v16.8: risk_score is an OBJECT {score,label,drivers} — read .score (the object
+  // coerced to NaN, so every verdict wrongly read "quiet" even at BLACK/100).
+  var _rs=(pack&&pack.risk_score)||{};
+  var risk=_num(_rs.score!=null?_rs.score:(pack&&pack.score));
+  var _drivers=_arr(_rs.drivers).slice(0,3).filter(Boolean);
+  var verbal=risk>=75?'the highest forensic alert — sustained heavy activity across the board':
              risk>=50?'elevated — close monitoring warranted':
              risk>=25?'moderate — routine watch holds':
              'quiet — no standout moves this scan';
-  var dir='';
-  var delta=pack&&pack.balance_delta;
-  if(delta!=null&&_num(delta)>0)
-    dir=' Inflow-leaning. Watched wallets are net accumulating.';
-  else if(delta!=null&&_num(delta)<0)
-    dir=' Outflow-leaning. Watched wallets are net distributing.';
+  var dir=' ('+risk+'/100).';
+  if(_drivers.length) dir+=' Primary drivers: '+_drivers.join(', ')+'.';
+  var delta=_num(pack&&(pack.total_balance_delta_xrp!=null?pack.total_balance_delta_xrp:pack.balance_delta));
+  if(delta>500000) dir+=' Watched wallets are net accumulating — about '+_xrpFmt(delta)+' XRP moved inward.';
+  else if(delta<-500000) dir+=' Watched wallets are net distributing — about '+_xrpFmt(Math.abs(delta))+' XRP moved outward.';
   return 'Today\u2019s forensic read: '+verbal+'.'+dir+
          ' Not financial advice. XRP-only forensic watch.\n\n'+
          'I\u2019m XRPMan, and I tell on the banks.';
@@ -33067,9 +33086,9 @@ function assemblePublicReport(pack){
                 : '\uD83E\uDE78 \u211C\u1D07\u1D05\u1D04\u1D00\u1D0D\u1D05\u029C\u1D0F\u029C\u1D1B\u1D07\u0280 \uD83E\uDE78\n\uFF33\uFF28\uFF21\uFF24\uFF2F\uFF37 \uFF37\uFF21\uFF34\uFF23\uFF28')
              + '\n' + _today();
 
-  var exec  = _buildExecutiveSummary(interps);
+  var exec  = _buildExecutiveSummary(interps, pack);
   var wmm   = _buildWhatMatteredMost(interps);
-  var evid  = _buildEvidence(interps);
+  var evid  = _buildEvidence(interps, pack);
   var watch = _buildWatchNext(interps);
   var verd  = _buildVerdict(interps, pack);
 
