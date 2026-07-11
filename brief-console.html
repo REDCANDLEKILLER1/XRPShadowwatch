@@ -2865,7 +2865,11 @@ const WATCHLIST = [
   ['WHALE_RECV_rhuCPE', 'rhuCPEoLFYbpbwyhXioSumPKrnfCi3AXJZ', 'whale'],
   ['WHALE_RECV_r4Dymt', 'r4DymtkgUAh2wqRxVfdd3Xtswzim6eC6c5', 'whale'],
   ['LARGE_RECV_r9onsz', 'r9onszrkdqcSWeL4ti7sHJDGcrYmMyFHmM', 'whale'],
-  ['LARGE_RECV_r97Kea', 'r97KeayHuEsDwyU1yPBVtMLLoQr79QcRFe', 'whale']
+  ['LARGE_RECV_r97Kea', 'r97KeayHuEsDwyU1yPBVtMLLoQr79QcRFe', 'whale'],
+  // ── v16.9 discovery adds (2026-07-11): surfaced by the Auto Wallet Finder ──
+  ['WHALE_RECV_BINANCE', 'rPz2qA93PeRCyHyFCqyNggnyycJR1N4iNf', 'whale'],   // 19.9M XRP recv from BINANCE_HC · richlist #468 · score 190/200
+  ['WHALE_RECV_RIPPLE',  'raRVLN1i5QFF6w8cwV3RovtTkjFj3qyNRf', 'whale'],   // 79.8M XRP recv from RIPPLE_305M_G · richlist #164 · score 165/200
+  ['ROUTING_SPLITTER',   'rP4X2hTa7A7udDbE6wczXvPz7XZ63sKxv3', 'whale']    // forwarded 20M from RIPPLE_305M_G · next-hop splitter · score 125/200
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)
@@ -32929,7 +32933,13 @@ function _nvSeed(pack){
   return Math.abs(h);
 }
 function _nvPick(arr, seed, salt){ if(!arr||!arr.length) return ''; return arr[(seed+(salt||0))%arr.length]; }
-function _lc1(s){ s=String(s||''); return s?s.charAt(0).toLowerCase()+s.slice(1):s; }
+function _lc1(s){
+  s=String(s||''); if(!s) return s;
+  // Don't de-capitalize acronyms / brand names when the first word already
+  // carries a second capital (CLARITY, ETF, JPMorgan, XRP, SEC, DEX...).
+  if(/^[A-Z][A-Z0-9]/.test(s)) return s;
+  return s.charAt(0).toLowerCase()+s.slice(1);
+}
 // XRPMan's in-character asides — his ethos from the theme (receipts, tracing,
 // telling on the banks). Used to give the morning read personality and room.
 var _NV_BEATS=[
