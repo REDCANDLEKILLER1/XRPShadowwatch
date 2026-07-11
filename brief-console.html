@@ -16618,7 +16618,17 @@ function buildMorningStoryHtml(pack) {
   const health = i.healthResult;
 
   // Build text body, strip any plain-text SOURCES block (will be replaced with clickable)
-  const textBody = buildMorningStoryText(pack);
+  let textBody = buildMorningStoryText(pack);
+  // DAILY BRIEF GATE (view): when today's brief is locked, the full-screen
+  // report shows the SAME governed brief as the popup — no fresh leak here.
+  // Scoped to the live pack so mock-pack self-tests stay deterministic.
+  try {
+    var _live = (typeof state !== 'undefined' && state) ? state.pack : null;
+    if (pack && pack === _live &&
+        window.SW_DAILY_GATE && typeof window.SW_DAILY_GATE.viewBrief === 'function') {
+      textBody = window.SW_DAILY_GATE.viewBrief(textBody, pack);
+    }
+  } catch (_) {}
   const cleaned  = textBody.replace(/\n{1,3}SOURCES[\s\S]*$/m, '').trimEnd();
 
   let html = '';
@@ -20298,6 +20308,15 @@ async function run() {
     try {
       if (typeof buildMorningStoryText === 'function') {
         state.morningStoryReport = buildMorningStoryText(p);
+        // DAILY BRIEF GATE (source): one fresh brief per 24h. When locked, this
+        // swaps in today's logged brief so BOTH the popup and the full-screen
+        // report show the same governed brief — no surface can leak a fresh one.
+        // Also archives the day's brief for the "on this day" history.
+        try {
+          if (window.SW_DAILY_GATE && typeof window.SW_DAILY_GATE.gateDelivery === 'function') {
+            state.morningStoryReport = window.SW_DAILY_GATE.gateDelivery(state.morningStoryReport, p);
+          }
+        } catch (_) {}
       }
     } catch (e) { elog('v3.24 morning story build', e); }
 
@@ -34023,6 +34042,7 @@ html, body {
      the data recovers. A hidden dev hotspot (press-and-hold, bottom-left)
      bypasses the gate for testing / for the person filing the brief. -->
 <div id="swDailyUnlockDot" aria-hidden="true"></div>
+<div id="swDevBadge" title="Dev unlock is active — tap to restore the daily limit">🔓 DEV UNLOCK</div>
 <style>
   /* Invisible press-and-hold hotspot, opposite the DEBUG fab. Only reveals a
      faint filling ring while held, so it's discoverable but not obtrusive. */
@@ -34031,49 +34051,70 @@ html, body {
     border-radius:0 64px 0 0;opacity:0;transition:opacity .2s;
     background:radial-gradient(circle at 8px calc(100% - 8px),rgba(0,255,0,0.55),rgba(0,255,0,0) 70%);}
   #swDailyUnlockDot.holding{opacity:1;}
+  /* Loud, deliberate badge so dev-unlock can never silently stay on. */
+  #swDevBadge{display:none;position:fixed;left:12px;bottom:12px;z-index:99998;
+    font:600 10px/1 'Share Tech Mono',monospace;letter-spacing:1px;cursor:pointer;
+    background:#221a00;color:#ffcc00;border:1px solid rgba(255,204,0,0.6);border-radius:16px;
+    padding:7px 11px;box-shadow:0 0 12px rgba(255,204,0,0.35);}
+  #swDevBadge:hover{background:#ffcc00;color:#000;}
 </style>
 <script>
 (function(){
   'use strict';
-  var DAY_MS   = 24*60*60*1000;
-  var KEY      = 'SW_DAILY_BRIEF_GATE_V1';
-  var UNLOCK   = 'SW_DEV_UNLOCK';       // sessionStorage → resets when the app closes
-  var HOLD_MS  = 9000;                   // press-and-hold duration for dev unlock
+  var DAY_MS     = 24*60*60*1000;
+  var KEY        = 'SW_DAILY_BRIEF_GATE_V1';   // today's lock
+  var ARCH       = 'SW_BRIEF_ARCHIVE_V1';      // all-time archive, keyed by YYYY-MM-DD
+  var UNLOCK     = 'SW_DEV_UNLOCK';            // sessionStorage, {until:<ts>}
+  var HOLD_MS    = 9000;                        // press-and-hold for dev unlock
+  var UNLOCK_TTL = 2*60*60*1000;                // dev unlock auto-expires (can't silently stay on)
+  var ARCH_MAX   = 500;                         // cap archived days (~16 months)
 
   function _now(){ return (new Date()).getTime(); }
-  function loadGate(){
-    try { return JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch(_){ return {}; }
-  }
-  function saveGate(g){ try { localStorage.setItem(KEY, JSON.stringify(g)); } catch(_){} }
-  function devUnlocked(){ try { return sessionStorage.getItem(UNLOCK) === '1'; } catch(_){ return false; } }
-  function setUnlocked(on){
-    try { if(on) sessionStorage.setItem(UNLOCK,'1'); else sessionStorage.removeItem(UNLOCK); } catch(_){}
-  }
+  function _ymd(ts){ return new Date(ts).toISOString().slice(0,10); }
   function _log(msg){ try { if(typeof window.log === 'function') window.log('[daily-gate] '+msg); } catch(_){} }
 
+  function loadGate(){ try { return JSON.parse(localStorage.getItem(KEY)||'{}')||{}; } catch(_){ return {}; } }
+  function saveGate(g){ try { localStorage.setItem(KEY, JSON.stringify(g)); } catch(_){} }
+  function loadArch(){ try { return JSON.parse(localStorage.getItem(ARCH)||'{}')||{}; } catch(_){ return {}; } }
+  function saveArch(a){ try { localStorage.setItem(ARCH, JSON.stringify(a)); } catch(_){} }
+
+  // ── Dev unlock (auto-expiring) ─────────────────────────────────
+  function devUnlocked(){
+    try {
+      var raw = sessionStorage.getItem(UNLOCK); if(!raw) return false;
+      var u = JSON.parse(raw);
+      if (u && u.until && u.until > _now()) return true;
+      sessionStorage.removeItem(UNLOCK); refreshBadge(); return false;
+    } catch(_){ return false; }
+  }
+  function setUnlocked(on){
+    try {
+      if (on) sessionStorage.setItem(UNLOCK, JSON.stringify({ until: _now()+UNLOCK_TTL }));
+      else    sessionStorage.removeItem(UNLOCK);
+    } catch(_){}
+    refreshBadge();
+  }
+  function refreshBadge(){
+    var b = document.getElementById('swDevBadge'); if(!b) return;
+    var on=false, left=0;
+    try { var u=JSON.parse(sessionStorage.getItem(UNLOCK)||'null'); if(u&&u.until>_now()){ on=true; left=u.until-_now(); } } catch(_){}
+    if (on){ b.style.display='block'; b.textContent='🔓 DEV UNLOCK · '+fmtCountdown(left)+' left · tap to lock'; }
+    else   { b.style.display='none'; }
+  }
+
   // ── Self-healing helper ────────────────────────────────────────
-  // Repairs cosmetic glitches, then judges whether the report is fit to be
-  // locked in as the day's brief. Returns {ok, text, reason, repaired}.
   function healReport(text){
-    var t = String(text || '');
-    var repaired = false;
-    // 1) Repair display glitches that are safe to scrub (stray code artifacts
-    //    leaking into prose). These are almost always a formatting miss, not a
-    //    reason to burn the daily slot.
-    var before = t;
+    var t = String(text || ''), repaired = false, before = t;
     t = t.replace(/\b(?:undefined|NaN)\b/g, '—')
          .replace(/\[object [A-Za-z]+\]/g, '—')
          .replace(/[ \t]+\n/g, '\n')
          .replace(/\n{4,}/g, '\n\n\n');
     if (t !== before) repaired = true;
-    // 2) Hard failures that mean the reader would get a broken brief. Don't
-    //    consume the day on these — let the next attempt (once the connection
-    //    is back) file the clean one.
-    if (t.trim().length < 300)                                   return {ok:false, text:t, reason:'empty / too short', repaired:repaired};
+    if (t.trim().length < 300) return {ok:false, text:t, reason:'empty / too short', repaired:repaired};
     if (/is not defined|ReferenceError|TypeError|SyntaxError/.test(t))
-                                                                 return {ok:false, text:t, reason:'script error in report', repaired:repaired};
+      return {ok:false, text:t, reason:'script error in report', repaired:repaired};
     if (/failed to fetch|fetch failed|upstream fetch failed|proxy error|network error/i.test(t))
-                                                                 return {ok:false, text:t, reason:'connection dropped', repaired:repaired};
+      return {ok:false, text:t, reason:'connection dropped', repaired:repaired};
     return {ok:true, text:t, reason:'', repaired:repaired};
   }
 
@@ -34086,33 +34127,120 @@ html, body {
   }
   function lockedBanner(g, now){
     var left = fmtCountdown((g.lastDeliveredAt||0)+DAY_MS - now);
-    // Plain text — the report body renders via textContent, not HTML.
     return '⏳ TODAY’S BRIEF IS IN THE BOOKS.\n'+
            'Next fresh Coffee & Crypto brief unlocks in '+left+'.\n'+
            'This is the report XRPMan filed this morning — re-read it anytime.\n'+
            '─'.repeat(44)+'\n';
   }
+  function _packFacts(pack){
+    var f = {};
+    try {
+      if (pack){
+        var rs = pack.risk_score || {};
+        f.risk  = (rs.score!=null ? rs.score : pack.score);
+        f.price = pack.price!=null ? pack.price : pack.xrp_price;
+      }
+    } catch(_){}
+    return f;
+  }
+  function lockState(){
+    var g = loadGate(), now = _now();
+    return { g:g, now:now, locked: !!(g.report && (now-(g.lastDeliveredAt||0) < DAY_MS)) };
+  }
 
-  // ── Gate status (exposed for the debug log) ────────────────────
+  // ── COMMIT: heal → lock today → write archive. Shared by every
+  //    delivery surface so a brief is committed exactly once per day. ──
+  function commit(freshText, sources, pack){
+    var h = healReport(freshText);
+    if (!h.ok){ _log('withheld daily lock — unfit ('+h.reason+')'); return null; }
+    var now = _now(), date = _ymd(now), g = loadGate();
+    saveGate({ lastDeliveredAt:now, deliveredDate:date, report:h.text,
+               sources: Array.isArray(sources)?sources.slice(0,40):[], count:(g.count||0)+1 });
+    // Archive: the FIRST good brief of a date is canonical; don't overwrite it.
+    var a = loadArch();
+    if (!a[date]){
+      var f = _packFacts(pack);
+      a[date] = { date:date, savedAt:now, text:h.text,
+                  sources: Array.isArray(sources)?sources.slice(0,20):[],
+                  risk:f.risk, price:f.price };
+      var keys = Object.keys(a).sort();
+      while (keys.length > ARCH_MAX){ delete a[keys.shift()]; }
+      saveArch(a);
+      _log('archived brief for '+date+' (archive holds '+Object.keys(a).length+' days)');
+    }
+    _log('brief locked for 24h (delivery #'+((g.count||0)+1)+')');
+    return h.text;
+  }
+
+  // ── SOURCE GATE — called at the live finalize where the real report
+  //    is set on state. Governs BOTH the popup and the full-screen view. ──
+  function gateDelivery(freshText, pack){
+    try {
+      if (devUnlocked()) return healReport(freshText).text;
+      var ls = lockState();
+      if (ls.locked){ _log('source-gate: locked — using today’s logged brief'); return ls.g.report; }
+      var committed = commit(freshText, (pack && pack.report_sources) || null, pack);
+      if (committed) return committed;
+      if (ls.g.report) return ls.g.report;      // unfit fresh → keep last good
+      return healReport(freshText).text;         // nothing better; slot NOT consumed
+    } catch(_){ return freshText; }
+  }
+
+  // ── Archive access ─────────────────────────────────────────────
+  function archList(){
+    var a = loadArch();
+    return Object.keys(a).sort().reverse().map(function(d){
+      var e=a[d]; return { date:d, savedAt:e.savedAt, chars:(e.text||'').length, risk:e.risk, price:e.price };
+    });
+  }
+  function archGet(date){ var a=loadArch(); return a[date]||null; }
+  function onThisDay(refTs){
+    var now = refTs||_now(), md = _ymd(now).slice(5), today = _ymd(now);
+    var a = loadArch(), out = [];
+    Object.keys(a).forEach(function(d){ if (d.slice(5)===md && d!==today) out.push(a[d]); });
+    return out.sort(function(x,y){ return y.savedAt-x.savedAt; });
+  }
+
+  // ── VIEW GATE — read-only. Display surfaces that re-render the brief
+  //    (e.g. the full-screen HTML view) call this to get the governed text
+  //    WITHOUT committing/locking. Commit happens once, at gateDelivery. ──
+  function viewBrief(freshText, pack){
+    try {
+      if (devUnlocked()) return healReport(freshText).text;
+      var ls = lockState();
+      if (ls.locked) return ls.g.report;
+      return healReport(freshText).text;
+    } catch(_){ return freshText; }
+  }
+
+  // ── Public API ─────────────────────────────────────────────────
   window.SW_DAILY_GATE = {
+    gateDelivery: gateDelivery,
+    viewBrief: viewBrief,
     status: function(){
-      var g = loadGate(), now = _now();
-      var locked = !!(g.report && (now - (g.lastDeliveredAt||0) < DAY_MS));
+      var ls = lockState(), a = loadArch(), dates = Object.keys(a).sort();
       return {
         unlocked_dev: devUnlocked(),
-        locked: locked && !devUnlocked(),
-        delivered_count: g.count || 0,
-        last_delivered: g.lastDeliveredAt ? new Date(g.lastDeliveredAt).toISOString() : null,
-        next_unlock_in: locked ? fmtCountdown((g.lastDeliveredAt||0)+DAY_MS-now) : 'now',
-        stored_report_chars: (g.report||'').length
+        locked: ls.locked && !devUnlocked(),
+        delivered_count: ls.g.count || 0,
+        last_delivered: ls.g.lastDeliveredAt ? new Date(ls.g.lastDeliveredAt).toISOString() : null,
+        next_unlock_in: ls.locked ? fmtCountdown((ls.g.lastDeliveredAt||0)+DAY_MS-ls.now) : 'now',
+        stored_report_chars: (ls.g.report||'').length,
+        archive_days: dates.length,
+        archive_range: dates.length ? (dates[0]+' … '+dates[dates.length-1]) : 'none',
+        on_this_day: onThisDay().length
       };
     },
-    reset:  function(){ try { localStorage.removeItem(KEY); } catch(_){} _log('gate reset'); },
+    archiveList: archList,
+    archiveGet:  archGet,
+    onThisDay:   onThisDay,
+    reset:        function(){ try { localStorage.removeItem(KEY); } catch(_){} _log('today’s lock reset'); },
+    clearArchive: function(){ try { localStorage.removeItem(ARCH); } catch(_){} _log('archive cleared'); },
     unlock: function(){ setUnlocked(true);  _log('dev unlock ON'); },
     relock: function(){ setUnlocked(false); _log('dev unlock OFF'); }
   };
 
-  // ── Install: wrap the single report-delivery choke point ───────
+  // ── Install: wrap the popup surface (secondary gate) ───────────
   function install(){
     var MRF = window.MORNING_REPORT_FLOAT;
     if (!MRF || typeof MRF.show !== 'function') { setTimeout(install, 400); return; }
@@ -34120,38 +34248,15 @@ html, body {
     var _origShow = MRF.show;
     MRF.show = function(reportText, sources, pack){
       try {
-        // Dev bypass: always fresh, never locks, never consumes a slot. Still
-        // runs the healer so testing exercises the real path.
-        if (devUnlocked()) {
-          var hb = healReport(reportText);
-          if (hb.repaired) _log('dev preview: repaired cosmetic glitches');
-          return _origShow.call(MRF, hb.text, sources, pack);
-        }
-        var g = loadGate(), now = _now();
-        // Locked window: serve the logged brief + countdown, ignore the fresh build.
-        if (g.report && (now - (g.lastDeliveredAt||0) < DAY_MS)) {
-          _log('locked — serving today’s logged brief; next in '+
-               fmtCountdown((g.lastDeliveredAt||0)+DAY_MS-now));
-          return _origShow.call(MRF, lockedBanner(g, now) + '\n' + g.report, g.sources || sources, pack);
-        }
-        // Fresh delivery attempt → self-heal, then decide whether to lock it in.
-        var h = healReport(reportText);
-        if (!h.ok) {
-          _log('withheld daily lock — report unfit ('+h.reason+'); reader keeps their slot');
-          // If we still have an earlier good brief, show that rather than a broken one.
-          if (g.report) return _origShow.call(MRF, lockedBanner(g, now) + '\n' + g.report, g.sources || sources, pack);
-          return _origShow.call(MRF, h.text, sources, pack); // nothing better to show; slot NOT consumed
-        }
-        if (h.repaired) _log('healed cosmetic glitches before locking the brief');
-        saveGate({
-          lastDeliveredAt: now,
-          deliveredDate:   new Date(now).toISOString().slice(0,10),
-          report:          h.text,
-          sources:         Array.isArray(sources) ? sources.slice(0,40) : [],
-          count:           (g.count||0)+1
-        });
-        _log('brief locked for 24h (delivery #'+((g.count||0)+1)+')');
-        return _origShow.call(MRF, h.text, sources, pack);
+        if (devUnlocked()) return _origShow.call(MRF, healReport(reportText).text, sources, pack);
+        var ls = lockState();
+        if (ls.locked)
+          return _origShow.call(MRF, lockedBanner(ls.g, ls.now)+'\n'+ls.g.report, ls.g.sources||sources, pack);
+        var committed = commit(reportText, sources, pack);
+        if (committed) return _origShow.call(MRF, committed, sources, pack);
+        if (ls.g.report)
+          return _origShow.call(MRF, lockedBanner(ls.g, ls.now)+'\n'+ls.g.report, ls.g.sources||sources, pack);
+        return _origShow.call(MRF, healReport(reportText).text, sources, pack);
       } catch(e){
         try { return _origShow.call(MRF, reportText, sources, pack); } catch(_){}
       }
@@ -34160,40 +34265,39 @@ html, body {
     _log('installed');
   }
   install();
+  try { refreshBadge(); setInterval(refreshBadge, 60000); } catch(_){}
 
   // ── Hidden dev-unlock hotspot: press-and-hold 9s (bottom-left) ─
   (function(){
     var dot = document.getElementById('swDailyUnlockDot');
     if (!dot) return;
-    var timer = null, feedback = null;
-    function cancel(){
-      if (timer){ clearTimeout(timer); timer = null; }
-      if (feedback){ clearInterval(feedback); feedback = null; }
-      dot.classList.remove('holding');
-    }
+    var timer = null;
+    function cancel(){ if (timer){ clearTimeout(timer); timer = null; } dot.classList.remove('holding'); }
     function fire(){
       cancel();
       var on = !devUnlocked();
       setUnlocked(on);
       if (on) { try { window.SW_DAILY_GATE.reset(); } catch(_){} }
-      var msg = on ? 'DEV UNLOCK ON — multiple reports enabled' : 'DEV UNLOCK OFF — daily limit restored';
+      var msg = on ? 'DEV UNLOCK ON — multiple reports for 2h' : 'DEV UNLOCK OFF — daily limit restored';
       try { if (typeof window.showToast === 'function') window.showToast(msg); } catch(_){}
       try { if (typeof window.speakXaiLine === 'function') window.speakXaiLine(msg, {priority:'CMD'}); } catch(_){}
       _log(on ? 'dev unlock engaged via hold' : 'dev unlock released via hold');
     }
-    function start(e){
-      cancel();
-      dot.classList.add('holding');
-      timer = setTimeout(fire, HOLD_MS);
-    }
+    function start(){ cancel(); dot.classList.add('holding'); timer = setTimeout(fire, HOLD_MS); }
     dot.addEventListener('pointerdown', start);
     dot.addEventListener('pointerup', cancel);
     dot.addEventListener('pointerleave', cancel);
     dot.addEventListener('pointercancel', cancel);
-    // Touch fallback for browsers without Pointer Events.
-    dot.addEventListener('touchstart', function(e){ e.preventDefault(); start(e); }, {passive:false});
+    dot.addEventListener('touchstart', function(e){ e.preventDefault(); start(); }, {passive:false});
     dot.addEventListener('touchend', cancel);
     dot.addEventListener('touchcancel', cancel);
+  })();
+
+  // Visible dev-unlock badge doubles as a one-tap re-lock.
+  (function(){
+    var b = document.getElementById('swDevBadge');
+    if (b) b.addEventListener('click', function(){ setUnlocked(false);
+      try { if (typeof window.showToast === 'function') window.showToast('DEV UNLOCK OFF — daily limit restored'); } catch(_){} });
   })();
 })();
 </script>
@@ -34217,6 +34321,11 @@ html, body {
   #swDebugOverlay pre{flex:0 0 auto;max-height:38vh;overflow:auto;background:rgba(0,8,0,0.85);
     border:1px solid rgba(0,255,0,0.2);border-radius:6px;padding:10px;color:#9fdf9f;font-size:11px;
     white-space:pre-wrap;word-break:break-word;margin:0;}
+  #swDebugOverlay .dbg-arch{display:flex;flex-wrap:wrap;gap:5px;max-height:16vh;overflow:auto;margin-bottom:6px;}
+  #swDebugOverlay .dbg-arch .arch-chip{font:600 10px 'Share Tech Mono',monospace;background:rgba(0,18,0,0.9);
+    color:#9fdf9f;border:1px solid rgba(0,255,0,0.3);border-radius:4px;padding:5px 8px;cursor:pointer;letter-spacing:.5px;}
+  #swDebugOverlay .dbg-arch .arch-chip:hover{background:#00ff00;color:#000;}
+  #swDebugOverlay .dbg-arch .arch-chip.today{border-color:#ffcc00;color:#ffcc00;}
 </style>
 <div id="swDebugFab" title="Debug log">🐞 DEBUG</div>
 <div id="swDebugOverlay">
@@ -34224,12 +34333,16 @@ html, body {
     <span class="dbg-title">🐞 DEBUG LOG</span>
     <div class="dbg-btns">
       <button id="swDbgRefresh">REFRESH</button>
+      <button id="swDbgArchBtn">📅 ARCHIVE</button>
       <button id="swDbgCopy">COPY</button>
       <button id="swDbgDownload">⬇ TXT</button>
       <button id="swDbgClose">✕ CLOSE</button>
     </div>
   </div>
   <div class="dbg-sec">DAILY BRIEF GATE</div><pre id="swDbgGate">—</pre>
+  <div class="dbg-sec">BRIEF ARCHIVE <span id="swArchMeta" style="color:#7fbf7f"></span></div>
+  <div id="swArchList" class="dbg-arch"></div>
+  <pre id="swDbgArch">Tap 📅 ARCHIVE, then tap a date to re-read that day’s brief.</pre>
   <div class="dbg-sec">ERROR LOG</div><pre id="swDbgErr">—</pre>
   <div class="dbg-sec">SCAN FEED</div><pre id="swDbgFeed">—</pre>
   <div class="dbg-sec">REPORT &amp; MARKET</div><pre id="swDbgMkt">—</pre>
@@ -34270,8 +34383,39 @@ html, body {
              'locked: '+(s.locked?'YES':'no')+'   next fresh brief in: '+s.next_unlock_in+'\n'+
              'reports delivered (lifetime): '+s.delivered_count+'\n'+
              'last delivered: '+(s.last_delivered||'never')+'\n'+
-             'logged brief size: '+s.stored_report_chars+' chars';
+             'logged brief size: '+s.stored_report_chars+' chars\n'+
+             'archive: '+s.archive_days+' day(s)  ['+s.archive_range+']  ·  on this day: '+s.on_this_day;
     } catch(e){ return 'gate status error: '+e.message; }
+  }
+  function ymdToday(){ try { return new Date().toISOString().slice(0,10); } catch(_){ return ''; } }
+  function fillArch(){
+    var list=$one('swArchList'), meta=$one('swArchMeta'), view=$one('swDbgArch');
+    if(!list||!window.SW_DAILY_GATE) return;
+    var items=[]; try { items=window.SW_DAILY_GATE.archiveList()||[]; } catch(_){}
+    var otd=[]; try { otd=window.SW_DAILY_GATE.onThisDay()||[]; } catch(_){}
+    if(meta) meta.textContent='· '+items.length+' day(s)'+(otd.length?' · '+otd.length+' on this day in past years':'');
+    list.innerHTML='';
+    if(!items.length){ if(view) view.textContent='No briefs archived yet. The first clean brief each day is saved here automatically.'; return; }
+    var today=ymdToday();
+    items.forEach(function(it){
+      var chip=document.createElement('span');
+      chip.className='arch-chip'+(it.date===today?' today':'');
+      chip.setAttribute('data-arch', it.date);
+      chip.textContent=it.date+(it.risk!=null?(' · r'+it.risk):'');
+      list.appendChild(chip);
+    });
+    if(view){
+      var head='📅 ON THIS DAY\n';
+      if(otd.length){ otd.forEach(function(e){ head+='• '+e.date+' (risk '+(e.risk!=null?e.risk:'—')+')\n'; }); }
+      else head+='(nothing yet — this fills in as the year comes around)\n';
+      view.textContent=head+'\nTap a date above to re-read that day’s brief.';
+    }
+  }
+  function showArchDay(date){
+    var view=$one('swDbgArch'); if(!view||!window.SW_DAILY_GATE) return;
+    var e=null; try { e=window.SW_DAILY_GATE.archiveGet(date); } catch(_){}
+    view._archDate=date;
+    view.textContent = e && e.text ? ('📅 '+date+'  ·  '+(e.text.length)+' chars\n'+'─'.repeat(30)+'\n'+e.text) : ('No brief stored for '+date+'.');
   }
   function fill(){
     if($one('swDbgGate')) $one('swDbgGate').textContent = gateBlock();
@@ -34279,6 +34423,7 @@ html, body {
     if($one('swDbgFeed')) $one('swDbgFeed').textContent = txtOf('statusFeed')||'No scan feed yet.';
     if($one('swDbgMkt'))  $one('swDbgMkt').textContent  = marketBlock();
     if($one('swDbgNews')) $one('swDbgNews').textContent = newsBlock();
+    fillArch();
   }
   function combined(){
     return 'SHADOW WATCH DEBUG LOG\n\n[DAILY BRIEF GATE]\n'+gateBlock()+
@@ -34288,10 +34433,15 @@ html, body {
            '\n\n[NEWS]\n'+newsBlock();
   }
   document.addEventListener('click', function(e){
-    var t=e.target; if(!t||!t.id) return;
+    var t=e.target; if(!t) return;
+    // Archive date chip (no id, carries data-arch).
+    var ad = t.getAttribute && t.getAttribute('data-arch');
+    if(ad){ showArchDay(ad); return; }
+    if(!t.id) return;
     if(t.id==='swDebugFab'){ fill(); var o=$one('swDebugOverlay'); if(o)o.classList.add('open'); }
     else if(t.id==='swDbgClose'){ var o=$one('swDebugOverlay'); if(o)o.classList.remove('open'); }
     else if(t.id==='swDbgRefresh'){ fill(); }
+    else if(t.id==='swDbgArchBtn'){ fillArch(); }
     else if(t.id==='swDbgCopy'){ try{ if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(combined()); }catch(_){}}
     else if(t.id==='swDbgDownload'){
       try{
