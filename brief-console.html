@@ -32919,62 +32919,73 @@ function _topInterp(interps){
 //   Exec  = the one-line topline (the single biggest fact)
 //   WMM   = why it mattered / the context BEYOND the headline move
 //   Evid  = the itemized receipts (built separately, below)
+// ── v16.9: LOCAL NARRATOR ("small LM") ──────────────────────────────
+// Turns the ledger facts into a warm Coffee & Crypto morning read instead of a
+// robotic data dump. No external AI — deterministic per scan (seeded by scan id)
+// so the phrasing varies day to day but stays stable within a single report.
+function _nvSeed(pack){
+  var s=String((pack&&(pack.scan_id||pack.report_id))||(typeof _today==='function'?_today():'')||'seed');
+  var h=0; for(var i=0;i<s.length;i++){ h=(h*31 + s.charCodeAt(i))|0; }
+  return Math.abs(h);
+}
+function _nvPick(arr, seed, salt){ if(!arr||!arr.length) return ''; return arr[(seed+(salt||0))%arr.length]; }
+function _lc1(s){ s=String(s||''); return s?s.charAt(0).toLowerCase()+s.slice(1):s; }
+
 function _buildExecutiveSummary(interps, pack){
-  var best=_topInterp(interps);
-  if(!best) return 'The watch ran today — the ledger was observed, and no single move stood out this scan.';
-  var band=interps[4], absorber=interps[5];
-  if(band&&band.has_signal&&band.narrative_weight>=0.70&&absorber&&absorber.has_signal){
-    return _firstSentence(band.summary)+' '+_firstSentence(absorber.headline||absorber.summary);
-  }
-  // Topline move + a one-line risk posture (the full detail lives in Evidence).
-  var lead=_firstSentence(best.summary || best.headline);
+  var seed=_nvSeed(pack), best=_topInterp(interps), moves=interps[0];
+  var openers=[
+    'I kept watch over the Ledger while you slept. ',
+    'Another night on patrol, and the Ledger tipped its hand: ',
+    'The city sleeps; the Ledger never does. Overnight, ',
+    'XRPMan on the wire — while you were out cold, '
+  ];
+  var factRaw=(moves&&moves.has_signal)?(moves.headline||moves.summary):(best?best.summary:'');
+  if(!factRaw) return _nvPick(openers,seed,0)+'the Ledger stayed quiet under my watch. No whale broke cover — and a still night on patrol is a good night.';
+  var line=_nvPick(openers,seed,0)+_lc1(_firstSentence(factRaw));
   var score=_num(pack&&pack.risk_score&&pack.risk_score.score);
-  var posture=score>=75?' Risk is at the highest alert level today.':
-              score>=50?' Risk is elevated above baseline.':
-              score>=25?' Risk is moderate — nothing extreme.':'';
-  return lead+posture;
+  var posture=score>=75?_nvPick(['The signal flared red — this is a full-alert night on the Ledger.','Every alarm I’ve got lit up. Top of the dial.'],seed,1)
+             :score>=50?_nvPick(['My instincts are up — something’s moving out there.','The Ledger’s running warm tonight, and I’m watching close.'],seed,1)
+             :score>=25?_nvPick(['Nothing villainous, but I kept one eye open.','A quiet patrol — steady, nothing extreme.'],seed,1)
+             :_nvPick(['Otherwise the Ledger behaved itself.','The rest of the board stayed in line.'],seed,1);
+  return line+(posture?' '+posture:'');
 }
 
-function _buildWhatMatteredMost(interps){
-  var band=interps[4], absorber=interps[5];
-  // The daily tension: chart quiet vs ledger active.
+function _buildWhatMatteredMost(interps, pack){
+  var seed=_nvSeed(pack), band=interps[4], absorber=interps[5];
   if(band&&band.has_signal&&absorber&&absorber.has_signal){
-    return band.summary+' '+absorber.summary+' The chart is quiet. The ledger is not.';
+    return 'Here’s the part that put me on alert. '+band.summary+' '+absorber.summary+' The chart played dead; the Ledger told the truth.';
   }
-  // Otherwise frame the context BEYOND the top move (not a repeat of the opener).
   var best=_topInterp(interps);
   var others=interps.filter(function(i){ return i && i.has_signal && i!==best; })
     .sort(function(a,b){ return b.narrative_weight-a.narrative_weight; });
+  var leads=['What really caught my eye out there: ','Beyond the headline, here’s what I flagged: ','The part I couldn’t look away from: '];
   if(others.length){
-    return 'Beyond the headline move, the board showed ' +
-      others.slice(0,2).map(function(i){ return i.headline||_firstSentence(i.summary); }).join('; ') +
-      '. Ledger evidence — not the chart — is what moved.';
+    return _nvPick(leads,seed,2)+others.slice(0,2).map(function(i){ return _lc1(i.headline||_firstSentence(i.summary)); }).join(', and ')+
+      '. Down here the Ledger leads and the chart just follows along.';
   }
-  if(best){
-    return 'One move carried the scan; the rest of the board stayed quiet. That concentration — a single dominant transfer rather than broad activity — is itself the tell.';
-  }
-  return 'Watch maintained. The rails were observed this scan.';
+  if(best) return 'One move carried the whole night — a single, deliberate transfer, not a busy board. When it’s that concentrated, the quiet around it is the tell, and I noticed.';
+  return 'A steady patrol tonight. The rails stayed calm and nothing tried to slip past me.';
 }
 
 function _buildEvidence(interps, pack){
   var moves=interps[0], domShift=interps[1], news=interps[2],
       recv=interps[3];
   var parts=[];
-  if(moves&&moves.has_signal) parts.push(moves.summary);
-  if(recv&&recv.has_signal)   parts.push(recv.summary);
-  if(domShift&&domShift.has_signal) parts.push(domShift.summary);
+  if(moves&&moves.has_signal) parts.push('Here are the receipts, straight off the Ledger. '+moves.summary);
+  if(recv&&recv.has_signal)   parts.push('I traced it — '+_lc1(recv.summary));
+  if(domShift&&domShift.has_signal) parts.push('Across the whole board, '+_lc1(domShift.summary));
   // v16.8: surface newly-discovered related wallets so the report says more.
   try {
     var inbox=(typeof state!=='undefined' && _arr(state.discoveryInbox)) ||
               _arr(pack&&pack.discovery_candidates);
     var fresh=inbox.filter(function(c){ return c && c.review_status!=='REJECTED' && c.review_status!=='SUPPRESSED'; });
     if(fresh.length){
-      parts.push(fresh.length+' new related wallet'+(fresh.length===1?'':'s')+
-        ' surfaced from these flows — parked for review, behavioral evidence only, nothing auto-trusted.');
+      parts.push('I also pulled '+fresh.length+' new wallet'+(fresh.length===1?'':'s')+
+        ' onto the watch — flagged, not trusted; behavioral evidence only, nobody gets a badge automatically.');
     }
   } catch(_){}
-  if(news&&news.has_signal)   parts.push('News context: '+news.summary);
-  if(!parts.length) return 'Ledger observed. No single transfer was large enough to flag this scan. The watch continues.';
+  if(news&&news.has_signal)   parts.push('And out in the daylight world, '+_lc1(news.summary));
+  if(!parts.length) return 'No move crossed the line big enough to book tonight. I stayed on watch anyway.';
   return parts.join(' ');
 }
 
@@ -32983,18 +32994,18 @@ function _buildWatchNext(interps){
   var recv=interps[3], band=interps[4], absorber=interps[5], moves=interps[0];
   if(recv&&recv.has_signal){
     if(recv.summary.indexOf('forwarded')>-1)
-      bullets.push('Track the forwarded funds — next-hop destination reveals routing intent.');
+      bullets.push('Follow the forwarded funds — where they land tells me who’s really behind it.');
     else if(recv.summary.indexOf('held')>-1)
-      bullets.push('Watch the holding wallet for any outward movement in the next 24 hours.');
+      bullets.push('Keep eyes on that holding wallet for any move out in the next day.');
   }
   if(band&&band.has_signal&&band.summary.indexOf('corridor')>-1)
-    bullets.push('Watch whether the price corridor holds through the next trading session.');
+    bullets.push('See whether the price corridor holds through the next session.');
   if(absorber&&absorber.has_signal)
-    bullets.push('Monitor the absorbing wallets for follow-through — accumulation or redistribution.');
+    bullets.push('Watch the absorbing wallets — are they stacking it, or handing it back out?');
   if(moves&&moves.has_signal)
-    bullets.push('Check if the largest transfer recipient shows any on-ledger activity overnight.');
+    bullets.push('Check whether last night’s big recipient makes a move today.');
   if(!bullets.length)
-    bullets.push('Continue monitoring the watched-wallet list for new large-transfer activity.');
+    bullets.push('Keep the watchlist warm and wait for the next whale to break cover.');
   return bullets.slice(0,4).map(function(b){return '\u2022 '+b;}).join('\n');
 }
 
@@ -33004,12 +33015,12 @@ function _buildVerdict(interps, pack){
   var _rs=(pack&&pack.risk_score)||{};
   var risk=_num(_rs.score!=null?_rs.score:(pack&&pack.score));
   var _drivers=_arr(_rs.drivers).slice(0,3).filter(Boolean);
-  var verbal=risk>=75?'the highest forensic alert — sustained heavy activity across the board':
-             risk>=50?'elevated — close monitoring warranted':
-             risk>=25?'moderate — routine watch holds':
-             'quiet — no standout moves this scan';
+  var verbal=risk>=75?'the Ledger is on high alert — heavy hands moving all night':
+             risk>=50?'the Ledger is restless, and I’m watching close':
+             risk>=25?'a moderate night — routine patrol holds':
+             'a quiet night — no villain broke cover';
   var dir=' ('+risk+'/100).';
-  if(_drivers.length) dir+=' Primary drivers: '+_drivers.join(', ')+'.';
+  if(_drivers.length) dir+=' What tipped me off: '+_drivers.join(', ')+'.';
   var delta=_num(pack&&(pack.total_balance_delta_xrp!=null?pack.total_balance_delta_xrp:pack.balance_delta));
   if(delta>500000) dir+=' Watched wallets are net accumulating — about '+_xrpFmt(delta)+' XRP moved inward.';
   else if(delta<-500000) dir+=' Watched wallets are net distributing — about '+_xrpFmt(Math.abs(delta))+' XRP moved outward.';
@@ -33087,7 +33098,7 @@ function assemblePublicReport(pack){
              + '\n' + _today();
 
   var exec  = _buildExecutiveSummary(interps, pack);
-  var wmm   = _buildWhatMatteredMost(interps);
+  var wmm   = _buildWhatMatteredMost(interps, pack);
   var evid  = _buildEvidence(interps, pack);
   var watch = _buildWatchNext(interps);
   var verd  = _buildVerdict(interps, pack);
