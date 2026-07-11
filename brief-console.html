@@ -32930,6 +32930,19 @@ function _nvSeed(pack){
 }
 function _nvPick(arr, seed, salt){ if(!arr||!arr.length) return ''; return arr[(seed+(salt||0))%arr.length]; }
 function _lc1(s){ s=String(s||''); return s?s.charAt(0).toLowerCase()+s.slice(1):s; }
+// XRPMan's in-character asides — his ethos from the theme (receipts, tracing,
+// telling on the banks). Used to give the morning read personality and room.
+var _NV_BEATS=[
+  'Somebody wanted this one quiet. That’s exactly why I say it loud.',
+  'The banks count on nobody watching. I count on catching them.',
+  'Every coin leaves a trail on the Ledger — and I follow the trail.',
+  'Receipts over rumors. That’s the whole job, every single morning.',
+  'They move in the dark. I brought the light.',
+  'No badges, no guesses — just what the Ledger actually did.',
+  'This is why I keep watch: so you never have to wonder who moved what.',
+  'The chart is the story they tell you. The Ledger is the one that’s true.'
+];
+function _nvBeat(seed, salt){ return _NV_BEATS[((seed||0)+(salt||0))%_NV_BEATS.length]; }
 
 function _buildExecutiveSummary(interps, pack){
   var seed=_nvSeed(pack), best=_topInterp(interps), moves=interps[0];
@@ -32947,7 +32960,9 @@ function _buildExecutiveSummary(interps, pack){
              :score>=50?_nvPick(['My instincts are up — something’s moving out there.','The Ledger’s running warm tonight, and I’m watching close.'],seed,1)
              :score>=25?_nvPick(['Nothing villainous, but I kept one eye open.','A quiet patrol — steady, nothing extreme.'],seed,1)
              :_nvPick(['Otherwise the Ledger behaved itself.','The rest of the board stayed in line.'],seed,1);
-  return line+(posture?' '+posture:'');
+  // Close the open on one of XRPMan's signature beats — keeps the voice front
+  // and center before we get into the facts.
+  return line+(posture?' '+posture:'')+' '+_nvBeat(seed,0);
 }
 
 function _buildWhatMatteredMost(interps, pack){
@@ -32985,7 +33000,8 @@ function _buildEvidence(interps, pack){
     }
   } catch(_){}
   if(news&&news.has_signal)   parts.push('And out in the daylight world, '+_lc1(news.summary));
-  if(!parts.length) return 'No move crossed the line big enough to book tonight. I stayed on watch anyway.';
+  if(!parts.length) return 'No move crossed the line big enough to book tonight. I stayed on watch anyway. '+_nvBeat(_nvSeed(pack),3);
+  parts.push(_nvBeat(_nvSeed(pack),3));
   return parts.join(' ');
 }
 
@@ -33024,7 +33040,7 @@ function _buildVerdict(interps, pack){
   var delta=_num(pack&&(pack.total_balance_delta_xrp!=null?pack.total_balance_delta_xrp:pack.balance_delta));
   if(delta>500000) dir+=' Watched wallets are net accumulating — about '+_xrpFmt(delta)+' XRP moved inward.';
   else if(delta<-500000) dir+=' Watched wallets are net distributing — about '+_xrpFmt(Math.abs(delta))+' XRP moved outward.';
-  return 'Today\u2019s forensic read: '+verbal+'.'+dir+
+  return 'Today\u2019s forensic read: '+verbal+'.'+dir+' '+_nvBeat(_nvSeed(pack),5)+
          ' Not financial advice. XRP-only forensic watch.\n\n'+
          'I\u2019m XRPMan, and I tell on the banks.';
 }

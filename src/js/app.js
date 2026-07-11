@@ -959,10 +959,19 @@
                 const _song = document.getElementById('app-song');
                 const _muted = localStorage.getItem('SW_SONG_MUTED') === '1';
                 if (_song) {
-                    _song.volume = 0.55; _song.muted = _muted;
-                    _song.play().catch(function(){});
                     const _sb = document.getElementById('song-btn');
-                    if (_sb) _sb.classList.toggle('tac-active', !_muted);
+                    // When the (non-looping) theme finishes on its own, drop the
+                    // button back to the stopped state so it reads as "replay".
+                    _song.addEventListener('ended', function () {
+                        if (_sb) _sb.classList.remove('tac-active');
+                    });
+                    _song.volume = 0.55; _song.muted = false;
+                    if (!_muted) {
+                        _song.play().catch(function(){});
+                        if (_sb) _sb.classList.add('tac-active');
+                    } else {
+                        if (_sb) _sb.classList.remove('tac-active');
+                    }
                 }
             } catch(e){}
             splash.classList.add('fade-out');
@@ -1844,16 +1853,22 @@
             const song = document.getElementById('app-song');
             const btn = document.getElementById('song-btn');
             if (!song) return;
-            const willMute = !song.muted && !song.paused; // currently audible → mute
-            if (willMute) {
-                song.muted = true;
+            // The theme plays ONCE (no loop). This button is a real STOP/REPLAY:
+            // if it's currently playing, stop it dead and rewind; otherwise
+            // replay from the top. No lingering muted-but-playing state.
+            const playing = !song.paused && !song.ended;
+            if (playing) {
+                song.pause();
+                try { song.currentTime = 0; } catch(e){}
             } else {
                 song.muted = false; song.volume = 0.55;
-                if (song.paused) song.play().catch(function(){});
+                try { song.currentTime = 0; } catch(e){}
+                song.play().catch(function(){});
             }
-            try { localStorage.setItem('SW_SONG_MUTED', song.muted ? '1' : '0'); } catch(e){}
-            if (btn) btn.classList.toggle('tac-active', !song.muted);
-            try { showToast(song.muted ? 'THEME MUTED' : 'THEME ON'); } catch(e){}
+            const nowPlaying = !song.paused;
+            try { localStorage.setItem('SW_SONG_MUTED', nowPlaying ? '0' : '1'); } catch(e){}
+            if (btn) btn.classList.toggle('tac-active', nowPlaying);
+            try { showToast(nowPlaying ? 'THEME ON' : 'THEME STOPPED'); } catch(e){}
         }
 
         function toggleMute() {
