@@ -34460,6 +34460,7 @@ html, body {
     <span class="dbg-title">🐞 DEBUG LOG</span>
     <div class="dbg-btns">
       <button id="swDbgRefresh">REFRESH</button>
+      <button id="swDbgUnlock">🔓 UNLOCK</button>
       <button id="swDbgArchBtn">📅 ARCHIVE</button>
       <button id="swDbgCopy">COPY</button>
       <button id="swDbgDownload">⬇ TXT</button>
@@ -34552,7 +34553,14 @@ html, body {
     view._archDate=date;
     view.textContent = e && e.text ? ('📅 '+date+'  ·  '+(e.text.length)+' chars\n'+'─'.repeat(30)+'\n'+e.text) : ('No brief stored for '+date+'.');
   }
+  function updateUnlockBtn(){
+    var b=$one('swDbgUnlock'); if(!b||!window.SW_DAILY_GATE) return;
+    var on=false; try { on=window.SW_DAILY_GATE.status().unlocked_dev; } catch(_){}
+    b.textContent = on ? '🔒 RE-LOCK' : '🔓 UNLOCK';
+    b.style.color = on ? '#ffcc00' : '';
+  }
   function fill(){
+    updateUnlockBtn();
     if($one('swDbgGate')) $one('swDbgGate').textContent = gateBlock();
     if($one('swDbgErr'))  $one('swDbgErr').textContent  = txtOf('errorLog')||'No errors logged.';
     if($one('swDbgFeed')) $one('swDbgFeed').textContent = txtOf('statusFeed')||'No scan feed yet.';
@@ -34576,6 +34584,17 @@ html, body {
     if(t.id==='swDebugFab'){ fill(); var o=$one('swDebugOverlay'); if(o)o.classList.add('open'); }
     else if(t.id==='swDbgClose'){ var o=$one('swDebugOverlay'); if(o)o.classList.remove('open'); }
     else if(t.id==='swDbgRefresh'){ fill(); }
+    else if(t.id==='swDbgUnlock'){
+      // One-tap dev unlock/relock from the debug panel — no hidden 9s hold needed.
+      try {
+        if(window.SW_DAILY_GATE){
+          var on=window.SW_DAILY_GATE.status().unlocked_dev;
+          if(on){ window.SW_DAILY_GATE.relock(); }
+          else  { window.SW_DAILY_GATE.unlock(); window.SW_DAILY_GATE.reset(); } // clear today's lock so a re-scan regenerates fresh
+        }
+      } catch(_){}
+      updateUnlockBtn(); fill();
+    }
     else if(t.id==='swDbgArchBtn'){ fillArch(); }
     else if(t.id==='swDbgCopy'){ try{ if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(combined()); }catch(_){}}
     else if(t.id==='swDbgDownload'){
