@@ -1,7 +1,9 @@
 
     (function(){
       var _loaded = false;
-      window.exitBriefFullscreen = function(){ try { switchView('live'); } catch(e){} };
+      // Leaving Shadow Watch returns to HOME / Mission Control (the main screen),
+      // not the live XRPL stream.
+      window.exitBriefFullscreen = function(){ try { switchView('home'); } catch(e){} };
       window.loadBriefConsole = function(){
         try {
           var vb = document.getElementById('view-brief');

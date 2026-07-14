@@ -2879,7 +2879,9 @@ const WATCHLIST = [
   ['SPLITTER_rhWt2b',     'rhWt2bhRq3wiK9sQnYVmhhKb5Dr2SE32hk', 'whale'],  // 18.43M forwarded from ROUTING_SPLITTER · richlist #371 · score 140/200
   ['WHALE_RECV_rBg2Fu',   'rBg2FuZT91C52Nny68houguJ4vt5x1o91m', 'whale'],  // 303M recv from RIPPLE_500M_B · score 125/200
   ['LARGE_RECV_rUjfTQ',   'rUjfTQpvBr6wsGGxMw6sRmRQGG76nvp8Ln', 'whale'],  // COINBASE/CRYPTO_COM adjacent · seen 3 scans · score 120/200
-  ['LARGE_RECV_rLoD9U',   'rLoD9U2ghXP2xUYbtML6G6v1p8LhM9mSnc', 'whale']   // CRYPTO_COM outflow · richlist #230 · score 100/200
+  ['LARGE_RECV_rLoD9U',   'rLoD9U2ghXP2xUYbtML6G6v1p8LhM9mSnc', 'whale'],  // CRYPTO_COM outflow · richlist #230 · score 100/200
+  // ── v16.12 discovery add (2026-07-14): next hop off LARGE_RECV_rLoD9U (flywheel) ──
+  ['SPLITTER_rUSYaU',     'rUSYaUPUyXhEebdrQHXScFsKyUAjgPNbKf', 'whale']   // 1.7M forwarded from LARGE_RECV_rLoD9U · richlist #321 · score 140/200
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)
