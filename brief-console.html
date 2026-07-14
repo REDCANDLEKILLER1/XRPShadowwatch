@@ -9948,7 +9948,6 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         '<button class="mrf-menu-item" id="mrfCollapseBtn"      type="button">\u2015 Minimize</button>' +
         '<button class="mrf-menu-item" id="mrfResizeBtn"        type="button">\u2922 Resize window</button>' +
         '<button class="mrf-menu-item" id="mrfCopyBtn"          type="button">\uD83D\uDCCB Copy report</button>' +
-        '<button class="mrf-menu-item" id="mrfOpenFullBtn"      type="button">\uD83D\uDCC4 Report Desk (all reports & downloads)</button>' +
         '<button class="mrf-menu-item" id="mrfCopyWalletsBtn"   type="button">\uD83C\uDFAF Copy new wallet targets</button>' +
         '<button class="mrf-menu-item" id="mrfDlWalletsBtn"     type="button">\u2B07 Download wallet suggestions</button>' +
         '<button class="mrf-menu-item" id="mrfDownloadTotalBtn" type="button">\u2B07 Download total report</button>' +
@@ -9977,7 +9976,6 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     item('mrfCollapseBtn',      function() { MORNING_REPORT_FLOAT.collapse(); });
     item('mrfResizeBtn',        function() { MORNING_REPORT_FLOAT.toggleSize(); });
     item('mrfCopyBtn',          function() { MORNING_REPORT_FLOAT.copy(); });
-    item('mrfOpenFullBtn',      function() { if (typeof showScreen === 'function') showScreen('report'); MORNING_REPORT_FLOAT.hide(); });
     // v3.34: wallet targets straight from the report menu — copy to hand off, or download the full TXT.
     item('mrfCopyWalletsBtn',   function() {
       var txt = (typeof suggestedWalletsAddressList === 'function') ? suggestedWalletsAddressList() : '';
@@ -10262,36 +10260,62 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         if (w.identity_type&&w.identity_type!=='Unknown') h+='<span class="mbt-src-meta">'+_esc(w.identity_type)+'</span>';
         h+='<br>';
         var a=_esc(w.address);
-        h+='<button class="mbt-btn" data-addr="'+a+'" onclick="window._mbtCopyOne(this.dataset.addr)">COPY</button> ';
-        h+='<a class="mbt-btn" href="https://xrpscan.com/account/'+encodeURIComponent(w.address)+'" target="_blank" rel="noopener noreferrer">XRPSCAN</a> ';
-        h+='<button class="mbt-btn" data-addr="'+a+'" onclick="window._mbtTrace(this.dataset.addr)">TRACE</button>';
+        h+='<button class="mbt-btn" data-addr="'+a+'" onclick="window._mbtCopyOne(this.dataset.addr)">COPY</button>';
         h+='</div>';
       });
       h+='<button class="mbt-action" onclick="window._mbtCopyWallets()">COPY ALL WALLETS</button>';
       return h;
     }
 
+    // v16.11: the old SW-DATA / EVIDENCE panels waited on a postMessage bridge
+    // from the outer app that no longer answers. The data lives right here in
+    // the local scan pack, so read it directly (bridge data still merged if it
+    // ever arrives).
+    function _num(x){ x=Number(x); return isNaN(x)?0:x; }
+    function _usd(v){ v=_num(v); if(!v) return '—'; var a=Math.abs(v);
+      return a>=1e9?'$'+(v/1e9).toFixed(2)+'B':a>=1e6?'$'+(v/1e6).toFixed(2)+'M':a>=1e3?'$'+(v/1e3).toFixed(1)+'K':'$'+Math.round(v); }
+    function _xrp(v){ v=_num(v); var a=Math.abs(v);
+      return a>=1e9?(v/1e9).toFixed(2)+'B':a>=1e6?(v/1e6).toFixed(2)+'M':a>=1e3?(v/1e3).toFixed(1)+'K':String(Math.round(v)); }
+    function _livePack(){ try { return (typeof state!=='undefined' && state.pack) || _S.pack || null; } catch(_){ return _S.pack||null; } }
+
     function _pSWData(d){
-      if (!d) return '<div class="mbt-empty">Live Shadow Watch bridge pending.<br>Use SESSION REPORT for raw scanner data.</div>';
-      var h='';
-      if (d.price)  h+='<div class="mbt-sw-row"><span class="mbt-sw-lbl">XRP PRICE</span><span class="mbt-sw-val">$'+_esc(String(d.price))+'</span></div>';
-      if (d.ledger) h+='<div class="mbt-sw-row"><span class="mbt-sw-lbl">LEDGER</span><span class="mbt-sw-val">'+_esc(String(d.ledger))+'</span></div>';
-      if (d.metrics){
-        h+='<div class="mbt-sw-row"><span class="mbt-sw-lbl">XRP VOL</span><span class="mbt-sw-val">'+_esc(Math.floor(d.metrics.totalXRPVol||0).toLocaleString())+' XRP</span></div>';
-        h+='<div class="mbt-sw-row"><span class="mbt-sw-lbl">TX COUNT</span><span class="mbt-sw-val">'+_esc(String(d.metrics.txCount||0))+'</span></div>';
+      var p=_livePack(), rows=[];
+      function row(l,v){ rows.push('<div class="mbt-sw-row"><span class="mbt-sw-lbl">'+_esc(l)+'</span><span class="mbt-sw-val">'+_esc(v)+'</span></div>'); }
+      if (p){
+        if (_num(p.xrp_price))               row('XRP PRICE','$'+_num(p.xrp_price).toFixed(4));
+        if (_num(p.xrp_volume_24h))          row('24H VOLUME',_usd(p.xrp_volume_24h));
+        if (_num(p.xrpl_dex_volume_24h_usd)) row('NATIVE DEX',_usd(p.xrpl_dex_volume_24h_usd));
+        if (_num(p.xrpl_evm_tvl_usd))        row('EVM TVL',_usd(p.xrpl_evm_tvl_usd));
+        if (_num(p.rlusd_supply))            row('RLUSD SUPPLY',_xrp(p.rlusd_supply)+' tokens');
+        var watched=_num(p.watchlist_total)||_num(p.wallets_checked);
+        if (watched)                         row('WALLETS', watched+(_num(p.wallets_checked)?(' ('+_num(p.wallets_checked)+' scanned)'):''));
+        var lt=(p.large_transfers||[]).length; if(lt) row('LARGE XFERS', lt);
+        if (_num(p.shadow_volume_xrp))       row('SHADOW VOL',_xrp(p.shadow_volume_xrp)+' XRP');
+        var nd=_num(p.total_balance_delta_xrp); if(Math.abs(nd)>=100000) row('NET FLOW',(nd>0?'+':'−')+_xrp(Math.abs(nd))+' XRP');
+        var rs=p.risk_score; if(rs&&(rs.label||rs.score!=null)) row('RISK', String(rs.label||rs.score));
       }
-      if (d.hvtHits&&d.hvtHits.length) h+='<div class="mbt-sw-row"><span class="mbt-sw-lbl">HVT HITS</span><span class="mbt-sw-val">'+d.hvtHits.length+'</span></div>';
-      if (d.whaleHits&&d.whaleHits.length) h+='<div class="mbt-sw-row"><span class="mbt-sw-lbl">WHALE HITS</span><span class="mbt-sw-val">'+d.whaleHits.length+'</span></div>';
-      return h||'<div class="mbt-empty">No scanner metrics in bridge payload.</div>';
+      if (d&&d.ledger) row('LEDGER', String(d.ledger)); // merge bridge value if present
+      if (!rows.length) return '<div class="mbt-empty">Run a scan to populate Shadow Watch data.</div>';
+      return rows.join('');
     }
 
     function _pEvidence(ev){
-      if (!ev||!ev.length) return '<div class="mbt-empty">Evidence bridge pending.<br>Use outer Evidence Locker for saved cases.</div>';
-      var h='';
-      ev.slice(0,10).forEach(function(c){
-        h+='<div class="mbt-sw-row"><span class="mbt-sw-lbl">'+_esc(c.type||'CASE')+'</span><span class="mbt-sw-val">'+_esc(String((c.amt||0).toLocaleString()))+' XRP</span></div>';
-      });
-      return h;
+      var p=_livePack(), h='';
+      var large=(p&&p.large_transfers)||(typeof state!=='undefined'&&state.large)||[];
+      if (large&&large.length){
+        large.slice(0,10).forEach(function(t){
+          var amt=_num(t.amount!=null?t.amount:t.amt);
+          var lbl=t.sender_label||t.label||t.classification||'transfer';
+          h+='<div class="mbt-sw-row"><span class="mbt-sw-lbl">'+_esc(lbl)+'</span><span class="mbt-sw-val">'+_esc(_xrp(amt))+' XRP</span></div>';
+        });
+      }
+      try {
+        var inbox=(typeof state!=='undefined'&&Array.isArray(state.discoveryInbox))?state.discoveryInbox.length:0;
+        if (inbox) h+='<div class="mbt-sw-row"><span class="mbt-sw-lbl">DISCOVERED</span><span class="mbt-sw-val">'+inbox+' new wallet(s)</span></div>';
+      } catch(_){}
+      if (ev&&ev.length){ ev.slice(0,10).forEach(function(c){
+        h+='<div class="mbt-sw-row"><span class="mbt-sw-lbl">'+_esc(c.type||'CASE')+'</span><span class="mbt-sw-val">'+_esc(_xrp(c.amt||0))+' XRP</span></div>'; }); }
+      return h||'<div class="mbt-empty">No large transfers flagged this scan.</div>';
     }
 
     window._mbtSwitch = function(id){
@@ -10341,7 +10365,6 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
           {id:'wallets',lbl:'WALLETS'},
           {id:'swdata', lbl:'SW DATA'},
           {id:'evidence',lbl:'EVIDENCE'},
-          {id:'session',lbl:'SESSION'},
           {id:'copy',   lbl:'COPY'},
           {id:'export', lbl:'EXPORT'}
         ];
@@ -10354,7 +10377,6 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
           '<div class="mbt-panel" id="mbt-panel-wallets">'+_pWallets(wallets)+'</div>'+
           '<div class="mbt-panel" id="mbt-panel-swdata">'+_pSWData(_S.swData)+'</div>'+
           '<div class="mbt-panel" id="mbt-panel-evidence">'+_pEvidence(_S.evidData)+'</div>'+
-          '<div class="mbt-panel" id="mbt-panel-session"><div class="mbt-empty">Opens raw scanner session report in Shadow Watch.</div><button class="mbt-action" onclick="window._mbtOpenSession()">OPEN SESSION REPORT</button></div>'+
           '<div class="mbt-panel" id="mbt-panel-copy"><div class="mbt-empty">Copy the full generated Daily Brief to clipboard.</div><button class="mbt-action" onclick="window._mbtCopyReport()">COPY FULL BRIEF</button></div>'+
           '<div class="mbt-panel" id="mbt-panel-export"><div class="mbt-empty">Export report + sources + wallet mentions as JSON package.</div><button class="mbt-action" onclick="window._mbtExport()">EXPORT PACKAGE</button></div>';
 
