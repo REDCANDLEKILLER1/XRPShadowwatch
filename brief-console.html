@@ -2869,7 +2869,17 @@ const WATCHLIST = [
   // ── v16.9 discovery adds (2026-07-11): surfaced by the Auto Wallet Finder ──
   ['WHALE_RECV_BINANCE', 'rPz2qA93PeRCyHyFCqyNggnyycJR1N4iNf', 'whale'],   // 19.9M XRP recv from BINANCE_HC · richlist #468 · score 190/200
   ['WHALE_RECV_RIPPLE',  'raRVLN1i5QFF6w8cwV3RovtTkjFj3qyNRf', 'whale'],   // 79.8M XRP recv from RIPPLE_305M_G · richlist #164 · score 165/200
-  ['ROUTING_SPLITTER',   'rP4X2hTa7A7udDbE6wczXvPz7XZ63sKxv3', 'whale']    // forwarded 20M from RIPPLE_305M_G · next-hop splitter · score 125/200
+  ['ROUTING_SPLITTER',   'rP4X2hTa7A7udDbE6wczXvPz7XZ63sKxv3', 'whale'],   // forwarded 20M from RIPPLE_305M_G · next-hop splitter · score 125/200
+  // ── v16.10 discovery adds (2026-07-14): ADD-tier candidates from the Auto Wallet Finder ──
+  ['SPLITTER_RIPPLE500',  'rKwJaGmB5Hz24Qs2iyCaTdUuL1WsEXUWy5', 'whale'],  // 200M each from RIPPLE_500M_A & _B, forwarded on · richlist #6 · score 190/200
+  ['EXOUT_RECV_rBgnUK',   'rBgnUKAEiFhCRLPoYNPPe3JUWayRjP6Ayg', 'whale'],  // exchange-outflow receiver (WHALE_PRIV_12 → COINBASE) · score 175/200
+  ['EXOUT_RECV_r4sRya',   'r4sRyacXpbh4HbagmgfoQq8Q3j8ZJzbZ1J', 'whale'],  // exchange-outflow receiver (COINBASE_HOT) · score 140/200
+  ['WHALE_RECV_rjqMer',   'rjqMerAJeP3XBc22CEAA9bkPZXfAETfkT',  'whale'],  // 41.8M recv from RIPPLE_305M_G · richlist #229 · score 140/200
+  ['BINANCE_PEG_BRIDGE',  'r3bqvUfF9weyxZqwo6qumBV2Q5k8LzepjJ', 'whale'],  // operator-reviewed: Binance-Peg / bridge reserve (BSC/BEP20) · score 140/200
+  ['SPLITTER_rhWt2b',     'rhWt2bhRq3wiK9sQnYVmhhKb5Dr2SE32hk', 'whale'],  // 18.43M forwarded from ROUTING_SPLITTER · richlist #371 · score 140/200
+  ['WHALE_RECV_rBg2Fu',   'rBg2FuZT91C52Nny68houguJ4vt5x1o91m', 'whale'],  // 303M recv from RIPPLE_500M_B · score 125/200
+  ['LARGE_RECV_rUjfTQ',   'rUjfTQpvBr6wsGGxMw6sRmRQGG76nvp8Ln', 'whale'],  // COINBASE/CRYPTO_COM adjacent · seen 3 scans · score 120/200
+  ['LARGE_RECV_rLoD9U',   'rLoD9U2ghXP2xUYbtML6G6v1p8LhM9mSnc', 'whale']   // CRYPTO_COM outflow · richlist #230 · score 100/200
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)
