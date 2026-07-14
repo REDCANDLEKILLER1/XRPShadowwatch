@@ -4270,6 +4270,11 @@ function validate() {
 
 const shadowVolumeXRP = () => state.large.reduce((a, t) => a + n(t.amount), 0);
 const totalDeltaXRP = () => state.wallets.filter(w => w.status === 'CHECKED').reduce((a, w) => a + n(w.delta_xrp), 0);
+// Wide-shot activity across the watched wallets (ALL sizes, not just the ≥1M
+// whale moves). Shadow Volume stays the spotlight; these are the full totals.
+// XRP-currency payments only; the >=100B guard excludes partial-payment artifacts.
+const totalTxXRP = () => state.txs.reduce((a, t) => a + (t.currency === 'XRP' && n(t.amount) > 0 && n(t.amount) < 1e11 ? n(t.amount) : 0), 0);
+const activeWalletCount = () => { const s = {}; state.txs.forEach(t => { if (t.account) s[t.account] = 1; }); return Object.keys(s).length; };
 
 // ── RISK ──────────────────────────────────────────────────────
 function riskBand(s) {
@@ -4442,6 +4447,7 @@ function buildPack(v) {
     watchlist_total: WATCHLIST.length,
     wallets_checked: checked.length, wallets_failed: failed.length, wallets_invalid: invalid.length,
     wallets: state.wallets, tx_24h_count: state.txs.length,
+    total_tx_xrp: totalTxXRP(), active_wallets: activeWalletCount(),
     shadow_volume_xrp: shadowVolumeXRP(), total_balance_delta_xrp: totalDeltaXRP(),
     large_transfers: state.large, fragmentation_flags: state.frags,
     top_signals: state.flags.slice(0, 5),
@@ -33197,7 +33203,9 @@ function _buildLedgerDiagnostics(pack){
     var q=(d24>1.5?' (24h firm)':d24<-1.5?' (24h soft)':d24?' (24h flat)':'');
     L.push('\u2022 XRP price: ~$'+price.toFixed(4)+q);
   }
-  var vol=_num(p.xrp_volume_24h);            if(vol>0) L.push('\u2022 24h volume: '+_usdC(vol));
+  // Market volume = exchange trading (external, in USD). Labeled so it is never
+  // confused with the on-Ledger movement figures below (which are in XRP).
+  var vol=_num(p.xrp_volume_24h);            if(vol>0) L.push('\u2022 Market volume (exchanges, 24h): '+_usdC(vol));
   var nat=_num(p.xrpl_dex_volume_24h_usd);   if(nat>0) L.push('\u2022 Native XRPL DEX (24h): '+_usdC(nat));
   var evm=_num(p.xrpl_evm_dex_volume_24h_usd), tvl=_num(p.xrpl_evm_tvl_usd);
   if(evm>0||tvl>0){
@@ -33212,9 +33220,18 @@ function _buildLedgerDiagnostics(pack){
     if(scanned>0&&watched>0&&scanned!==watched) wc+=' ('+scanned+' scanned this pass)';
     L.push(wc);
   }
-  var lt=_arr(p.large_transfers).length||_num(p.large_transfers_count);
-  if(lt>0) L.push('\u2022 Large transfers flagged: '+lt);
-  var sv=_num(p.shadow_volume_xrp);          if(sv>0) L.push('\u2022 Shadow volume: '+_xrpFmt(sv)+' XRP');
+  // Wide shot: ALL on-Ledger activity across the watched wallets, every size.
+  var txn=_num(p.tx_24h_count), moved=_num(p.total_tx_xrp), act=_num(p.active_wallets);
+  if(txn>0||moved>0){
+    var ap=[];
+    if(txn>0)   ap.push(txn+' transaction'+(txn===1?'':'s'));
+    if(moved>0) ap.push(_xrpFmt(moved)+' XRP moved');
+    if(act>0)   ap.push(act+' wallet'+(act===1?'':'s')+' active');
+    L.push('\u2022 Watched activity (all sizes): '+ap.join(' \u00b7 '));
+  }
+  // Spotlight: the big whale moves only \u2014 a SUBSET of the activity line above.
+  var sv=_num(p.shadow_volume_xrp), lt=_arr(p.large_transfers).length||_num(p.large_transfers_count);
+  if(sv>0) L.push('\u2022 Shadow volume (whale moves \u22651M): '+_xrpFmt(sv)+' XRP'+(lt>0?(' \u00b7 '+lt+' transfer'+(lt===1?'':'s')):''));
   var nd=_num(p.total_balance_delta_xrp!=null?p.total_balance_delta_xrp:p.balance_delta);
   if(Math.abs(nd)>=100000) L.push('\u2022 Net watched flow: '+(nd>0?'+':'\u2212')+_xrpFmt(Math.abs(nd))+' XRP '+(nd>0?'inward':'outward'));
   if(!L.length) return 'The rails were quiet \u2014 no market or ledger metrics crossed the wire this scan.';
