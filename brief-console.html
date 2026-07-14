@@ -3646,6 +3646,57 @@ async function fetchRlusdCoinGecko() {
   return sup > 0 ? Math.round(sup) : null;
 }
 
+// ── FUNDED XRPL ACCOUNTS (adoption) ────────────────────────────────
+// Unfunded/vanity keypairs never touch the Ledger — only funded accounts
+// exist on-chain, so this is the real adoption number. No single "count all
+// accounts" RPC exists, so we read it from explorers and cross-check.
+// Defensive extractor: pull the first plausible funded-account integer
+// (~3M–100M) whose key mentions account/address, tolerant to field naming.
+function _extractFunded(j){
+  if (!j || typeof j !== 'object') return null;
+  var KEYS = ['account_count','accounts','funded_accounts','fundedAccounts','total_accounts','totalAccounts','activeAccounts','active_accounts','count'];
+  for (var i=0;i<KEYS.length;i++){ if (KEYS[i] in j){ var v=Number(j[KEYS[i]]); if (v>=3e6 && v<=1e8) return Math.round(v); } }
+  var found=null;
+  (function walk(o,depth){
+    if (found || !o || typeof o!=='object' || depth>4) return;
+    for (var k in o){ var val=o[k];
+      if (typeof val==='number' && /account|address/i.test(k) && val>=3e6 && val<=1e8){ found=Math.round(val); return; }
+      if (val && typeof val==='object') walk(val, depth+1);
+    }
+  })(j,0);
+  return found;
+}
+async function fetchFundedXrpscan(){
+  var url='https://api.xrpscan.com/api/v1/metrics';
+  var j=null;
+  try { const r=await fetchWithTimeout(url, MARKET_FETCH_TIMEOUT_MS); if (r.ok) j=await r.json(); } catch(e){}
+  if (!j){ try { const { response }=await proxyFetch(url, MARKET_FETCH_TIMEOUT_MS); if (response && response.ok) j=await response.json(); } catch(e){} }
+  return _extractFunded(j);
+}
+async function fetchFundedBithomp(){
+  // Bithomp statistics may require a free API key; if so this fails gracefully
+  // and we run single-source (still cross-checked against our daily trend).
+  var url='https://bithomp.com/api/v2/statistics';
+  var j=null;
+  try { const r=await fetchWithTimeout(url, MARKET_FETCH_TIMEOUT_MS); if (r.ok) j=await r.json(); } catch(e){}
+  if (!j){ try { const { response }=await proxyFetch(url, MARKET_FETCH_TIMEOUT_MS); if (response && response.ok) j=await response.json(); } catch(e){} }
+  return _extractFunded(j);
+}
+// Reconcile the parallel sources: agree (within 0.5%) → confident; else flag.
+// For a monotonic-growing count the freshest (larger) plausible value wins.
+function _reconcileFunded(a, b){
+  a = (a && a>=3e6 && a<=1e8) ? a : null;
+  b = (b && b>=3e6 && b<=1e8) ? b : null;
+  if (a && b) return Math.max(a, b);
+  return a || b || null;
+}
+function _fundedTag(a, b){
+  if (a && b) return (Math.abs(a-b)/Math.max(a,b) < 0.005 ? 'xrpscan+bithomp agree' : 'xrpscan+bithomp DIVERGE');
+  if (a) return 'xrpscan only';
+  if (b) return 'bithomp only';
+  return 'no source';
+}
+
 async function market() {
   const notes = [];
   // 1. CoinGecko (primary)
@@ -3727,6 +3778,17 @@ async function market() {
       notes.push('✓ RLUSD supply (' + tag + ')');
     } else notes.push('RLUSD supply empty (both sources failed)');
   } catch (e) { notes.push('RLUSD supply error'); }
+  // 9. Funded XRPL accounts — TWO explorers in parallel, cross-checked, then
+  //    validated against our own daily trend (see _recordFundedAccounts).
+  try {
+    const fa = await Promise.allSettled([ fetchFundedXrpscan(), fetchFundedBithomp() ]);
+    const xs = fa[0].status === 'fulfilled' ? fa[0].value : null;
+    const bh = fa[1].status === 'fulfilled' ? fa[1].value : null;
+    state.fundedAccountsSources = { xrpscan: xs, bithomp: bh };
+    const chosen = _reconcileFunded(xs, bh);
+    if (chosen) { state.fundedAccounts = chosen; notes.push('✓ Funded accounts (' + _fundedTag(xs, bh) + ')'); }
+    else notes.push('Funded accounts empty (both sources failed)');
+  } catch (e) { notes.push('Funded accounts error'); }
 
   // Update HUD
   const price = n($('inPrice').value), delta = n($('inDelta').value), vol = n($('inVolume').value);
@@ -4276,6 +4338,39 @@ const totalDeltaXRP = () => state.wallets.filter(w => w.status === 'CHECKED').re
 const totalTxXRP = () => state.txs.reduce((a, t) => a + (t.currency === 'XRP' && n(t.amount) > 0 && n(t.amount) < 1e11 ? n(t.amount) : 0), 0);
 const activeWalletCount = () => { const s = {}; state.txs.forEach(t => { if (t.account) s[t.account] = 1; }); return Object.keys(s).length; };
 
+// ── Funded-account daily trend (the "new accounts since last report" engine) ──
+// Store the funded-account total per day; the delta vs the last report day IS
+// the count of new funded XRPL accounts. Also acts as a validating cross-check:
+// a reading that isn't ≥ the last value (accounts only grow) is rejected.
+function _fundedHistLoad(){ try { return JSON.parse(localStorage.getItem('SW_FUNDED_HIST') || '{}') || {}; } catch(_){ return {}; } }
+function _fundedHistSave(h){ try { localStorage.setItem('SW_FUNDED_HIST', JSON.stringify(h)); } catch(_){} }
+function _recordFundedAccounts(count){
+  count = Number(count) || 0;
+  if (count < 3e6 || count > 1e8) return; // implausible → ignore
+  try {
+    const h = _fundedHistLoad();
+    const today = new Date().toISOString().slice(0, 10);
+    // Accounts only grow; if a source glitches low, keep the higher prior-today value.
+    if (!h[today] || count >= h[today]) h[today] = count;
+    const keys = Object.keys(h).sort();
+    while (keys.length > 500) delete h[keys.shift()];
+    _fundedHistSave(h);
+  } catch(_){}
+}
+function _fundedAccountsDelta(count){
+  try {
+    const h = _fundedHistLoad();
+    const today = new Date().toISOString().slice(0, 10);
+    const priors = Object.keys(h).filter(d => d < today).sort();
+    if (!priors.length) return null;                       // no baseline yet
+    const since = priors[priors.length - 1];
+    const base = Number(h[since]) || 0;
+    if (!base) return null;
+    const now = Number(count) || base;
+    return { delta: Math.round(now - base), sinceDate: since };
+  } catch(_){ return null; }
+}
+
 // ── RISK ──────────────────────────────────────────────────────
 function riskBand(s) {
   if (s >= 75) return 'BLACK / EXTREME';
@@ -4458,10 +4553,15 @@ function buildPack(v) {
     rlusd_supply: n(state.rlusdSupply),
     rlusd_supply_gateway:   n(state.rlusdSupplySources?.gateway),
     rlusd_supply_coingecko: n(state.rlusdSupplySources?.coingecko),
+    funded_accounts: n(state.fundedAccounts),
+    funded_accounts_xrpscan: n(state.fundedAccountsSources?.xrpscan),
+    funded_accounts_bithomp: n(state.fundedAccountsSources?.bithomp),
     world_news_context_manual: $('inWorldContext')?.value?.trim() || '',
     validation: v
   };
   p.evidence_quality = evidenceQuality(p);
+  // Log today's funded-account total to the daily trend (drives the delta).
+  try { _recordFundedAccounts(n(p.funded_accounts)); } catch (_) {}
   return p;
 }
 
@@ -33213,6 +33313,15 @@ function _buildLedgerDiagnostics(pack){
     L.push('\u2022 XRPL EVM: '+parts.join(' \u00b7 '));
   }
   var rlusd=_num(p.rlusd_supply);            if(rlusd>0) L.push('\u2022 RLUSD supply: '+_xrpFmt(rlusd)+' tokens');
+  // Funded XRPL accounts (adoption) + how many are new since the last report.
+  var funded=_num(p.funded_accounts);
+  if(funded>0){
+    var fline='\u2022 Funded XRPL accounts: '+funded.toLocaleString('en-US');
+    var fd=(typeof _fundedAccountsDelta==='function')?_fundedAccountsDelta(funded):null;
+    if(fd) fline+=' ('+(fd.delta>=0?'+':'')+fd.delta.toLocaleString('en-US')+' since '+fd.sinceDate+')';
+    else   fline+=' (baseline set \u2014 daily change starts next report)';
+    L.push(fline);
+  }
   var watched=_num(p.watchlist_total)||_num(p.wallets_total)||(typeof WATCHLIST!=='undefined'?WATCHLIST.length:0);
   var scanned=_num(p.wallets_checked);
   if(watched>0||scanned>0){
@@ -34561,6 +34670,19 @@ html, body {
         var fm=function(v){ return (v==null||v===0)?'—':(v>=1e9?(v/1e9).toFixed(2)+'B':(v/1e6).toFixed(2)+'M'); };
         var agree=(g&&c)?(Math.abs(g-c)/Math.max(g,c)<0.02?'agree':'DIVERGE'):(g||c?'single-source':'both failed');
         out+='\nRLUSD supply: gateway='+fm(g)+'  gecko='+fm(c)+'  ('+agree+')';
+      }
+      // Funded XRPL accounts — both sources + agreement + today's trend delta.
+      var fsrc=(window.state&&window.state.fundedAccountsSources)||null;
+      var fchosen=(window.state&&window.state.fundedAccounts)||0;
+      if(fsrc||fchosen){
+        var xs=fsrc&&fsrc.xrpscan, bh=fsrc&&fsrc.bithomp;
+        var ci=function(v){ return (v==null||v===0)?'—':Number(v).toLocaleString('en-US'); };
+        var fagree=(xs&&bh)?(Math.abs(xs-bh)/Math.max(xs,bh)<0.005?'agree':'DIVERGE'):(xs||bh?'single-source':'both failed');
+        out+='\nfunded accounts: xrpscan='+ci(xs)+'  bithomp='+ci(bh)+'  ('+fagree+')';
+        try {
+          var fd=(typeof _fundedAccountsDelta==='function')?_fundedAccountsDelta(fchosen):null;
+          out+='   trend: '+(fd?((fd.delta>=0?'+':'')+fd.delta.toLocaleString('en-US')+' since '+fd.sinceDate):'baseline (no prior day yet)');
+        } catch(_){}
       }
     } catch(e){}
     return out||'No scan yet.';

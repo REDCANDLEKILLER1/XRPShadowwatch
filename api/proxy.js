@@ -27,6 +27,8 @@ module.exports = async function handler(req, res) {
     // market / DeFi
     'api.llama.fi', 'api.coingecko.com', 'api.coinbase.com', 'api.coincap.io',
     'api.coinpaprika.com', 'min-api.cryptocompare.com',
+    // XRPL network stats (funded-account count — read-only, cross-checked)
+    'api.xrpscan.com', 'bithomp.com',
     // news / signal
     'api.gdeltproject.org', 'news.google.com',
     'bitcoinist.com', 'newsbtc.com', 'u.today', 'cryptoslate.com', 'coingape.com',
