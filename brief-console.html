@@ -34275,6 +34275,28 @@ html, body {
     return { g:g, now:now, locked: !!(g.report && (now-(g.lastDeliveredAt||0) < DAY_MS)) };
   }
 
+  // ── Master switch ──────────────────────────────────────────────
+  // The 24h block can be turned OFF while building (default OFF for now).
+  // When OFF, reports are unlimited (no lock) but the daily archive still
+  // accumulates, so the "on this day" history keeps building either way.
+  var ENABLED_KEY = 'SW_GATE_ENABLED';
+  function gateEnabled(){ try { var v=localStorage.getItem(ENABLED_KEY); return v===null ? false : v==='1'; } catch(_){ return false; } }
+  function setGateEnabled(on){ try { localStorage.setItem(ENABLED_KEY, on?'1':'0'); } catch(_){} }
+
+  // Archive the FIRST good brief of each date (canonical), independent of the lock.
+  function _writeArchive(text, sources, pack){
+    try {
+      var now=_now(), date=_ymd(now), a=loadArch();
+      if (a[date]) return;
+      var f=_packFacts(pack);
+      a[date]={ date:date, savedAt:now, text:text,
+                sources:Array.isArray(sources)?sources.slice(0,20):[], risk:f.risk, price:f.price };
+      var keys=Object.keys(a).sort(); while(keys.length>ARCH_MAX){ delete a[keys.shift()]; }
+      saveArch(a);
+      _log('archived brief for '+date+' (archive holds '+Object.keys(a).length+' days)');
+    } catch(_){}
+  }
+
   // ── COMMIT: heal → lock today → write archive. Shared by every
   //    delivery surface so a brief is committed exactly once per day. ──
   function commit(freshText, sources, pack){
@@ -34283,18 +34305,7 @@ html, body {
     var now = _now(), date = _ymd(now), g = loadGate();
     saveGate({ lastDeliveredAt:now, deliveredDate:date, report:h.text,
                sources: Array.isArray(sources)?sources.slice(0,40):[], count:(g.count||0)+1 });
-    // Archive: the FIRST good brief of a date is canonical; don't overwrite it.
-    var a = loadArch();
-    if (!a[date]){
-      var f = _packFacts(pack);
-      a[date] = { date:date, savedAt:now, text:h.text,
-                  sources: Array.isArray(sources)?sources.slice(0,20):[],
-                  risk:f.risk, price:f.price };
-      var keys = Object.keys(a).sort();
-      while (keys.length > ARCH_MAX){ delete a[keys.shift()]; }
-      saveArch(a);
-      _log('archived brief for '+date+' (archive holds '+Object.keys(a).length+' days)');
-    }
+    _writeArchive(h.text, sources, pack);
     _log('brief locked for 24h (delivery #'+((g.count||0)+1)+')');
     return h.text;
   }
@@ -34304,6 +34315,12 @@ html, body {
   function gateDelivery(freshText, pack){
     try {
       if (devUnlocked()) return healReport(freshText).text;
+      // Block OFF: unlimited reports, but keep the daily archive building.
+      if (!gateEnabled()) {
+        var hd = healReport(freshText);
+        if (hd.ok) _writeArchive(hd.text, (pack && pack.report_sources) || null, pack);
+        return hd.text;
+      }
       var ls = lockState();
       if (ls.locked){ _log('source-gate: locked — using today’s logged brief'); return ls.g.report; }
       var committed = commit(freshText, (pack && pack.report_sources) || null, pack);
@@ -34333,7 +34350,7 @@ html, body {
   //    WITHOUT committing/locking. Commit happens once, at gateDelivery. ──
   function viewBrief(freshText, pack){
     try {
-      if (devUnlocked()) return healReport(freshText).text;
+      if (devUnlocked() || !gateEnabled()) return healReport(freshText).text;
       var ls = lockState();
       if (ls.locked) return ls.g.report;
       return healReport(freshText).text;
@@ -34346,12 +34363,14 @@ html, body {
     viewBrief: viewBrief,
     status: function(){
       var ls = lockState(), a = loadArch(), dates = Object.keys(a).sort();
+      var enabled = gateEnabled();
       return {
+        gate_enabled: enabled,
         unlocked_dev: devUnlocked(),
-        locked: ls.locked && !devUnlocked(),
+        locked: enabled && ls.locked && !devUnlocked(),
         delivered_count: ls.g.count || 0,
         last_delivered: ls.g.lastDeliveredAt ? new Date(ls.g.lastDeliveredAt).toISOString() : null,
-        next_unlock_in: ls.locked ? fmtCountdown((ls.g.lastDeliveredAt||0)+DAY_MS-ls.now) : 'now',
+        next_unlock_in: (enabled && ls.locked) ? fmtCountdown((ls.g.lastDeliveredAt||0)+DAY_MS-ls.now) : 'now',
         stored_report_chars: (ls.g.report||'').length,
         archive_days: dates.length,
         archive_range: dates.length ? (dates[0]+' … '+dates[dates.length-1]) : 'none',
@@ -34361,6 +34380,9 @@ html, body {
     archiveList: archList,
     archiveGet:  archGet,
     onThisDay:   onThisDay,
+    enable:  function(){ setGateEnabled(true);  _log('24h daily block ENABLED'); },
+    disable: function(){ setGateEnabled(false); _log('24h daily block DISABLED'); },
+    isEnabled: gateEnabled,
     reset:        function(){ try { localStorage.removeItem(KEY); } catch(_){} _log('today’s lock reset'); },
     clearArchive: function(){ try { localStorage.removeItem(ARCH); } catch(_){} _log('archive cleared'); },
     unlock: function(){ setUnlocked(true);  _log('dev unlock ON'); },
@@ -34375,7 +34397,7 @@ html, body {
     var _origShow = MRF.show;
     MRF.show = function(reportText, sources, pack){
       try {
-        if (devUnlocked()) return _origShow.call(MRF, healReport(reportText).text, sources, pack);
+        if (devUnlocked() || !gateEnabled()) return _origShow.call(MRF, healReport(reportText).text, sources, pack);
         var ls = lockState();
         if (ls.locked)
           return _origShow.call(MRF, lockedBanner(ls.g, ls.now)+'\n'+ls.g.report, ls.g.sources||sources, pack);
@@ -34460,6 +34482,7 @@ html, body {
     <span class="dbg-title">🐞 DEBUG LOG</span>
     <div class="dbg-btns">
       <button id="swDbgRefresh">REFRESH</button>
+      <button id="swDbgGateToggle">⏳ BLOCK: OFF</button>
       <button id="swDbgUnlock">🔓 UNLOCK</button>
       <button id="swDbgArchBtn">📅 ARCHIVE</button>
       <button id="swDbgCopy">COPY</button>
@@ -34515,7 +34538,8 @@ html, body {
     try {
       if(!window.SW_DAILY_GATE) return 'gate not installed yet.';
       var s=window.SW_DAILY_GATE.status();
-      return 'dev unlock: '+(s.unlocked_dev?'ON (multiple reports)':'off')+'\n'+
+      return '24h daily block: '+(s.gate_enabled?'ON':'OFF (unlimited reports)')+'\n'+
+             'dev unlock: '+(s.unlocked_dev?'ON (multiple reports)':'off')+'\n'+
              'locked: '+(s.locked?'YES':'no')+'   next fresh brief in: '+s.next_unlock_in+'\n'+
              'reports delivered (lifetime): '+s.delivered_count+'\n'+
              'last delivered: '+(s.last_delivered||'never')+'\n'+
@@ -34559,8 +34583,14 @@ html, body {
     b.textContent = on ? '🔒 RE-LOCK' : '🔓 UNLOCK';
     b.style.color = on ? '#ffcc00' : '';
   }
+  function updateGateBtn(){
+    var b=$one('swDbgGateToggle'); if(!b||!window.SW_DAILY_GATE) return;
+    var on=false; try { on=window.SW_DAILY_GATE.status().gate_enabled; } catch(_){}
+    b.textContent = on ? '⏳ BLOCK: ON' : '⏳ BLOCK: OFF';
+    b.style.color = on ? '#ffcc00' : '';
+  }
   function fill(){
-    updateUnlockBtn();
+    updateUnlockBtn(); updateGateBtn();
     if($one('swDbgGate')) $one('swDbgGate').textContent = gateBlock();
     if($one('swDbgErr'))  $one('swDbgErr').textContent  = txtOf('errorLog')||'No errors logged.';
     if($one('swDbgFeed')) $one('swDbgFeed').textContent = txtOf('statusFeed')||'No scan feed yet.';
@@ -34584,6 +34614,16 @@ html, body {
     if(t.id==='swDebugFab'){ fill(); var o=$one('swDebugOverlay'); if(o)o.classList.add('open'); }
     else if(t.id==='swDbgClose'){ var o=$one('swDebugOverlay'); if(o)o.classList.remove('open'); }
     else if(t.id==='swDbgRefresh'){ fill(); }
+    else if(t.id==='swDbgGateToggle'){
+      // Turn the 24h daily block ON/OFF. OFF = unlimited reports (archive still builds).
+      try {
+        if(window.SW_DAILY_GATE){
+          if(window.SW_DAILY_GATE.status().gate_enabled){ window.SW_DAILY_GATE.disable(); }
+          else { window.SW_DAILY_GATE.enable(); window.SW_DAILY_GATE.reset(); } // fresh 24h window starts on next brief
+        }
+      } catch(_){}
+      updateGateBtn(); fill();
+    }
     else if(t.id==='swDbgUnlock'){
       // One-tap dev unlock/relock from the debug panel — no hidden 9s hold needed.
       try {
