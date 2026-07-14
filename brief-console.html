@@ -3395,8 +3395,16 @@ async function scanWallets(ws) {
         const t = item.tx_json || item.tx || {}, iso = t.date ? rip(t.date) : '';
         if (!iso) continue;
         let amt = 0, cur = 'XRP', escrowDest = '';
-        if (typeof t.Amount === 'string') amt = drops(t.Amount);
-        else if (t.Amount && typeof t.Amount === 'object') { cur = t.Amount.currency || 'TOKEN'; amt = n(t.Amount.value || 0); }
+        // v16.9 units fix: a partial payment carries a huge SENTINEL in `Amount`
+        // (the max, often ~1e17 drops ≈ 100B+ XRP) while the REAL moved amount is
+        // in meta.delivered_amount. Reading Amount produced impossible "103B XRP"
+        // transfers. Prefer the actually-delivered amount whenever it's present.
+        const _dmeta = item.meta || item.metaData || {};
+        let amtSrc = t.Amount;
+        if (_dmeta && _dmeta.delivered_amount != null && _dmeta.delivered_amount !== 'unavailable')
+          amtSrc = _dmeta.delivered_amount;
+        if (typeof amtSrc === 'string') amt = drops(amtSrc);
+        else if (amtSrc && typeof amtSrc === 'object') { cur = amtSrc.currency || 'TOKEN'; amt = n(amtSrc.value || 0); }
         else if (t.TransactionType === 'EscrowFinish' || t.TransactionType === 'EscrowCreate') {
           // Released/locked XRP lives in metadata (the created/deleted Escrow node), not t.Amount.
           const meta = item.meta || item.metaData || {};
@@ -3465,7 +3473,15 @@ function classify(t) {
 function analyzeFlags() {
   const flags = [], large = [], frags = [];
   const threshold = n($('inLargeThreshold').value) || 1000000;
+  // XRP total supply is ~100B. Any single "XRP" amount at/above this ceiling is a
+  // data artifact (e.g. an unresolved partial-payment sentinel), never a real
+  // transfer — exclude it so the report can't print an impossible 100B+ move.
+  const MAX_PLAUSIBLE_XRP = 100_000_000_000;
   for (const t of state.txs) {
+    if (t.currency === 'XRP' && t.amount >= MAX_PLAUSIBLE_XRP) {
+      log('dropped implausible XRP amount (data artifact): ' + fmt(t.amount, 0) + ' ' + (t.hash || ''));
+      continue;
+    }
     if (t.currency === 'XRP' && t.amount >= threshold) {
       const c = classify(t); large.push(c);
       flags.push(`${c.confidence} ${c.classification}: ${c.sender_label} → ${ca(c.to)} ${fmt(c.amount, 0)} XRP ${c.hash}`);
@@ -3649,6 +3665,17 @@ async function market() {
     const v = await fetchDefiDex('https://api.llama.fi/overview/dexs/xrpl?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume');
     if (v != null) { $('inXrpldex').value = v; notes.push('✓ Native DEX'); } else notes.push('Native DEX empty');
   } catch (e) { notes.push('Native DEX blocked'); }
+  // 8. RLUSD supply (Ripple's XRPL stablecoin) — a Ledger-activity indicator.
+  //    Direct → proxy fallback, same as the other market pulls.
+  try {
+    const url = 'https://api.coingecko.com/api/v3/coins/ripple-usd?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false';
+    let j = null;
+    try { const r = await fetchWithTimeout(url, MARKET_FETCH_TIMEOUT_MS); if (r.ok) j = await r.json(); } catch (e) {}
+    if (!j || !j.market_data) { try { const { response } = await proxyFetch(url, MARKET_FETCH_TIMEOUT_MS); if (response && response.ok) j = await response.json(); } catch (e) {} }
+    const m = (j && j.market_data) || {};
+    const sup = n(m.circulating_supply) || n(m.total_supply);
+    if (sup > 0) { state.rlusdSupply = Math.round(sup); notes.push('✓ RLUSD supply'); } else notes.push('RLUSD supply empty');
+  } catch (e) { notes.push('RLUSD supply ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
 
   // Update HUD
   const price = n($('inPrice').value), delta = n($('inDelta').value), vol = n($('inVolume').value);
@@ -4371,6 +4398,7 @@ function buildPack(v) {
     xrpl_evm_tvl_usd: n($('inTvl')?.value),
     xrpl_evm_dex_volume_24h_usd: n($('inDexvol')?.value),
     xrpl_dex_volume_24h_usd: n($('inXrpldex')?.value),
+    rlusd_supply: n(state.rlusdSupply),
     world_news_context_manual: $('inWorldContext')?.value?.trim() || '',
     validation: v
   };
@@ -33074,6 +33102,50 @@ function _buildVerdict(interps, pack){
          'I\u2019m XRPMan, and I tell on the banks.';
 }
 
+// Compact USD formatter for the diagnostics readout.
+function _usdC(v){
+  v=_num(v); if(!v) return '$0';
+  var a=Math.abs(v);
+  if(a>=1e9) return '$'+(v/1e9).toFixed(2).replace(/\.00$/,'')+'B';
+  if(a>=1e6) return '$'+(v/1e6).toFixed(2).replace(/\.00$/,'')+'M';
+  if(a>=1e3) return '$'+(v/1e3).toFixed(1).replace(/\.0$/,'')+'K';
+  return '$'+Math.round(v);
+}
+
+// LEDGER DIAGNOSTICS \u2014 the factual readout the desk loves: price/volume, the
+// XRPL DEX + EVM layer, RLUSD stablecoin supply, wallet coverage and the
+// night's on-chain activity. Only prints lines that actually have data.
+function _buildLedgerDiagnostics(pack){
+  var p=pack||{}, L=[];
+  var price=_num(p.xrp_price!=null?p.xrp_price:p.price), d24=_num(p.xrp_delta_24h_pct);
+  if(price>0){
+    var q=(d24>1.5?' (24h firm)':d24<-1.5?' (24h soft)':d24?' (24h flat)':'');
+    L.push('\u2022 XRP price: ~$'+price.toFixed(4)+q);
+  }
+  var vol=_num(p.xrp_volume_24h);            if(vol>0) L.push('\u2022 24h volume: '+_usdC(vol));
+  var nat=_num(p.xrpl_dex_volume_24h_usd);   if(nat>0) L.push('\u2022 Native XRPL DEX (24h): '+_usdC(nat));
+  var evm=_num(p.xrpl_evm_dex_volume_24h_usd), tvl=_num(p.xrpl_evm_tvl_usd);
+  if(evm>0||tvl>0){
+    var parts=[]; if(evm>0) parts.push(_usdC(evm)+' DEX'); if(tvl>0) parts.push(_usdC(tvl)+' TVL');
+    L.push('\u2022 XRPL EVM: '+parts.join(' \u00b7 '));
+  }
+  var rlusd=_num(p.rlusd_supply);            if(rlusd>0) L.push('\u2022 RLUSD supply: '+_xrpFmt(rlusd)+' tokens');
+  var watched=_num(p.watchlist_total)||_num(p.wallets_total)||(typeof WATCHLIST!=='undefined'?WATCHLIST.length:0);
+  var scanned=_num(p.wallets_checked);
+  if(watched>0||scanned>0){
+    var wc='\u2022 Watched wallets: '+(watched||scanned);
+    if(scanned>0&&watched>0&&scanned!==watched) wc+=' ('+scanned+' scanned this pass)';
+    L.push(wc);
+  }
+  var lt=_arr(p.large_transfers).length||_num(p.large_transfers_count);
+  if(lt>0) L.push('\u2022 Large transfers flagged: '+lt);
+  var sv=_num(p.shadow_volume_xrp);          if(sv>0) L.push('\u2022 Shadow volume: '+_xrpFmt(sv)+' XRP');
+  var nd=_num(p.total_balance_delta_xrp!=null?p.total_balance_delta_xrp:p.balance_delta);
+  if(Math.abs(nd)>=100000) L.push('\u2022 Net watched flow: '+(nd>0?'+':'\u2212')+_xrpFmt(Math.abs(nd))+' XRP '+(nd>0?'inward':'outward'));
+  if(!L.length) return 'The rails were quiet \u2014 no market or ledger metrics crossed the wire this scan.';
+  return L.join('\n');
+}
+
 function _buildPrayer(pack){
   // Call existing prayer engine if available
   if(typeof window.getDailyPrayer==='function')
@@ -33147,6 +33219,7 @@ function assemblePublicReport(pack){
   var evid  = _buildEvidence(interps, pack);
   var watch = _buildWatchNext(interps);
   var verd  = _buildVerdict(interps, pack);
+  var diag  = _buildLedgerDiagnostics(pack);
 
   // Build public body (capped at 4K)
   var body=
@@ -33165,7 +33238,8 @@ function assemblePublicReport(pack){
            _sectionHeader('WHAT MATTERED MOST')+wmm+
            _sectionHeader('EVIDENCE')+shortEvid+
            _sectionHeader('WHAT TO WATCH NEXT')+watch+
-           _sectionHeader('VERDICT')+verd;
+           _sectionHeader('VERDICT')+verd+
+           _sectionHeader('LEDGER DIAGNOSTICS')+diag;
     }
     // Still over? Shorten WHAT MATTERED MOST
     if(body.length>4000 && wmm.length>200){
@@ -33174,7 +33248,8 @@ function assemblePublicReport(pack){
            _sectionHeader('WHAT MATTERED MOST')+shortWmm+
            _sectionHeader('EVIDENCE')+evid.slice(0,300)+'\u2026 [dev panel]'+
            _sectionHeader('WHAT TO WATCH NEXT')+watch+
-           _sectionHeader('VERDICT')+verd;
+           _sectionHeader('VERDICT')+verd+
+           _sectionHeader('LEDGER DIAGNOSTICS')+diag;
     }
     if(body.length>4000) body=body.slice(0,3960)+'\n\u2026[4K LIMIT]';
   }
@@ -33363,7 +33438,7 @@ function assertHumanReadable(report){
   // v3.34: the mandated section headers are REQUIRED in ALL-CAPS by
   // assertSectionOrderLocked, so counting them made this assert impossible.
   // Exclude those header words and brand/ticker tokens from the count.
-  var _CAPS_WL=/^(EXECUTIVE|SUMMARY|WHAT|MATTERED|MOST|EVIDENCE|WATCH|NEXT|VERDICT|SOURCES|XRP|COFFEE|CRYPTO|XCELLENT|GPT|RLUSD|USD|TVL|DEX|AMM|NFT)$/;
+  var _CAPS_WL=/^(EXECUTIVE|SUMMARY|WHAT|MATTERED|MOST|EVIDENCE|WATCH|NEXT|VERDICT|SOURCES|LEDGER|DIAGNOSTICS|XRP|XRPL|EVM|COFFEE|CRYPTO|XCELLENT|GPT|RLUSD|USD|TVL|DEX|AMM|NFT)$/;
   var capsMatches=(body.match(/\b[A-Z]{3,}\b/g)||[]).filter(function(t){return !_CAPS_WL.test(t);}).length;
   if(capsMatches>5)
     return _fail('assertHumanReadable',
