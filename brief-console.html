@@ -34634,6 +34634,7 @@ html, body {
     <span class="dbg-title">🐞 DEBUG LOG</span>
     <div class="dbg-btns">
       <button id="swDbgRefresh">REFRESH</button>
+      <button id="swDbgProbe">🛰 PROBE</button>
       <button id="swDbgGateToggle">⏳ BLOCK: OFF</button>
       <button id="swDbgUnlock">🔓 UNLOCK</button>
       <button id="swDbgArchBtn">📅 ARCHIVE</button>
@@ -34642,6 +34643,8 @@ html, body {
       <button id="swDbgClose">✕ CLOSE</button>
     </div>
   </div>
+  <div class="dbg-sec">SOURCE PROBE <button id="swDbgProbeCopy" style="font:600 9px 'Share Tech Mono',monospace;background:rgba(0,18,0,0.9);color:#00ff00;border:1px solid rgba(0,255,0,0.45);border-radius:4px;padding:3px 8px;cursor:pointer;margin-left:8px">COPY PROBE</button></div>
+  <pre id="swDbgProbeBody">Tap 🛰 PROBE to fetch the funded-account sources into this copyable box, then COPY PROBE.</pre>
   <div class="dbg-sec">DAILY BRIEF GATE</div><pre id="swDbgGate">—</pre>
   <div class="dbg-sec">BRIEF ARCHIVE <span id="swArchMeta" style="color:#7fbf7f"></span></div>
   <div id="swArchList" class="dbg-arch"></div>
@@ -34770,6 +34773,47 @@ html, body {
            '\n\n[SCAN FEED]\n'+(txtOf('statusFeed')||'—')+
            '\n\n[NEWS]\n'+newsBlock();
   }
+  // Fetch the candidate funded-account endpoints (direct, then via our own
+  // same-origin proxy which can reach allowlisted hosts server-side) and dump
+  // the raw responses into a copyable box — so the exact JSON shape can be seen.
+  async function probeSources(){
+    var out=$one('swDbgProbeBody'); if(out) out.textContent='probing… (this can take a few seconds)';
+    var targets=[
+      'https://api.xrpscan.com/api/v1/metrics',
+      'https://api.xrpscan.com/api/v1/network/metrics',
+      'https://api.xrpscan.com/api/v1/account/rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+      'https://bithomp.com/api/v2/statistics'
+    ];
+    var lines=['SOURCE PROBE @ '+new Date().toISOString(), ''];
+    for(var i=0;i<targets.length;i++){
+      var url=targets[i];
+      var got=false;
+      try{
+        var r=await fetch(url, {headers:{'Accept':'application/json'}});
+        var body=await r.text();
+        lines.push('GET '+url+'  →  HTTP '+r.status+'  (direct)');
+        lines.push(body.slice(0,900));
+        got=true;
+      }catch(e){
+        lines.push('GET '+url+'  →  direct FAILED ('+(e&&e.message||e)+')');
+      }
+      if(!got){
+        try{
+          var pu='/api/proxy?url='+encodeURIComponent(url);
+          var pr=await fetch(pu);
+          var pb=await pr.text();
+          lines.push('   via proxy  →  HTTP '+pr.status);
+          lines.push(pb.slice(0,900));
+        }catch(e2){
+          lines.push('   via proxy  →  FAILED ('+(e2&&e2.message||e2)+')');
+        }
+      }
+      lines.push('\n'+'─'.repeat(34)+'\n');
+      if(out) out.textContent=lines.join('\n'); // progressive
+    }
+    if(out) out.textContent=lines.join('\n');
+  }
+
   document.addEventListener('click', function(e){
     var t=e.target; if(!t) return;
     // Archive date chip (no id, carries data-arch).
@@ -34801,6 +34845,8 @@ html, body {
       updateUnlockBtn(); fill();
     }
     else if(t.id==='swDbgArchBtn'){ fillArch(); }
+    else if(t.id==='swDbgProbe'){ probeSources(); }
+    else if(t.id==='swDbgProbeCopy'){ try{ var pt=(($one('swDbgProbeBody')||{}).textContent)||''; if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(pt); }catch(_){}}
     else if(t.id==='swDbgCopy'){ try{ if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(combined()); }catch(_){}}
     else if(t.id==='swDbgDownload'){
       try{
