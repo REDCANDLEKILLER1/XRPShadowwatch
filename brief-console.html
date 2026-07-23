@@ -2885,7 +2885,9 @@ const WATCHLIST = [
   // ── v16.13 discovery add (2026-07-14): next hop off SPLITTER_rUSYaU (flywheel continues) ──
   ['SPLITTER_r4nydG',     'r4nydGjxDBn2VDMqmDxx2oZQGCcEWKPs8F', 'whale'],  // 59.2M forwarded from SPLITTER_rUSYaU · richlist #188 · score 140/200
   // ── v16.14 discovery add (2026-07-23): next hop off SPLITTER_r4nydG → CRYPTO_COM (4th flywheel hop) ──
-  ['SPLITTER_rDsbeo',     'rDsbeomae4FXwgQTJp9Rs64Qg9vDiTCdBv', 'whale']   // 2.35M from SPLITTER_r4nydG, forwarded to CRYPTO_COM · richlist #465 · score 190/200
+  ['SPLITTER_rDsbeo',     'rDsbeomae4FXwgQTJp9Rs64Qg9vDiTCdBv', 'whale'],  // 2.35M from SPLITTER_r4nydG, forwarded to CRYPTO_COM · richlist #465 · score 190/200
+  // ── v16.15 discovery add (2026-07-23): next hop off SPLITTER_rDsbeo (5th flywheel hop) ──
+  ['SPLITTER_rXzRVo',     'rXzRVoohqvahY4zyUrfmznpVgkLJsDCtd',  'whale']   // 3.31M from SPLITTER_rDsbeo, forwarded on · richlist #136 · score 165/200
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)
@@ -34805,14 +34807,16 @@ html, body {
     var out=$one('swDbgProbeBody'); if(out) out.textContent='probing… (this can take a few seconds)';
     // XRPScan is open (no key). /metrics 404s — its metrics are date-based and/or
     // under different paths. Probe the likely candidates so we find the account-count one.
-    var _d=function(off){ return new Date(Date.now()-off*86400000).toISOString().slice(0,10); };
+    // /api/v1/metrics/:x returns plain "Not found" (route exists) vs "Cannot GET"
+    // (no route) — so metrics takes a NAME, not a date. Probe metric-name candidates.
     var targets=[
-      'https://api.xrpscan.com/api/v1/metrics/'+_d(1),
-      'https://api.xrpscan.com/api/v1/metrics/'+_d(2),
-      'https://api.xrpscan.com/api/v1/statistics',
-      'https://api.xrpscan.com/api/v1/network/info',
-      'https://api.xrpscan.com/api/v1/network/nodes',
-      'https://api.xrpscan.com/api/v1/ledgers'
+      'https://api.xrpscan.com/api/v1/metrics/accounts',
+      'https://api.xrpscan.com/api/v1/metrics/account',
+      'https://api.xrpscan.com/api/v1/metrics/summary',
+      'https://api.xrpscan.com/api/v1/metrics/network',
+      'https://api.xrpscan.com/api/v1/metrics/latest',
+      'https://api.xrpscan.com/api/v1/server_info',
+      'https://api.xrpscan.com/api/v1/network/server_info'
     ];
     var lines=['SOURCE PROBE @ '+new Date().toISOString(), ''];
     for(var i=0;i<targets.length;i++){
