@@ -3550,7 +3550,13 @@ async function scanReceivers(ws) {
         const t = item.tx_json || item.tx || {}, iso = t.date ? rip(t.date) : '';
         if (!iso || new Date(iso).getTime() < cutoff) continue;
         rec.tx_count++;
-        const amt = typeof t.Amount === 'string' ? drops(t.Amount) : 0;
+        // Prefer meta.delivered_amount (partial-payment sentinel fix) so a huge
+        // Amount sentinel can't inflate the forwarded total.
+        const _meta = item.meta || item.metaData || {};
+        let _amtSrc = t.Amount;
+        if (_meta.delivered_amount != null && _meta.delivered_amount !== 'unavailable') _amtSrc = _meta.delivered_amount;
+        const amt = typeof _amtSrc === 'string' ? drops(_amtSrc) : 0;
+        if (amt >= 100000000000) continue; // implausible (≥ total supply) → data artifact
         if (t.Account === addr && amt >= 1000000) { rec.forwarded_large_count++; rec.forwarded_large_total_xrp += amt; }
       }
       rec.classification = rec.forwarded_large_count > 0 ? 'NEXT_HOP_FORWARDING_DETECTED'
@@ -6376,11 +6382,16 @@ function collectDiscoveryCandidates(pack) {
     }
     if (source) rec.sources.add(source);
     if (fields) {
-      if (fields.reason)              rec.reasons.push(fields.reason);
+      // Guard: any single XRP value ≥ total supply is a data artifact (an
+      // unresolved partial-payment sentinel). Drop its value AND its reason
+      // line so bogus "100B XRP" amounts never reach a candidate.
+      const _v = fields.value_xrp != null ? n(fields.value_xrp) : null;
+      const _implausible = (_v != null && _v >= 100000000000);
+      if (fields.reason && !_implausible) rec.reasons.push(fields.reason);
       if (fields.related_watched)     fields.related_watched.forEach(w => rec.related_watched_wallets.add(w));
-      if (fields.value_xrp != null) {
-        rec.total_value_xrp += n(fields.value_xrp);
-        if (n(fields.value_xrp) > rec.max_value_xrp) rec.max_value_xrp = n(fields.value_xrp);
+      if (_v != null && !_implausible) {
+        rec.total_value_xrp += _v;
+        if (_v > rec.max_value_xrp) rec.max_value_xrp = _v;
       }
       if (fields.tx_count != null)    rec.tx_count += n(fields.tx_count);
       if (fields.last_seen)           rec.last_seen = fields.last_seen;
@@ -13638,7 +13649,19 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         if (!resp.ok) return [];
         var data = await resp.json();
         var list = (data.result && data.result.transactions) || [];
-        return list.map(function(t){ return t.tx || t; });
+        return list.map(function(t){
+          var tx = t.tx || t.tx_json || t;
+          // Partial-payment sentinel fix: a Payment's Amount can be a huge max
+          // (~1e17 drops ≈ 100B+ XRP) while the real moved amount is in
+          // meta.delivered_amount. Normalize Amount to the delivered value so
+          // every downstream reader (reverse links, candidates) sees the truth.
+          try {
+            var meta = t.meta || t.metaData;
+            if (tx && meta && meta.delivered_amount != null && meta.delivered_amount !== 'unavailable')
+              tx.Amount = meta.delivered_amount;
+          } catch (_) {}
+          return tx;
+        });
       } catch (_) { if (tid) clearTimeout(tid); return []; }
     },
 
