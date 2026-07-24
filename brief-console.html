@@ -2889,7 +2889,9 @@ const WATCHLIST = [
   // ── v16.15 discovery add (2026-07-23): next hop off SPLITTER_rDsbeo (5th flywheel hop) ──
   ['SPLITTER_rXzRVo',     'rXzRVoohqvahY4zyUrfmznpVgkLJsDCtd',  'whale'],  // 3.31M from SPLITTER_rDsbeo, forwarded on · richlist #136 · score 165/200
   // ── v16.16 discovery add (2026-07-23): 14.87M forwarded from SPLITTER_rhWt2b, seen 3 scans ──
-  ['SPLITTER_r4wf7e',     'r4wf7enWPxyHtbizyV7ZHiZi5XgwHh4Rzn', 'whale']   // 14.87M from SPLITTER_rhWt2b · score 125/200
+  ['SPLITTER_r4wf7e',     'r4wf7enWPxyHtbizyV7ZHiZi5XgwHh4Rzn', 'whale'],  // 14.87M from SPLITTER_rhWt2b · score 125/200
+  // ── v16.17 discovery add (2026-07-24): 14.87M recv from SPLITTER_r4wf7e → COINBASE (6th flywheel hop) ──
+  ['WHALE_RECV_rLSn6Z',   'rLSn6Z3T8uCxbcd1oxwfGQN1Fdn5CyGujK', 'whale']   // 16.47M max from SPLITTER_r4wf7e, sent to COINBASE · richlist #628 · score 175/200
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)
