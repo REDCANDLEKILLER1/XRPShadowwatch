@@ -3673,13 +3673,21 @@ async function fetchXrplDailyMetrics(){
   try { const r=await fetchWithTimeout(url, MARKET_FETCH_TIMEOUT_MS); if (r.ok) j=await r.json(); } catch(e){}
   if (!Array.isArray(j)){ try { const { response }=await proxyFetch(url, MARKET_FETCH_TIMEOUT_MS); if (response && response.ok) j=await response.json(); } catch(e){} }
   if (!Array.isArray(j) || !j.length) return null;
-  // Most recent entry (array is chronological; guard by scanning for max date).
-  var last=j[j.length-1];
-  for (var i=j.length-1;i>=0 && i>j.length-40;i--){ if (j[i] && j[i].date && (!last.date || j[i].date>last.date)) last=j[i]; }
-  var m=(last && last.metric) || {};
+  // Use the most recent COMPLETE day (date < today UTC) — the current day is
+  // only partially elapsed and would under-report (e.g. "+73" an hour in).
+  var todayYmd=''; try { todayYmd=new Date().toISOString().slice(0,10); } catch(_){}
+  var best=null, bestYmd='';
+  for (var i=j.length-1;i>=0 && i>j.length-60;i--){
+    var e=j[i]; if (!e || !e.date) continue;
+    var d=String(e.date).slice(0,10);
+    if (todayYmd && d>=todayYmd) continue;        // skip the in-progress current day
+    if (d>bestYmd){ best=e; bestYmd=d; }
+  }
+  if (!best) best=j[j.length-1];                   // fallback: only today's partial exists
+  var m=(best && best.metric) || {};
   var created=n(m.accounts_created);
   if (!(created>0)) return null;
-  return { date:String(last.date||'').slice(0,10), accounts_created:created,
+  return { date:String(best.date||'').slice(0,10), accounts_created:created,
            transaction_count:n(m.transaction_count), payments_count:n(m.payments_count) };
 }
 
