@@ -33222,8 +33222,10 @@ function _buildEvidence(interps, pack){
               _arr(pack&&pack.discovery_candidates);
     var fresh=inbox.filter(function(c){ return c && c.review_status!=='REJECTED' && c.review_status!=='SUPPRESSED'; });
     if(fresh.length){
-      parts.push('I also pulled '+fresh.length+' new wallet'+(fresh.length===1?'':'s')+
-        ' onto the watch — flagged, not trusted; behavioral evidence only, nobody gets a badge automatically.');
+      // fresh is the CUMULATIVE discovery inbox (not new-this-scan), so say so
+      // honestly — the actionable "add these" set is the smaller ranked list.
+      parts.push('The discovery net now holds '+fresh.length+' flagged wallet'+(fresh.length===1?'':'s')+
+        ' — flagged, not trusted; behavioral evidence only, nobody gets a badge automatically.');
     }
   } catch(_){}
   if(news&&news.has_signal)   parts.push('And out in the daylight world, '+_lc1(news.summary));
