@@ -2891,7 +2891,21 @@ const WATCHLIST = [
   // ── v16.16 discovery add (2026-07-23): 14.87M forwarded from SPLITTER_rhWt2b, seen 3 scans ──
   ['SPLITTER_r4wf7e',     'r4wf7enWPxyHtbizyV7ZHiZi5XgwHh4Rzn', 'whale'],  // 14.87M from SPLITTER_rhWt2b · score 125/200
   // ── v16.17 discovery add (2026-07-24): 14.87M recv from SPLITTER_r4wf7e → COINBASE (6th flywheel hop) ──
-  ['WHALE_RECV_rLSn6Z',   'rLSn6Z3T8uCxbcd1oxwfGQN1Fdn5CyGujK', 'whale']   // 16.47M max from SPLITTER_r4wf7e, sent to COINBASE · richlist #628 · score 175/200
+  ['WHALE_RECV_rLSn6Z',   'rLSn6Z3T8uCxbcd1oxwfGQN1Fdn5CyGujK', 'whale'],  // 16.47M max from SPLITTER_r4wf7e, sent to COINBASE · richlist #628 · score 175/200
+  // ── v16.18 discovery adds (2026-07-24): full ranked candidate set, each carrying its REAL behavior category ──
+  ['SPLITTER_rDSTYv',     'rDSTYvUv4xqRypy3NMsuwheX6WcciEUE3c', 'next_hop_splitter'],       // 3M from RIPPLE_305M_G, forwards on
+  ['LARGE_RECV_rHwtsa',   'rHwtsaA1X4mzVCEqcvEvk59uRLhVos9xnZ', 'discovered_receiver'],     // 3.5M from RIPPLE_305M_G
+  ['WHALE_RECV_rJdAkp',   'rJdAkptufUtAscrxJq1ivjJDLHiAyD5eU7', 'discovered_whale'],        // 90M from INST_CUSTODY_B
+  ['SPLITTER_rNASJd',     'rNASJdZjY9dToHnNURi3HAUku3duPwbtD1', 'next_hop_splitter'],       // 300M from RIPPLE_500M_A, forwards on
+  ['SPLITTER_rfRms8',     'rfRms8V4gNsJDdg4VtWrjxsgrQPQ9ZF8n8', 'next_hop_splitter'],       // 100M from RIPPLE_305M_G, forwards on
+  ['WHALE_RECV_rQDYQ1',   'rQDYQ14B35Eby3TAW8sFpUJcyTqPTFtjpg', 'discovered_whale'],        // 2.25M from LARGE_RECV_rLoD9U, holding
+  ['LARGE_RECV_rwpTh9',   'rwpTh9DDa52XkM9nTKp2QrJuCGV5d1mQVP', 'discovered_receiver'],     // COINBASE/BITBANK adjacent, seen 6 scans
+  ['LARGE_RECV_rRmgo6',   'rRmgo6NW1W7GHjC5qEpcpQnq8NE74ZS1P',  'discovered_receiver'],     // CRYPTO_COM/COINBASE adjacent, seen 5 scans
+  ['LARGE_RECV_rnWK3E',   'rnWK3EpZNg73ovL4iPTVpYESN41rJkLyEb', 'discovered_receiver'],     // UPBIT-adjacent, seen 3 scans
+  ['LARGE_RECV_rNQEMJ',   'rNQEMJA4PsoSrZRn9J6RajAYhcDzzhf8ok', 'discovered_receiver'],     // COINCHECK_TOP adjacent
+  ['LARGE_RECV_rMjtwn',   'rMjtwnezA5oV6rxtqfRr54nngqR3Lng4wY', 'discovered_receiver'],     // LARGE_RECV_r97Kea adjacent, seen 5 scans
+  ['LARGE_RECV_ra8xqX',   'ra8xqX4QhcogFfxpMxMByvFnXyxw9E8rzY', 'discovered_receiver'],     // LARGE_RECV_rLoD9U adjacent, seen 3 scans
+  ['HIGHVAL_rNxp4h',      'rNxp4h8apvRis6mJf9Sh8C6iRxfrDWN7AV', 'discovered_unknown_highval'] // recurring high-value, seen 10 scans, BITHUMB-adjacent
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)
