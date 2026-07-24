@@ -7439,6 +7439,17 @@ if (typeof window !== 'undefined') {
           suggested_label:    finalLabel,
           display_label:      override ? override.display_label : null,
           suggested_category: finalCategory,
+          // v16.19: secondary category — a relationship/source tag layered on top
+          // of the primary behavior category, derived from the watched wallets
+          // this candidate is linked to. Gives Lady K a second angle per wallet.
+          secondary_category: (function(rel, cls){
+            var R=(rel||[]).join(' ').toUpperCase();
+            if (/BINANCE|COINBASE|BITBANK|BITSTAMP|BITHUMB|KRAKEN|UPBIT|OKX|HUOBI|GATE|BYBIT|KUCOIN|GEMINI|CRYPTO_COM|COINCHECK|BITFLYER|UPHOLD/.test(R)) return 'exchange-adjacent';
+            if (/RIPPLE/.test(R)) return 'ripple-sourced';
+            if (/SPLITTER/.test(R)) return 'splitter-chain';
+            if (cls==='NEXT_HOP_SPLITTER') return 'routing-node';
+            return 'watch-net';
+          })(c.related_watched_wallets, classification),
           classification,
           identity_status:    override ? override.identity_status : null,
           reviewed_label_note: override ? override.note : null,
@@ -7549,6 +7560,7 @@ if (typeof window !== 'undefined') {
         lines.push('Behavior classification:' + c.classification);
       }
       lines.push('Category:               ' + c.suggested_category);
+      if (c.secondary_category) lines.push('Secondary category:     ' + c.secondary_category);
       lines.push('Score:                  ' + c.score + ' / 200');
       lines.push('Action tier:            ' + c.action_tier);
       lines.push('Confidence:             ' + c.confidence);
