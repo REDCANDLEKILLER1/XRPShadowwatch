@@ -144,6 +144,7 @@
   .sw-dash-v1 *{animation:none !important;transition:none !important;}
 }
 </style>
+<style>
 /* ════════════════════════════════════════════════════════════
    v3.31-hotfix1l: LANDING SCREEN POLISH
    Hide old .main-grid HUD before buildCommandCenterV17 removes it.
@@ -26331,8 +26332,15 @@ function shadowWatchXrpmanAiCommandHeadSmokeTest() {
     const room  = cmdScreen.querySelector('#xrpmanAiCommandRoom');
     const hero  = cmdScreen.querySelector('.cmd-hero');
     const orb   = cmdScreen.querySelector('.cmd-orb-wrap');
+    // Redesign v1 (design/report-dashboard-v1): the command room is reparented
+    // into the #swDash grid shell, so #swDash becomes the first child while the
+    // room lives inside it. Accept either layout — the invariant we still guard
+    // is that the room is the primary content of the command screen, present and
+    // not buried outside the shell.
+    const dash = cmdScreen.querySelector('#swDash');
     check('XRPMan AI command room is first child of #screen-command',
-      cmdScreen.firstElementChild === room);
+      cmdScreen.firstElementChild === room ||
+      (dash && cmdScreen.firstElementChild === dash && dash.contains(room)));
     check('Legacy .cmd-hero still in DOM (hidden by CSS)',    !!hero);
     check('Legacy .cmd-orb-wrap still in DOM (hidden by CSS)', !!orb);
   }
