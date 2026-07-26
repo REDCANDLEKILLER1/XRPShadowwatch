@@ -80,7 +80,10 @@
 /* ── gauges / tiles / meter ────────────────────────────── */
 .sw-dash-v1 .sw-gaugerow{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--sw-gap);}
 .sw-dash-v1 .sw-gauge{text-align:center;}
-.sw-dash-v1 .sw-gauge svg{width:100%;max-width:180px;height:auto;}
+.sw-dash-v1 .sw-gauge svg{width:100%;max-width:150px;height:auto;overflow:visible;}
+.sw-dash-v1 .sw-gauge-track{stroke:rgba(154,190,174,0.16);}
+.sw-dash-v1 .sw-gauge-arc{transition:stroke-dasharray .55s ease;}
+.sw-dash-v1 .sw-gauge-svgval{font-family:'Orbitron',sans-serif;font-weight:900;fill:var(--sw-green);}
 .sw-dash-v1 .sw-gauge-val{font:900 26px/1 'Orbitron',sans-serif;color:var(--sw-green);margin-top:6px;}
 .sw-dash-v1 .sw-gauge-lbl{font:600 10px 'Rajdhani',sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--sw-text-muted);margin-top:4px;}
 .sw-dash-v1 .sw-tilerow{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--sw-gap);margin-top:var(--sw-gap);}
@@ -21371,9 +21374,28 @@ if (typeof window !== 'undefined') {
   window.renderDashboardV1Live = renderDashboardV1Live;
 }
 
-function _swGauge(id, lbl, val) {
-  return '<div class="sw-gauge"><div class="sw-gauge-val" id="' + id + '" aria-label="' + lbl + ' ' + val + '">' +
-         val + '</div><div class="sw-gauge-lbl">' + lbl + '</div></div>';
+// SVG donut gauge. frac (0..1) drives the arc; valText is the exact readout
+// shown in the center (raw value, never derived from frac). color styles the arc.
+var _SW_GAUGE_C = 2 * Math.PI * 44;   // circumference for r=44
+function _swGauge(id, lbl, valText, frac, color) {
+  var f = Math.max(0, Math.min(1, Number(frac) || 0));
+  var dash = (f * _SW_GAUGE_C).toFixed(1) + ' ' + _SW_GAUGE_C.toFixed(1);
+  var arcCol = color || 'var(--sw-green)';
+  var fs = String(valText).length > 5 ? 13 : (String(valText).length > 3 ? 16 : 20);
+  return '<div class="sw-gauge">' +
+    '<svg viewBox="0 0 100 100" role="img" aria-label="' + lbl + ' ' + valText + '">' +
+      '<circle class="sw-gauge-track" cx="50" cy="50" r="44" fill="none" stroke-width="8"/>' +
+      '<circle class="sw-gauge-arc" id="' + id + '" cx="50" cy="50" r="44" fill="none" stroke="' + arcCol + '" ' +
+        'stroke-width="8" stroke-linecap="round" stroke-dasharray="' + dash + '" transform="rotate(-90 50 50)"/>' +
+      '<text class="sw-gauge-svgval" x="50" y="50" text-anchor="middle" dominant-baseline="central" ' +
+        'style="font-size:' + fs + 'px;fill:' + arcCol + '">' + valText + '</text>' +
+    '</svg>' +
+    '<div class="sw-gauge-lbl">' + lbl + '</div></div>';
+}
+function _swRiskColor(score) {
+  if (score >= 70) return 'var(--sw-red)';
+  if (score >= 40) return 'var(--sw-gold)';
+  return 'var(--sw-green)';
 }
 function _swTile(lbl, val) {
   return '<div class="sw-tile"><div class="sw-tile-val">' + val + '</div>' +
@@ -21383,13 +21405,18 @@ function _swRenderInstruments(p, risk) {
   var DASH = '—';
   var g = document.getElementById('swGauges');
   if (g) {
-    var covTxt = p ? (n(p.wallets_checked) + '/' + n(p.watchlist_total)) : DASH;
-    var whale  = p ? (p.large_transfers || []).length : null;
-    var rScore = risk ? n(risk.score) : null;
+    var checked = p ? n(p.wallets_checked) : 0;
+    var total   = p ? n(p.watchlist_total) : 0;
+    var covFrac = (p && total > 0) ? (checked / total) : 0;        // no ÷0
+    var covTxt  = p ? (checked + '/' + total) : DASH;
+    var whale   = p ? (p.large_transfers || []).length : 0;
+    var whaleFrac = Math.min(1, whale / 10);                       // visual scale; text is raw count
+    var rScore  = risk ? n(risk.score) : 0;
     g.innerHTML =
-      _swGauge('swGaugeCoverage', 'WALLET COVERAGE', covTxt) +
-      _swGauge('swGaugeWhale', 'WHALE ACTIVITY', p ? String(whale) : DASH) +
-      _swGauge('swGaugeRisk', 'ACTIVITY RISK', risk ? (rScore + '/100') : (p ? '0/100' : DASH));
+      _swGauge('swGaugeCoverage', 'WALLET COVERAGE', covTxt, covFrac, 'var(--sw-cyan)') +
+      _swGauge('swGaugeWhale', 'WHALE ACTIVITY', p ? String(whale) : DASH, whaleFrac, 'var(--sw-gold)') +
+      _swGauge('swGaugeRisk', 'ACTIVITY RISK', risk ? (rScore + '/100') : (p ? '0/100' : DASH),
+               rScore / 100, p ? _swRiskColor(rScore) : 'var(--sw-text-muted)');
   }
   var m = document.getElementById('swMeter');
   if (m) {
