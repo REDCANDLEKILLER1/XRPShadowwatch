@@ -2905,7 +2905,10 @@ const WATCHLIST = [
   ['LARGE_RECV_rNQEMJ',   'rNQEMJA4PsoSrZRn9J6RajAYhcDzzhf8ok', 'discovered_receiver'],     // COINCHECK_TOP adjacent
   ['LARGE_RECV_rMjtwn',   'rMjtwnezA5oV6rxtqfRr54nngqR3Lng4wY', 'discovered_receiver'],     // LARGE_RECV_r97Kea adjacent, seen 5 scans
   ['LARGE_RECV_ra8xqX',   'ra8xqX4QhcogFfxpMxMByvFnXyxw9E8rzY', 'discovered_receiver'],     // LARGE_RECV_rLoD9U adjacent, seen 3 scans
-  ['HIGHVAL_rNxp4h',      'rNxp4h8apvRis6mJf9Sh8C6iRxfrDWN7AV', 'discovered_unknown_highval'] // recurring high-value, seen 10 scans, BITHUMB-adjacent
+  ['HIGHVAL_rNxp4h',      'rNxp4h8apvRis6mJf9Sh8C6iRxfrDWN7AV', 'discovered_unknown_highval'], // recurring high-value, seen 10 scans, BITHUMB-adjacent
+  // ── v16.20 discovery adds (2026-07-26): ADD-tier candidates (exchange-adjacent) ──
+  ['HIGHVAL_rBuZfn',      'rBuZfn1m4tA6znziHsRp9AyC1M3qg6rgbF', 'discovered_unknown_highval'], // BITHUMB-adjacent · richlist #239 (35.7M) · score 135/200
+  ['LARGE_RECV_rDAE53',   'rDAE53VfMvftPB4ogpWGWvzkQxfht6JPxr', 'discovered_receiver']         // CRYPTO_COM/COINBASE/BINANCE/BITBANK adjacent · richlist #146 (74.2M) · score 125/200
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)
