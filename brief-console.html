@@ -9549,6 +9549,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       el.textContent = 'MODE ' + _currentMode + ' \u00B7 WALLETS ' + wallets +
                        ' \u00B7 QUEUE ' + qSize + ' \u00B7 HELPERS ' + helpers +
                        ' \u00B7 ERRORS ' + errs;
+      // Responsive dashboard v1: piggyback the existing 4s tick (no new timer).
+      try { if (window.__swDashApplied && typeof window.renderDashboardV1Live === 'function') window.renderDashboardV1Live(); } catch (_) {}
     } catch (_) {}
   }
   if (typeof window !== 'undefined') {
@@ -20713,6 +20715,8 @@ async function run() {
     shadowSay('Scan complete. Report ready.', 'READY', 100);
     log('✓ Scan complete. Copy or download the public report manually.');
     scanSucceeded = true;
+    // Responsive dashboard v1: refresh instruments/feed/network from sealed state.
+    try { if (typeof window.renderDashboardV1 === 'function') window.renderDashboardV1(); } catch (_) {}
     // v3.17: signal sealed state to cmd-log-state badge
     document.body.classList.remove('scanning','building','error');
     document.body.classList.add('sealed');
@@ -21141,6 +21145,327 @@ function migrateLayoutToScreens() {
   try { _patchBuildBundleForV321(); } catch (_) {}
   try { if (typeof renderNewsSourceStrategyPanel === 'function') renderNewsSourceStrategyPanel(); } catch (_) {}
   try { if (typeof renderNewsRouterPanel === 'function') renderNewsRouterPanel(); } catch (_) {}
+
+  // Responsive report dashboard v1 — additive layout adopter (design branch).
+  try { applyDashboardLayoutV1(); } catch (e) { try { console.error('[sw-dash] adopt failed:', e); } catch(_){} }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  RESPONSIVE REPORT DASHBOARD v1  (branch: design/report-dashboard-v1)
+//
+//  Additive layout adopter. Runs AFTER migrateLayoutToScreens has built and
+//  wired #xrpmanAiCommandRoom. It builds a responsive #swDash grid inside
+//  #screen-command and REPARENTS the existing functional nodes into slots by
+//  reference (appendChild) — IDs and per-element listeners are preserved, so
+//  every engine consumer (getElementById + null-guards) keeps working. Gated
+//  behind body.sw-dash-v1. If anything throws, the original room is left intact
+//  (nodes only move on the happy path). No new network calls; reads real state.
+// ═══════════════════════════════════════════════════════════════
+function _swEl(tag, attrs, html) {
+  var el = document.createElement(tag);
+  if (attrs) for (var k in attrs) { if (k === 'class') el.className = attrs[k]; else el.setAttribute(k, attrs[k]); }
+  if (html != null) el.innerHTML = html;
+  return el;
+}
+function _swSetText(id, val) { var e = document.getElementById(id); if (e) e.textContent = val; }
+function _swShort(a) { a = String(a || ''); return a.length > 12 ? (a.slice(0, 6) + '…' + a.slice(-4)) : a; }
+
+// Honest link/mode derived from the engine's own body-state classes (never a
+// fabricated connection value).
+function _swMode() {
+  var b = document.body.classList;
+  if (b.contains('scanning')) return 'SCANNING';
+  if (b.contains('building')) return 'BUILDING';
+  if (b.contains('error'))    return 'ERROR';
+  if (b.contains('sealed'))   return 'SEALED';
+  return 'READY';
+}
+function _swLink() {
+  var b = document.body.classList;
+  if (b.contains('scanning') || b.contains('building')) return 'LIVE';
+  if (b.contains('sealed')) return 'IDLE';
+  return 'STANDBY';
+}
+
+// Parent navigation (same-origin iframe → outer app). Guarded.
+function swNav(v) {
+  try {
+    if (window.parent && window.parent !== window && typeof window.parent.switchView === 'function') {
+      window.parent.switchView(v);
+    }
+  } catch (_) {}
+}
+function exitShadowWatchReport() {
+  try {
+    if (window.parent && window.parent !== window && typeof window.parent.exitBriefFullscreen === 'function') {
+      window.parent.exitBriefFullscreen(); return;
+    }
+  } catch (_) {}
+  try { history.back(); } catch (_) {}
+}
+if (typeof window !== 'undefined') { window.swNav = swNav; window.exitShadowWatchReport = exitShadowWatchReport; }
+
+var SW_NAV_ITEMS = [
+  { id: 'home',  label: 'HOME'  }, { id: 'live', label: 'LIVE' },
+  { id: 'map',   label: 'MAP'   }, { id: 'graph', label: 'GRAPH' },
+  { id: 'hvt',   label: 'HVT'   }, { id: 'report', label: 'REPORT' }
+];
+function _swBuildNav(container, cls) {
+  SW_NAV_ITEMS.forEach(function (it) {
+    var b = _swEl('button', { type: 'button', 'class': cls, 'data-swnav': it.id, 'aria-label': it.label },
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/></svg><span>' + it.label + '</span>');
+    b.addEventListener('click', function () { swNav(it.id); });
+    container.appendChild(b);
+  });
+}
+// Delegate to an existing wired command button (never re-implements the action).
+function _swClickCmd(cmd) {
+  try {
+    var b = document.querySelector('#xaiCommandButtons [data-xai-cmd="' + cmd + '"]');
+    if (b) { b.click(); return true; }
+  } catch (_) {}
+  return false;
+}
+function _swCell(id, lbl, val) {
+  return '<div class="sw-tile"><div class="sw-tile-val" id="' + id + '">' + val + '</div>' +
+         '<div class="sw-tile-lbl">' + lbl + '</div></div>';
+}
+
+function applyDashboardLayoutV1() {
+  if (window.__swDashApplied) return;
+  var cmd  = document.getElementById('screen-command');
+  var room = document.getElementById('xrpmanAiCommandRoom');
+  if (!cmd || !room) return;                 // nothing to adopt — leave engine untouched
+  document.body.classList.add('sw-dash-v1');
+  try {
+    // 1. Grid shell
+    var dash   = _swEl('div',    { id: 'swDash' });
+    var header = _swEl('header', { id: 'swDashHeader' });
+    var rail   = _swEl('nav',    { id: 'swDashRail', 'aria-label': 'Shadow Watch sections' });
+    var main   = _swEl('div',    { id: 'swDashMain' });
+    var bottom = _swEl('nav',    { id: 'swDashBottomNav', 'aria-label': 'Shadow Watch sections' });
+    dash.appendChild(header); dash.appendChild(rail); dash.appendChild(main); dash.appendChild(bottom);
+
+    // 2. Header: brand + honest live stats + controls
+    header.appendChild(_swEl('div', { 'class': 'sw-brand' }, 'SHADOW<b>WATCH</b>'));
+    header.appendChild(_swEl('div', { 'class': 'sw-hstat' }, 'CONNECTION<b id="swHConn">STANDBY</b>'));
+    header.appendChild(_swEl('div', { 'class': 'sw-hstat' }, 'SCAN<b id="swHMode">READY</b>'));
+    header.appendChild(_swEl('div', { 'class': 'sw-hstat' }, 'TX SAMPLE<b id="swHLedger">—</b>'));
+    header.appendChild(_swEl('div', { 'class': 'sw-hspacer' }));
+    var voiceToggle = document.getElementById('xaiVoiceOutputToggle');   // reparent the wired control
+    if (voiceToggle) header.appendChild(voiceToggle);
+    var menuBtn = _swEl('button', { type: 'button', 'class': 'sw-hbtn' }, 'MENU');
+    menuBtn.addEventListener('click', function () { if (!_swClickCmd('open-system')) swNav('report'); });
+    header.appendChild(menuBtn);
+    var exitBtn = _swEl('button', { type: 'button', 'class': 'sw-hbtn sw-exit' }, 'EXIT');
+    exitBtn.addEventListener('click', exitShadowWatchReport);
+    header.appendChild(exitBtn);
+
+    // 3. Nav (desktop rail + mobile bottom)
+    _swBuildNav(rail, 'sw-navbtn');
+    _swBuildNav(bottom, 'sw-navbtn');
+
+    // 4. Main grid slots
+    var hero        = _swEl('div', { 'class': 'sw-hero' });
+    var heroSide    = _swEl('div', { 'class': 'sw-hero-side' });
+    var statusRow   = _swEl('div', { 'class': 'sw-statusrow' });
+    var instruments = _swEl('div', { 'class': 'sw-instruments sw-panel', id: 'swInstruments' });
+    var feed        = _swEl('div', { 'class': 'sw-feed sw-panel',        id: 'swFeed' });
+    var network     = _swEl('div', { 'class': 'sw-network sw-panel',     id: 'swNetwork' });
+    var repevid     = _swEl('div', { 'class': 'sw-repevid sw-panel',     id: 'swRepEvid' });
+    var downloads   = _swEl('div', { 'class': 'sw-downloads sw-panel',   id: 'swDownloads' });
+    [hero, heroSide, statusRow, instruments, feed, network, repevid, downloads].forEach(function (s) { main.appendChild(s); });
+
+    // 4a. hero = the entire live command room (moved whole → all engine wiring intact)
+    hero.appendChild(room);
+    var legacyHero = cmd.querySelector('.cmd-hero');     if (legacyHero) legacyHero.style.display = 'none';
+    var legacyOrb  = cmd.querySelector('.cmd-orb-wrap'); if (legacyOrb)  legacyOrb.style.display  = 'none';
+    // 4b. hero-side = live scan log (moved by reference)
+    var logPane = document.getElementById('cmdLogPane'); if (logPane) heroSide.appendChild(logPane);
+
+    // 4c. status cells
+    statusRow.innerHTML =
+      _swCell('swCellMode', 'MODE', 'READY') + _swCell('swCellWallets', 'WALLETS', '0') +
+      _swCell('swCellQueue', 'QUEUE', '0') + _swCell('swCellHelpers', 'HELPERS', '0') +
+      _swCell('swCellErrors', 'ERRORS', '0') + _swCell('swCellConn', 'LINK', '—');
+
+    // 4d. instrument / feed / network / repevid / downloads scaffolds
+    instruments.innerHTML =
+      '<div class="sw-panel-title"><span><span class="sw-dot"></span>LIVE SCAN INSTRUMENTS</span></div>' +
+      '<div class="sw-gaugerow" id="swGauges"></div>' +
+      '<div class="sw-meter" id="swMeter"></div>' +
+      '<div class="sw-tilerow" id="swTiles"></div>';
+    feed.innerHTML =
+      '<div class="sw-panel-title"><span><span class="sw-dot"></span>LIVE ACTIVITY FEED</span></div>' +
+      '<div id="swFeedList"></div>';
+    network.innerHTML =
+      '<div class="sw-panel-title"><span><span class="sw-dot"></span>NETWORK OVERVIEW</span></div>' +
+      '<div id="swNetList"></div>';
+    repevid.innerHTML =
+      '<div class="sw-panel-title"><span><span class="sw-dot"></span>REPORT &amp; EVIDENCE</span></div>' +
+      '<div id="swRepBody"></div>';
+    var openBtn = _swEl('button', { 'class': 'sw-cardbtn', type: 'button' }, 'READ LATEST REPORT');
+    openBtn.addEventListener('click', function () { _swClickCmd('read-report'); });
+    repevid.appendChild(openBtn);
+    downloads.innerHTML =
+      '<div class="sw-panel-title"><span><span class="sw-dot"></span>DAILY REPORTS &amp; DOWNLOADS</span></div>';
+    [['copy-morning', 'Copy Morning Report'], ['download-morning', 'Download Morning Report'],
+     ['download-total', 'Download Total Report'], ['download-debug', 'Download Full Debug']].forEach(function (pair) {
+      var b = _swEl('button', { 'class': 'sw-cardbtn', type: 'button' }, pair[1]);
+      b.addEventListener('click', function () { _swClickCmd(pair[0]); });
+      downloads.appendChild(b);
+    });
+
+    // 5. Report viewer full-width at the bottom of the grid (moved by reference)
+    var reportPane = document.getElementById('cmdReportPane');
+    if (reportPane) { reportPane.style.gridColumn = 'span 12'; main.appendChild(reportPane); }
+
+    // 6. Mount the shell as the FIRST child of the command screen
+    cmd.insertBefore(dash, cmd.firstChild);
+
+    window.__swDashApplied = true;
+    renderDashboardV1();
+  } catch (e) {
+    try { console.error('[sw-dash] applyDashboardLayoutV1 failed:', e); } catch (_) {}
+    // Best-effort: any partially-moved nodes are still live + wired; engine keeps working.
+  }
+}
+
+// Cheap live refresh — header stats + status cells only. Safe to call often
+// (hooked to renderStatusStrip's existing 4s tick; no new timer).
+function renderDashboardV1Live() {
+  if (!window.__swDashApplied) return;
+  try {
+    var p = (typeof state !== 'undefined' && state.pack) ? state.pack : null;
+    _swSetText('swHConn', _swLink());
+    _swSetText('swHMode', _swMode());
+    _swSetText('swHLedger', p ? String(n(p.tx_24h_count)) : '—');
+    var wTotal = (typeof KNOWN !== 'undefined') ? Object.keys(KNOWN).length
+               : (typeof WATCHLIST !== 'undefined' ? WATCHLIST.length : 0);
+    var qSize = window.SHADOW_BLOOM_QUEUE ? window.SHADOW_BLOOM_QUEUE.size() : 0;
+    var errs  = (typeof state !== 'undefined' && Array.isArray(state.errorLog)) ? state.errorLog.length : 0;
+    _swSetText('swCellMode', _swMode());
+    _swSetText('swCellWallets', (p ? n(p.wallets_checked) : 0) + '/' + wTotal);
+    _swSetText('swCellQueue', String(qSize));
+    _swSetText('swCellErrors', String(errs));
+    _swSetText('swCellConn', _swLink());
+  } catch (_) {}
+}
+
+// Full render — instruments + feed + network + report/evidence. Called at
+// scan-complete and once on adopt.
+function renderDashboardV1() {
+  if (!window.__swDashApplied) return;
+  try {
+    var p = (typeof state !== 'undefined' && state.pack) ? state.pack : null;
+    var risk = (p && p.risk_score) || (typeof state !== 'undefined' ? state.riskScore : null) || null;
+    renderDashboardV1Live();
+    _swRenderInstruments(p, risk);
+    _swRenderFeed(p);
+    _swRenderNetwork(p);
+    _swRenderRepEvid(p, risk);
+  } catch (e) { try { console.error('[sw-dash] render failed:', e); } catch (_) {} }
+}
+if (typeof window !== 'undefined') {
+  window.renderDashboardV1 = renderDashboardV1;
+  window.renderDashboardV1Live = renderDashboardV1Live;
+}
+
+function _swGauge(id, lbl, val) {
+  return '<div class="sw-gauge"><div class="sw-gauge-val" id="' + id + '" aria-label="' + lbl + ' ' + val + '">' +
+         val + '</div><div class="sw-gauge-lbl">' + lbl + '</div></div>';
+}
+function _swTile(lbl, val) {
+  return '<div class="sw-tile"><div class="sw-tile-val">' + val + '</div>' +
+         '<div class="sw-tile-lbl">' + lbl + '</div></div>';
+}
+function _swRenderInstruments(p, risk) {
+  var DASH = '—';
+  var g = document.getElementById('swGauges');
+  if (g) {
+    var covTxt = p ? (n(p.wallets_checked) + '/' + n(p.watchlist_total)) : DASH;
+    var whale  = p ? (p.large_transfers || []).length : null;
+    var rScore = risk ? n(risk.score) : null;
+    g.innerHTML =
+      _swGauge('swGaugeCoverage', 'WALLET COVERAGE', covTxt) +
+      _swGauge('swGaugeWhale', 'WHALE ACTIVITY', p ? String(whale) : DASH) +
+      _swGauge('swGaugeRisk', 'ACTIVITY RISK', risk ? (rScore + '/100') : (p ? '0/100' : DASH));
+  }
+  var m = document.getElementById('swMeter');
+  if (m) {
+    if (!p) {
+      m.innerHTML = '<div class="sw-empty">NET WATCHED FLOW · WAITING FOR SCAN</div>';
+    } else {
+      var d = n(p.total_balance_delta_xrp);
+      var mag = Math.min(1, Math.abs(d) / 5000000);          // visual scale only; text is exact
+      var pct = 50 + (d >= 0 ? 1 : -1) * mag * 50;
+      var left = Math.min(pct, 50), width = Math.abs(pct - 50);
+      var col = d > 0 ? 'var(--sw-green)' : (d < 0 ? 'var(--sw-red)' : 'var(--sw-text-muted)');
+      m.innerHTML =
+        '<div class="sw-panel-title" style="margin:2px 0 6px"><span>NET WATCHED FLOW</span>' +
+        '<span style="color:' + col + '">' + (d > 0 ? '+' : '') + fmt(d, 0) + ' XRP</span></div>' +
+        '<div class="sw-meter-track"><div class="sw-meter-zero"></div>' +
+        '<div class="sw-meter-fill" style="left:' + left + '%;width:' + width + '%"></div></div>';
+    }
+  }
+  var t = document.getElementById('swTiles');
+  if (t) {
+    var shadow = p ? n(p.shadow_volume_xrp) : null;
+    var disc   = (typeof state !== 'undefined' && Array.isArray(state.discoveryInbox)) ? state.discoveryInbox.length : 0;
+    var ev     = p && p.evidence_quality ? p.evidence_quality : null;
+    t.innerHTML =
+      _swTile('SHADOW VOL',  p ? (shadow > 0 ? fmt(shadow, 0) + ' XRP' : '0') : 'WAITING') +
+      _swTile('DISCOVERY',   String(disc)) +
+      _swTile('EVIDENCE',    ev ? (ev.grade + ' · ' + n(ev.score)) : (p ? DASH : 'WAITING')) +
+      _swTile('LEDGER TX',   p ? String(n(p.tx_24h_count)) : 'WAITING');
+  }
+}
+function _swRenderFeed(p) {
+  var el = document.getElementById('swFeedList'); if (!el) return;
+  var large = (p && Array.isArray(p.large_transfers)) ? p.large_transfers
+            : ((typeof state !== 'undefined' && Array.isArray(state.large)) ? state.large : []);
+  if (!large.length) { el.innerHTML = '<div class="sw-empty">NO FLAGGED ACTIVITY · RUN A SCAN</div>'; return; }
+  el.innerHTML = large.slice(0, 14).map(function (tx) {
+    var amt   = fmt(n(tx.amount), 0) + ' XRP';
+    var cls   = String(tx.classification || 'TRANSFER').replace(/_/g, ' ');
+    var route = (tx.sender_label || 'UNKNOWN') + ' → ' + (tx.receiver_label || (tx.to ? _swShort(tx.to) : 'UNKNOWN'));
+    return '<div class="sw-feed-row"><div class="sw-feed-ico">⚡</div>' +
+      '<div class="sw-feed-body"><div class="sw-feed-title">' + cls + ' · ' + amt + '</div>' +
+      '<div class="sw-feed-detail">' + route + '</div></div>' +
+      '<div class="sw-feed-time">' + (tx.confidence || '') + '</div></div>';
+  }).join('');
+}
+function _swRenderNetwork(p) {
+  var el = document.getElementById('swNetList'); if (!el) return;
+  if (!p) { el.innerHTML = '<div class="sw-empty">NETWORK STATS LOAD ON SCAN</div>'; return; }
+  var rows = [];
+  function row(lbl, val) {
+    rows.push('<div class="sw-feed-row"><div class="sw-feed-body">' +
+      '<div class="sw-feed-detail" style="color:var(--sw-text-muted)">' + lbl + '</div></div>' +
+      '<div class="sw-feed-title" style="white-space:nowrap">' + val + '</div></div>');
+  }
+  var rl = n(p.rlusd_supply);                 row('RLUSD SUPPLY',    rl > 0 ? fmt(rl, 0) : '—');
+  var acc = n(p.xrpl_accounts_created);        row('NEW FUNDED ACCTS' + (p.xrpl_metrics_date ? (' (' + p.xrpl_metrics_date + ')') : ''), acc > 0 ? ('+' + fmt(acc, 0)) : '—');
+  var dex = n(p.xrpl_dex_volume_24h_usd);      row('XRPL DEX VOL 24H', dex > 0 ? ('$' + fmt(dex, 0)) : '—');
+  var tvl = n(p.xrpl_evm_tvl_usd);             row('XRPL EVM TVL',     tvl > 0 ? ('$' + fmt(tvl, 0)) : '—');
+  row('LEDGER TX (24H)', String(n(p.tx_24h_count)));
+  var btn = '<button class="sw-cardbtn" type="button" data-swnav="map">VIEW MAP</button>';
+  el.innerHTML = rows.join('') + btn;
+  var vb = el.querySelector('[data-swnav="map"]'); if (vb) vb.addEventListener('click', function () { swNav('map'); });
+}
+function _swRenderRepEvid(p, risk) {
+  var el = document.getElementById('swRepBody'); if (!el) return;
+  if (!p) { el.innerHTML = '<div class="sw-empty">NO REPORT YET</div>'; return; }
+  var ev = p.evidence_quality || {}, r = risk || {};
+  function row(lbl, val) {
+    return '<div class="sw-feed-row"><div class="sw-feed-body">' +
+      '<div class="sw-feed-detail" style="color:var(--sw-text-muted)">' + lbl + '</div></div>' +
+      '<div class="sw-feed-title">' + val + '</div></div>';
+  }
+  el.innerHTML =
+    row('EVIDENCE GRADE', (ev.grade || '—') + ' (' + n(ev.score) + '/100)') +
+    row('ACTIVITY RISK',  (r.score != null ? (n(r.score) + '/100') : '—')) +
+    row('RISK LABEL',     (r.label || '—'));
 }
 
 // v3.17: wire COPY / DOWNLOAD buttons on Command Center to mirror what
