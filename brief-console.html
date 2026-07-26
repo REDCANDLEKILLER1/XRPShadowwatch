@@ -4,7 +4,120 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>XRPMAN // SHADOW WATCH v3.31</title>
-<style>
+<!-- Brand fonts: the report console runs in an iframe and does NOT inherit the
+     parent's font load, so mirror index.html's Google Fonts link here. -->
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<!-- ═══════════ SHADOWWATCH DASHBOARD REDESIGN v1 (design/report-dashboard-v1) ═══════════
+     Responsive forensic-dashboard styling. Entirely INERT until body.sw-dash-v1 is set
+     and the #swDash layout is mounted (commit 2). Tokens are harmless custom properties;
+     all structural rules are scoped under .sw-dash-v1 so this commit changes nothing yet. -->
+<style id="sw-dash-v1">
+:root{
+  --sw-green:#00FF00; --sw-green-soft:#76FF76; --sw-cyan:#00D9FF; --sw-gold:#FFC83D;
+  --sw-red:#FF4D4D; --sw-purple:#B45CFF;
+  --sw-bg:#020504; --sw-bg-raised:#050b08;
+  --sw-surface:rgba(7,15,12,0.82); --sw-surface-strong:rgba(8,18,14,0.94);
+  --sw-border:rgba(154,190,174,0.20); --sw-border-active:rgba(0,255,0,0.72);
+  --sw-text:#EAF4EE; --sw-text-muted:#91A39A;
+  --sw-shadow:0 14px 40px rgba(0,0,0,0.38); --sw-glow:0 0 18px rgba(0,255,0,0.16);
+  --sw-radius-sm:8px; --sw-radius:12px; --sw-radius-lg:16px;
+  --sw-gap:clamp(10px,1.2vw,18px);
+  --sw-rail-w:96px; --sw-header-h:66px;
+}
+/* ── shell ─────────────────────────────────────────────── */
+.sw-dash-v1 #swDash{position:relative;z-index:1;display:grid;gap:var(--sw-gap);
+  grid-template-columns:var(--sw-rail-w) 1fr;grid-template-areas:"rail header" "rail main";
+  align-content:start;min-height:100vh;padding:0;color:var(--sw-text);
+  font-family:'Rajdhani','Share Tech Mono',sans-serif;}
+.sw-dash-v1 #swDashHeader{grid-area:header;}
+.sw-dash-v1 #swDashRail{grid-area:rail;}
+.sw-dash-v1 #swDashMain{grid-area:main;display:grid;gap:var(--sw-gap);align-content:start;
+  grid-template-columns:repeat(12,1fr);padding:0 var(--sw-gap) calc(var(--sw-gap)*2);}
+/* ── panels ────────────────────────────────────────────── */
+.sw-dash-v1 .sw-panel{background:var(--sw-surface);border:1px solid var(--sw-border);
+  border-radius:var(--sw-radius);box-shadow:var(--sw-shadow);padding:clamp(12px,1.1vw,18px);
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
+.sw-dash-v1 .sw-panel.sw-active{border-color:var(--sw-border-active);box-shadow:var(--sw-glow);}
+.sw-dash-v1 .sw-panel-title{font:600 11px/1 'Rajdhani',sans-serif;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--sw-text-muted);display:flex;align-items:center;
+  justify-content:space-between;margin:0 0 10px;}
+.sw-dash-v1 .sw-panel-title .sw-dot{width:7px;height:7px;border-radius:50%;background:var(--sw-green);
+  box-shadow:0 0 8px var(--sw-green);margin-right:7px;display:inline-block;}
+/* ── header ────────────────────────────────────────────── */
+.sw-dash-v1 #swDashHeader{position:sticky;top:0;z-index:5;height:var(--sw-header-h);
+  display:flex;align-items:center;gap:18px;padding:0 var(--sw-gap);
+  background:rgba(2,5,4,0.82);backdrop-filter:blur(8px);border-bottom:1px solid var(--sw-border);}
+.sw-dash-v1 .sw-brand{font:900 20px/1 'Orbitron',sans-serif;letter-spacing:.04em;color:var(--sw-text);white-space:nowrap;}
+.sw-dash-v1 .sw-brand b{color:var(--sw-green);}
+.sw-dash-v1 .sw-hstat{display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--sw-text-muted);letter-spacing:.1em;text-transform:uppercase;}
+.sw-dash-v1 .sw-hstat b{font:600 13px/1 'Share Tech Mono',monospace;color:var(--sw-green-soft);letter-spacing:0;text-transform:none;}
+.sw-dash-v1 .sw-hspacer{flex:1;}
+.sw-dash-v1 .sw-hbtn{font:600 12px 'Rajdhani',sans-serif;letter-spacing:.08em;color:var(--sw-text);
+  background:transparent;border:1px solid var(--sw-border);border-radius:var(--sw-radius-sm);
+  padding:9px 14px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;}
+.sw-dash-v1 .sw-hbtn.sw-exit{border-color:var(--sw-border-active);color:var(--sw-green);}
+.sw-dash-v1 .sw-hbtn:hover{border-color:var(--sw-border-active);}
+/* ── nav rail (desktop) ────────────────────────────────── */
+.sw-dash-v1 #swDashRail{position:sticky;top:0;align-self:start;display:flex;flex-direction:column;
+  gap:4px;padding:calc(var(--sw-header-h) + 8px) 8px 8px;}
+.sw-dash-v1 .sw-navbtn{display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 4px;
+  border-radius:var(--sw-radius-sm);border:1px solid transparent;background:transparent;cursor:pointer;
+  color:var(--sw-text-muted);font:600 9.5px 'Rajdhani',sans-serif;letter-spacing:.1em;text-transform:uppercase;}
+.sw-dash-v1 .sw-navbtn svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2;}
+.sw-dash-v1 .sw-navbtn:hover{color:var(--sw-green-soft);}
+.sw-dash-v1 .sw-navbtn.sw-on{color:var(--sw-green);border-color:var(--sw-border-active);background:rgba(0,255,0,0.06);}
+.sw-dash-v1 #swDashBottomNav{display:none;}
+/* ── hero / reactor ────────────────────────────────────── */
+.sw-dash-v1 .sw-hero{grid-column:span 8;}
+.sw-dash-v1 .sw-hero-side{grid-column:span 4;display:grid;gap:var(--sw-gap);align-content:start;}
+.sw-dash-v1 .sw-statusrow{grid-column:span 12;display:grid;gap:var(--sw-gap);
+  grid-template-columns:repeat(6,1fr);}
+.sw-dash-v1 .sw-instruments{grid-column:span 8;}
+.sw-dash-v1 .sw-feed{grid-column:span 4;}
+.sw-dash-v1 .sw-network{grid-column:span 5;}
+.sw-dash-v1 .sw-repevid{grid-column:span 3;}
+.sw-dash-v1 .sw-downloads{grid-column:span 4;}
+/* ── gauges / tiles / meter ────────────────────────────── */
+.sw-dash-v1 .sw-gaugerow{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--sw-gap);}
+.sw-dash-v1 .sw-gauge{text-align:center;}
+.sw-dash-v1 .sw-gauge svg{width:100%;max-width:180px;height:auto;}
+.sw-dash-v1 .sw-gauge-val{font:900 26px/1 'Orbitron',sans-serif;color:var(--sw-green);margin-top:6px;}
+.sw-dash-v1 .sw-gauge-lbl{font:600 10px 'Rajdhani',sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--sw-text-muted);margin-top:4px;}
+.sw-dash-v1 .sw-tilerow{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--sw-gap);margin-top:var(--sw-gap);}
+.sw-dash-v1 .sw-tile{background:var(--sw-bg-raised);border:1px solid var(--sw-border);border-radius:var(--sw-radius-sm);padding:14px;text-align:center;}
+.sw-dash-v1 .sw-tile-val{font:900 22px/1 'Orbitron',sans-serif;color:var(--sw-green);}
+.sw-dash-v1 .sw-tile-lbl{font:600 9.5px 'Rajdhani',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--sw-text-muted);margin-top:5px;}
+.sw-dash-v1 .sw-meter{margin-top:var(--sw-gap);}
+.sw-dash-v1 .sw-meter-track{position:relative;height:14px;border-radius:8px;background:linear-gradient(90deg,rgba(255,77,77,.25),rgba(0,0,0,.3) 50%,rgba(0,255,0,.25));overflow:hidden;}
+.sw-dash-v1 .sw-meter-fill{position:absolute;top:0;bottom:0;background:var(--sw-gold);opacity:.85;}
+.sw-dash-v1 .sw-meter-zero{position:absolute;top:-3px;bottom:-3px;left:50%;width:2px;background:var(--sw-green);}
+/* ── feed / network ────────────────────────────────────── */
+.sw-dash-v1 .sw-feed-row{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid rgba(154,190,174,.10);}
+.sw-dash-v1 .sw-feed-ico{width:30px;height:30px;flex:0 0 auto;border-radius:8px;display:grid;place-items:center;background:var(--sw-bg-raised);border:1px solid var(--sw-border);}
+.sw-dash-v1 .sw-feed-body{flex:1;min-width:0;}
+.sw-dash-v1 .sw-feed-title{font:600 12px 'Rajdhani',sans-serif;color:var(--sw-text);}
+.sw-dash-v1 .sw-feed-detail{font:400 10.5px 'Share Tech Mono',monospace;color:var(--sw-text-muted);word-break:break-all;}
+.sw-dash-v1 .sw-feed-time{font:400 9.5px 'Share Tech Mono',monospace;color:var(--sw-text-muted);white-space:nowrap;}
+.sw-dash-v1 .sw-empty{color:var(--sw-text-muted);font:600 11px 'Rajdhani',sans-serif;letter-spacing:.08em;padding:14px 0;text-align:center;}
+.sw-dash-v1 .sw-cardbtn{width:100%;margin-top:10px;padding:9px;border:1px solid var(--sw-border-active);background:rgba(0,255,0,0.05);color:var(--sw-green);border-radius:var(--sw-radius-sm);font:600 11px 'Rajdhani',sans-serif;letter-spacing:.1em;cursor:pointer;}
+/* ── mobile ────────────────────────────────────────────── */
+@media (max-width:760px){
+  .sw-dash-v1 #swDash{grid-template-columns:1fr;grid-template-areas:"header" "main";}
+  .sw-dash-v1 #swDashRail{display:none;}
+  .sw-dash-v1 #swDashMain{grid-template-columns:1fr;padding-bottom:calc(72px + env(safe-area-inset-bottom,0px));}
+  .sw-dash-v1 .sw-hero,.sw-dash-v1 .sw-hero-side,.sw-dash-v1 .sw-instruments,.sw-dash-v1 .sw-feed,
+  .sw-dash-v1 .sw-network,.sw-dash-v1 .sw-repevid,.sw-dash-v1 .sw-downloads{grid-column:span 12;}
+  .sw-dash-v1 .sw-statusrow{grid-template-columns:repeat(3,1fr);}
+  .sw-dash-v1 #swDashBottomNav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:20;
+    justify-content:space-around;align-items:center;gap:2px;
+    padding:8px 6px calc(8px + env(safe-area-inset-bottom,0px));
+    background:rgba(2,5,4,0.94);border-top:1px solid var(--sw-border);backdrop-filter:blur(8px);}
+}
+/* ── motion ────────────────────────────────────────────── */
+@media (prefers-reduced-motion:reduce){
+  .sw-dash-v1 *{animation:none !important;transition:none !important;}
+}
+</style>
 /* ════════════════════════════════════════════════════════════
    v3.31-hotfix1l: LANDING SCREEN POLISH
    Hide old .main-grid HUD before buildCommandCenterV17 removes it.
