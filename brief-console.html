@@ -103,8 +103,31 @@
 .sw-dash-v1 .sw-feed-time{font:400 9.5px 'Share Tech Mono',monospace;color:var(--sw-text-muted);white-space:nowrap;}
 .sw-dash-v1 .sw-empty{color:var(--sw-text-muted);font:600 11px 'Rajdhani',sans-serif;letter-spacing:.08em;padding:14px 0;text-align:center;}
 .sw-dash-v1 .sw-cardbtn{width:100%;margin-top:10px;padding:9px;border:1px solid var(--sw-border-active);background:rgba(0,255,0,0.05);color:var(--sw-green);border-radius:var(--sw-radius-sm);font:600 11px 'Rajdhani',sans-serif;letter-spacing:.1em;cursor:pointer;}
+/* ── responsive polish (v1) ────────────────────────────── */
+/* Defensive: grid/flex children must be allowed to shrink (prevents blowout). */
+.sw-dash-v1 #swDashMain>*{min-width:0;}
+.sw-dash-v1 .sw-panel{min-width:0;}
+/* Reparented engine panes hold long log/report lines — keep them from pushing
+   the page; wrap addresses/hashes instead of forcing horizontal scroll. */
+.sw-dash-v1 #cmdLogPane,.sw-dash-v1 #cmdReportPane{max-width:100%;}
+.sw-dash-v1 #cmdLogBody,.sw-dash-v1 #cmdReportBody{white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;}
+/* Tablet: hero + instruments go full width so the narrow side columns don't
+   get cramped between the desktop rail and the 12-col grid. */
+@media (max-width:1080px) and (min-width:761px){
+  .sw-dash-v1 .sw-hero,.sw-dash-v1 .sw-hero-side,
+  .sw-dash-v1 .sw-instruments,.sw-dash-v1 .sw-feed,.sw-dash-v1 .sw-downloads{grid-column:span 12;}
+  .sw-dash-v1 .sw-network{grid-column:span 7;}
+  .sw-dash-v1 .sw-repevid{grid-column:span 5;}
+  .sw-dash-v1 .sw-statusrow{grid-template-columns:repeat(3,1fr);}
+}
 /* ── mobile ────────────────────────────────────────────── */
 @media (max-width:760px){
+  /* Declutter the header: nav lives in the bottom bar, the status row already
+     surfaces mode/wallets/errors, so drop the decorative header stats. */
+  .sw-dash-v1 #swDashHeader{gap:10px;}
+  .sw-dash-v1 #swDashHeader .sw-hstat{display:none;}
+  .sw-dash-v1 .sw-brand{font-size:16px;}
+  .sw-dash-v1 .sw-hbtn{padding:8px 11px;}
   .sw-dash-v1 #swDash{grid-template-columns:1fr;grid-template-areas:"header" "main";}
   .sw-dash-v1 #swDashRail{display:none;}
   .sw-dash-v1 #swDashMain{grid-template-columns:1fr;padding-bottom:calc(72px + env(safe-area-inset-bottom,0px));}
