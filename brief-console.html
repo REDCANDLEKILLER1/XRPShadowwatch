@@ -2010,6 +2010,30 @@ body.xai-command-mounted .main-grid{
 </style>
 </head>
 <body class="dev-locked">
+<!-- Silent looping background video behind the whole report. object-fit:cover +
+     center keeps a landscape clip filling both PC (landscape) and phone (portrait).
+     Sits at z-index:-1 (above the black body bg, behind all content); a dark scrim
+     keeps the report text readable. muted + playsinline = mobile autoplay. -->
+<video id="swBgVideo" autoplay loop muted playsinline preload="auto" disablepictureinpicture
+       src="https://ipfs.filebase.io/ipfs/QmUTCrEJRu4ipiquW5ecwgq94FJusW6r3KiNPjA3TaCscL"></video>
+<div id="swBgScrim"></div>
+<style>
+  #swBgVideo{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;
+    z-index:-1;pointer-events:none;}
+  #swBgScrim{position:fixed;inset:0;z-index:-1;pointer-events:none;background:rgba(0,6,3,0.62);}
+</style>
+<script>
+(function(){
+  var v=document.getElementById('swBgVideo'); if(!v) return;
+  v.muted=true; v.defaultMuted=true;
+  function kick(){ try{ var p=v.play(); if(p&&p.catch) p.catch(function(){}); }catch(_){} }
+  kick();
+  window.addEventListener('load', kick);
+  ['pointerdown','touchstart','click','visibilitychange'].forEach(function(ev){
+    document.addEventListener(ev, kick, {passive:true});
+  });
+})();
+</script>
 <canvas id="matrixRain"></canvas>
 <!-- v3.11: Light edge-crawl sizzle (replaced heavy 24-bolt SVG storm) -->
 <div id="stormFlash"></div>
