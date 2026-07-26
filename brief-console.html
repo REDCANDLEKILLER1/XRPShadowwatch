@@ -33182,7 +33182,23 @@ var _NV_BEATS=[
   'They move in the dark. I brought the light.',
   'No badges, no guesses — just what the Ledger actually did.',
   'This is why I keep watch: so you never have to wonder who moved what.',
-  'The chart is the story they tell you. The Ledger is the one that’s true.'
+  'The chart is the story they tell you. The Ledger is the one that’s true.',
+  'I don’t trade the news. I trade the truth on the Ledger.',
+  'When the money whispers, I turn up the volume.',
+  'They bury it in the ledger and hope nobody reads. I read.',
+  'Follow the money and you find the motive — every single time.',
+  'I don’t need their permission to watch. The Ledger is public.',
+  'A whale can hide its name, but never its footprints.',
+  'The truth doesn’t need a press release. It’s already on-chain.',
+  'I work the night shift so the community can sleep.',
+  'Big money hates a witness. I’m the witness.',
+  'Numbers don’t lie, and neither do I.',
+  'Every transfer is a confession, if you know how to read it.',
+  'I’m not here to hype. I’m here to hold the line.',
+  'Watch the hands, not the mouth. Hands move the money.',
+  'They call it noise. I call it evidence.',
+  'The banks write the headlines. The Ledger writes the record.',
+  'Trust the receipts. Question everything else.'
 ];
 function _nvBeat(seed, salt){ return _NV_BEATS[((seed||0)+(salt||0))%_NV_BEATS.length]; }
 
@@ -33192,16 +33208,32 @@ function _buildExecutiveSummary(interps, pack){
     'I kept watch over the Ledger while you slept. ',
     'Another night on patrol, and the Ledger tipped its hand: ',
     'The city sleeps; the Ledger never does. Overnight, ',
-    'XRPMan on the wire — while you were out cold, '
+    'XRPMan on the wire — while you were out cold, ',
+    'While the world slept, I worked the Ledger. ',
+    'Morning. Here’s what moved in the dark: ',
+    'I ran the whole board overnight, and here’s the read: ',
+    'Coffee’s hot and the Ledger’s open — overnight, ',
+    'You were sleeping. The whales weren’t. ',
+    'Fresh off the night shift on the Ledger: ',
+    'I never blinked. Here’s what crossed the wire: ',
+    'The Ledger doesn’t clock out, and neither do I. Overnight, ',
+    'Let’s open the books on last night: ',
+    'Straight from the night watch: '
+  ];
+  var quietOpen=[
+    'the Ledger stayed quiet under my watch. No whale broke cover — and a still night on patrol is a good night.',
+    'the rails ran quiet and honest. Nobody big blinked, and that’s worth saying out loud.',
+    'it was a calm shift. No heavy hands, no cover blown — I still counted every ripple.',
+    'the board sat still. A quiet night isn’t a wasted one; it’s the baseline I measure the loud ones against.'
   ];
   var factRaw=(moves&&moves.has_signal)?(moves.headline||moves.summary):(best?best.summary:'');
-  if(!factRaw) return _nvPick(openers,seed,0)+'the Ledger stayed quiet under my watch. No whale broke cover — and a still night on patrol is a good night.';
+  if(!factRaw) return _nvPick(openers,seed,0)+_nvPick(quietOpen,seed,7)+' '+_nvBeat(seed,0);
   var line=_nvPick(openers,seed,0)+_lc1(_firstSentence(factRaw));
   var score=_num(pack&&pack.risk_score&&pack.risk_score.score);
-  var posture=score>=75?_nvPick(['The signal flared red — this is a full-alert night on the Ledger.','Every alarm I’ve got lit up. Top of the dial.'],seed,1)
-             :score>=50?_nvPick(['My instincts are up — something’s moving out there.','The Ledger’s running warm tonight, and I’m watching close.'],seed,1)
-             :score>=25?_nvPick(['Nothing villainous, but I kept one eye open.','A quiet patrol — steady, nothing extreme.'],seed,1)
-             :_nvPick(['Otherwise the Ledger behaved itself.','The rest of the board stayed in line.'],seed,1);
+  var posture=score>=75?_nvPick(['The signal flared red — this is a full-alert night on the Ledger.','Every alarm I’ve got lit up. Top of the dial.','This is a loud one — the board’s screaming and I’m all eyes.','Red across the board. When it’s this hot, somebody’s making a move.','Full alert. The heavy hands came out to play tonight.'],seed,1)
+             :score>=50?_nvPick(['My instincts are up — something’s moving out there.','The Ledger’s running warm tonight, and I’m watching close.','Not a siren yet, but the needle’s twitching. I’m leaning in.','Enough motion to keep me honest — I’m tracking it.','Warm, not hot. But warm is how the big ones start.'],seed,1)
+             :score>=25?_nvPick(['Nothing villainous, but I kept one eye open.','A quiet patrol — steady, nothing extreme.','Low hum on the board. I logged it and moved on.','Mostly calm, a little chatter. Nothing I’d wake you for.','Slow night — but slow is when you catch the sloppy ones.'],seed,1)
+             :_nvPick(['Otherwise the Ledger behaved itself.','The rest of the board stayed in line.','A still night — the rails were quiet and honest.','Nothing else tried to slip past. Good.','Calm water tonight — I still counted every ripple.'],seed,1);
   // Close the open on one of XRPMan's signature beats — keeps the voice front
   // and center before we get into the facts.
   return line+(posture?' '+posture:'')+' '+_nvBeat(seed,0);
@@ -33209,28 +33241,62 @@ function _buildExecutiveSummary(interps, pack){
 
 function _buildWhatMatteredMost(interps, pack){
   var seed=_nvSeed(pack), band=interps[4], absorber=interps[5];
+  var tails=[
+    ' Down here the Ledger leads and the chart just follows along.',
+    ' The chart plays catch-up; the Ledger already knew.',
+    ' That’s the move under the move — the part the ticker never shows you.',
+    ' Watch that thread; it usually unspools into something bigger.',
+    ' Small on the surface, loud if you know where the money sleeps.'
+  ];
   if(band&&band.has_signal&&absorber&&absorber.has_signal){
-    return 'Here’s the part that put me on alert. '+band.summary+' '+absorber.summary+' The chart played dead; the Ledger told the truth.';
+    var alertLead=_nvPick(['Here’s the part that put me on alert.','This is the piece I circled twice.','Here’s where the night turned interesting.','This is the tell that earned a hard look.'],seed,2);
+    var closer=_nvPick(['The chart played dead; the Ledger told the truth.','The price sat still while the money quietly rearranged itself.','No fireworks on the ticker — all the action was underneath.'],seed,6);
+    return alertLead+' '+band.summary+' '+absorber.summary+' '+closer;
   }
   var best=_topInterp(interps);
   var others=interps.filter(function(i){ return i && i.has_signal && i!==best; })
     .sort(function(a,b){ return b.narrative_weight-a.narrative_weight; });
-  var leads=['What really caught my eye out there: ','Beyond the headline, here’s what I flagged: ','The part I couldn’t look away from: '];
+  var leads=[
+    'What really caught my eye out there: ',
+    'Beyond the headline, here’s what I flagged: ',
+    'The part I couldn’t look away from: ',
+    'Here’s what actually mattered under the surface: ',
+    'The tell of the night: ',
+    'If you read one thing, read this: ',
+    'What the chart won’t tell you: ',
+    'The move that earned a second look: ',
+    'Cut through the noise, here’s the signal: '
+  ];
   if(others.length){
     return _nvPick(leads,seed,2)+others.slice(0,2).map(function(i){ return _lc1(i.headline||_firstSentence(i.summary)); }).join(', and ')+
-      '. Down here the Ledger leads and the chart just follows along.';
+      '.'+_nvPick(tails,seed,6);
   }
-  if(best) return 'One move carried the whole night — a single, deliberate transfer, not a busy board. When it’s that concentrated, the quiet around it is the tell, and I noticed.';
-  return 'A steady patrol tonight. The rails stayed calm and nothing tried to slip past me.';
+  if(best) return _nvPick([
+    'One move carried the whole night — a single, deliberate transfer, not a busy board. When it’s that concentrated, the quiet around it is the tell, and I noticed.',
+    'It came down to one move. One deliberate transfer, no crowd around it — and concentration like that is its own kind of loud.',
+    'The whole night hinged on a single hand. Not a busy board, just one purposeful move — the sort I don’t let slide.',
+    'One transfer did the talking tonight. Clean, deliberate, alone on the board — exactly the kind that rewards a closer look.'
+  ],seed,2);
+  return _nvPick([
+    'A steady patrol tonight. The rails stayed calm and nothing tried to slip past me.',
+    'Quiet on the board. No single move stood up and asked to be watched — so I watched everything instead.',
+    'Nothing forced my hand tonight. Calm rails, honest flow, and me still reading every line.',
+    'The night kept its secrets, if it had any. I found no move worth circling — which is its own clean answer.'
+  ],seed,2);
 }
 
 function _buildEvidence(interps, pack){
+  var seed=_nvSeed(pack);
   var moves=interps[0], domShift=interps[1], news=interps[2],
       recv=interps[3];
   var parts=[];
-  if(moves&&moves.has_signal) parts.push('Here are the receipts, straight off the Ledger. '+moves.summary);
-  if(recv&&recv.has_signal)   parts.push('I traced it — '+_lc1(recv.summary));
-  if(domShift&&domShift.has_signal) parts.push('Across the whole board, '+_lc1(domShift.summary));
+  var receiptsLead=_nvPick(['Here are the receipts, straight off the Ledger.','Let’s go to the tape.','The evidence, plain and on-chain:','Here’s exactly what the Ledger logged:','Receipts first, opinions never:'],seed,8);
+  var tracedLead=_nvPick(['I traced it —','I followed the money —','I ran it down —','I chased the hops —','I walked it forward —'],seed,9);
+  var domLead=_nvPick(['Across the whole board,','Zooming out,','On the wider board,','Stepping back for the big picture,'],seed,10);
+  var newsLead=_nvPick(['And out in the daylight world,','Up in the headlines,','And where the news lives,','Above ground, in the daylight world,'],seed,11);
+  if(moves&&moves.has_signal) parts.push(receiptsLead+' '+moves.summary);
+  if(recv&&recv.has_signal)   parts.push(tracedLead+' '+_lc1(recv.summary));
+  if(domShift&&domShift.has_signal) parts.push(domLead+' '+_lc1(domShift.summary));
   // v16.8: surface newly-discovered related wallets so the report says more.
   try {
     var inbox=(typeof state!=='undefined' && _arr(state.discoveryInbox)) ||
@@ -33239,18 +33305,19 @@ function _buildEvidence(interps, pack){
     if(fresh.length){
       // fresh is the CUMULATIVE discovery inbox (not new-this-scan), so say so
       // honestly — the actionable "add these" set is the smaller ranked list.
-      parts.push('The discovery net now holds '+fresh.length+' flagged wallet'+(fresh.length===1?'':'s')+
-        ' — flagged, not trusted; behavioral evidence only, nobody gets a badge automatically.');
+      var netLead=_nvPick(['The discovery net now holds ','I’ve got ','The watch net is carrying ','Flagged on the net right now: '],seed,12);
+      var netTail=_nvPick([' — flagged, not trusted; behavioral evidence only, nobody gets a badge automatically.',' — every one flagged on behavior, not identity; nobody gets a badge for free.',' — suspects, not the convicted; the Ledger earns the flag, I don’t hand it out.'],seed,13);
+      parts.push(netLead+fresh.length+' flagged wallet'+(fresh.length===1?'':'s')+netTail);
     }
   } catch(_){}
-  if(news&&news.has_signal)   parts.push('And out in the daylight world, '+_lc1(news.summary));
-  if(!parts.length) return 'No move crossed the line big enough to book tonight. I stayed on watch anyway. '+_nvBeat(_nvSeed(pack),3);
-  parts.push(_nvBeat(_nvSeed(pack),3));
+  if(news&&news.has_signal)   parts.push(newsLead+' '+_lc1(news.summary));
+  if(!parts.length) return _nvPick(['No move crossed the line big enough to book tonight. I stayed on watch anyway.','Nothing hit the threshold worth booking — but a clean night is still a logged night.','The board gave me nothing to charge tonight. I kept the watch regardless.'],seed,4)+' '+_nvBeat(seed,3);
+  parts.push(_nvBeat(seed,3));
   return parts.join(' ');
 }
 
-function _buildWatchNext(interps){
-  var bullets=[];
+function _buildWatchNext(interps, pack){
+  var seed=_nvSeed(pack), bullets=[];
   var recv=interps[3], band=interps[4], absorber=interps[5], moves=interps[0];
   if(recv&&recv.has_signal){
     if(recv.summary.indexOf('forwarded')>-1)
@@ -33264,8 +33331,22 @@ function _buildWatchNext(interps){
     bullets.push('Watch the absorbing wallets — are they stacking it, or handing it back out?');
   if(moves&&moves.has_signal)
     bullets.push('Check whether last night’s big recipient makes a move today.');
-  if(!bullets.length)
-    bullets.push('Keep the watchlist warm and wait for the next whale to break cover.');
+  // Standing watch \u2014 always-true forensic to-dos. Fill out the list (especially
+  // on a quiet night) so the section stays substantive instead of a lone line.
+  var standing=[
+    'Keep the watchlist warm and wait for the next whale to break cover.',
+    'Watch the exchanges around the open \u2014 that\u2019s when the banks like to move.',
+    'If a dormant giant wakes up, I\u2019ll flag it before the chart does.',
+    'Eyes on the escrow calendar \u2014 a big unlock reshapes the whole board.',
+    'Track whether today\u2019s quiet is the calm before a repositioning.',
+    'Keep tracing the chains we\u2019ve already opened; they tend to extend another hop.',
+    'Watch the same-hour clusters \u2014 coordination hides in the timing, not the size.'
+  ];
+  var need=Math.max(0, 3-bullets.length);
+  for(var s=0; s<standing.length && need>0; s++){
+    var pick=_nvPick(standing, seed, 24+s);
+    if(bullets.indexOf(pick)===-1){ bullets.push(pick); need--; }
+  }
   return bullets.slice(0,4).map(function(b){return '\u2022 '+b;}).join('\n');
 }
 
@@ -33275,16 +33356,17 @@ function _buildVerdict(interps, pack){
   var _rs=(pack&&pack.risk_score)||{};
   var risk=_num(_rs.score!=null?_rs.score:(pack&&pack.score));
   var _drivers=_arr(_rs.drivers).slice(0,3).filter(Boolean);
-  var verbal=risk>=75?'the Ledger is on high alert — heavy hands moving all night':
-             risk>=50?'the Ledger is restless, and I’m watching close':
-             risk>=25?'a moderate night — routine patrol holds':
-             'a quiet night — no villain broke cover';
+  var seed=_nvSeed(pack);
+  var verbal=risk>=75?_nvPick(['the Ledger is on high alert — heavy hands moving all night','this was a loud night — big money didn’t even try to hide','the board ran hot; the whales were busy','full-alert night — the heavy hands showed themselves'],seed,30):
+             risk>=50?_nvPick(['the Ledger is restless, and I’m watching close','a stirring night — motion working under the surface','the board’s warm; something’s in play','an unsettled night — I’m leaning in on it'],seed,30):
+             risk>=25?_nvPick(['a moderate night — routine patrol holds','a steady night — nothing broke the pattern','ordinary motion, nothing that raised the hair on my neck','a middling night — logged and watched'],seed,30):
+             _nvPick(['a quiet night — no villain broke cover','a still night — the rails stayed honest','calm water — nobody made a move worth booking','a silent shift — and silence gets logged too'],seed,30);
   var dir=' ('+risk+'/100).';
-  if(_drivers.length) dir+=' What tipped me off: '+_drivers.join(', ')+'.';
+  if(_drivers.length) dir+=' '+_nvPick(['What tipped me off: ','What put me here: ','The flags that lit up: ','What earned the score: '],seed,31)+_drivers.join(', ')+'.';
   var delta=_num(pack&&(pack.total_balance_delta_xrp!=null?pack.total_balance_delta_xrp:pack.balance_delta));
   if(delta>500000) dir+=' Watched wallets are net accumulating — about '+_xrpFmt(delta)+' XRP moved inward.';
   else if(delta<-500000) dir+=' Watched wallets are net distributing — about '+_xrpFmt(Math.abs(delta))+' XRP moved outward.';
-  return 'Today\u2019s forensic read: '+verbal+'.'+dir+' '+_nvBeat(_nvSeed(pack),5)+
+  return _nvPick(['Today\u2019s forensic read: ','The read, straight up: ','Bottom line off the Ledger: ','My call this morning: '],seed,32)+verbal+'.'+dir+' '+_nvBeat(seed,5)+
          ' Not financial advice. XRP-only forensic watch.\n\n'+
          'I\u2019m XRPMan, and I tell on the banks.';
 }
@@ -33422,7 +33504,7 @@ function assemblePublicReport(pack){
   var exec  = _buildExecutiveSummary(interps, pack);
   var wmm   = _buildWhatMatteredMost(interps, pack);
   var evid  = _buildEvidence(interps, pack);
-  var watch = _buildWatchNext(interps);
+  var watch = _buildWatchNext(interps, pack);
   var verd  = _buildVerdict(interps, pack);
   var diag  = _buildLedgerDiagnostics(pack);
 
