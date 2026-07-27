@@ -26,13 +26,13 @@
 }
 /* ── shell ─────────────────────────────────────────────── */
 .sw-dash-v1 #swDash{position:relative;z-index:1;display:grid;gap:var(--sw-gap);
-  grid-template-columns:var(--sw-rail-w) 1fr;grid-template-areas:"rail header" "rail main";
+  grid-template-columns:var(--sw-rail-w) minmax(0,1fr);grid-template-areas:"rail header" "rail main";
   align-content:start;min-height:100vh;padding:0;color:var(--sw-text);
   font-family:'Rajdhani','Share Tech Mono',sans-serif;}
 .sw-dash-v1 #swDashHeader{grid-area:header;}
 .sw-dash-v1 #swDashRail{grid-area:rail;}
-.sw-dash-v1 #swDashMain{grid-area:main;display:grid;gap:var(--sw-gap);align-content:start;
-  grid-template-columns:repeat(12,1fr);padding:0 var(--sw-gap) calc(var(--sw-gap)*2);}
+.sw-dash-v1 #swDashMain{grid-area:main;min-width:0;display:grid;gap:var(--sw-gap);align-content:start;
+  grid-template-columns:repeat(12,minmax(0,1fr));padding:0 var(--sw-gap) calc(var(--sw-gap)*2);}
 /* ── public-shell override ─────────────────────────────────
    PUBLIC SHELL v1 (later in this file) locks the console to a single
    non-scrolling 100vh viewport and hides every #screen-command child except
@@ -85,14 +85,14 @@ body.sw-dash-v1{overflow-y:auto !important;overflow-x:hidden !important;height:1
 .sw-dash-v1 .sw-hero{grid-column:span 8;}
 .sw-dash-v1 .sw-hero-side{grid-column:span 4;display:grid;gap:var(--sw-gap);align-content:start;}
 .sw-dash-v1 .sw-statusrow{grid-column:span 12;display:grid;gap:var(--sw-gap);
-  grid-template-columns:repeat(6,1fr);}
+  grid-template-columns:repeat(6,minmax(0,1fr));}
 .sw-dash-v1 .sw-instruments{grid-column:span 8;}
 .sw-dash-v1 .sw-feed{grid-column:span 4;}
 .sw-dash-v1 .sw-network{grid-column:span 5;}
 .sw-dash-v1 .sw-repevid{grid-column:span 3;}
 .sw-dash-v1 .sw-downloads{grid-column:span 4;}
 /* ── gauges / tiles / meter ────────────────────────────── */
-.sw-dash-v1 .sw-gaugerow{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--sw-gap);}
+.sw-dash-v1 .sw-gaugerow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sw-gap);}
 .sw-dash-v1 .sw-gauge{text-align:center;}
 .sw-dash-v1 .sw-gauge svg{width:100%;max-width:150px;height:auto;overflow:visible;}
 .sw-dash-v1 .sw-gauge-track{stroke:rgba(154,190,174,0.16);}
@@ -100,7 +100,7 @@ body.sw-dash-v1{overflow-y:auto !important;overflow-x:hidden !important;height:1
 .sw-dash-v1 .sw-gauge-svgval{font-family:'Orbitron',sans-serif;font-weight:900;fill:var(--sw-green);}
 .sw-dash-v1 .sw-gauge-val{font:900 26px/1 'Orbitron',sans-serif;color:var(--sw-green);margin-top:6px;}
 .sw-dash-v1 .sw-gauge-lbl{font:600 10px 'Rajdhani',sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--sw-text-muted);margin-top:4px;}
-.sw-dash-v1 .sw-tilerow{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--sw-gap);margin-top:var(--sw-gap);}
+.sw-dash-v1 .sw-tilerow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--sw-gap);margin-top:var(--sw-gap);}
 .sw-dash-v1 .sw-tile{background:var(--sw-bg-raised);border:1px solid var(--sw-border);border-radius:var(--sw-radius-sm);padding:14px;text-align:center;}
 .sw-dash-v1 .sw-tile-val{font:900 22px/1 'Orbitron',sans-serif;color:var(--sw-green);}
 .sw-dash-v1 .sw-tile-lbl{font:600 9.5px 'Rajdhani',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--sw-text-muted);margin-top:5px;}
@@ -132,22 +132,23 @@ body.sw-dash-v1{overflow-y:auto !important;overflow-x:hidden !important;height:1
   .sw-dash-v1 .sw-instruments,.sw-dash-v1 .sw-feed,.sw-dash-v1 .sw-downloads{grid-column:span 12;}
   .sw-dash-v1 .sw-network{grid-column:span 7;}
   .sw-dash-v1 .sw-repevid{grid-column:span 5;}
-  .sw-dash-v1 .sw-statusrow{grid-template-columns:repeat(3,1fr);}
+  .sw-dash-v1 .sw-statusrow{grid-template-columns:repeat(3,minmax(0,1fr));}
 }
 /* ── mobile ────────────────────────────────────────────── */
 @media (max-width:760px){
   /* Declutter the header: nav lives in the bottom bar, the status row already
      surfaces mode/wallets/errors, so drop the decorative header stats. */
-  .sw-dash-v1 #swDashHeader{gap:10px;}
+  .sw-dash-v1 #swDashHeader{gap:7px;min-width:0;padding:0 10px;}
   .sw-dash-v1 #swDashHeader .sw-hstat{display:none;}
-  .sw-dash-v1 .sw-brand{font-size:16px;}
-  .sw-dash-v1 .sw-hbtn{padding:8px 11px;}
-  .sw-dash-v1 #swDash{grid-template-columns:1fr;grid-template-areas:"header" "main";}
+  .sw-dash-v1 .sw-brand{font-size:14px;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;}
+  .sw-dash-v1 .sw-hbtn{padding:6px 8px;font-size:11px;flex:0 0 auto;}
+  .sw-dash-v1 #swDashHeader #xaiVoiceOutputToggle{font-size:9px;padding:6px 8px;max-width:96px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;}
+  .sw-dash-v1 #swDash{grid-template-columns:minmax(0,1fr);grid-template-areas:"header" "main";}
   .sw-dash-v1 #swDashRail{display:none;}
   .sw-dash-v1 #swDashMain{grid-template-columns:1fr;padding-bottom:calc(72px + env(safe-area-inset-bottom,0px));}
   .sw-dash-v1 .sw-hero,.sw-dash-v1 .sw-hero-side,.sw-dash-v1 .sw-instruments,.sw-dash-v1 .sw-feed,
   .sw-dash-v1 .sw-network,.sw-dash-v1 .sw-repevid,.sw-dash-v1 .sw-downloads{grid-column:span 12;}
-  .sw-dash-v1 .sw-statusrow{grid-template-columns:repeat(3,1fr);}
+  .sw-dash-v1 .sw-statusrow{grid-template-columns:repeat(3,minmax(0,1fr));}
   .sw-dash-v1 #swDashBottomNav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:20;
     justify-content:space-around;align-items:center;gap:2px;
     padding:8px 6px calc(8px + env(safe-area-inset-bottom,0px));
