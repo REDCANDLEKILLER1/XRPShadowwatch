@@ -33,6 +33,20 @@
 .sw-dash-v1 #swDashRail{grid-area:rail;}
 .sw-dash-v1 #swDashMain{grid-area:main;display:grid;gap:var(--sw-gap);align-content:start;
   grid-template-columns:repeat(12,1fr);padding:0 var(--sw-gap) calc(var(--sw-gap)*2);}
+/* ── public-shell override ─────────────────────────────────
+   PUBLIC SHELL v1 (later in this file) locks the console to a single
+   non-scrolling 100vh viewport and hides every #screen-command child except
+   #xrpmanAiCommandRoom. The dashboard reparents that room INTO #swDash, so
+   without these overrides #swDash (and the room inside it) would be hidden and
+   the page could not scroll. Each override outranks the lock on specificity
+   (adds .sw-dash-v1), so the original lock is left byte-for-byte intact and
+   only takes effect when the dashboard is active. */
+body.sw-dash-v1{overflow-y:auto !important;overflow-x:hidden !important;height:100% !important;max-height:100vh !important;}
+.sw-dash-v1 #screen-command{overflow:visible !important;max-height:none !important;}
+.sw-dash-v1 #screen-command>#swDash{display:grid !important;visibility:visible !important;
+  pointer-events:auto !important;position:relative !important;width:auto !important;height:auto !important;
+  overflow:visible !important;clip:auto !important;max-height:none !important;}
+.sw-dash-v1 #xrpmanAiCommandRoom{max-height:none !important;overflow-y:visible !important;}
 /* ── panels ────────────────────────────────────────────── */
 .sw-dash-v1 .sw-panel{background:var(--sw-surface);border:1px solid var(--sw-border);
   border-radius:var(--sw-radius);box-shadow:var(--sw-shadow);padding:clamp(12px,1.1vw,18px);
