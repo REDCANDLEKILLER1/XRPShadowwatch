@@ -121,6 +121,8 @@ body.sw-dash-v1{overflow-y:auto !important;overflow-x:hidden !important;height:1
 /* Defensive: grid/flex children must be allowed to shrink (prevents blowout). */
 .sw-dash-v1 #swDashMain>*{min-width:0;}
 .sw-dash-v1 .sw-panel{min-width:0;}
+/* Clip any sub-pixel rounding so the page can never scroll horizontally. */
+.sw-dash-v1 #swDash,.sw-dash-v1 #swDashMain{overflow-x:clip;max-width:100%;}
 /* Reparented engine panes hold long log/report lines — keep them from pushing
    the page; wrap addresses/hashes instead of forcing horizontal scroll. */
 .sw-dash-v1 #cmdLogPane,.sw-dash-v1 #cmdReportPane{max-width:100%;}
@@ -9585,7 +9587,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       var wChecked = (typeof state !== 'undefined' && state.pack && state.pack.wallets_checked) || 0;
       var wTotal   = (typeof KNOWN !== 'undefined') ? Object.keys(KNOWN).length : 0;
       var qSize    = window.SHADOW_BLOOM_QUEUE ? window.SHADOW_BLOOM_QUEUE.size() : 0;
-      var helpers  = 0; // GO 2 features off
+      var helpers  = (typeof _xaiHelpersCount === 'function') ? _xaiHelpersCount()
+                     : ((window.SHADOW_HELPER_POOL && Array.isArray(window.SHADOW_HELPER_POOL.activeJobs)) ? window.SHADOW_HELPER_POOL.activeJobs.length : 0);
       var errs     = (typeof state !== 'undefined' && Array.isArray(state.errorLog)) ? state.errorLog.length : 0;
       var wallets  = _currentMode === 'SCANNING' ? (wChecked + '/' + wTotal) : String(wTotal);
       el.textContent = 'MODE ' + _currentMode + ' \u00B7 WALLETS ' + wallets +
@@ -10999,6 +11002,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       fillEl.style.width = pct + '%';
       if (wrap) wrap.setAttribute('data-mission-state', phase);
       if (nextEl) nextEl.textContent = NEXT_ACTION_LABEL[phase] || ('NEXT: ' + (XAI_SCAN_PROGRESS.nextAction || ''));
+      // Dashboard v1: advance live instruments on every progress tick (no new timer).
+      try { if (window.__swDashApplied && typeof window.renderDashboardV1Live === 'function') window.renderDashboardV1Live(); } catch (_) {}
     } catch (_) {}
   }
   if (typeof window !== 'undefined') window.renderXaiMissionUI = _renderMissionUI;
@@ -21278,26 +21283,36 @@ function applyDashboardLayoutV1() {
   var cmd  = document.getElementById('screen-command');
   var room = document.getElementById('xrpmanAiCommandRoom');
   if (!cmd || !room) return;                 // nothing to adopt — leave engine untouched
-  document.body.classList.add('sw-dash-v1');
+
+  // Transactional: record every move so we can fully roll back on any failure,
+  // and only flip body.sw-dash-v1 / __swDashApplied AFTER a clean mount.
+  var moves = [];                            // {node, parent, next}
+  var dash = null;
+  var legacyHero = cmd.querySelector('.cmd-hero');
+  var legacyOrb  = cmd.querySelector('.cmd-orb-wrap');
+  var legacyHeroDisp = legacyHero ? legacyHero.style.display : null;
+  var legacyOrbDisp  = legacyOrb  ? legacyOrb.style.display  : null;
+  function _record(node) { if (node) moves.push({ node: node, parent: node.parentNode, next: node.nextSibling }); }
+  function _adopt(slot, node) { if (node) { _record(node); slot.appendChild(node); } }
+
   try {
-    // 1. Grid shell
-    var dash   = _swEl('div',    { id: 'swDash' });
+    // 1. Build the grid shell DETACHED (nothing enters the document yet)
+    dash       = _swEl('div',    { id: 'swDash' });
     var header = _swEl('header', { id: 'swDashHeader' });
     var rail   = _swEl('nav',    { id: 'swDashRail', 'aria-label': 'Shadow Watch sections' });
     var main   = _swEl('div',    { id: 'swDashMain' });
     var bottom = _swEl('nav',    { id: 'swDashBottomNav', 'aria-label': 'Shadow Watch sections' });
     dash.appendChild(header); dash.appendChild(rail); dash.appendChild(main); dash.appendChild(bottom);
 
-    // 2. Header: brand + honest live stats + controls
+    // 2. Header: brand + live stats + controls (MENU is dev-gated → System Console)
     header.appendChild(_swEl('div', { 'class': 'sw-brand' }, 'SHADOW<b>WATCH</b>'));
     header.appendChild(_swEl('div', { 'class': 'sw-hstat' }, 'CONNECTION<b id="swHConn">STANDBY</b>'));
     header.appendChild(_swEl('div', { 'class': 'sw-hstat' }, 'SCAN<b id="swHMode">READY</b>'));
     header.appendChild(_swEl('div', { 'class': 'sw-hstat' }, 'TX SAMPLE<b id="swHLedger">—</b>'));
     header.appendChild(_swEl('div', { 'class': 'sw-hspacer' }));
-    var voiceToggle = document.getElementById('xaiVoiceOutputToggle');   // reparent the wired control
-    if (voiceToggle) header.appendChild(voiceToggle);
-    var menuBtn = _swEl('button', { type: 'button', 'class': 'sw-hbtn' }, 'MENU');
-    menuBtn.addEventListener('click', function () { if (!_swClickCmd('open-system')) swNav('report'); });
+    _adopt(header, document.getElementById('xaiVoiceOutputToggle'));   // reparent the wired control
+    var menuBtn = _swEl('button', { type: 'button', 'class': 'sw-hbtn sw-dev-only' }, 'MENU');
+    menuBtn.addEventListener('click', function () { _swClickCmd('open-system'); });
     header.appendChild(menuBtn);
     var exitBtn = _swEl('button', { type: 'button', 'class': 'sw-hbtn sw-exit' }, 'EXIT');
     exitBtn.addEventListener('click', exitShadowWatchReport);
@@ -21319,19 +21334,22 @@ function applyDashboardLayoutV1() {
     [hero, heroSide, statusRow, instruments, feed, network, repevid, downloads].forEach(function (s) { main.appendChild(s); });
 
     // 4a. hero = the entire live command room (moved whole → all engine wiring intact)
-    hero.appendChild(room);
-    var legacyHero = cmd.querySelector('.cmd-hero');     if (legacyHero) legacyHero.style.display = 'none';
-    var legacyOrb  = cmd.querySelector('.cmd-orb-wrap'); if (legacyOrb)  legacyOrb.style.display  = 'none';
+    _adopt(hero, room);
+    if (legacyHero) legacyHero.style.display = 'none';
+    if (legacyOrb)  legacyOrb.style.display  = 'none';
     // 4b. hero-side = live scan log (moved by reference)
-    var logPane = document.getElementById('cmdLogPane'); if (logPane) heroSide.appendChild(logPane);
+    _adopt(heroSide, document.getElementById('cmdLogPane'));
 
-    // 4c. status cells
+    // Test-only injection point for the transactional-rollback gate.
+    if (window.__swDashForceFail) throw new Error('forced adopter failure (test)');
+
+    // 4c. status cells (static template; values set via textContent later)
     statusRow.innerHTML =
       _swCell('swCellMode', 'MODE', 'READY') + _swCell('swCellWallets', 'WALLETS', '0') +
       _swCell('swCellQueue', 'QUEUE', '0') + _swCell('swCellHelpers', 'HELPERS', '0') +
       _swCell('swCellErrors', 'ERRORS', '0') + _swCell('swCellConn', 'LINK', '—');
 
-    // 4d. instrument / feed / network / repevid / downloads scaffolds
+    // 4d. panel scaffolds (static trusted templates; dynamic content via DOM builders)
     instruments.innerHTML =
       '<div class="sw-panel-title"><span><span class="sw-dot"></span>LIVE SCAN INSTRUMENTS</span></div>' +
       '<div class="sw-gaugerow" id="swGauges"></div>' +
@@ -21351,58 +21369,121 @@ function applyDashboardLayoutV1() {
     repevid.appendChild(openBtn);
     downloads.innerHTML =
       '<div class="sw-panel-title"><span><span class="sw-dot"></span>DAILY REPORTS &amp; DOWNLOADS</span></div>';
-    [['copy-morning', 'Copy Morning Report'], ['download-morning', 'Download Morning Report'],
-     ['download-total', 'Download Total Report'], ['download-debug', 'Download Full Debug']].forEach(function (pair) {
-      var b = _swEl('button', { 'class': 'sw-cardbtn', type: 'button' }, pair[1]);
-      b.addEventListener('click', function () { _swClickCmd(pair[0]); });
+    // Public-safe morning exports stay public; Total + Full Debug are dev-gated
+    // (marked .sw-dev-only; _swApplyDevGate hides them unless the 9-tap unlock is active).
+    [['copy-morning', 'Copy Morning Report', false], ['download-morning', 'Download Morning Report', false],
+     ['download-total', 'Download Total Report', true], ['download-debug', 'Download Full Debug', true]].forEach(function (row) {
+      var b = _swEl('button', { 'class': 'sw-cardbtn' + (row[2] ? ' sw-dev-only' : ''), type: 'button' }, row[1]);
+      b.addEventListener('click', function () { _swClickCmd(row[0]); });
       downloads.appendChild(b);
     });
 
     // 5. Report viewer full-width at the bottom of the grid (moved by reference)
     var reportPane = document.getElementById('cmdReportPane');
-    if (reportPane) { reportPane.style.gridColumn = 'span 12'; main.appendChild(reportPane); }
+    if (reportPane) { _record(reportPane); reportPane.style.gridColumn = 'span 12'; main.appendChild(reportPane); }
 
-    // 6. Mount the shell as the FIRST child of the command screen
+    // 6. Mount the shell, THEN activate the flag + mark applied (transactional order)
     cmd.insertBefore(dash, cmd.firstChild);
-
+    document.body.classList.add('sw-dash-v1');
     window.__swDashApplied = true;
+    _swApplyDevGate();
     renderDashboardV1();
   } catch (e) {
-    try { console.error('[sw-dash] applyDashboardLayoutV1 failed:', e); } catch (_) {}
-    // Best-effort: any partially-moved nodes are still live + wired; engine keeps working.
+    try { console.error('[sw-dash] applyDashboardLayoutV1 failed — rolling back:', e); } catch (_) {}
+    // Roll back every move (reverse order), restore legacy display, drop partial shell + flag.
+    for (var i = moves.length - 1; i >= 0; i--) {
+      try { if (moves[i].parent) moves[i].parent.insertBefore(moves[i].node, moves[i].next); } catch (_) {}
+    }
+    try { if (legacyHero) legacyHero.style.display = legacyHeroDisp || ''; } catch (_) {}
+    try { if (legacyOrb)  legacyOrb.style.display  = legacyOrbDisp  || ''; } catch (_) {}
+    try { if (dash && dash.parentNode) dash.parentNode.removeChild(dash); } catch (_) {}
+    try { document.body.classList.remove('sw-dash-v1'); } catch (_) {}
+    window.__swDashApplied = false;
   }
 }
 
-// Cheap live refresh — header stats + status cells only. Safe to call often
-// (hooked to renderStatusStrip's existing 4s tick; no new timer).
+// ── XSS-safe DOM builders — dynamic values NEVER string-interpolated into
+//    innerHTML; they enter the DOM only via textContent / setAttribute. ──
+function _swClear(el) { while (el && el.firstChild) el.removeChild(el.firstChild); }
+function _swEmpty(text) { var d = document.createElement('div'); d.className = 'sw-empty'; d.textContent = String(text); return d; }
+function _swMkRow(labelText, valueText, opts) {
+  opts = opts || {};
+  var row = document.createElement('div'); row.className = 'sw-feed-row';
+  var body = document.createElement('div'); body.className = 'sw-feed-body';
+  var lbl = document.createElement('div'); lbl.className = 'sw-feed-detail';
+  lbl.style.color = 'var(--sw-text-muted)'; lbl.textContent = String(labelText);
+  body.appendChild(lbl);
+  var val = document.createElement('div'); val.className = 'sw-feed-title';
+  if (opts.nowrap) val.style.whiteSpace = 'nowrap';
+  if (opts.color) val.style.color = opts.color;
+  val.textContent = String(valueText);
+  row.appendChild(body); row.appendChild(val);
+  return row;
+}
+// ── internal-access gate: reuse the existing 9-tap developer unlock; do NOT
+//    create a second access system, do NOT weaken PUBLIC_SHELL_v1. ──
+function _swDevUnlocked() {
+  try { return !!(window.SW_PUBLIC_SHELL && typeof window.SW_PUBLIC_SHELL.unlocked === 'function' && window.SW_PUBLIC_SHELL.unlocked()); }
+  catch (_) { return false; }
+}
+function _swApplyDevGate() {
+  try {
+    var on = _swDevUnlocked();
+    var els = document.querySelectorAll('#swDash .sw-dev-only');
+    for (var i = 0; i < els.length; i++) els[i].style.display = on ? '' : 'none';
+  } catch (_) {}
+}
+// ── helpers count: the SAME canonical source the status strip uses ──
+function _xaiHelpersCount() {
+  try { var HP = window.SHADOW_HELPER_POOL; return (HP && Array.isArray(HP.activeJobs)) ? HP.activeJobs.length : 0; }
+  catch (_) { return 0; }
+}
+if (typeof window !== 'undefined') window._xaiHelpersCount = _xaiHelpersCount;
+function _swScanning() {
+  var b = document.body.classList;
+  return b.contains('scanning') || b.contains('building');
+}
+
+// Cheap live refresh — header + status cells + INSTRUMENTS from live sources.
+// Piggybacks the status-strip 4s tick AND _renderMissionUI progress ticks
+// (no new timer), so gauges/telemetry advance DURING the scan.
 function renderDashboardV1Live() {
   if (!window.__swDashApplied) return;
   try {
-    var p = (typeof state !== 'undefined' && state.pack) ? state.pack : null;
+    var p  = (typeof state !== 'undefined' && state.pack) ? state.pack : null;
+    var SP = (typeof window !== 'undefined') ? window.XAI_SCAN_PROGRESS : null;
+    var scanning = _swScanning();
+    var DASH = '—';
+    // header
+    var txLive = (typeof state !== 'undefined' && Array.isArray(state.txs)) ? state.txs.length : 0;
     _swSetText('swHConn', _swLink());
     _swSetText('swHMode', _swMode());
-    _swSetText('swHLedger', p ? String(n(p.tx_24h_count)) : '—');
+    _swSetText('swHLedger', txLive ? String(txLive) : (p ? String(n(p.tx_24h_count)) : DASH));
+    // status cells
     var wTotal = (typeof KNOWN !== 'undefined') ? Object.keys(KNOWN).length
                : (typeof WATCHLIST !== 'undefined' ? WATCHLIST.length : 0);
-    var qSize = window.SHADOW_BLOOM_QUEUE ? window.SHADOW_BLOOM_QUEUE.size() : 0;
+    var wChecked = (scanning && SP && SP.walletsTotal > 0) ? SP.walletsChecked : (p ? n(p.wallets_checked) : 0);
+    var qSize = (window.SHADOW_BLOOM_QUEUE && typeof window.SHADOW_BLOOM_QUEUE.size === 'function') ? window.SHADOW_BLOOM_QUEUE.size() : 0;
     var errs  = (typeof state !== 'undefined' && Array.isArray(state.errorLog)) ? state.errorLog.length : 0;
     _swSetText('swCellMode', _swMode());
-    _swSetText('swCellWallets', (p ? n(p.wallets_checked) : 0) + '/' + wTotal);
+    _swSetText('swCellWallets', wChecked + '/' + wTotal);
     _swSetText('swCellQueue', String(qSize));
+    _swSetText('swCellHelpers', String(_xaiHelpersCount()));
     _swSetText('swCellErrors', String(errs));
     _swSetText('swCellConn', _swLink());
+    // live instruments + access gate
+    _swRenderInstruments(p, SP, scanning);
+    _swApplyDevGate();
   } catch (_) {}
 }
 
-// Full render — instruments + feed + network + report/evidence. Called at
-// scan-complete and once on adopt.
+// Full render — live + feed + network + report/evidence (post-scan panels).
 function renderDashboardV1() {
   if (!window.__swDashApplied) return;
   try {
     var p = (typeof state !== 'undefined' && state.pack) ? state.pack : null;
     var risk = (p && p.risk_score) || (typeof state !== 'undefined' ? state.riskScore : null) || null;
     renderDashboardV1Live();
-    _swRenderInstruments(p, risk);
     _swRenderFeed(p);
     _swRenderNetwork(p);
     _swRenderRepEvid(p, risk);
@@ -21413,126 +21494,240 @@ if (typeof window !== 'undefined') {
   window.renderDashboardV1Live = renderDashboardV1Live;
 }
 
-// SVG donut gauge. frac (0..1) drives the arc; valText is the exact readout
-// shown in the center (raw value, never derived from frac). color styles the arc.
+// SVG donut gauge, built as a DOM element. frac (0..1) drives the arc; valText
+// is the exact readout — dynamic values enter ONLY via textContent/setAttribute.
 var _SW_GAUGE_C = 2 * Math.PI * 44;   // circumference for r=44
-function _swGauge(id, lbl, valText, frac, color) {
-  var f = Math.max(0, Math.min(1, Number(frac) || 0));
-  var dash = (f * _SW_GAUGE_C).toFixed(1) + ' ' + _SW_GAUGE_C.toFixed(1);
-  var arcCol = color || 'var(--sw-green)';
-  var fs = String(valText).length > 5 ? 13 : (String(valText).length > 3 ? 16 : 20);
-  return '<div class="sw-gauge">' +
-    '<svg viewBox="0 0 100 100" role="img" aria-label="' + lbl + ' ' + valText + '">' +
-      '<circle class="sw-gauge-track" cx="50" cy="50" r="44" fill="none" stroke-width="8"/>' +
-      '<circle class="sw-gauge-arc" id="' + id + '" cx="50" cy="50" r="44" fill="none" stroke="' + arcCol + '" ' +
-        'stroke-width="8" stroke-linecap="round" stroke-dasharray="' + dash + '" transform="rotate(-90 50 50)"/>' +
-      '<text class="sw-gauge-svgval" x="50" y="50" text-anchor="middle" dominant-baseline="central" ' +
-        'style="font-size:' + fs + 'px;fill:' + arcCol + '">' + valText + '</text>' +
-    '</svg>' +
-    '<div class="sw-gauge-lbl">' + lbl + '</div></div>';
-}
+var _SW_SVGNS = 'http://www.w3.org/2000/svg';
 function _swRiskColor(score) {
   if (score >= 70) return 'var(--sw-red)';
   if (score >= 40) return 'var(--sw-gold)';
   return 'var(--sw-green)';
 }
-function _swTile(lbl, val) {
-  return '<div class="sw-tile"><div class="sw-tile-val">' + val + '</div>' +
-         '<div class="sw-tile-lbl">' + lbl + '</div></div>';
+function _swGauge(id, lbl, valText, frac, color) {
+  var f = Math.max(0, Math.min(1, Number(frac) || 0));
+  var dash = (f * _SW_GAUGE_C).toFixed(1) + ' ' + _SW_GAUGE_C.toFixed(1);
+  var arcCol = color || 'var(--sw-green)';
+  var vt = String(valText);
+  var fs = vt.length > 5 ? 13 : (vt.length > 3 ? 16 : 20);
+  var wrap = document.createElement('div'); wrap.className = 'sw-gauge';
+  var svg = document.createElementNS(_SW_SVGNS, 'svg');
+  svg.setAttribute('viewBox', '0 0 100 100'); svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', lbl + ' ' + vt);          // setAttribute — never parses HTML
+  var track = document.createElementNS(_SW_SVGNS, 'circle');
+  track.setAttribute('class', 'sw-gauge-track');
+  track.setAttribute('cx', '50'); track.setAttribute('cy', '50'); track.setAttribute('r', '44');
+  track.setAttribute('fill', 'none'); track.setAttribute('stroke-width', '8');
+  var arc = document.createElementNS(_SW_SVGNS, 'circle');
+  arc.setAttribute('class', 'sw-gauge-arc'); if (id) arc.setAttribute('id', id);
+  arc.setAttribute('cx', '50'); arc.setAttribute('cy', '50'); arc.setAttribute('r', '44');
+  arc.setAttribute('fill', 'none'); arc.setAttribute('stroke', arcCol); arc.setAttribute('stroke-width', '8');
+  arc.setAttribute('stroke-linecap', 'round'); arc.setAttribute('stroke-dasharray', dash);
+  arc.setAttribute('transform', 'rotate(-90 50 50)');
+  var txt = document.createElementNS(_SW_SVGNS, 'text');
+  txt.setAttribute('class', 'sw-gauge-svgval'); txt.setAttribute('x', '50'); txt.setAttribute('y', '50');
+  txt.setAttribute('text-anchor', 'middle'); txt.setAttribute('dominant-baseline', 'central');
+  txt.setAttribute('style', 'font-size:' + fs + 'px;fill:' + arcCol);
+  txt.textContent = vt;
+  svg.appendChild(track); svg.appendChild(arc); svg.appendChild(txt);
+  var lblDiv = document.createElement('div'); lblDiv.className = 'sw-gauge-lbl'; lblDiv.textContent = lbl;
+  wrap.appendChild(svg); wrap.appendChild(lblDiv);
+  return wrap;
 }
-function _swRenderInstruments(p, risk) {
+function _swTile(lbl, val) {
+  var t = document.createElement('div'); t.className = 'sw-tile';
+  var v = document.createElement('div'); v.className = 'sw-tile-val'; v.textContent = String(val);
+  var l = document.createElement('div'); l.className = 'sw-tile-lbl'; l.textContent = String(lbl);
+  t.appendChild(v); t.appendChild(l); return t;
+}
+// Live-first instruments: values advance mid-scan from real sources; anything
+// not yet available shows WAITING / — (never a manufactured 0).
+function _swRenderInstruments(p, SP, scanning) {
   var DASH = '—';
   var g = document.getElementById('swGauges');
   if (g) {
-    var checked = p ? n(p.wallets_checked) : 0;
-    var total   = p ? n(p.watchlist_total) : 0;
-    var covFrac = (p && total > 0) ? (checked / total) : 0;        // no ÷0
-    var covTxt  = p ? (checked + '/' + total) : DASH;
-    var whale   = p ? (p.large_transfers || []).length : 0;
-    var whaleFrac = Math.min(1, whale / 10);                       // visual scale; text is raw count
-    var rScore  = risk ? n(risk.score) : 0;
-    g.innerHTML =
-      _swGauge('swGaugeCoverage', 'WALLET COVERAGE', covTxt, covFrac, 'var(--sw-cyan)') +
-      _swGauge('swGaugeWhale', 'WHALE ACTIVITY', p ? String(whale) : DASH, whaleFrac, 'var(--sw-gold)') +
-      _swGauge('swGaugeRisk', 'ACTIVITY RISK', risk ? (rScore + '/100') : (p ? '0/100' : DASH),
-               rScore / 100, p ? _swRiskColor(rScore) : 'var(--sw-text-muted)');
+    // coverage — live during scan, else sealed pack, else —
+    var checked = null, total = null;
+    if (scanning && SP && SP.walletsTotal > 0) { checked = n(SP.walletsChecked); total = n(SP.walletsTotal); }
+    else if (p) { checked = n(p.wallets_checked); total = n(p.watchlist_total); }
+    var covTxt  = (checked === null) ? DASH : (checked + '/' + total);
+    var covFrac = (checked !== null && total > 0) ? (checked / total) : 0;
+    // whale — real live count from state.large (may legitimately be 0), else —
+    var largeArr = (typeof state !== 'undefined' && Array.isArray(state.large)) ? state.large
+                 : (p && Array.isArray(p.large_transfers) ? p.large_transfers : null);
+    var haveWhale = scanning || !!p || (largeArr && largeArr.length > 0);
+    var whale = largeArr ? largeArr.length : 0;
+    // risk — real score if present, else WAITING (never fake 0)
+    var riskObj = (typeof state !== 'undefined' && state.riskScore) ? state.riskScore : (p && p.risk_score ? p.risk_score : null);
+    var rScore  = riskObj ? n(riskObj.score) : null;
+    _swClear(g);
+    g.appendChild(_swGauge('swGaugeCoverage', 'WALLET COVERAGE', covTxt, covFrac, 'var(--sw-cyan)'));
+    g.appendChild(_swGauge('swGaugeWhale', 'WHALE ACTIVITY', haveWhale ? String(whale) : DASH, Math.min(1, whale / 10), 'var(--sw-gold)'));
+    g.appendChild(_swGauge('swGaugeRisk', 'ACTIVITY RISK', rScore === null ? 'WAITING' : (rScore + '/100'),
+                           rScore === null ? 0 : rScore / 100, rScore === null ? 'var(--sw-text-muted)' : _swRiskColor(rScore)));
   }
   var m = document.getElementById('swMeter');
   if (m) {
-    if (!p) {
-      m.innerHTML = '<div class="sw-empty">NET WATCHED FLOW · WAITING FOR SCAN</div>';
-    } else {
+    _swClear(m);
+    if (!p) { m.appendChild(_swEmpty('NET WATCHED FLOW · WAITING FOR SCAN')); }
+    else {
       var d = n(p.total_balance_delta_xrp);
-      var mag = Math.min(1, Math.abs(d) / 5000000);          // visual scale only; text is exact
+      var mag = Math.min(1, Math.abs(d) / 5000000);
       var pct = 50 + (d >= 0 ? 1 : -1) * mag * 50;
       var left = Math.min(pct, 50), width = Math.abs(pct - 50);
       var col = d > 0 ? 'var(--sw-green)' : (d < 0 ? 'var(--sw-red)' : 'var(--sw-text-muted)');
-      m.innerHTML =
-        '<div class="sw-panel-title" style="margin:2px 0 6px"><span>NET WATCHED FLOW</span>' +
-        '<span style="color:' + col + '">' + (d > 0 ? '+' : '') + fmt(d, 0) + ' XRP</span></div>' +
-        '<div class="sw-meter-track"><div class="sw-meter-zero"></div>' +
-        '<div class="sw-meter-fill" style="left:' + left + '%;width:' + width + '%"></div></div>';
+      var title = document.createElement('div'); title.className = 'sw-panel-title'; title.style.margin = '2px 0 6px';
+      var t1 = document.createElement('span'); t1.textContent = 'NET WATCHED FLOW';
+      var t2 = document.createElement('span'); t2.style.color = col; t2.textContent = (d > 0 ? '+' : '') + fmt(d, 0) + ' XRP';
+      title.appendChild(t1); title.appendChild(t2);
+      var track = document.createElement('div'); track.className = 'sw-meter-track';
+      var zero = document.createElement('div'); zero.className = 'sw-meter-zero';
+      var fill = document.createElement('div'); fill.className = 'sw-meter-fill';
+      fill.style.left = left + '%'; fill.style.width = width + '%';
+      track.appendChild(zero); track.appendChild(fill);
+      m.appendChild(title); m.appendChild(track);
     }
   }
   var t = document.getElementById('swTiles');
   if (t) {
+    var disc = (typeof state !== 'undefined' && Array.isArray(state.discoveryInbox)) ? state.discoveryInbox.length : 0;
+    var txLive = (typeof state !== 'undefined' && Array.isArray(state.txs)) ? state.txs.length : 0;
+    var ledgerTx = txLive ? txLive : (p ? n(p.tx_24h_count) : null);
     var shadow = p ? n(p.shadow_volume_xrp) : null;
-    var disc   = (typeof state !== 'undefined' && Array.isArray(state.discoveryInbox)) ? state.discoveryInbox.length : 0;
-    var ev     = p && p.evidence_quality ? p.evidence_quality : null;
-    t.innerHTML =
-      _swTile('SHADOW VOL',  p ? (shadow > 0 ? fmt(shadow, 0) + ' XRP' : '0') : 'WAITING') +
-      _swTile('DISCOVERY',   String(disc)) +
-      _swTile('EVIDENCE',    ev ? (ev.grade + ' · ' + n(ev.score)) : (p ? DASH : 'WAITING')) +
-      _swTile('LEDGER TX',   p ? String(n(p.tx_24h_count)) : 'WAITING');
+    var ev = (p && p.evidence_quality) ? p.evidence_quality : null;
+    _swClear(t);
+    t.appendChild(_swTile('SHADOW VOL', shadow === null ? 'WAITING' : (shadow > 0 ? fmt(shadow, 0) + ' XRP' : '0')));
+    t.appendChild(_swTile('DISCOVERY', String(disc)));
+    t.appendChild(_swTile('EVIDENCE', ev ? (ev.grade + ' · ' + n(ev.score)) : 'WAITING'));
+    t.appendChild(_swTile('LEDGER TX', ledgerTx === null ? 'WAITING' : String(ledgerTx)));
   }
 }
 function _swRenderFeed(p) {
   var el = document.getElementById('swFeedList'); if (!el) return;
   var large = (p && Array.isArray(p.large_transfers)) ? p.large_transfers
             : ((typeof state !== 'undefined' && Array.isArray(state.large)) ? state.large : []);
-  if (!large.length) { el.innerHTML = '<div class="sw-empty">NO FLAGGED ACTIVITY · RUN A SCAN</div>'; return; }
-  el.innerHTML = large.slice(0, 14).map(function (tx) {
+  _swClear(el);
+  if (!large.length) { el.appendChild(_swEmpty('NO FLAGGED ACTIVITY · RUN A SCAN')); return; }
+  large.slice(0, 14).forEach(function (tx) {
     var amt   = fmt(n(tx.amount), 0) + ' XRP';
     var cls   = String(tx.classification || 'TRANSFER').replace(/_/g, ' ');
     var route = (tx.sender_label || 'UNKNOWN') + ' → ' + (tx.receiver_label || (tx.to ? _swShort(tx.to) : 'UNKNOWN'));
-    return '<div class="sw-feed-row"><div class="sw-feed-ico">⚡</div>' +
-      '<div class="sw-feed-body"><div class="sw-feed-title">' + cls + ' · ' + amt + '</div>' +
-      '<div class="sw-feed-detail">' + route + '</div></div>' +
-      '<div class="sw-feed-time">' + (tx.confidence || '') + '</div></div>';
-  }).join('');
+    var row = document.createElement('div'); row.className = 'sw-feed-row';
+    var ico = document.createElement('div'); ico.className = 'sw-feed-ico'; ico.textContent = '⚡';
+    var body = document.createElement('div'); body.className = 'sw-feed-body';
+    var title = document.createElement('div'); title.className = 'sw-feed-title'; title.textContent = cls + ' · ' + amt;
+    var detail = document.createElement('div'); detail.className = 'sw-feed-detail'; detail.textContent = route;
+    body.appendChild(title); body.appendChild(detail);
+    var time = document.createElement('div'); time.className = 'sw-feed-time'; time.textContent = String(tx.confidence || '');
+    row.appendChild(ico); row.appendChild(body); row.appendChild(time);
+    el.appendChild(row);
+  });
 }
 function _swRenderNetwork(p) {
   var el = document.getElementById('swNetList'); if (!el) return;
-  if (!p) { el.innerHTML = '<div class="sw-empty">NETWORK STATS LOAD ON SCAN</div>'; return; }
-  var rows = [];
-  function row(lbl, val) {
-    rows.push('<div class="sw-feed-row"><div class="sw-feed-body">' +
-      '<div class="sw-feed-detail" style="color:var(--sw-text-muted)">' + lbl + '</div></div>' +
-      '<div class="sw-feed-title" style="white-space:nowrap">' + val + '</div></div>');
-  }
-  var rl = n(p.rlusd_supply);                 row('RLUSD SUPPLY',    rl > 0 ? fmt(rl, 0) : '—');
-  var acc = n(p.xrpl_accounts_created);        row('NEW FUNDED ACCTS' + (p.xrpl_metrics_date ? (' (' + p.xrpl_metrics_date + ')') : ''), acc > 0 ? ('+' + fmt(acc, 0)) : '—');
-  var dex = n(p.xrpl_dex_volume_24h_usd);      row('XRPL DEX VOL 24H', dex > 0 ? ('$' + fmt(dex, 0)) : '—');
-  var tvl = n(p.xrpl_evm_tvl_usd);             row('XRPL EVM TVL',     tvl > 0 ? ('$' + fmt(tvl, 0)) : '—');
-  row('LEDGER TX (24H)', String(n(p.tx_24h_count)));
-  var btn = '<button class="sw-cardbtn" type="button" data-swnav="map">VIEW MAP</button>';
-  el.innerHTML = rows.join('') + btn;
-  var vb = el.querySelector('[data-swnav="map"]'); if (vb) vb.addEventListener('click', function () { swNav('map'); });
+  _swClear(el);
+  if (!p) { el.appendChild(_swEmpty('NETWORK STATS LOAD ON SCAN')); return; }
+  var rl = n(p.rlusd_supply);
+  el.appendChild(_swMkRow('RLUSD SUPPLY', rl > 0 ? fmt(rl, 0) : '—', { nowrap: true }));
+  var acc = n(p.xrpl_accounts_created);
+  el.appendChild(_swMkRow('NEW FUNDED ACCTS' + (p.xrpl_metrics_date ? (' (' + p.xrpl_metrics_date + ')') : ''), acc > 0 ? ('+' + fmt(acc, 0)) : '—', { nowrap: true }));
+  var dex = n(p.xrpl_dex_volume_24h_usd);
+  el.appendChild(_swMkRow('XRPL DEX VOL 24H', dex > 0 ? ('$' + fmt(dex, 0)) : '—', { nowrap: true }));
+  var tvl = n(p.xrpl_evm_tvl_usd);
+  el.appendChild(_swMkRow('XRPL EVM TVL', tvl > 0 ? ('$' + fmt(tvl, 0)) : '—', { nowrap: true }));
+  el.appendChild(_swMkRow('LEDGER TX (24H)', String(n(p.tx_24h_count)), { nowrap: true }));
+  var btn = document.createElement('button'); btn.className = 'sw-cardbtn'; btn.type = 'button';
+  btn.textContent = 'VIEW MAP'; btn.addEventListener('click', function () { swNav('map'); });
+  el.appendChild(btn);
 }
 function _swRenderRepEvid(p, risk) {
   var el = document.getElementById('swRepBody'); if (!el) return;
-  if (!p) { el.innerHTML = '<div class="sw-empty">NO REPORT YET</div>'; return; }
+  _swClear(el);
+  if (!p) { el.appendChild(_swEmpty('NO REPORT YET')); return; }
   var ev = p.evidence_quality || {}, r = risk || {};
-  function row(lbl, val) {
-    return '<div class="sw-feed-row"><div class="sw-feed-body">' +
-      '<div class="sw-feed-detail" style="color:var(--sw-text-muted)">' + lbl + '</div></div>' +
-      '<div class="sw-feed-title">' + val + '</div></div>';
-  }
-  el.innerHTML =
-    row('EVIDENCE GRADE', (ev.grade || '—') + ' (' + n(ev.score) + '/100)') +
-    row('ACTIVITY RISK',  (r.score != null ? (n(r.score) + '/100') : '—')) +
-    row('RISK LABEL',     (r.label || '—'));
+  el.appendChild(_swMkRow('EVIDENCE GRADE', (ev.grade || '—') + ' (' + n(ev.score) + '/100)'));
+  el.appendChild(_swMkRow('ACTIVITY RISK', (r.score != null ? (n(r.score) + '/100') : '—')));
+  el.appendChild(_swMkRow('RISK LABEL', (r.label || '—')));
 }
+
+// ── Dashboard hardening smoke test (PR #8 audit fixes B1–B4) ──
+//   B2 XSS-safe rendering · B4 canonical helpers count · B3 live gauge advance
+//   · B1 dev-gated internal exports. Runs against the live adopted dashboard;
+//   saves/restores state so it is side-effect-free.
+function shadowWatchDashboardHardeningSmokeTest() {
+  var results = [], pass = 0, fail = 0;
+  function check(name, cond) { if (cond) { pass++; results.push('✓ ' + name); } else { fail++; results.push('✗ ' + name); } }
+  if (!window.__swDashApplied) { check('dashboard applied (precondition)', false); return { pass: pass, fail: fail, total: pass + fail, results: results }; }
+  var savedPack = state.pack, savedLarge = state.large, savedRisk = state.riskScore, savedDisc = state.discoveryInbox;
+  try {
+    // B2 — dynamic values must render as literal text, never parsed as HTML
+    window.__swXss = undefined;
+    var XSS = '<img src=x onerror="window.__swXss=1">';
+    state.pack = { wallets_checked: 1, watchlist_total: 1, tx_24h_count: 1,
+      large_transfers: [{ amount: 1000000, classification: XSS, confidence: XSS, sender_label: XSS, receiver_label: XSS, to: XSS }],
+      risk_score: { score: 10, label: XSS }, total_balance_delta_xrp: 0, shadow_volume_xrp: 0,
+      evidence_quality: { score: 50, grade: XSS }, rlusd_supply: 1, xrpl_accounts_created: 1,
+      xrpl_metrics_date: XSS, xrpl_dex_volume_24h_usd: 1, xrpl_evm_tvl_usd: 1 };
+    state.large = state.pack.large_transfers; state.riskScore = state.pack.risk_score;
+    window.renderDashboardV1();
+    var feedTxt = (document.getElementById('swFeedList') || {}).textContent || '';
+    var netTxt  = (document.getElementById('swNetList')  || {}).textContent || '';
+    var repTxt  = (document.getElementById('swRepBody')  || {}).textContent || '';
+    check('B2: feed renders injected markup as literal text', feedTxt.indexOf('<img src=x') !== -1);
+    check('B2: network renders injected value as literal text', netTxt.indexOf('<img src=x') !== -1);
+    check('B2: report/evidence renders injected label as literal text', repTxt.indexOf('<img src=x') !== -1);
+    check('B2: no <img> element was injected', !document.querySelector('#swFeedList img, #swNetList img, #swRepBody img'));
+    check('B2: onerror payload did NOT execute (window.__swXss undefined)', typeof window.__swXss === 'undefined');
+
+    // B4 — helpers cell reflects the canonical SHADOW_HELPER_POOL.activeJobs count
+    var HP = window.SHADOW_HELPER_POOL;
+    if (HP && Array.isArray(HP.activeJobs)) {
+      var before = HP.activeJobs.length;
+      HP.activeJobs.push({ job_id: '__hardening_test__', status: 'ACTIVE' });
+      window.renderDashboardV1Live();
+      var cellTxt = (document.getElementById('swCellHelpers') || {}).textContent || '';
+      check('B4: helpers cell shows nonzero canonical count', cellTxt === String(before + 1) && (before + 1) > 0);
+      HP.activeJobs.pop(); window.renderDashboardV1Live();
+    } else { check('B4: SHADOW_HELPER_POOL.activeJobs present', false); }
+
+    // B3 — coverage gauge advances live from XAI_SCAN_PROGRESS during a scan
+    var SP = window.XAI_SCAN_PROGRESS;
+    if (SP) {
+      var sc = SP.walletsChecked, st = SP.walletsTotal, wasScanning = document.body.classList.contains('scanning');
+      document.body.classList.add('scanning');
+      SP.walletsTotal = 112; SP.walletsChecked = 5; window.renderDashboardV1Live();
+      var g1 = (document.querySelector('#swGauges .sw-gauge .sw-gauge-svgval') || {}).textContent || '';
+      check('B3: coverage gauge live = 5/112', g1 === '5/112');
+      SP.walletsChecked = 50; window.renderDashboardV1Live();
+      var g2 = (document.querySelector('#swGauges .sw-gauge .sw-gauge-svgval') || {}).textContent || '';
+      check('B3: coverage gauge advanced to 50/112', g2 === '50/112');
+      SP.walletsChecked = sc; SP.walletsTotal = st; if (!wasScanning) document.body.classList.remove('scanning');
+    } else { check('B3: XAI_SCAN_PROGRESS present', false); }
+
+    // B1 — Total/Full Debug/System gated by the existing 9-tap developer unlock
+    if (window.SW_PUBLIC_SHELL) {
+      var origUnlocked = window.SW_PUBLIC_SHELL.unlocked;
+      window.SW_PUBLIC_SHELL.unlocked = function () { return false; }; _swApplyDevGate();
+      var devEls = document.querySelectorAll('#swDash .sw-dev-only');
+      var allHidden = devEls.length > 0, k;
+      for (k = 0; k < devEls.length; k++) if (devEls[k].style.display !== 'none') allHidden = false;
+      check('B1: locked → Total/Full Debug/System hidden (' + devEls.length + ' controls)', allHidden);
+      window.SW_PUBLIC_SHELL.unlocked = function () { return true; }; _swApplyDevGate();
+      var anyShown = false;
+      for (k = 0; k < devEls.length; k++) if (devEls[k].style.display !== 'none') anyShown = true;
+      check('B1: dev-unlock → internal controls restored', anyShown);
+      window.SW_PUBLIC_SHELL.unlocked = origUnlocked; _swApplyDevGate();
+    } else { check('B1: SW_PUBLIC_SHELL present', false); }
+  } catch (e) {
+    check('no exception during hardening test (' + (e && e.message) + ')', false);
+  } finally {
+    state.pack = savedPack; state.large = savedLarge; state.riskScore = savedRisk; state.discoveryInbox = savedDisc;
+    try { window.renderDashboardV1(); } catch (_) {}
+  }
+  var summary = '[dashboard hardening] ' + pass + '/' + (pass + fail) + ' passed, ' + fail + ' failed';
+  try { console.log(summary); } catch (_) {}
+  return { pass: pass, fail: fail, total: pass + fail, results: results, summary: summary };
+}
+if (typeof window !== 'undefined') window.shadowWatchDashboardHardeningSmokeTest = shadowWatchDashboardHardeningSmokeTest;
 
 // v3.17: wire COPY / DOWNLOAD buttons on Command Center to mirror what
 // Report Desk does, but operating on the visible report viewer.
