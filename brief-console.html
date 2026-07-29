@@ -156,6 +156,14 @@ body.sw-dash-v1{overflow-y:auto !important;overflow-x:hidden !important;height:1
     padding:8px 6px calc(8px + env(safe-area-inset-bottom,0px));
     background:rgba(2,5,4,0.94);border-top:1px solid var(--sw-border);backdrop-filter:blur(8px);}
 }
+/* ── single-screen consolidation (task #12) ─────────────────
+   Boot cloak: an opaque cover hides the legacy HUD flash until boot lifts it
+   (see the inline script after <body> + the reveal in the DOMContentLoaded
+   handler). It reveals on boot completion regardless of adopter success, so a
+   rolled-back adopter still shows the intact fallback room.
+   Also keep legacy screen-jump controls out of the mounted dashboard. */
+html.sw-booting body::after{content:"";position:fixed;inset:0;background:var(--sw-bg,#020504);z-index:99990;pointer-events:none;}
+.sw-dash-v1 #swDash [data-screen-target]{display:none !important;}
 /* ── motion ────────────────────────────────────────────── */
 @media (prefers-reduced-motion:reduce){
   .sw-dash-v1 *{animation:none !important;transition:none !important;}
@@ -2167,6 +2175,7 @@ body.xai-command-mounted .main-grid{
 </style>
 </head>
 <body class="dev-locked">
+<script>/* task #12 boot cloak — hide the legacy-HUD flash until boot lifts it; 4s safety reveal */try{document.documentElement.classList.add('sw-booting');setTimeout(function(){document.documentElement.classList.remove('sw-booting');},4000);}catch(_){}</script>
 <!-- Silent looping background video behind the whole report. object-fit:cover +
      center keeps a landscape clip filling both PC (landscape) and phone (portrait).
      Sits at z-index:-1 (above the black body bg, behind all content); a dark scrim
@@ -30656,10 +30665,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // v3.16: migrate panels into the new screen containers BEFORE any other UI work
   try { migrateLayoutToScreens(); } catch (e) { console.error('[v3.16] migration failed:', e); }
   try { installScreenNav(); } catch (e) { console.error('[v3.16] nav binding failed:', e); }
-  // Restore saved active screen (default = command)
-  let saved = 'command';
-  try { saved = localStorage.getItem(SHADOW_ACTIVE_SCREEN_KEY) || 'command'; } catch {}
-  showScreen(saved);
+  // Task #12 — single screen: the responsive dashboard (#screen-command) is the
+  // ONLY screen. Always land on it (ignore any saved legacy screen), then lift
+  // the boot cloak. Runs after migrate/adopt; if the adopter rolled back,
+  // 'command' still shows the intact fallback room — so revealing here is safe.
+  showScreen('command');
+  try { document.documentElement.classList.remove('sw-booting'); } catch (_) {}
   // ── v3.5: MATRIX RAIN BACKGROUND ───────────────────────────────
   // Canvas-driven katakana / hex / glyph cascade. Throttled, pauses when tab hidden.
   (function startMatrixRain() {
