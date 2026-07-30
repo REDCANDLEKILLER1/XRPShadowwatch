@@ -21445,12 +21445,67 @@ function _swApplyDevGate() {
     for (var i = 0; i < els.length; i++) els[i].style.display = on ? '' : 'none';
   } catch (_) {}
 }
-// Helpers count — same canonical source as the status strip.
+// In-flight helper count (used by the legacy hidden status strip only).
 function _xaiHelpersCount() {
   try { var HP = window.SHADOW_HELPER_POOL; return (HP && Array.isArray(HP.activeJobs)) ? HP.activeJobs.length : 0; }
   catch (_) { return 0; }
 }
 if (typeof window !== 'undefined') window._xaiHelpersCount = _xaiHelpersCount;
+
+// ── HELPER JOBS — run-local completed / created ──────────────────
+//  activeJobs.length is a short-lived in-flight counter (jobs are removed the
+//  moment they finish) and the pool only starts AFTER the report is sealed, so
+//  it reads 0 almost always. SHADOW_HELPER_POOL.stats is session-cumulative, so
+//  we snapshot a baseline when a run starts and report deltas for THAT run.
+//  We never mutate HP.stats — the baseline lives here.
+var _SW_HELPER_RUN = null;   // { base:{created,completed,failed} }
+function _swHelperStats() {
+  try {
+    var s = (window.SHADOW_HELPER_POOL && window.SHADOW_HELPER_POOL.stats) || null;
+    if (!s) return null;
+    return { created: Number(s.jobs_created) || 0, completed: Number(s.jobs_completed) || 0, failed: Number(s.jobs_failed) || 0 };
+  } catch (_) { return null; }
+}
+// Shared formatter — the single source for every visible HELPER JOBS readout.
+function _swHelperJobs() {
+  var now = _swHelperStats();
+  if (!now || !_SW_HELPER_RUN) return { text: '—', title: 'No helper run yet this session', failed: 0 };
+  var b = _SW_HELPER_RUN.base;
+  var created = Math.max(0, now.created - b.created);
+  var completed = Math.max(0, now.completed - b.completed);
+  var failed = Math.max(0, now.failed - b.failed);
+  if (created === 0) return { text: '—', title: 'Helper run started with no queued candidates', failed: 0 };
+  var title = completed + ' of ' + created + ' helper jobs completed this run';
+  if (failed > 0) title += ' · ' + failed + ' failed (not counted as completed)';
+  return { text: completed + ' / ' + created, title: title, failed: failed };
+}
+function _swRenderHelperJobs() {
+  var h = _swHelperJobs();
+  ['swCellHelpers', 'swMiniHelpers'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = h.text;                       // XSS-safe
+    el.setAttribute('title', h.title);
+    el.setAttribute('aria-label', 'Helper jobs: ' + h.title);
+    el.style.color = h.failed > 0 ? 'var(--sw-gold)' : '';
+  });
+}
+// Event-driven refresh — no new polling timer.
+(function _swWireHelperEvents() {
+  try {
+    var BUS = window.SHADOW_EVENT_BUS;
+    if (!BUS || typeof BUS.on !== 'function') return;
+    BUS.on('shadow.helper_pool.started', function () {
+      var s = _swHelperStats();
+      _SW_HELPER_RUN = { base: s || { created: 0, completed: 0, failed: 0 } };
+      _swRenderHelperJobs();
+    });
+    ['shadow.helper_job.created', 'shadow.helper_job.started', 'shadow.helper_job.completed',
+     'shadow.helper_job.failed', 'shadow.helper_pool.completed'].forEach(function (ev) {
+      BUS.on(ev, function () { _swRenderHelperJobs(); });
+    });
+  } catch (_) {}
+})();
 
 // ── static icon set (no dynamic data ever enters these strings) ──
 var _SW_ICONS = {
@@ -21558,7 +21613,7 @@ function _swBuildCockpit() {
     '<div class="sw-mini"><span>Mode</span><b id="swMiniMode">READY</b></div>' +
     '<div class="sw-mini"><span>Wallets</span><b id="swMiniWallets">0</b></div>' +
     '<div class="sw-mini"><span>Queue</span><b id="swMiniQueue">0</b></div>' +
-    '<div class="sw-mini"><span>Helpers</span><b id="swMiniHelpers">0</b></div>' +
+    '<div class="sw-mini"><span>Helper Jobs</span><b id="swMiniHelpers">—</b></div>' +
     '<div class="sw-mini"><span>Errors</span><b id="swMiniErrors">0</b></div>');
   var runBtn = _swEl('button', { type:'button', 'class':'sw-cardbtn', id:'swRunBtn', style:'margin-top:0' }, 'RUN SCAN');
   runBtn.addEventListener('click', function () { if (!_swScanning()) _swClickCmd('run-scan'); });
@@ -21590,7 +21645,7 @@ function _swBuildCockpit() {
   // Row 2 — status strip
   var strip = _swEl('div', { 'class':'sw-statusstrip' });
   [['wallet','Wallets','swCellWallets',''], ['list','Queue','swCellQueue',''],
-   ['user','Helpers','swCellHelpers',''], ['alert','Errors','swCellErrors','sw-warn'],
+   ['user','Helper Jobs','swCellHelpers',''], ['alert','Errors','swCellErrors','sw-warn'],
    ['shield','Risk Score','swCellRisk','sw-gold'], ['target','Coverage','swCellCoverage','']
   ].forEach(function (c) {
     var cell = _swEl('div', { 'class':'sw-scell' + (c[3] ? ' ' + c[3] : '') },
@@ -22003,12 +22058,12 @@ function renderDashboardV1Live() {
     _swSetText('swMiniMode', _swMode());
     _swSetText('swMiniWallets', String(wTotal));
     _swSetText('swMiniQueue', String(qSize));
-    _swSetText('swMiniHelpers', String(helpers));
+    // HELPER JOBS readouts come from the shared run-local formatter
     _swSetText('swMiniErrors', String(errs));
     // status strip
     _swSetText('swCellWallets', String(wTotal));
     _swSetText('swCellQueue', String(qSize));
-    _swSetText('swCellHelpers', String(helpers));
+    _swRenderHelperJobs();
     _swSetText('swCellErrors', String(errs));
     _swSetText('swCellRisk', riskObj ? (n(riskObj.score) + ' / 100') : 'WAITING');
     _swSetText('swCellCoverage', (wChecked || p || scanning) ? (wChecked + ' / ' + wTotal) : '—');
@@ -22069,16 +22124,41 @@ function shadowWatchDashboardHardeningSmokeTest() {
     check('B2: no <img> element was injected', !document.querySelector('#swDash img'));
     check('B2: onerror payload did NOT execute (window.__swXss undefined)', typeof window.__swXss === 'undefined');
 
-    // B4 — helpers cell reflects the canonical SHADOW_HELPER_POOL.activeJobs count
-    var HP = window.SHADOW_HELPER_POOL;
-    if (HP && Array.isArray(HP.activeJobs)) {
-      var before = HP.activeJobs.length;
-      HP.activeJobs.push({ job_id: '__hardening_test__', status: 'ACTIVE' });
-      window.renderDashboardV1Live();
-      var cellTxt = (document.getElementById('swCellHelpers') || {}).textContent || '';
-      check('B4: helpers cell shows nonzero canonical count', cellTxt === String(before + 1) && (before + 1) > 0);
-      HP.activeJobs.pop(); window.renderDashboardV1Live();
-    } else { check('B4: SHADOW_HELPER_POOL.activeJobs present', false); }
+    // B4 — HELPER JOBS shows run-local completed / created (never the in-flight
+    // counter, never raw cumulative totals, failures never counted as completed)
+    var HP = window.SHADOW_HELPER_POOL, BUS = window.SHADOW_EVENT_BUS;
+    if (HP && HP.stats && BUS && typeof BUS.emit === 'function') {
+      var savedRun = _SW_HELPER_RUN;
+      var s0 = { c: HP.stats.jobs_created, d: HP.stats.jobs_completed, f: HP.stats.jobs_failed };
+      var cell = function () { return (document.getElementById('swCellHelpers') || {}).textContent || ''; };
+      var mini = function () { return (document.getElementById('swMiniHelpers') || {}).textContent || ''; };
+      // idle → honest unavailable state (no fabricated zero)
+      _SW_HELPER_RUN = null; _swRenderHelperJobs();
+      check('B4: idle shows honest unavailable state (—)', cell() === '—');
+      // a run starts: baseline captured off cumulative stats
+      HP.stats.jobs_created += 40; HP.stats.jobs_completed += 30; HP.stats.jobs_failed += 5; // pre-existing session totals
+      BUS.emit('shadow.helper_pool.started', {});
+      check('B4: empty helper queue does not fabricate work', cell() === '—');
+      // 12 created, 3 completed
+      HP.stats.jobs_created += 12; HP.stats.jobs_completed += 3;
+      BUS.emit('shadow.helper_job.completed', {});
+      check('B4: progress shows run-local 3 / 12 (not cumulative)', cell() === '3 / 12');
+      check('B4: both visible readouts agree', mini() === cell());
+      // 11 completed + 1 failed → failure must NOT count as completed
+      HP.stats.jobs_completed += 8; HP.stats.jobs_failed += 1;
+      BUS.emit('shadow.helper_job.failed', {});
+      check('B4: failure not counted as completed (11 / 12)', cell() === '11 / 12');
+      var t = (document.getElementById('swCellHelpers') || {}).getAttribute('title') || '';
+      check('B4: failure exposed in accessible title', /1 failed/.test(t));
+      // completed value persists after the pool finishes
+      BUS.emit('shadow.helper_pool.completed', {});
+      check('B4: completed value persists after run', cell() === '11 / 12');
+      check('B4: HP.stats not mutated for presentation',
+        HP.stats.jobs_created === s0.c + 52 && HP.stats.jobs_completed === s0.d + 41 && HP.stats.jobs_failed === s0.f + 6);
+      // restore
+      HP.stats.jobs_created = s0.c; HP.stats.jobs_completed = s0.d; HP.stats.jobs_failed = s0.f;
+      _SW_HELPER_RUN = savedRun; _swRenderHelperJobs();
+    } else { check('B4: helper pool + event bus present', false); }
 
     // B3 — coverage gauge advances live from XAI_SCAN_PROGRESS during a scan
     var SP = window.XAI_SCAN_PROGRESS;
