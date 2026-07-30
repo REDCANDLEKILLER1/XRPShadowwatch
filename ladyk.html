@@ -108,6 +108,15 @@
     quietEngine();                                   // safe to call repeatedly
     if (!(W.MORNING_REPORT_FLOAT && D.getElementById('scanBtn'))) return;
     booted = true;
+    // The console re-initialises its voice settings during its own boot, which
+    // can flip voiceOutput back on after our first pass. Keep re-muting for a
+    // short window so the setting sticks. (Silence is already guaranteed by the
+    // no-op speak; this keeps the console's own flags honest too.)
+    var muteTicks = 0;
+    var muteTimer = setInterval(function () {
+      quietEngine();
+      if (++muteTicks > 40) clearInterval(muteTimer);   // ~12s
+    }, 300);
     hookReport();
     goBtn.disabled = false;
     goBtn.textContent = 'GET TODAY’S REPORT';
@@ -122,6 +131,15 @@
   // Result: this page makes exactly one request, to our own server — a slow or
   // blocked CDN can no longer delay or break the morning report.
   // If anything about this path fails we fall back to loading the file directly.
+  // Injected as the first thing inside the console's <head>: neutralises the
+  // speech engine itself, so every voice path (boot greeting, narrator, helper
+  // announcements) is silent no matter which module calls it.
+  var MUTE_TAG = '<scr' + 'ipt>try{window.__ladykMuted=1;var _ss=window.speechSynthesis;' +
+    'if(_ss){try{_ss.cancel()}catch(e){};_ss.speak=function(){};}' +
+    'window.addEventListener("DOMContentLoaded",function(){try{' +
+    'if(window.XAI_VOICE_SETTINGS){window.XAI_VOICE_SETTINGS.voiceOutput=false;window.XAI_VOICE_SETTINGS.muted=true;}' +
+    '}catch(e){}});}catch(e){}</scr' + 'ipt>';
+
   function loadEngine() {
     var fellBack = false;
     function fallback() { if (fellBack) return; fellBack = true; try { frame.src = '/brief-console.html'; } catch (_) {} }
@@ -132,6 +150,10 @@
           if (!html || html.length < 10000) throw new Error('unexpected console payload');
           html = html.replace(/<link\b[^>]*fonts\.googleapis\.com[^>]*>/gi, '');
           html = html.replace(/<video\b[^>]*id=["']swBgVideo["'][\s\S]*?<\/video>/i, '');
+          // Silence the console's voice BEFORE any of its scripts run, so the
+          // spoken boot greeting never reaches the speech engine at all. This
+          // page is read, not listened to.
+          html = html.replace(/<head([^>]*)>/i, '<head$1>' + MUTE_TAG);
           var d = frame.contentDocument;
           if (!d) throw new Error('no frame document');
           d.open(); d.write(html); d.close();
@@ -174,6 +196,16 @@
   // from a third-party gateway that this page has no use for).
   var quieted = false;
   function quietEngine() {
+    // Belt-and-braces mute: covers the fallback path (where the console is
+    // loaded directly and never sees the injected tag) and anything that tries
+    // to speak later. Runs on every poll tick until the engine is up.
+    try {
+      var ss = W.speechSynthesis;
+      if (ss && !W.__ladykMuted) { try { ss.cancel(); } catch (_) {} ss.speak = function () {}; W.__ladykMuted = 1; }
+      if (W.XAI_VOICE_SETTINGS) { W.XAI_VOICE_SETTINGS.voiceOutput = false; W.XAI_VOICE_SETTINGS.muted = true; }
+      var vt = D.getElementById('xaiVoiceOutputToggle');
+      if (vt && vt.getAttribute('data-voice-on') === 'true') vt.setAttribute('data-voice-on', 'false');
+    } catch (_) {}
     try {
       var v = D.getElementById('swBgVideo');
       if (v) {
