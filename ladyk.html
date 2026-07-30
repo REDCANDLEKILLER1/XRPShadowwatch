@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Shadow Watch — Daily Report</title>
+<!--
+  LADY K DAILY REPORT  —  shadowwatch.xyz/ladyk
+
+  A deliberately tiny front door for the person who reads the brief every
+  morning. The full Shadow Watch app (index.html) pulls Tailwind and three.js
+  from CDNs and plays the theme song; if either CDN is slow or blocked the page
+  can hang before the report is reachable. This page has NO external
+  dependencies at all — no CDN, no web fonts, no music, no 3D, no video.
+
+  It does NOT re-implement the report. It loads the real report console
+  (brief-console.html) in a hidden frame and drives it through the same
+  window-exposed API the console's own buttons use, so the text produced here is
+  byte-for-byte the report the console produces. brief-console.html is not
+  modified by this page in any way.
+-->
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:#04070A;color:#E6F1EA;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    -webkit-text-size-adjust:100%;text-size-adjust:100%}
+  .wrap{max-width:820px;margin:0 auto;padding:22px 16px 56px}
+  header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+  h1{font-size:19px;margin:0;letter-spacing:.06em;font-weight:700}
+  h1 b{color:#00FF00}
+  .sub{color:#7C8C86;font-size:12px;margin:0 0 18px}
+  button{font-family:inherit;cursor:pointer}
+  #go{display:block;width:100%;padding:20px;font-size:17px;font-weight:700;letter-spacing:.1em;
+    color:#00FF00;background:rgba(0,255,0,.06);border:2px solid rgba(0,255,0,.55);border-radius:12px}
+  #go:hover:not(:disabled){background:rgba(0,255,0,.12)}
+  #go:disabled{opacity:.55;cursor:default}
+  .status{margin:14px 0 0;font-size:13px;color:#7C8C86;min-height:20px}
+  .status.err{color:#FF6B6B}
+  .status.ok{color:#00FF00}
+  .bar{height:8px;background:#111a20;border-radius:4px;overflow:hidden;margin-top:10px;display:none}
+  .bar.on{display:block}
+  .bar i{display:block;height:100%;width:0;background:#00FF00;transition:width .4s ease}
+  pre#report{white-space:pre-wrap;word-wrap:break-word;background:#080D12;border:1px solid rgba(120,160,150,.2);
+    border-radius:12px;padding:16px;font-size:13.5px;line-height:1.55;margin:18px 0 0;display:none}
+  pre#report.on{display:block}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .row button{flex:1 1 auto;min-width:130px;padding:11px;font-size:12px;letter-spacing:.08em;font-weight:700;
+    color:#E6F1EA;background:transparent;border:1px solid rgba(120,160,150,.35);border-radius:9px}
+  .row button:hover{border-color:rgba(0,255,0,.6);color:#00FF00}
+  .row{display:none}.row.on{display:flex}
+  footer{margin-top:26px;font-size:11px;color:#5A6B65;text-align:center}
+  iframe#engine{position:absolute;left:-99999px;top:0;width:1200px;height:900px;border:0;opacity:0}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>SHADOW<b>WATCH</b></h1></header>
+  <p class="sub">Daily report &mdash; press the button, the scan runs, the report appears below.</p>
+
+  <button id="go" type="button" disabled>STARTING&hellip;</button>
+  <div class="bar" id="bar"><i id="barfill"></i></div>
+  <p class="status" id="status">Loading the report engine&hellip;</p>
+
+  <pre id="report"></pre>
+
+  <div class="row" id="actions">
+    <button type="button" id="copy">COPY REPORT</button>
+    <button type="button" id="dl">DOWNLOAD REPORT</button>
+    <button type="button" id="dbg">DOWNLOAD DEBUG LOG</button>
+  </div>
+
+  <footer>No music, no graphics &mdash; just the report. Same scan, same wording as the full console.</footer>
+</div>
+
+<iframe id="engine" title="Shadow Watch report engine" aria-hidden="true" tabindex="-1"></iframe>
+
+<script>
+(function () {
+  'use strict';
+  var frame = document.getElementById('engine');
+  var goBtn = document.getElementById('go');
+  var statusEl = document.getElementById('status');
+  var reportEl = document.getElementById('report');
+  var actions = document.getElementById('actions');
+  var bar = document.getElementById('bar'), barfill = document.getElementById('barfill');
+  var W = null, D = null, captured = '', pollTimer = null, running = false;
+
+  function say(msg, cls) { statusEl.textContent = msg; statusEl.className = 'status' + (cls ? ' ' + cls : ''); }
+  function setBar(pct) {
+    if (pct == null) { bar.className = 'bar'; return; }
+    bar.className = 'bar on'; barfill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+  }
+
+  // ── engine boot ───────────────────────────────────────────────
+  // Deliberately does NOT wait for the frame's load event: the console pulls a
+  // web font (and a decorative video) from third parties, and a slow or blocked
+  // CDN would otherwise delay "ready" — the exact failure this page exists to
+  // avoid. We poll for the engine objects instead, so readiness depends only on
+  // the console's own script, and we abort the decorative fetches as soon as we
+  // can reach the document.
+  var booted = false;
+  function bootEngine() {
+    if (booted) return;
+    try { W = frame.contentWindow; D = frame.contentDocument; } catch (e) { return; }
+    if (!W || !D) return;
+    quietEngine();                                   // safe to call repeatedly
+    if (!(W.MORNING_REPORT_FLOAT && D.getElementById('scanBtn'))) return;
+    booted = true;
+    hookReport();
+    goBtn.disabled = false;
+    goBtn.textContent = 'GET TODAY’S REPORT';
+    say('Ready. Press the button to run this morning’s scan.');
+  }
+  frame.addEventListener('load', bootEngine);
+
+  // Load the console's own HTML from our server and strip its two third-party
+  // tags (the render-blocking Google-Fonts stylesheet and the decorative IPFS
+  // video) BEFORE anything runs, then write it into the frame. Writing into an
+  // about:blank frame keeps it same-origin, so the engine API stays reachable.
+  // Result: this page makes exactly one request, to our own server — a slow or
+  // blocked CDN can no longer delay or break the morning report.
+  // If anything about this path fails we fall back to loading the file directly.
+  function loadEngine() {
+    var fellBack = false;
+    function fallback() { if (fellBack) return; fellBack = true; try { frame.src = './brief-console.html'; } catch (_) {} }
+    try {
+      fetch('./brief-console.html', { credentials: 'same-origin' })
+        .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.text(); })
+        .then(function (html) {
+          if (!html || html.length < 10000) throw new Error('unexpected console payload');
+          html = html.replace(/<link\b[^>]*fonts\.googleapis\.com[^>]*>/gi, '');
+          html = html.replace(/<video\b[^>]*id=["']swBgVideo["'][\s\S]*?<\/video>/i, '');
+          var d = frame.contentDocument;
+          if (!d) throw new Error('no frame document');
+          d.open(); d.write(html); d.close();
+          pollBoot();
+        })
+        .catch(function () { fallback(); pollBoot(); });
+    } catch (_) { fallback(); pollBoot(); }
+  }
+
+  var pollStarted = false;
+  function pollBoot() {
+    if (pollStarted) return;
+    pollStarted = true;
+    var t0 = Date.now();
+    (function tick() {
+      bootEngine();
+      if (booted) return;
+      if (Date.now() - t0 > 90000) { fail('The report engine did not finish loading. Refresh the page to try again.'); return; }
+      setTimeout(tick, 300);
+    })();
+  }
+  loadEngine();
+
+  function fail(msg) { say(msg, 'err'); goBtn.disabled = false; goBtn.textContent = 'TRY AGAIN'; running = false; setBar(null); }
+
+  function waitFor(test, ms) {
+    return new Promise(function (resolve, reject) {
+      var t0 = Date.now();
+      (function tick() {
+        var ok = false; try { ok = !!test(); } catch (_) {}
+        if (ok) return resolve();
+        if (Date.now() - t0 > ms) return reject(new Error('timeout'));
+        setTimeout(tick, 250);
+      })();
+    });
+  }
+
+  // Silence the hidden frame's decoration so it costs nothing while it works,
+  // and cancel the decorative video download entirely (it is a multi-MB fetch
+  // from a third-party gateway that this page has no use for).
+  var quieted = false;
+  function quietEngine() {
+    try {
+      var v = D.getElementById('swBgVideo');
+      if (v) {
+        try { v.pause(); } catch (_) {}
+        v.removeAttribute('autoplay');
+        v.removeAttribute('src');
+        try { while (v.firstChild) v.removeChild(v.firstChild); } catch (_) {}  // drop <source> children
+        try { v.load(); } catch (_) {}                                          // aborts the in-flight fetch
+        v.style.display = 'none';
+      }
+      var s = D.getElementById('swBgScrim'); if (s) s.style.display = 'none';
+      var m = D.getElementById('matrixRain'); if (m) m.style.display = 'none';
+      if (!quieted && (D.head || D.documentElement)) {
+        var st = D.createElement('style');
+        st.textContent = '#matrixRain,#stormOverlay,#stormFlash,#swBgVideo,#swBgScrim{display:none!important}';
+        (D.head || D.documentElement).appendChild(st);
+        quieted = true;
+      }
+    } catch (_) {}
+  }
+
+  // Capture the exact text the console shows in its own report window.
+  function hookReport() {
+    try {
+      var MRF = W.MORNING_REPORT_FLOAT;
+      if (!MRF || MRF.__ladykHooked) return;
+      var origShow = MRF.show;
+      MRF.show = function (text, sources, pack) {
+        captured = String(text || '');
+        try { showReport(captured); } catch (_) {}
+        return undefined;               // keep the console's floating window closed
+      };
+      MRF.__ladykHooked = true;
+      MRF.__origShow = origShow;
+    } catch (_) {}
+  }
+
+  function clickCmd(cmd) {
+    try {
+      var b = D.querySelector('#xaiCommandButtons [data-xai-cmd="' + cmd + '"]');
+      if (b) { b.click(); return true; }
+    } catch (_) {}
+    return false;
+  }
+
+  function enginePct() {
+    try {
+      var el = D.getElementById('xaiMissionPct');
+      var m = el && /(\d+)/.exec(el.textContent || '');
+      return m ? parseInt(m[1], 10) : 0;
+    } catch (_) { return 0; }
+  }
+  function engineStep() {
+    try { var el = D.getElementById('xaiMissionStep'); return (el && (el.textContent || '').trim()) || ''; }
+    catch (_) { return ''; }
+  }
+  function bodyHas(cls) { try { return D.body.classList.contains(cls); } catch (_) { return false; } }
+
+  function showReport(text) {
+    if (!text) return;
+    reportEl.textContent = text;          // textContent — never parsed as HTML
+    reportEl.className = 'on';
+    actions.className = 'row on';
+  }
+
+  // ── run ───────────────────────────────────────────────────────
+  goBtn.addEventListener('click', function () {
+    if (running || goBtn.disabled) return;
+    running = true; captured = '';
+    goBtn.disabled = true; goBtn.textContent = 'RUNNING…';
+    reportEl.className = ''; actions.className = 'row';
+    say('Running this morning’s scan. This takes a few minutes — leave the page open.');
+    setBar(0);
+
+    var started = false;
+    try { var sb = D.getElementById('scanBtn'); if (sb) { sb.click(); started = true; } } catch (_) {}
+    if (!started) started = clickCmd('run-scan');
+    if (!started) { fail('Could not start the scan. Refresh the page and try again.'); return; }
+
+    var t0 = Date.now(), MAX = 15 * 60 * 1000;
+    clearInterval(pollTimer);
+    pollTimer = setInterval(function () {
+      var pct = enginePct();
+      setBar(pct);
+      var step = engineStep();
+      if (pct > 0) say('Scanning… ' + pct + '%' + (step ? ' · ' + step : ''));
+
+      if (bodyHas('error')) {
+        clearInterval(pollTimer);
+        say('The scan hit an error — usually a dropped connection. Press Try Again, or send the debug log.', 'err');
+        actions.className = 'row on';
+        goBtn.disabled = false; goBtn.textContent = 'TRY AGAIN'; running = false; setBar(null);
+        return;
+      }
+      if (bodyHas('sealed')) {
+        clearInterval(pollTimer);
+        setBar(100);
+        clickCmd('read-report');                       // our hook captures the text
+        setTimeout(function () {
+          if (captured) { say('Report ready · ' + new Date().toLocaleString(), 'ok'); }
+          else { say('The scan finished but the report did not come through. Try again, or send the debug log.', 'err'); actions.className = 'row on'; }
+          goBtn.disabled = false; goBtn.textContent = 'RUN AGAIN'; running = false;
+        }, 700);
+        return;
+      }
+      if (Date.now() - t0 > MAX) {
+        clearInterval(pollTimer);
+        fail('The scan is taking longer than expected. Press Try Again, or send the debug log.');
+        actions.className = 'row on';
+      }
+    }, 1000);
+  });
+
+  // ── actions ───────────────────────────────────────────────────
+  document.getElementById('copy').addEventListener('click', function () {
+    var text = reportEl.textContent || '';
+    if (!text) return;
+    function done() { say('Report copied to the clipboard.', 'ok'); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(legacy);
+    } else { legacy(); }
+    function legacy() {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text; ta.style.cssText = 'position:fixed;left:-9999px;opacity:0';
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+        done();
+      } catch (_) { say('Could not copy automatically — select the text and copy it.', 'err'); }
+    }
+  });
+
+  document.getElementById('dl').addEventListener('click', function () {
+    var text = reportEl.textContent || '';
+    if (!text) return;
+    try {
+      var d = new Date(), stamp = d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2);
+      var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'ShadowWatch_Report_' + stamp + '.txt';
+      document.body.appendChild(a); a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 1500);
+      say('Report downloaded.', 'ok');
+    } catch (_) { say('Could not download the report.', 'err'); }
+  });
+
+  document.getElementById('dbg').addEventListener('click', function () {
+    try {
+      if (W && typeof W.downloadShadowWatchDebugFile === 'function') { W.downloadShadowWatchDebugFile(); say('Debug log downloaded — send that file over.', 'ok'); return; }
+      if (clickCmd('download-debug')) { say('Debug log downloaded — send that file over.', 'ok'); return; }
+      say('Could not produce the debug log.', 'err');
+    } catch (_) { say('Could not produce the debug log.', 'err'); }
+  });
+})();
+</script>
+</body>
+</html>
