@@ -124,9 +124,9 @@
   // If anything about this path fails we fall back to loading the file directly.
   function loadEngine() {
     var fellBack = false;
-    function fallback() { if (fellBack) return; fellBack = true; try { frame.src = './brief-console.html'; } catch (_) {} }
+    function fallback() { if (fellBack) return; fellBack = true; try { frame.src = '/brief-console.html'; } catch (_) {} }
     try {
-      fetch('./brief-console.html', { credentials: 'same-origin' })
+      fetch('/brief-console.html', { credentials: 'same-origin' })
         .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.text(); })
         .then(function (html) {
           if (!html || html.length < 10000) throw new Error('unexpected console payload');
