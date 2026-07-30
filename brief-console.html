@@ -244,11 +244,30 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
 }
 /* ════════ MOBILE — compact hierarchy per the phone reference ════════ */
 @media (max-width:900px){
-  body.sw-dash-v1{overflow-y:auto !important;overflow-x:hidden !important;}
-  .sw-dash-v1 #screen-command>#swDash{height:auto !important;max-height:none !important;min-height:100vh;}
+  /* The page MUST scroll on a phone. body is the scroll container, so every
+     ancestor of the cockpit has to be un-clipped — PUBLIC_SHELL_v1 pins
+     #screen-command to max-height:100vh/overflow:hidden, which previously made
+     everything below the status strip unreachable. */
+  body.sw-dash-v1{overflow-y:auto !important;overflow-x:hidden !important;
+    height:100% !important;max-height:100vh !important;-webkit-overflow-scrolling:touch;}
+  .sw-dash-v1 #screenStage{overflow:visible !important;max-height:none !important;}
+  .sw-dash-v1 #screen-command{overflow:visible !important;max-height:none !important;height:auto !important;}
+  .sw-dash-v1 #screen-command>#swDash{height:auto !important;max-height:none !important;overflow:visible !important;}
   .sw-dash-v1 #swDash{height:auto;grid-template-columns:minmax(0,1fr);
     grid-template-rows:auto auto auto;grid-template-areas:"header" "main" "footer";
-    padding:7px 7px calc(64px + env(safe-area-inset-bottom,0px));overflow:visible;}
+    padding:7px 7px calc(72px + env(safe-area-inset-bottom,0px));overflow:visible;
+    -webkit-text-size-adjust:100%;text-size-adjust:100%;}
+  /* keep mobile type compact — stops Chrome text-boosting from blowing the layout up */
+  .sw-dash-v1 .sw-panel{padding:9px 10px;}
+  .sw-dash-v1 .sw-reactor-ttl{font-size:11px;}
+  .sw-dash-v1 .sw-reactor-pct{font-size:30px;}
+  .sw-dash-v1 .sw-reactor-phase{font-size:13px;margin-top:3px;}
+  .sw-dash-v1 .sw-segbar{height:16px;}
+  .sw-dash-v1 .sw-mini b{font-size:13px;}
+  .sw-dash-v1 .sw-scell b{font-size:14px;}
+  .sw-dash-v1 .sw-gauge svg{max-width:104px;}
+  .sw-dash-v1 .sw-gauge-val{font-size:15px;}
+  .sw-dash-v1 .sw-tile-val{font-size:15px;}
   .sw-dash-v1 #swDashRail{display:none;}
   .sw-dash-v1 #swDashMain{grid-template-rows:none;overflow:visible;}
   .sw-dash-v1 #swDashHeader{gap:8px;padding:0 10px;height:46px;}
@@ -276,9 +295,10 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
   .sw-dash-v1 .sw-netmap{min-height:150px;}
   .sw-dash-v1 #swDashFooter{justify-content:center;}
   .sw-dash-v1 #swDashFooter .sw-foot-r{display:none;}
+  /* right padding keeps the last item clear of the pre-existing DEBUG fab */
   .sw-dash-v1 #swDashBottomNav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:30;
     justify-content:space-around;align-items:stretch;gap:2px;
-    padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));
+    padding:6px 96px calc(6px + env(safe-area-inset-bottom,0px)) 4px;
     background:rgba(4,7,10,0.96);border-top:1px solid var(--sw-border);backdrop-filter:blur(8px);}
   .sw-dash-v1 #swDashBottomNav .sw-navbtn{flex:1 1 0;flex-direction:column;gap:3px;align-items:center;
     justify-content:center;padding:5px 2px;font-size:8.5px;letter-spacing:.06em;}
