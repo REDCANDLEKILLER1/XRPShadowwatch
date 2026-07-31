@@ -3827,6 +3827,26 @@ async function scanWallets(ws) {
     setBar('hudWalletBar', 50 + phase2Done / Math.max(needTx.length, 1) * 50);
   }
 
+  // ── DEDUPE: one ledger transaction = one row ──────────────────
+  // Transactions are fetched per watched wallet, so a transfer BETWEEN two
+  // watched wallets comes back in both wallets' account_tx results and was
+  // pushed twice. Every downstream total counted it twice: the 24h tx count,
+  // watched activity volume, and — because analyzeFlags() walks state.txs —
+  // shadow volume and the large-transfer list. Measured on the 2026-07-31 scan:
+  // 36 large-transfer rows for 24 real transactions, overstating shadow volume
+  // by 37%. Keep the first row for each ledger hash (rows without a hash, e.g.
+  // synthetic entries, are always kept).
+  (function dedupeTxsByHash() {
+    var seen = Object.create(null), out = [], dropped = 0;
+    for (var i = 0; i < state.txs.length; i++) {
+      var h = state.txs[i] && state.txs[i].hash;
+      if (h) { if (seen[h]) { dropped++; continue; } seen[h] = 1; }
+      out.push(state.txs[i]);
+    }
+    if (dropped) log('deduped ' + dropped + ' duplicate tx row(s) seen from both sides of a watched-to-watched transfer');
+    state.txs = out;
+  })();
+
   // Final state
   state.wallets = rows;
   renderWallets();
@@ -3853,7 +3873,13 @@ function classify(t) {
   else if (f && f.cat === 'whale' && !to)       { type = 'WHALE_TO_UNKNOWN';  conf = 'HIGH'; reason = 'known whale to unknown'; }
   else if (f && f.cat === 'escrow')             { type = 'ESCROW_FLOW';       conf = 'HIGH'; reason = 'Ripple/escrow wallet'; }
   return { ...t, classification: type, confidence: conf, reason,
-    sender_label: f?.label || t.label || 'UNKNOWN', receiver_label: to?.label || 'UNKNOWN' };
+    // The sender label must describe the ACTUAL sender. Falling back to
+    // t.label used the label of the wallet whose history the row came from —
+    // which for an inbound transfer is the RECEIVER — so the report claimed
+    // things like "UPBIT_1.2B → UPBIT_1.2B" for a payment from an unknown
+    // third party. Fall back to the sender's own (shortened) address instead.
+    sender_label: f?.label || (t.from ? ca(t.from) : 'UNKNOWN'),
+    receiver_label: to?.label || (t.to ? ca(t.to) : 'UNKNOWN') };
 }
 
 function analyzeFlags() {
