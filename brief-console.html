@@ -14,149 +14,301 @@
 <style id="sw-dash-v1">
 :root{
   --sw-green:#00FF00; --sw-green-soft:#76FF76; --sw-cyan:#00D9FF; --sw-gold:#FFC83D;
-  --sw-red:#FF4D4D; --sw-purple:#B45CFF;
-  --sw-bg:#020504; --sw-bg-raised:#050b08;
-  --sw-surface:rgba(7,15,12,0.82); --sw-surface-strong:rgba(8,18,14,0.94);
-  --sw-border:rgba(154,190,174,0.20); --sw-border-active:rgba(0,255,0,0.72);
-  --sw-text:#EAF4EE; --sw-text-muted:#91A39A;
-  --sw-shadow:0 14px 40px rgba(0,0,0,0.38); --sw-glow:0 0 18px rgba(0,255,0,0.16);
-  --sw-radius-sm:8px; --sw-radius:12px; --sw-radius-lg:16px;
-  --sw-gap:clamp(10px,1.2vw,18px);
-  --sw-rail-w:96px; --sw-header-h:66px;
+  --sw-red:#FF4D4D; --sw-purple:#B45CFF; --sw-blue:#4DA6FF;
+  --sw-bg:#04070A; --sw-bg-raised:#0A1016; --sw-panel:#080D12;
+  --sw-border:rgba(120,160,150,0.18); --sw-border-active:rgba(0,255,0,0.55);
+  --sw-text:#E6F1EA; --sw-text-muted:#7C8C86;
+  --sw-radius:10px; --sw-radius-sm:7px;
+  --sw-gap:8px; --sw-rail-w:186px; --sw-header-h:52px; --sw-footer-h:22px;
+  --sw-f-lbl:9px; --sw-f-num:22px;
 }
-/* ── shell ─────────────────────────────────────────────── */
-.sw-dash-v1 #swDash{position:relative;z-index:1;display:grid;gap:var(--sw-gap);
-  grid-template-columns:var(--sw-rail-w) minmax(0,1fr);grid-template-areas:"rail header" "rail main";
-  align-content:start;min-height:100vh;padding:0;color:var(--sw-text);
-  font-family:'Rajdhani','Share Tech Mono',sans-serif;}
-.sw-dash-v1 #swDashHeader{grid-area:header;}
-.sw-dash-v1 #swDashRail{grid-area:rail;}
-.sw-dash-v1 #swDashMain{grid-area:main;min-width:0;display:grid;gap:var(--sw-gap);align-content:start;
-  grid-template-columns:repeat(12,minmax(0,1fr));padding:0 var(--sw-gap) calc(var(--sw-gap)*2);}
-/* ── public-shell override ─────────────────────────────────
-   PUBLIC SHELL v1 (later in this file) locks the console to a single
-   non-scrolling 100vh viewport and hides every #screen-command child except
-   #xrpmanAiCommandRoom. The dashboard reparents that room INTO #swDash, so
-   without these overrides #swDash (and the room inside it) would be hidden and
-   the page could not scroll. Each override outranks the lock on specificity
-   (adds .sw-dash-v1), so the original lock is left byte-for-byte intact and
-   only takes effect when the dashboard is active. */
-body.sw-dash-v1{overflow-y:auto !important;overflow-x:hidden !important;height:100% !important;max-height:100vh !important;}
-.sw-dash-v1 #screen-command{overflow:visible !important;max-height:none !important;}
+/* Boot cloak — opaque cover kills the legacy-HUD flash until boot lifts it. */
+html.sw-booting body::after{content:"";position:fixed;inset:0;background:#04070A;z-index:99990;pointer-events:none;}
+/* ════════ FIXED COCKPIT SHELL — one viewport, no page scroll ════════ */
+body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100vh !important;}
+.sw-dash-v1 #screenStage{overflow:hidden !important;}
+.sw-dash-v1 #screen-command{overflow:hidden !important;max-height:100vh !important;
+  padding:0 !important;border:none !important;border-radius:0 !important;background:transparent !important;margin:0 !important;}
 .sw-dash-v1 #screen-command>#swDash{display:grid !important;visibility:visible !important;
-  pointer-events:auto !important;position:relative !important;width:auto !important;height:auto !important;
-  overflow:visible !important;clip:auto !important;max-height:none !important;}
-.sw-dash-v1 #xrpmanAiCommandRoom{max-height:none !important;overflow-y:visible !important;}
-/* ── panels ────────────────────────────────────────────── */
-.sw-dash-v1 .sw-panel{background:var(--sw-surface);border:1px solid var(--sw-border);
-  border-radius:var(--sw-radius);box-shadow:var(--sw-shadow);padding:clamp(12px,1.1vw,18px);
-  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
-.sw-dash-v1 .sw-panel.sw-active{border-color:var(--sw-border-active);box-shadow:var(--sw-glow);}
-.sw-dash-v1 .sw-panel-title{font:600 11px/1 'Rajdhani',sans-serif;letter-spacing:.14em;
-  text-transform:uppercase;color:var(--sw-text-muted);display:flex;align-items:center;
-  justify-content:space-between;margin:0 0 10px;}
-.sw-dash-v1 .sw-panel-title .sw-dot{width:7px;height:7px;border-radius:50%;background:var(--sw-green);
-  box-shadow:0 0 8px var(--sw-green);margin-right:7px;display:inline-block;}
-/* ── header ────────────────────────────────────────────── */
-.sw-dash-v1 #swDashHeader{position:sticky;top:0;z-index:5;height:var(--sw-header-h);
-  display:flex;align-items:center;gap:18px;padding:0 var(--sw-gap);
-  background:rgba(2,5,4,0.82);backdrop-filter:blur(8px);border-bottom:1px solid var(--sw-border);}
-.sw-dash-v1 .sw-brand{font:900 20px/1 'Orbitron',sans-serif;letter-spacing:.04em;color:var(--sw-text);white-space:nowrap;}
-.sw-dash-v1 .sw-brand b{color:var(--sw-green);}
-.sw-dash-v1 .sw-hstat{display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--sw-text-muted);letter-spacing:.1em;text-transform:uppercase;}
-.sw-dash-v1 .sw-hstat b{font:600 13px/1 'Share Tech Mono',monospace;color:var(--sw-green-soft);letter-spacing:0;text-transform:none;}
-.sw-dash-v1 .sw-hspacer{flex:1;}
-.sw-dash-v1 .sw-hbtn{font:600 12px 'Rajdhani',sans-serif;letter-spacing:.08em;color:var(--sw-text);
-  background:transparent;border:1px solid var(--sw-border);border-radius:var(--sw-radius-sm);
-  padding:9px 14px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;}
-.sw-dash-v1 .sw-hbtn.sw-exit{border-color:var(--sw-border-active);color:var(--sw-green);}
+  pointer-events:auto !important;position:relative !important;width:auto !important;
+  height:100vh !important;max-height:100vh !important;overflow:hidden !important;clip:auto !important;}
+/* Legacy interface = emergency fallback only. Kept live in the DOM (engine host)
+   but taken out of flow and off-screen; rollback removes the class + the flag. */
+.sw-dash-v1 .sw-legacy-hidden{position:absolute !important;left:-99999px !important;top:0 !important;
+  width:1px !important;height:1px !important;max-height:1px !important;overflow:hidden !important;
+  opacity:0 !important;pointer-events:none !important;}
+.sw-dash-v1 #swDash{box-sizing:border-box;height:100vh;padding:var(--sw-gap);gap:var(--sw-gap);
+  display:grid;grid-template-columns:var(--sw-rail-w) minmax(0,1fr);
+  grid-template-rows:var(--sw-header-h) minmax(0,1fr) var(--sw-footer-h);
+  grid-template-areas:"header header" "rail main" "footer footer";
+  overflow:hidden;color:var(--sw-text);font-family:'Rajdhani','Share Tech Mono',sans-serif;
+  background:var(--sw-bg);}
+.sw-dash-v1 #swDash *{box-sizing:border-box;}
+/* ════════ panels ════════ */
+.sw-dash-v1 .sw-panel{background:var(--sw-panel);border:1px solid var(--sw-border);
+  border-radius:var(--sw-radius);padding:10px 12px;min-width:0;min-height:0;
+  display:flex;flex-direction:column;overflow:hidden;}
+.sw-dash-v1 .sw-panel-title{display:flex;align-items:center;justify-content:space-between;
+  font:700 10px/1 'Rajdhani',sans-serif;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--sw-text);margin:0 0 8px;flex:0 0 auto;}
+.sw-dash-v1 .sw-panel-title .sw-t{display:flex;align-items:center;gap:7px;}
+.sw-dash-v1 .sw-panel-title .sw-tag{font:700 9px 'Rajdhani',sans-serif;letter-spacing:.12em;color:var(--sw-cyan);}
+.sw-dash-v1 .sw-dot{width:6px;height:6px;border-radius:50%;background:var(--sw-green);
+  box-shadow:0 0 7px var(--sw-green);flex:0 0 auto;}
+/* ════════ header ════════ */
+.sw-dash-v1 #swDashHeader{grid-area:header;display:flex;align-items:center;gap:14px;
+  padding:0 14px;background:var(--sw-panel);border:1px solid var(--sw-border);border-radius:var(--sw-radius);}
+.sw-dash-v1 .sw-brandwrap{display:flex;align-items:center;gap:9px;flex:0 0 auto;}
+.sw-dash-v1 .sw-brandmark{width:24px;height:24px;flex:0 0 auto;}
+.sw-dash-v1 .sw-brand{font:900 17px/1 'Orbitron',sans-serif;letter-spacing:.02em;color:#fff;white-space:nowrap;}
+.sw-dash-v1 .sw-brand b{color:var(--sw-green);font-weight:900;}
+.sw-dash-v1 .sw-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--sw-border);
+  border-radius:999px;padding:5px 11px;font:700 10px 'Rajdhani',sans-serif;letter-spacing:.1em;
+  color:var(--sw-text);white-space:nowrap;flex:0 0 auto;}
+.sw-dash-v1 .sw-chip .sw-chipdot{width:13px;height:13px;border-radius:50%;border:2px solid var(--sw-green);flex:0 0 auto;}
+.sw-dash-v1 .sw-hstat{display:flex;flex-direction:column;gap:3px;flex:0 0 auto;min-width:0;}
+.sw-dash-v1 .sw-hstat span{font:600 8.5px 'Rajdhani',sans-serif;letter-spacing:.13em;text-transform:uppercase;color:var(--sw-text-muted);}
+.sw-dash-v1 .sw-hstat b{font:600 11.5px/1 'Share Tech Mono',monospace;color:var(--sw-green-soft);letter-spacing:0;white-space:nowrap;}
+.sw-dash-v1 .sw-hstat b.sw-live::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;
+  background:var(--sw-green);box-shadow:0 0 6px var(--sw-green);margin-right:5px;vertical-align:middle;}
+.sw-dash-v1 .sw-hsep{width:1px;height:26px;background:var(--sw-border);flex:0 0 auto;}
+.sw-dash-v1 .sw-hspacer{flex:1 1 auto;min-width:0;}
+.sw-dash-v1 .sw-hbtn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--sw-border);
+  border-radius:var(--sw-radius-sm);background:transparent;color:var(--sw-text);cursor:pointer;
+  padding:7px 12px;font:700 10.5px 'Rajdhani',sans-serif;letter-spacing:.1em;flex:0 0 auto;white-space:nowrap;}
 .sw-dash-v1 .sw-hbtn:hover{border-color:var(--sw-border-active);}
-/* ── nav rail (desktop) ────────────────────────────────── */
-.sw-dash-v1 #swDashRail{position:sticky;top:0;align-self:start;display:flex;flex-direction:column;
-  gap:4px;padding:calc(var(--sw-header-h) + 8px) 8px 8px;}
-.sw-dash-v1 .sw-navbtn{display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 4px;
-  border-radius:var(--sw-radius-sm);border:1px solid transparent;background:transparent;cursor:pointer;
-  color:var(--sw-text-muted);font:600 9.5px 'Rajdhani',sans-serif;letter-spacing:.1em;text-transform:uppercase;}
-.sw-dash-v1 .sw-navbtn svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2;}
-.sw-dash-v1 .sw-navbtn:hover{color:var(--sw-green-soft);}
-.sw-dash-v1 .sw-navbtn.sw-on{color:var(--sw-green);border-color:var(--sw-border-active);background:rgba(0,255,0,0.06);}
+.sw-dash-v1 .sw-hbtn.sw-exit{border-color:var(--sw-border-active);color:var(--sw-green);}
+.sw-dash-v1 .sw-hbtn svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;}
+/* ════════ left rail ════════ */
+.sw-dash-v1 #swDashRail{grid-area:rail;display:flex;flex-direction:column;gap:3px;
+  background:var(--sw-panel);border:1px solid var(--sw-border);border-radius:var(--sw-radius);
+  padding:9px 8px;overflow:hidden;min-height:0;}
+.sw-dash-v1 .sw-navbtn{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:var(--sw-radius-sm);
+  border:1px solid transparent;background:transparent;cursor:pointer;color:var(--sw-text-muted);
+  font:700 11px 'Rajdhani',sans-serif;letter-spacing:.1em;text-transform:uppercase;text-align:left;flex:0 0 auto;}
+.sw-dash-v1 .sw-navbtn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.9;flex:0 0 auto;}
+.sw-dash-v1 .sw-navbtn:hover{color:var(--sw-green-soft);background:rgba(0,255,0,0.04);}
+.sw-dash-v1 .sw-navbtn.sw-on{color:var(--sw-green);border-color:var(--sw-border-active);background:rgba(0,255,0,0.07);}
+.sw-dash-v1 .sw-railspacer{flex:1 1 auto;}
 .sw-dash-v1 #swDashBottomNav{display:none;}
-/* ── hero / reactor ────────────────────────────────────── */
-.sw-dash-v1 .sw-hero{grid-column:span 8;}
-.sw-dash-v1 .sw-hero-side{grid-column:span 4;display:grid;gap:var(--sw-gap);align-content:start;}
-.sw-dash-v1 .sw-statusrow{grid-column:span 12;display:grid;gap:var(--sw-gap);
-  grid-template-columns:repeat(6,minmax(0,1fr));}
-.sw-dash-v1 .sw-instruments{grid-column:span 8;}
-.sw-dash-v1 .sw-feed{grid-column:span 4;}
-.sw-dash-v1 .sw-network{grid-column:span 5;}
-.sw-dash-v1 .sw-repevid{grid-column:span 3;}
-.sw-dash-v1 .sw-downloads{grid-column:span 4;}
-/* ── gauges / tiles / meter ────────────────────────────── */
-.sw-dash-v1 .sw-gaugerow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sw-gap);}
-.sw-dash-v1 .sw-gauge{text-align:center;}
-.sw-dash-v1 .sw-gauge svg{width:100%;max-width:150px;height:auto;overflow:visible;}
-.sw-dash-v1 .sw-gauge-track{stroke:rgba(154,190,174,0.16);}
-.sw-dash-v1 .sw-gauge-arc{transition:stroke-dasharray .55s ease;}
-.sw-dash-v1 .sw-gauge-svgval{font-family:'Orbitron',sans-serif;font-weight:900;fill:var(--sw-green);}
-.sw-dash-v1 .sw-gauge-val{font:900 26px/1 'Orbitron',sans-serif;color:var(--sw-green);margin-top:6px;}
-.sw-dash-v1 .sw-gauge-lbl{font:600 10px 'Rajdhani',sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--sw-text-muted);margin-top:4px;}
-.sw-dash-v1 .sw-tilerow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--sw-gap);margin-top:var(--sw-gap);}
-.sw-dash-v1 .sw-tile{background:var(--sw-bg-raised);border:1px solid var(--sw-border);border-radius:var(--sw-radius-sm);padding:14px;text-align:center;}
-.sw-dash-v1 .sw-tile-val{font:900 22px/1 'Orbitron',sans-serif;color:var(--sw-green);}
-.sw-dash-v1 .sw-tile-lbl{font:600 9.5px 'Rajdhani',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--sw-text-muted);margin-top:5px;}
-.sw-dash-v1 .sw-meter{margin-top:var(--sw-gap);}
-.sw-dash-v1 .sw-meter-track{position:relative;height:14px;border-radius:8px;background:linear-gradient(90deg,rgba(255,77,77,.25),rgba(0,0,0,.3) 50%,rgba(0,255,0,.25));overflow:hidden;}
-.sw-dash-v1 .sw-meter-fill{position:absolute;top:0;bottom:0;background:var(--sw-gold);opacity:.85;}
-.sw-dash-v1 .sw-meter-zero{position:absolute;top:-3px;bottom:-3px;left:50%;width:2px;background:var(--sw-green);}
-/* ── feed / network ────────────────────────────────────── */
-.sw-dash-v1 .sw-feed-row{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid rgba(154,190,174,.10);}
-.sw-dash-v1 .sw-feed-ico{width:30px;height:30px;flex:0 0 auto;border-radius:8px;display:grid;place-items:center;background:var(--sw-bg-raised);border:1px solid var(--sw-border);}
-.sw-dash-v1 .sw-feed-body{flex:1;min-width:0;}
-.sw-dash-v1 .sw-feed-title{font:600 12px 'Rajdhani',sans-serif;color:var(--sw-text);}
-.sw-dash-v1 .sw-feed-detail{font:400 10.5px 'Share Tech Mono',monospace;color:var(--sw-text-muted);word-break:break-all;}
-.sw-dash-v1 .sw-feed-time{font:400 9.5px 'Share Tech Mono',monospace;color:var(--sw-text-muted);white-space:nowrap;}
-.sw-dash-v1 .sw-empty{color:var(--sw-text-muted);font:600 11px 'Rajdhani',sans-serif;letter-spacing:.08em;padding:14px 0;text-align:center;}
-.sw-dash-v1 .sw-cardbtn{width:100%;margin-top:10px;padding:9px;border:1px solid var(--sw-border-active);background:rgba(0,255,0,0.05);color:var(--sw-green);border-radius:var(--sw-radius-sm);font:600 11px 'Rajdhani',sans-serif;letter-spacing:.1em;cursor:pointer;}
-/* ── responsive polish (v1) ────────────────────────────── */
-/* Defensive: grid/flex children must be allowed to shrink (prevents blowout). */
-.sw-dash-v1 #swDashMain>*{min-width:0;}
-.sw-dash-v1 .sw-panel{min-width:0;}
-/* Clip any sub-pixel rounding so the page can never scroll horizontally. */
-.sw-dash-v1 #swDash,.sw-dash-v1 #swDashMain{overflow-x:clip;max-width:100%;}
-/* Reparented engine panes hold long log/report lines — keep them from pushing
-   the page; wrap addresses/hashes instead of forcing horizontal scroll. */
-.sw-dash-v1 #cmdLogPane,.sw-dash-v1 #cmdReportPane{max-width:100%;}
-.sw-dash-v1 #cmdLogBody,.sw-dash-v1 #cmdReportBody{white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;}
-/* Tablet: hero + instruments go full width so the narrow side columns don't
-   get cramped between the desktop rail and the 12-col grid. */
-@media (max-width:1080px) and (min-width:761px){
-  .sw-dash-v1 .sw-hero,.sw-dash-v1 .sw-hero-side,
-  .sw-dash-v1 .sw-instruments,.sw-dash-v1 .sw-feed,.sw-dash-v1 .sw-downloads{grid-column:span 12;}
-  .sw-dash-v1 .sw-network{grid-column:span 7;}
-  .sw-dash-v1 .sw-repevid{grid-column:span 5;}
-  .sw-dash-v1 .sw-statusrow{grid-template-columns:repeat(3,minmax(0,1fr));}
+/* ════════ main grid ════════ */
+.sw-dash-v1 #swDashMain{grid-area:main;display:grid;gap:var(--sw-gap);min-width:0;min-height:0;
+  grid-template-rows:auto auto minmax(0,1fr);overflow:hidden;}
+.sw-dash-v1 .sw-row-reactor{display:grid;gap:var(--sw-gap);grid-template-columns:minmax(0,1fr) 320px;min-width:0;}
+.sw-dash-v1 .sw-row-cols{display:grid;gap:var(--sw-gap);min-width:0;min-height:0;
+  grid-template-columns:minmax(0,1.12fr) minmax(0,0.82fr) minmax(0,1.26fr);}
+.sw-dash-v1 .sw-col3{display:grid;gap:var(--sw-gap);min-width:0;min-height:0;grid-template-rows:minmax(0,1fr) auto;}
+.sw-dash-v1 .sw-col3-bottom{display:grid;gap:var(--sw-gap);grid-template-columns:minmax(0,1fr) minmax(0,1fr);min-width:0;}
+/* ════════ reactor core ════════ */
+.sw-dash-v1 .sw-reactor{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:14px;}
+.sw-dash-v1 .sw-reactor-left{min-width:0;display:flex;flex-direction:column;}
+.sw-dash-v1 .sw-reactor-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+.sw-dash-v1 .sw-reactor-ttl{font:700 12px 'Rajdhani',sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--sw-text);}
+.sw-dash-v1 .sw-reactor-phase{font:700 15px 'Rajdhani',sans-serif;letter-spacing:.1em;color:var(--sw-cyan);margin-top:5px;}
+.sw-dash-v1 .sw-reactor-pct{font:900 40px/0.9 'Orbitron',sans-serif;color:var(--sw-green);text-shadow:0 0 22px rgba(0,255,0,.35);white-space:nowrap;}
+.sw-dash-v1 .sw-segbar{display:flex;gap:3px;height:20px;margin:9px 0 7px;}
+.sw-dash-v1 .sw-seg{flex:1 1 0;border-radius:2px;background:#141B1F;min-width:0;}
+.sw-dash-v1 .sw-reactor-next{font:600 10px 'Share Tech Mono',monospace;letter-spacing:.06em;color:var(--sw-text-muted);text-transform:uppercase;}
+.sw-dash-v1 .sw-minigrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 10px;align-content:start;}
+.sw-dash-v1 .sw-mini{min-width:0;}
+.sw-dash-v1 .sw-mini span{display:block;font:600 8.5px 'Rajdhani',sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--sw-text-muted);}
+.sw-dash-v1 .sw-mini b{display:block;font:700 14px/1.15 'Share Tech Mono',monospace;color:var(--sw-green);}
+.sw-dash-v1 .sw-scanstatus{grid-column:span 2;border:1px solid var(--sw-border);border-radius:var(--sw-radius-sm);
+  padding:7px 9px;display:flex;align-items:center;gap:8px;margin-top:2px;}
+.sw-dash-v1 .sw-scanstatus svg{width:15px;height:15px;stroke:var(--sw-green);fill:none;stroke-width:2;flex:0 0 auto;}
+.sw-dash-v1 .sw-scanstatus span{font:600 8.5px 'Rajdhani',sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--sw-text-muted);display:block;}
+.sw-dash-v1 .sw-scanstatus b{font:600 11px 'Rajdhani',sans-serif;color:var(--sw-green);display:block;}
+/* ════════ read-report + voice card ════════ */
+.sw-dash-v1 .sw-actionpanel{display:flex;flex-direction:column;gap:8px;justify-content:center;}
+.sw-dash-v1 .sw-readbtn{display:flex;align-items:center;gap:11px;width:100%;text-align:left;cursor:pointer;
+  border:1px solid var(--sw-border-active);border-radius:var(--sw-radius);background:rgba(0,255,0,0.05);
+  color:var(--sw-green);padding:11px 13px;}
+.sw-dash-v1 .sw-readbtn svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.8;flex:0 0 auto;}
+.sw-dash-v1 .sw-readbtn>span{min-width:0;}
+.sw-dash-v1 .sw-readbtn .sw-rb-t{display:block;font:700 13px 'Rajdhani',sans-serif;letter-spacing:.09em;text-transform:uppercase;}
+.sw-dash-v1 .sw-readbtn .sw-rb-s{display:block;font:500 9.5px 'Rajdhani',sans-serif;color:var(--sw-text-muted);letter-spacing:.03em;text-transform:none;margin-top:1px;}
+.sw-dash-v1 .sw-readbtn .sw-rb-arrow{margin-left:auto;}
+.sw-dash-v1 .sw-voicerow{display:flex;align-items:center;gap:10px;border:1px solid var(--sw-border);
+  border-radius:var(--sw-radius);padding:9px 13px;cursor:pointer;background:transparent;width:100%;}
+.sw-dash-v1 .sw-voicerow svg{width:17px;height:17px;stroke:var(--sw-text);fill:none;stroke-width:1.8;flex:0 0 auto;}
+.sw-dash-v1 .sw-voicerow .sw-vl{font:700 11px 'Rajdhani',sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--sw-text);}
+.sw-dash-v1 .sw-voicerow .sw-vs{margin-left:auto;font:700 10px 'Rajdhani',sans-serif;letter-spacing:.1em;color:var(--sw-text-muted);}
+.sw-dash-v1 .sw-switch{width:38px;height:20px;border-radius:999px;background:#20282C;position:relative;flex:0 0 auto;transition:background .2s;}
+.sw-dash-v1 .sw-switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;
+  background:#8C9A94;transition:left .2s,background .2s;}
+.sw-dash-v1 .sw-voicerow[data-on="true"] .sw-switch{background:rgba(0,255,0,.3);}
+.sw-dash-v1 .sw-voicerow[data-on="true"] .sw-switch::after{left:20px;background:var(--sw-green);}
+/* ════════ status strip ════════ */
+.sw-dash-v1 .sw-statusstrip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));align-items:center;
+  background:var(--sw-panel);border:1px solid var(--sw-border);border-radius:var(--sw-radius);padding:9px 4px;}
+.sw-dash-v1 .sw-scell{display:flex;align-items:center;gap:9px;padding:0 12px;min-width:0;border-right:1px solid var(--sw-border);}
+.sw-dash-v1 .sw-scell:last-child{border-right:none;}
+.sw-dash-v1 .sw-scell svg{width:17px;height:17px;fill:none;stroke-width:1.8;flex:0 0 auto;stroke:var(--sw-text-muted);}
+.sw-dash-v1 .sw-scell .sw-sc-b{min-width:0;}
+.sw-dash-v1 .sw-scell span{display:block;font:600 8.5px 'Rajdhani',sans-serif;letter-spacing:.13em;text-transform:uppercase;color:var(--sw-text-muted);}
+.sw-dash-v1 .sw-scell b{display:block;font:700 15px/1.1 'Share Tech Mono',monospace;color:var(--sw-green);white-space:nowrap;}
+.sw-dash-v1 .sw-scell.sw-warn svg{stroke:var(--sw-red);} .sw-dash-v1 .sw-scell.sw-warn b{color:var(--sw-red);}
+.sw-dash-v1 .sw-scell.sw-gold svg{stroke:var(--sw-gold);} .sw-dash-v1 .sw-scell.sw-gold b{color:var(--sw-gold);}
+/* ════════ instruments ════════ */
+/* instruments fill the column: the gauge block absorbs the spare height so the
+   meter + tiles stay anchored at the bottom (no scattered dead space) */
+.sw-dash-v1 #swInstruments{justify-content:flex-start;}
+.sw-dash-v1 .sw-gaugerow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;
+  flex:1 1 auto;align-content:center;min-height:0;}
+@media (min-height:860px){ .sw-dash-v1 .sw-gauge svg{max-width:154px;} }
+.sw-dash-v1 .sw-gauge{text-align:center;min-width:0;}
+.sw-dash-v1 .sw-gauge-cap{font:700 8.5px 'Rajdhani',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--sw-text-muted);margin-bottom:2px;}
+.sw-dash-v1 .sw-gauge svg{width:100%;max-width:132px;height:auto;overflow:visible;}
+.sw-dash-v1 .sw-gauge-track{stroke:rgba(120,160,150,.15);}
+.sw-dash-v1 .sw-gauge-arc{transition:stroke-dasharray .5s ease;}
+.sw-dash-v1 .sw-gauge-val{font:900 17px/1 'Orbitron',sans-serif;margin-top:1px;white-space:nowrap;}
+.sw-dash-v1 .sw-gauge-sub{font:600 7.5px 'Rajdhani',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--sw-text-muted);margin-top:2px;}
+.sw-dash-v1 .sw-netflow{border:1px solid var(--sw-border);border-radius:var(--sw-radius-sm);padding:8px 10px;margin-top:8px;flex:0 0 auto;}
+.sw-dash-v1 .sw-nf-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
+.sw-dash-v1 .sw-nf-ttl{font:700 9.5px 'Rajdhani',sans-serif;letter-spacing:.13em;text-transform:uppercase;color:var(--sw-text);}
+.sw-dash-v1 .sw-nf-val{font:700 12px 'Share Tech Mono',monospace;white-space:nowrap;}
+.sw-dash-v1 .sw-nf-dir{font:700 8.5px 'Rajdhani',sans-serif;letter-spacing:.12em;color:var(--sw-text-muted);}
+.sw-dash-v1 .sw-meter-track{position:relative;height:11px;border-radius:3px;margin:7px 0 3px;
+  background:linear-gradient(90deg,rgba(255,200,61,.10),rgba(20,27,31,1) 50%,rgba(0,255,0,.10));overflow:hidden;}
+.sw-dash-v1 .sw-meter-fill{position:absolute;top:0;bottom:0;background:var(--sw-gold);border-radius:3px;}
+.sw-dash-v1 .sw-meter-zero{position:absolute;top:-2px;bottom:-2px;left:50%;width:2px;background:var(--sw-green);}
+.sw-dash-v1 .sw-nf-scale{display:flex;justify-content:space-between;font:600 7.5px 'Rajdhani',sans-serif;letter-spacing:.1em;color:var(--sw-text-muted);}
+.sw-dash-v1 .sw-tilerow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:8px;flex:0 0 auto;}
+.sw-dash-v1 .sw-tile{background:var(--sw-bg-raised);border:1px solid var(--sw-border);border-radius:var(--sw-radius-sm);
+  padding:8px 4px;text-align:center;min-width:0;}
+.sw-dash-v1 .sw-tile-lbl{font:600 7.5px 'Rajdhani',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--sw-text-muted);}
+.sw-dash-v1 .sw-tile-val{font:900 17px/1.15 'Orbitron',sans-serif;color:var(--sw-cyan);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sw-dash-v1 .sw-tile-sub{font:600 7.5px 'Rajdhani',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--sw-text-muted);}
+/* ════════ feed ════════ */
+.sw-dash-v1 .sw-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;}
+.sw-dash-v1 .sw-scroll::-webkit-scrollbar{width:5px;}
+.sw-dash-v1 .sw-scroll::-webkit-scrollbar-thumb{background:rgba(120,160,150,.25);border-radius:3px;}
+.sw-dash-v1 .sw-feed-row{display:flex;gap:9px;padding:8px 0;border-bottom:1px solid rgba(120,160,150,.10);align-items:flex-start;}
+.sw-dash-v1 .sw-feed-row:last-child{border-bottom:none;}
+.sw-dash-v1 .sw-feed-ico{width:26px;height:26px;flex:0 0 auto;border-radius:50%;display:grid;place-items:center;
+  background:var(--sw-bg-raised);border:1px solid var(--sw-border);}
+.sw-dash-v1 .sw-feed-ico svg{width:13px;height:13px;fill:none;stroke-width:2;}
+.sw-dash-v1 .sw-feed-body{flex:1 1 auto;min-width:0;}
+.sw-dash-v1 .sw-feed-title{font:600 11px 'Rajdhani',sans-serif;color:var(--sw-text);}
+.sw-dash-v1 .sw-feed-detail{font:400 9px 'Share Tech Mono',monospace;color:var(--sw-text-muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sw-dash-v1 .sw-feed-time{font:400 8.5px 'Share Tech Mono',monospace;color:var(--sw-text-muted);white-space:nowrap;flex:0 0 auto;}
+.sw-dash-v1 .sw-empty{color:var(--sw-text-muted);font:600 10px 'Rajdhani',sans-serif;letter-spacing:.08em;
+  padding:16px 6px;text-align:center;}
+/* ════════ list rows (report & evidence, downloads) ════════ */
+.sw-dash-v1 .sw-lrow{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid rgba(120,160,150,.08);}
+.sw-dash-v1 .sw-lrow:last-of-type{border-bottom:none;}
+.sw-dash-v1 .sw-lrow svg{width:14px;height:14px;fill:none;stroke-width:1.8;stroke:var(--sw-text-muted);flex:0 0 auto;}
+.sw-dash-v1 .sw-lrow .sw-lt{font:600 10.5px 'Rajdhani',sans-serif;color:var(--sw-text);min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sw-dash-v1 .sw-lrow .sw-lt small{display:block;font:400 8.5px 'Share Tech Mono',monospace;color:var(--sw-text-muted);}
+.sw-dash-v1 .sw-lrow .sw-lv{margin-left:auto;font:700 12px 'Share Tech Mono',monospace;color:var(--sw-green);flex:0 0 auto;}
+.sw-dash-v1 .sw-lrow.sw-risk svg{stroke:var(--sw-red);} .sw-dash-v1 .sw-lrow.sw-risk .sw-lv{color:var(--sw-red);}
+.sw-dash-v1 .sw-dlbtn{margin-left:auto;background:transparent;border:none;cursor:pointer;padding:3px;flex:0 0 auto;}
+.sw-dash-v1 .sw-dlbtn svg{stroke:var(--sw-green);width:15px;height:15px;}
+.sw-dash-v1 .sw-cardbtn{width:100%;margin-top:8px;padding:7px;border:1px solid var(--sw-border-active);
+  background:rgba(0,255,0,0.05);color:var(--sw-green);border-radius:var(--sw-radius-sm);
+  font:700 9.5px 'Rajdhani',sans-serif;letter-spacing:.12em;cursor:pointer;flex:0 0 auto;text-transform:uppercase;}
+/* ════════ network overview (real edges only) ════════ */
+.sw-dash-v1 .sw-netwrap{flex:1 1 auto;min-height:0;display:flex;gap:8px;}
+.sw-dash-v1 .sw-netmap{flex:1 1 auto;min-width:0;min-height:0;border:1px solid var(--sw-border);
+  border-radius:var(--sw-radius-sm);background:var(--sw-bg-raised);overflow:hidden;position:relative;}
+.sw-dash-v1 .sw-netmap svg{width:100%;height:100%;display:block;}
+.sw-dash-v1 .sw-netlegend{flex:0 0 auto;align-self:center;display:flex;flex-direction:column;gap:6px;
+  border:1px solid var(--sw-border);border-radius:var(--sw-radius-sm);padding:8px 9px;background:rgba(4,7,10,.6);}
+.sw-dash-v1 .sw-leg{display:flex;align-items:center;gap:6px;font:600 8px 'Rajdhani',sans-serif;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--sw-text-muted);white-space:nowrap;}
+.sw-dash-v1 .sw-leg i{width:7px;height:7px;border-radius:50%;flex:0 0 auto;}
+/* ════════ footer ════════ */
+.sw-dash-v1 #swDashFooter{grid-area:footer;display:flex;align-items:center;justify-content:space-between;
+  padding:0 6px;font:600 8.5px 'Rajdhani',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--sw-text-muted);}
+.sw-dash-v1 #swDashFooter b{color:var(--sw-green);font-weight:700;}
+/* ════════ tighter fit on short/small desktops ════════ */
+@media (max-height:820px){
+  :root{--sw-header-h:46px;--sw-gap:6px;}
+  .sw-dash-v1 .sw-reactor-pct{font-size:32px;}
+  .sw-dash-v1 .sw-gauge svg{max-width:112px;}
+  .sw-dash-v1 .sw-segbar{height:15px;margin:7px 0 5px;}
+  .sw-dash-v1 .sw-panel{padding:8px 10px;}
 }
-/* ── mobile ────────────────────────────────────────────── */
-@media (max-width:760px){
-  /* Declutter the header: nav lives in the bottom bar, the status row already
-     surfaces mode/wallets/errors, so drop the decorative header stats. */
-  .sw-dash-v1 #swDashHeader{gap:7px;min-width:0;padding:0 10px;}
-  .sw-dash-v1 #swDashHeader .sw-hstat{display:none;}
-  .sw-dash-v1 .sw-brand{font-size:14px;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;}
-  .sw-dash-v1 .sw-hbtn{padding:6px 8px;font-size:11px;flex:0 0 auto;}
-  .sw-dash-v1 #swDashHeader #xaiVoiceOutputToggle{font-size:9px;padding:6px 8px;max-width:96px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;}
-  .sw-dash-v1 #swDash{grid-template-columns:minmax(0,1fr);grid-template-areas:"header" "main";}
+@media (max-height:700px){
+  .sw-dash-v1 .sw-reactor-pct{font-size:26px;}
+  .sw-dash-v1 .sw-gauge svg{max-width:96px;}
+  .sw-dash-v1 .sw-tile-val,.sw-dash-v1 .sw-gauge-val{font-size:14px;}
+  .sw-dash-v1 .sw-scell b{font-size:13px;}
+}
+@media (max-width:1280px){
+  :root{--sw-rail-w:150px;}
+  .sw-dash-v1 .sw-row-reactor{grid-template-columns:minmax(0,1fr) 260px;}
+  .sw-dash-v1 .sw-reactor{grid-template-columns:minmax(0,1fr) 210px;}
+}
+/* ════════ MOBILE — compact hierarchy per the phone reference ════════ */
+@media (max-width:900px){
+  /* The page MUST scroll on a phone. body is the scroll container, so every
+     ancestor of the cockpit has to be un-clipped — PUBLIC_SHELL_v1 pins
+     #screen-command to max-height:100vh/overflow:hidden, which previously made
+     everything below the status strip unreachable. */
+  body.sw-dash-v1{overflow-y:auto !important;overflow-x:hidden !important;
+    height:100% !important;max-height:100vh !important;-webkit-overflow-scrolling:touch;}
+  .sw-dash-v1 #screenStage{overflow:visible !important;max-height:none !important;}
+  .sw-dash-v1 #screen-command{overflow:visible !important;max-height:none !important;height:auto !important;}
+  .sw-dash-v1 #screen-command>#swDash{height:auto !important;max-height:none !important;overflow:visible !important;}
+  .sw-dash-v1 #swDash{height:auto;grid-template-columns:minmax(0,1fr);
+    grid-template-rows:auto auto auto;grid-template-areas:"header" "main" "footer";
+    padding:7px 7px calc(72px + env(safe-area-inset-bottom,0px));overflow:visible;
+    -webkit-text-size-adjust:100%;text-size-adjust:100%;}
+  /* keep mobile type compact — stops Chrome text-boosting from blowing the layout up */
+  .sw-dash-v1 .sw-panel{padding:9px 10px;}
+  .sw-dash-v1 .sw-reactor-ttl{font-size:11px;}
+  .sw-dash-v1 .sw-reactor-pct{font-size:30px;}
+  .sw-dash-v1 .sw-reactor-phase{font-size:13px;margin-top:3px;}
+  .sw-dash-v1 .sw-segbar{height:16px;}
+  .sw-dash-v1 .sw-mini b{font-size:13px;}
+  .sw-dash-v1 .sw-scell b{font-size:14px;}
+  .sw-dash-v1 .sw-gauge svg{max-width:104px;}
+  .sw-dash-v1 .sw-gauge-val{font-size:15px;}
+  .sw-dash-v1 .sw-tile-val{font-size:15px;}
   .sw-dash-v1 #swDashRail{display:none;}
-  .sw-dash-v1 #swDashMain{grid-template-columns:1fr;padding-bottom:calc(72px + env(safe-area-inset-bottom,0px));}
-  .sw-dash-v1 .sw-hero,.sw-dash-v1 .sw-hero-side,.sw-dash-v1 .sw-instruments,.sw-dash-v1 .sw-feed,
-  .sw-dash-v1 .sw-network,.sw-dash-v1 .sw-repevid,.sw-dash-v1 .sw-downloads{grid-column:span 12;}
-  .sw-dash-v1 .sw-statusrow{grid-template-columns:repeat(3,minmax(0,1fr));}
-  .sw-dash-v1 #swDashBottomNav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:20;
-    justify-content:space-around;align-items:center;gap:2px;
-    padding:8px 6px calc(8px + env(safe-area-inset-bottom,0px));
-    background:rgba(2,5,4,0.94);border-top:1px solid var(--sw-border);backdrop-filter:blur(8px);}
+  .sw-dash-v1 #swDashMain{grid-template-rows:none;overflow:visible;}
+  .sw-dash-v1 #swDashHeader{gap:8px;padding:0 10px;height:46px;}
+  .sw-dash-v1 .sw-brand{font-size:14px;}
+  .sw-dash-v1 .sw-brandmark{width:20px;height:20px;}
+  .sw-dash-v1 #swDashHeader .sw-hstat,.sw-dash-v1 #swDashHeader .sw-hsep{display:none;}
+  .sw-dash-v1 #swDashHeader .sw-chip{padding:4px 9px;font-size:9px;}
+  .sw-dash-v1 .sw-hbtn{padding:6px 9px;font-size:9.5px;}
+  .sw-dash-v1 .sw-hbtn .sw-hbtn-t{display:none;}
+  .sw-dash-v1 .sw-hbtn.sw-exit .sw-hbtn-t{display:inline;}
+  .sw-dash-v1 .sw-row-reactor{grid-template-columns:minmax(0,1fr);}
+  .sw-dash-v1 .sw-reactor{grid-template-columns:minmax(0,1fr);gap:10px;}
+  .sw-dash-v1 .sw-minigrid{grid-template-columns:repeat(3,minmax(0,1fr));}
+  .sw-dash-v1 .sw-scanstatus{grid-column:span 3;}
+  .sw-dash-v1 .sw-actionpanel{flex-direction:row;}
+  .sw-dash-v1 .sw-readbtn{flex:1 1 auto;}
+  .sw-dash-v1 .sw-voicerow{flex:0 0 auto;width:auto;}
+  .sw-dash-v1 .sw-voicerow .sw-vl{display:none;}
+  .sw-dash-v1 .sw-statusstrip{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 0;}
+  .sw-dash-v1 .sw-scell:nth-child(3n){border-right:none;}
+  .sw-dash-v1 .sw-row-cols{grid-template-columns:minmax(0,1fr);}
+  .sw-dash-v1 .sw-col3{grid-template-rows:none;}
+  .sw-dash-v1 .sw-col3-bottom{grid-template-columns:minmax(0,1fr);}
+  .sw-dash-v1 .sw-scroll{max-height:290px;}
+  .sw-dash-v1 .sw-netmap{min-height:150px;}
+  .sw-dash-v1 #swDashFooter{justify-content:center;}
+  .sw-dash-v1 #swDashFooter .sw-foot-r{display:none;}
+  /* right padding keeps the last item clear of the pre-existing DEBUG fab */
+  .sw-dash-v1 #swDashBottomNav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:30;
+    justify-content:space-around;align-items:stretch;gap:2px;
+    padding:6px 96px calc(6px + env(safe-area-inset-bottom,0px)) 4px;
+    background:rgba(4,7,10,0.96);border-top:1px solid var(--sw-border);backdrop-filter:blur(8px);}
+  .sw-dash-v1 #swDashBottomNav .sw-navbtn{flex:1 1 0;flex-direction:column;gap:3px;align-items:center;
+    justify-content:center;padding:5px 2px;font-size:8.5px;letter-spacing:.06em;}
+  .sw-dash-v1 #swDashBottomNav .sw-navbtn svg{width:18px;height:18px;}
 }
-/* ── motion ────────────────────────────────────────────── */
+@media (max-width:420px){
+  .sw-dash-v1 .sw-gauge svg{max-width:96px;}
+  .sw-dash-v1 .sw-tilerow{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .sw-dash-v1 .sw-reactor-pct{font-size:34px;}
+}
 @media (prefers-reduced-motion:reduce){
   .sw-dash-v1 *{animation:none !important;transition:none !important;}
 }
@@ -2167,6 +2319,7 @@ body.xai-command-mounted .main-grid{
 </style>
 </head>
 <body class="dev-locked">
+<script>/* boot cloak — hide the legacy-HUD flash until boot lifts it; 4s safety reveal */try{document.documentElement.classList.add('sw-booting');setTimeout(function(){document.documentElement.classList.remove('sw-booting');},4000);}catch(_){}</script>
 <!-- Silent looping background video behind the whole report. object-fit:cover +
      center keeps a landscape clip filling both PC (landscape) and phone (portrait).
      Sits at z-index:-1 (above the black body bg, behind all content); a dark scrim
@@ -21198,27 +21351,42 @@ function migrateLayoutToScreens() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  RESPONSIVE REPORT DASHBOARD v1  (branch: design/report-dashboard-v1)
+//  SHADOW WATCH FIXED COCKPIT  (branch: design/fixed-cockpit-layout)
 //
-//  Additive layout adopter. Runs AFTER migrateLayoutToScreens has built and
-//  wired #xrpmanAiCommandRoom. It builds a responsive #swDash grid inside
-//  #screen-command and REPARENTS the existing functional nodes into slots by
-//  reference (appendChild) — IDs and per-element listeners are preserved, so
-//  every engine consumer (getElementById + null-guards) keeps working. Gated
-//  behind body.sw-dash-v1. If anything throws, the original room is left intact
-//  (nodes only move on the happy path). No new network calls; reads real state.
+//  Rebuilt to reproduce the approved desktop + mobile reference designs.
+//
+//  Architecture (corrects the earlier "stacked hybrid" implementation):
+//    - The dashboard is built from NATIVE components only. The legacy
+//      #xrpmanAiCommandRoom (robot, dialogue, command cluster), #cmdLogPane and
+//      #cmdReportPane are NEVER shown inside it. They stay live in the DOM as
+//      the engine host + emergency fallback, taken out of flow via
+//      .sw-legacy-hidden, and are restored if the adopter fails.
+//    - Native controls DRIVE the engine by clicking the hidden, already-wired
+//      buttons (never re-implementing scan/report/export logic) and READ engine
+//      state (XAI_SCAN_PROGRESS, the mission UI nodes, state.*).
+//    - Fixed single viewport on desktop: no page scroll; panels scroll inside.
+//    - Real values only. Anything unavailable shows WAITING / — and no
+//      relationship is drawn that the ledger data does not contain.
 // ═══════════════════════════════════════════════════════════════
 function _swEl(tag, attrs, html) {
   var el = document.createElement(tag);
   if (attrs) for (var k in attrs) { if (k === 'class') el.className = attrs[k]; else el.setAttribute(k, attrs[k]); }
-  if (html != null) el.innerHTML = html;
+  if (html != null) el.innerHTML = html;   // callers pass STATIC markup only
   return el;
 }
 function _swSetText(id, val) { var e = document.getElementById(id); if (e) e.textContent = val; }
+function _swClear(el) { while (el && el.firstChild) el.removeChild(el.firstChild); }
+function _swEmpty(t) { var d = document.createElement('div'); d.className = 'sw-empty'; d.textContent = String(t); return d; }
 function _swShort(a) { a = String(a || ''); return a.length > 12 ? (a.slice(0, 6) + '…' + a.slice(-4)) : a; }
-
-// Honest link/mode derived from the engine's own body-state classes (never a
-// fabricated connection value).
+function _swPad2(n) { n = Number(n) || 0; return (n < 10 && n >= 0) ? ('0' + n) : String(n); }
+function _swCompact(v) {
+  v = Number(v) || 0; var a = Math.abs(v), s = v < 0 ? '-' : '';
+  if (a >= 1e9) return s + (a / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+  if (a >= 1e6) return s + (a / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (a >= 1e3) return s + (a / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+  return s + String(Math.round(a));
+}
+// Honest mode/link derived from the engine's own body-state classes.
 function _swMode() {
   var b = document.body.classList;
   if (b.contains('scanning')) return 'SCANNING';
@@ -21229,17 +21397,24 @@ function _swMode() {
 }
 function _swLink() {
   var b = document.body.classList;
-  if (b.contains('scanning') || b.contains('building')) return 'LIVE';
-  if (b.contains('sealed')) return 'IDLE';
-  return 'STANDBY';
+  if (b.contains('scanning') || b.contains('building')) return 'Live';
+  if (b.contains('sealed')) return 'Idle';
+  return 'Standby';
 }
-
+function _swScanning() { var b = document.body.classList; return b.contains('scanning') || b.contains('building'); }
+function _swScanStatusText() {
+  switch (_swMode()) {
+    case 'SCANNING': return 'Running smoothly';
+    case 'BUILDING': return 'Sealing evidence';
+    case 'ERROR':    return 'Attention needed';
+    case 'SEALED':   return 'Report sealed';
+    default:         return 'Standing by';
+  }
+}
 // Parent navigation (same-origin iframe → outer app). Guarded.
 function swNav(v) {
   try {
-    if (window.parent && window.parent !== window && typeof window.parent.switchView === 'function') {
-      window.parent.switchView(v);
-    }
+    if (window.parent && window.parent !== window && typeof window.parent.switchView === 'function') window.parent.switchView(v);
   } catch (_) {}
 }
 function exitShadowWatchReport() {
@@ -21251,21 +21426,7 @@ function exitShadowWatchReport() {
   try { history.back(); } catch (_) {}
 }
 if (typeof window !== 'undefined') { window.swNav = swNav; window.exitShadowWatchReport = exitShadowWatchReport; }
-
-var SW_NAV_ITEMS = [
-  { id: 'home',  label: 'HOME'  }, { id: 'live', label: 'LIVE' },
-  { id: 'map',   label: 'MAP'   }, { id: 'graph', label: 'GRAPH' },
-  { id: 'hvt',   label: 'HVT'   }, { id: 'report', label: 'REPORT' }
-];
-function _swBuildNav(container, cls) {
-  SW_NAV_ITEMS.forEach(function (it) {
-    var b = _swEl('button', { type: 'button', 'class': cls, 'data-swnav': it.id, 'aria-label': it.label },
-      '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/></svg><span>' + it.label + '</span>');
-    b.addEventListener('click', function () { swNav(it.id); });
-    container.appendChild(b);
-  });
-}
-// Delegate to an existing wired command button (never re-implements the action).
+// Delegate to the existing wired (hidden) command button — never re-implement.
 function _swClickCmd(cmd) {
   try {
     var b = document.querySelector('#xaiCommandButtons [data-xai-cmd="' + cmd + '"]');
@@ -21273,319 +21434,446 @@ function _swClickCmd(cmd) {
   } catch (_) {}
   return false;
 }
-function _swCell(id, lbl, val) {
-  return '<div class="sw-tile"><div class="sw-tile-val" id="' + id + '">' + val + '</div>' +
-         '<div class="sw-tile-lbl">' + lbl + '</div></div>';
-}
-
-function applyDashboardLayoutV1() {
-  if (window.__swDashApplied) return;
-  var cmd  = document.getElementById('screen-command');
-  var room = document.getElementById('xrpmanAiCommandRoom');
-  if (!cmd || !room) return;                 // nothing to adopt — leave engine untouched
-
-  // Transactional: record every move so we can fully roll back on any failure,
-  // and only flip body.sw-dash-v1 / __swDashApplied AFTER a clean mount.
-  var moves = [];                            // {node, parent, next}
-  var dash = null;
-  var legacyHero = cmd.querySelector('.cmd-hero');
-  var legacyOrb  = cmd.querySelector('.cmd-orb-wrap');
-  var legacyHeroDisp = legacyHero ? legacyHero.style.display : null;
-  var legacyOrbDisp  = legacyOrb  ? legacyOrb.style.display  : null;
-  function _record(node) { if (node) moves.push({ node: node, parent: node.parentNode, next: node.nextSibling }); }
-  function _adopt(slot, node) { if (node) { _record(node); slot.appendChild(node); } }
-
-  try {
-    // 1. Build the grid shell DETACHED (nothing enters the document yet)
-    dash       = _swEl('div',    { id: 'swDash' });
-    var header = _swEl('header', { id: 'swDashHeader' });
-    var rail   = _swEl('nav',    { id: 'swDashRail', 'aria-label': 'Shadow Watch sections' });
-    var main   = _swEl('div',    { id: 'swDashMain' });
-    var bottom = _swEl('nav',    { id: 'swDashBottomNav', 'aria-label': 'Shadow Watch sections' });
-    dash.appendChild(header); dash.appendChild(rail); dash.appendChild(main); dash.appendChild(bottom);
-
-    // 2. Header: brand + live stats + controls (MENU is dev-gated → System Console)
-    header.appendChild(_swEl('div', { 'class': 'sw-brand' }, 'SHADOW<b>WATCH</b>'));
-    header.appendChild(_swEl('div', { 'class': 'sw-hstat' }, 'CONNECTION<b id="swHConn">STANDBY</b>'));
-    header.appendChild(_swEl('div', { 'class': 'sw-hstat' }, 'SCAN<b id="swHMode">READY</b>'));
-    header.appendChild(_swEl('div', { 'class': 'sw-hstat' }, 'TX SAMPLE<b id="swHLedger">—</b>'));
-    header.appendChild(_swEl('div', { 'class': 'sw-hspacer' }));
-    _adopt(header, document.getElementById('xaiVoiceOutputToggle'));   // reparent the wired control
-    var menuBtn = _swEl('button', { type: 'button', 'class': 'sw-hbtn sw-dev-only' }, 'MENU');
-    menuBtn.addEventListener('click', function () { _swClickCmd('open-system'); });
-    header.appendChild(menuBtn);
-    var exitBtn = _swEl('button', { type: 'button', 'class': 'sw-hbtn sw-exit' }, 'EXIT');
-    exitBtn.addEventListener('click', exitShadowWatchReport);
-    header.appendChild(exitBtn);
-
-    // 3. Nav (desktop rail + mobile bottom)
-    _swBuildNav(rail, 'sw-navbtn');
-    _swBuildNav(bottom, 'sw-navbtn');
-
-    // 4. Main grid slots
-    var hero        = _swEl('div', { 'class': 'sw-hero' });
-    var heroSide    = _swEl('div', { 'class': 'sw-hero-side' });
-    var statusRow   = _swEl('div', { 'class': 'sw-statusrow' });
-    var instruments = _swEl('div', { 'class': 'sw-instruments sw-panel', id: 'swInstruments' });
-    var feed        = _swEl('div', { 'class': 'sw-feed sw-panel',        id: 'swFeed' });
-    var network     = _swEl('div', { 'class': 'sw-network sw-panel',     id: 'swNetwork' });
-    var repevid     = _swEl('div', { 'class': 'sw-repevid sw-panel',     id: 'swRepEvid' });
-    var downloads   = _swEl('div', { 'class': 'sw-downloads sw-panel',   id: 'swDownloads' });
-    [hero, heroSide, statusRow, instruments, feed, network, repevid, downloads].forEach(function (s) { main.appendChild(s); });
-
-    // 4a. hero = the entire live command room (moved whole → all engine wiring intact)
-    _adopt(hero, room);
-    if (legacyHero) legacyHero.style.display = 'none';
-    if (legacyOrb)  legacyOrb.style.display  = 'none';
-    // 4b. hero-side = live scan log (moved by reference)
-    _adopt(heroSide, document.getElementById('cmdLogPane'));
-
-    // Test-only injection point for the transactional-rollback gate.
-    if (window.__swDashForceFail) throw new Error('forced adopter failure (test)');
-
-    // 4c. status cells (static template; values set via textContent later)
-    statusRow.innerHTML =
-      _swCell('swCellMode', 'MODE', 'READY') + _swCell('swCellWallets', 'WALLETS', '0') +
-      _swCell('swCellQueue', 'QUEUE', '0') + _swCell('swCellHelpers', 'HELPERS', '0') +
-      _swCell('swCellErrors', 'ERRORS', '0') + _swCell('swCellConn', 'LINK', '—');
-
-    // 4d. panel scaffolds (static trusted templates; dynamic content via DOM builders)
-    instruments.innerHTML =
-      '<div class="sw-panel-title"><span><span class="sw-dot"></span>LIVE SCAN INSTRUMENTS</span></div>' +
-      '<div class="sw-gaugerow" id="swGauges"></div>' +
-      '<div class="sw-meter" id="swMeter"></div>' +
-      '<div class="sw-tilerow" id="swTiles"></div>';
-    feed.innerHTML =
-      '<div class="sw-panel-title"><span><span class="sw-dot"></span>LIVE ACTIVITY FEED</span></div>' +
-      '<div id="swFeedList"></div>';
-    network.innerHTML =
-      '<div class="sw-panel-title"><span><span class="sw-dot"></span>NETWORK OVERVIEW</span></div>' +
-      '<div id="swNetList"></div>';
-    repevid.innerHTML =
-      '<div class="sw-panel-title"><span><span class="sw-dot"></span>REPORT &amp; EVIDENCE</span></div>' +
-      '<div id="swRepBody"></div>';
-    var openBtn = _swEl('button', { 'class': 'sw-cardbtn', type: 'button' }, 'READ LATEST REPORT');
-    openBtn.addEventListener('click', function () { _swClickCmd('read-report'); });
-    repevid.appendChild(openBtn);
-    downloads.innerHTML =
-      '<div class="sw-panel-title"><span><span class="sw-dot"></span>DAILY REPORTS &amp; DOWNLOADS</span></div>';
-    // Public-safe morning exports stay public; Total + Full Debug are dev-gated
-    // (marked .sw-dev-only; _swApplyDevGate hides them unless the 9-tap unlock is active).
-    [['copy-morning', 'Copy Morning Report', false], ['download-morning', 'Download Morning Report', false],
-     ['download-total', 'Download Total Report', true], ['download-debug', 'Download Full Debug', true]].forEach(function (row) {
-      var b = _swEl('button', { 'class': 'sw-cardbtn' + (row[2] ? ' sw-dev-only' : ''), type: 'button' }, row[1]);
-      b.addEventListener('click', function () { _swClickCmd(row[0]); });
-      downloads.appendChild(b);
-    });
-
-    // 5. Report viewer full-width at the bottom of the grid (moved by reference)
-    var reportPane = document.getElementById('cmdReportPane');
-    if (reportPane) { _record(reportPane); reportPane.style.gridColumn = 'span 12'; main.appendChild(reportPane); }
-
-    // 6. Mount the shell, THEN activate the flag + mark applied (transactional order)
-    cmd.insertBefore(dash, cmd.firstChild);
-    document.body.classList.add('sw-dash-v1');
-    window.__swDashApplied = true;
-    _swApplyDevGate();
-    renderDashboardV1();
-  } catch (e) {
-    try { console.error('[sw-dash] applyDashboardLayoutV1 failed — rolling back:', e); } catch (_) {}
-    // Roll back every move (reverse order), restore legacy display, drop partial shell + flag.
-    for (var i = moves.length - 1; i >= 0; i--) {
-      try { if (moves[i].parent) moves[i].parent.insertBefore(moves[i].node, moves[i].next); } catch (_) {}
-    }
-    try { if (legacyHero) legacyHero.style.display = legacyHeroDisp || ''; } catch (_) {}
-    try { if (legacyOrb)  legacyOrb.style.display  = legacyOrbDisp  || ''; } catch (_) {}
-    try { if (dash && dash.parentNode) dash.parentNode.removeChild(dash); } catch (_) {}
-    try { document.body.classList.remove('sw-dash-v1'); } catch (_) {}
-    window.__swDashApplied = false;
-  }
-}
-
-// ── XSS-safe DOM builders — dynamic values NEVER string-interpolated into
-//    innerHTML; they enter the DOM only via textContent / setAttribute. ──
-function _swClear(el) { while (el && el.firstChild) el.removeChild(el.firstChild); }
-function _swEmpty(text) { var d = document.createElement('div'); d.className = 'sw-empty'; d.textContent = String(text); return d; }
-function _swMkRow(labelText, valueText, opts) {
-  opts = opts || {};
-  var row = document.createElement('div'); row.className = 'sw-feed-row';
-  var body = document.createElement('div'); body.className = 'sw-feed-body';
-  var lbl = document.createElement('div'); lbl.className = 'sw-feed-detail';
-  lbl.style.color = 'var(--sw-text-muted)'; lbl.textContent = String(labelText);
-  body.appendChild(lbl);
-  var val = document.createElement('div'); val.className = 'sw-feed-title';
-  if (opts.nowrap) val.style.whiteSpace = 'nowrap';
-  if (opts.color) val.style.color = opts.color;
-  val.textContent = String(valueText);
-  row.appendChild(body); row.appendChild(val);
-  return row;
-}
-// ── internal-access gate: reuse the existing 9-tap developer unlock; do NOT
-//    create a second access system, do NOT weaken PUBLIC_SHELL_v1. ──
+// Internal access gate — reuses the existing 9-tap developer unlock.
 function _swDevUnlocked() {
   try { return !!(window.SW_PUBLIC_SHELL && typeof window.SW_PUBLIC_SHELL.unlocked === 'function' && window.SW_PUBLIC_SHELL.unlocked()); }
   catch (_) { return false; }
 }
 function _swApplyDevGate() {
   try {
-    var on = _swDevUnlocked();
-    var els = document.querySelectorAll('#swDash .sw-dev-only');
+    var on = _swDevUnlocked(), els = document.querySelectorAll('#swDash .sw-dev-only');
     for (var i = 0; i < els.length; i++) els[i].style.display = on ? '' : 'none';
   } catch (_) {}
 }
-// ── helpers count: the SAME canonical source the status strip uses ──
+// In-flight helper count (used by the legacy hidden status strip only).
 function _xaiHelpersCount() {
   try { var HP = window.SHADOW_HELPER_POOL; return (HP && Array.isArray(HP.activeJobs)) ? HP.activeJobs.length : 0; }
   catch (_) { return 0; }
 }
 if (typeof window !== 'undefined') window._xaiHelpersCount = _xaiHelpersCount;
-function _swScanning() {
-  var b = document.body.classList;
-  return b.contains('scanning') || b.contains('building');
-}
 
-// Cheap live refresh — header + status cells + INSTRUMENTS from live sources.
-// Piggybacks the status-strip 4s tick AND _renderMissionUI progress ticks
-// (no new timer), so gauges/telemetry advance DURING the scan.
-function renderDashboardV1Live() {
-  if (!window.__swDashApplied) return;
+// ── HELPER JOBS — run-local completed / created ──────────────────
+//  activeJobs.length is a short-lived in-flight counter (jobs are removed the
+//  moment they finish) and the pool only starts AFTER the report is sealed, so
+//  it reads 0 almost always. SHADOW_HELPER_POOL.stats is session-cumulative, so
+//  we snapshot a baseline when a run starts and report deltas for THAT run.
+//  We never mutate HP.stats — the baseline lives here.
+var _SW_HELPER_RUN = null;   // { base:{created,completed,failed} }
+function _swHelperStats() {
   try {
-    var p  = (typeof state !== 'undefined' && state.pack) ? state.pack : null;
-    var SP = (typeof window !== 'undefined') ? window.XAI_SCAN_PROGRESS : null;
-    var scanning = _swScanning();
-    var DASH = '—';
-    // header
-    var txLive = (typeof state !== 'undefined' && Array.isArray(state.txs)) ? state.txs.length : 0;
-    _swSetText('swHConn', _swLink());
-    _swSetText('swHMode', _swMode());
-    _swSetText('swHLedger', txLive ? String(txLive) : (p ? String(n(p.tx_24h_count)) : DASH));
-    // status cells
-    var wTotal = (typeof KNOWN !== 'undefined') ? Object.keys(KNOWN).length
-               : (typeof WATCHLIST !== 'undefined' ? WATCHLIST.length : 0);
-    var wChecked = (scanning && SP && SP.walletsTotal > 0) ? SP.walletsChecked : (p ? n(p.wallets_checked) : 0);
-    var qSize = (window.SHADOW_BLOOM_QUEUE && typeof window.SHADOW_BLOOM_QUEUE.size === 'function') ? window.SHADOW_BLOOM_QUEUE.size() : 0;
-    var errs  = (typeof state !== 'undefined' && Array.isArray(state.errorLog)) ? state.errorLog.length : 0;
-    _swSetText('swCellMode', _swMode());
-    _swSetText('swCellWallets', wChecked + '/' + wTotal);
-    _swSetText('swCellQueue', String(qSize));
-    _swSetText('swCellHelpers', String(_xaiHelpersCount()));
-    _swSetText('swCellErrors', String(errs));
-    _swSetText('swCellConn', _swLink());
-    // live instruments + access gate
-    _swRenderInstruments(p, SP, scanning);
-    _swApplyDevGate();
+    var s = (window.SHADOW_HELPER_POOL && window.SHADOW_HELPER_POOL.stats) || null;
+    if (!s) return null;
+    return { created: Number(s.jobs_created) || 0, completed: Number(s.jobs_completed) || 0, failed: Number(s.jobs_failed) || 0 };
+  } catch (_) { return null; }
+}
+// Shared formatter — the single source for every visible HELPER JOBS readout.
+function _swHelperJobs() {
+  var now = _swHelperStats();
+  if (!now || !_SW_HELPER_RUN) return { text: '—', title: 'No helper run yet this session', failed: 0 };
+  var b = _SW_HELPER_RUN.base;
+  var created = Math.max(0, now.created - b.created);
+  var completed = Math.max(0, now.completed - b.completed);
+  var failed = Math.max(0, now.failed - b.failed);
+  if (created === 0) return { text: '—', title: 'Helper run started with no queued candidates', failed: 0 };
+  var title = completed + ' of ' + created + ' helper jobs completed this run';
+  if (failed > 0) title += ' · ' + failed + ' failed (not counted as completed)';
+  return { text: completed + ' / ' + created, title: title, failed: failed };
+}
+function _swRenderHelperJobs() {
+  var h = _swHelperJobs();
+  ['swCellHelpers', 'swMiniHelpers'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = h.text;                       // XSS-safe
+    el.setAttribute('title', h.title);
+    el.setAttribute('aria-label', 'Helper jobs: ' + h.title);
+    el.style.color = h.failed > 0 ? 'var(--sw-gold)' : '';
+  });
+}
+// Event-driven refresh — no new polling timer.
+(function _swWireHelperEvents() {
+  try {
+    var BUS = window.SHADOW_EVENT_BUS;
+    if (!BUS || typeof BUS.on !== 'function') return;
+    BUS.on('shadow.helper_pool.started', function () {
+      var s = _swHelperStats();
+      _SW_HELPER_RUN = { base: s || { created: 0, completed: 0, failed: 0 } };
+      _swRenderHelperJobs();
+    });
+    ['shadow.helper_job.created', 'shadow.helper_job.started', 'shadow.helper_job.completed',
+     'shadow.helper_job.failed', 'shadow.helper_pool.completed'].forEach(function (ev) {
+      BUS.on(ev, function () { _swRenderHelperJobs(); });
+    });
   } catch (_) {}
+})();
+
+// ── static icon set (no dynamic data ever enters these strings) ──
+var _SW_ICONS = {
+  home:'<path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  live:'<path d="M2 12h4l3-8 4 16 3-8h6"/>',
+  map:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9S14.5 18.3 12 21c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/>',
+  graph:'<path d="M4 20V10M9 20V4M14 20v-7M19 20V7"/>',
+  hvt:'<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>',
+  report:'<path d="M6 2h8l4 4v16H6z"/><path d="M14 2v5h5M9 13h7M9 17h5"/>',
+  menu:'<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+  settings:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>',
+  help:'<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.3 2.4c-.6.2-.8.7-.8 1.3v.6"/><circle cx="12" cy="17" r="0.9" fill="currentColor"/>',
+  bars:'<path d="M4 6h16M4 12h16M4 18h16"/>',
+  wallet:'<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M17 14h.01"/>',
+  list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  user:'<circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/>',
+  alert:'<path d="M12 3l9.5 17H2.5z"/><path d="M12 9v5M12 17h.01"/>',
+  shield:'<path d="M12 2l8 3.5v6c0 5-3.4 9-8 10.5C7.4 20.5 4 16.5 4 11.5v-6z"/>',
+  target:'<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/>',
+  doc:'<path d="M6 2h8l4 4v16H6z"/><path d="M14 2v5h5"/>',
+  folder:'<path d="M3 6h6l2 3h10v11H3z"/>',
+  dl:'<path d="M12 3v11M7.5 10L12 14.5 16.5 10M4 20h16"/>',
+  chev:'<path d="M9 5l7 7-7 7"/>',
+  arrow:'<path d="M4 12h15M13 6l6 6-6 6"/>',
+  vol:'<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9.5a4 4 0 0 1 0 5"/>',
+  power:'<path d="M12 3v9"/><path d="M7.2 7.5A7.5 7.5 0 1 0 16.8 7.5"/>',
+  pulse:'<path d="M2 12h4l3-7 4 14 3-7h6"/>',
+  coin:'<circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h4a1.8 1.8 0 0 1 0 3.6h-3a1.8 1.8 0 0 0 0 3.6h4"/>',
+  whale:'<path d="M3 14c3 0 3-3 6-3s3 3 6 3 3-3 6-3"/><path d="M4 18c3 0 4-2 8-2s5 2 8 2"/>',
+  eye:'<path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/>'
+};
+function _swIcon(name, cls) {
+  return '<svg viewBox="0 0 24 24" aria-hidden="true"' + (cls ? ' class="' + cls + '"' : '') + '>' + (_SW_ICONS[name] || '') + '</svg>';
+}
+var SW_NAV_ITEMS = [
+  { id:'home', label:'HOME', icon:'home' }, { id:'live', label:'LIVE', icon:'live' },
+  { id:'map', label:'MAP', icon:'map' }, { id:'graph', label:'GRAPH', icon:'graph' },
+  { id:'hvt', label:'HVT', icon:'hvt' }, { id:'report', label:'REPORT', icon:'report' }
+];
+var SW_NAV_MOBILE = ['home','live','map','graph'];
+function _swNavBtn(it, on) {
+  var b = _swEl('button', { type:'button', 'class':'sw-navbtn' + (on ? ' sw-on' : ''), 'data-swnav':it.id },
+    _swIcon(it.icon) + '<span></span>');
+  b.querySelector('span').textContent = it.label;
+  b.addEventListener('click', function () { swNav(it.id); });
+  return b;
 }
 
-// Full render — live + feed + network + report/evidence (post-scan panels).
-function renderDashboardV1() {
-  if (!window.__swDashApplied) return;
+// ═══════════════ COCKPIT DOM (built detached) ═══════════════
+function _swBuildCockpit() {
+  var dash = _swEl('div', { id:'swDash' });
+
+  // ── header ──
+  var header = _swEl('header', { id:'swDashHeader' });
+  header.appendChild(_swEl('div', { 'class':'sw-brandwrap' },
+    '<svg class="sw-brandmark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="#00FF00" stroke-width="1.6"/><circle cx="12" cy="12" r="4.5" fill="none" stroke="#00FF00" stroke-width="2"/><circle cx="12" cy="12" r="1.6" fill="#00FF00"/></svg>' +
+    '<span class="sw-brand">SHADOW<b>WATCH</b></span>'));
+  var chip = _swEl('span', { 'class':'sw-chip' }, '<span class="sw-chipdot"></span><span>XRPMAN</span>');
+  header.appendChild(chip);
+  header.appendChild(_swEl('div', { 'class':'sw-hsep' }));
+  header.appendChild(_swEl('div', { 'class':'sw-hstat' }, '<span>Connection</span><b id="swHConn" class="sw-live">Standby</b>'));
+  header.appendChild(_swEl('div', { 'class':'sw-hsep' }));
+  header.appendChild(_swEl('div', { 'class':'sw-hstat' }, '<span>Ledger TX</span><b id="swHLedger">—</b>'));
+  header.appendChild(_swEl('div', { 'class':'sw-hsep' }));
+  header.appendChild(_swEl('div', { 'class':'sw-hstat' }, '<span>Scan Mode</span><b id="swHMode">Shadow Scan</b>'));
+  header.appendChild(_swEl('div', { 'class':'sw-hspacer' }));
+  var menuBtn = _swEl('button', { type:'button', 'class':'sw-hbtn sw-dev-only' }, _swIcon('bars') + '<span class="sw-hbtn-t">MENU</span>');
+  menuBtn.addEventListener('click', function () { _swClickCmd('open-system'); });
+  header.appendChild(menuBtn);
+  var exitBtn = _swEl('button', { type:'button', 'class':'sw-hbtn sw-exit' },
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg><span class="sw-hbtn-t">EXIT</span>');
+  exitBtn.addEventListener('click', exitShadowWatchReport);
+  header.appendChild(exitBtn);
+  dash.appendChild(header);
+
+  // ── left rail ──
+  var rail = _swEl('nav', { id:'swDashRail', 'aria-label':'Shadow Watch sections' });
+  SW_NAV_ITEMS.forEach(function (it, i) { rail.appendChild(_swNavBtn(it, i === 0)); });
+  var menuNav = _swEl('button', { type:'button', 'class':'sw-navbtn sw-dev-only' }, _swIcon('menu') + '<span>MENU</span>');
+  menuNav.addEventListener('click', function () { _swClickCmd('open-system'); });
+  rail.appendChild(menuNav);
+  rail.appendChild(_swEl('div', { 'class':'sw-railspacer' }));
+  var setBtn = _swEl('button', { type:'button', 'class':'sw-navbtn sw-dev-only' }, _swIcon('settings') + '<span>SETTINGS</span>');
+  setBtn.addEventListener('click', function () { _swClickCmd('open-system'); });
+  rail.appendChild(setBtn);
+  var helpBtn = _swEl('button', { type:'button', 'class':'sw-navbtn' }, _swIcon('help') + '<span>HELP</span>');
+  helpBtn.addEventListener('click', function () { _swClickCmd('read-report'); });
+  rail.appendChild(helpBtn);
+  dash.appendChild(rail);
+
+  // ── main ──
+  var main = _swEl('div', { id:'swDashMain' });
+
+  // Row 1 — reactor core + action card
+  var rowReactor = _swEl('div', { 'class':'sw-row-reactor' });
+  var reactorPanel = _swEl('section', { 'class':'sw-panel' });
+  var reactor = _swEl('div', { 'class':'sw-reactor' });
+  var rLeft = _swEl('div', { 'class':'sw-reactor-left' },
+    '<div class="sw-reactor-head"><div><div class="sw-reactor-ttl">REACTOR CORE // SHADOW SCAN</div>' +
+    '<div class="sw-reactor-phase" id="swReactorPhase">IDLE</div></div>' +
+    '<div class="sw-reactor-pct" id="swReactorPct">0%</div></div>' +
+    '<div class="sw-segbar" id="swSegBar"></div>' +
+    '<div class="sw-reactor-next" id="swReactorNext">NEXT: RUN MORNING SCAN</div>');
+  var rRight = _swEl('div', { 'class':'sw-minigrid' },
+    '<div class="sw-mini"><span>Mode</span><b id="swMiniMode">READY</b></div>' +
+    '<div class="sw-mini"><span>Wallets</span><b id="swMiniWallets">0</b></div>' +
+    '<div class="sw-mini"><span>Queue</span><b id="swMiniQueue">0</b></div>' +
+    '<div class="sw-mini"><span>Helper Jobs</span><b id="swMiniHelpers">—</b></div>' +
+    '<div class="sw-mini"><span>Errors</span><b id="swMiniErrors">0</b></div>');
+  var runBtn = _swEl('button', { type:'button', 'class':'sw-cardbtn', id:'swRunBtn', style:'margin-top:0' }, 'RUN SCAN');
+  runBtn.addEventListener('click', function () { if (!_swScanning()) _swClickCmd('run-scan'); });
+  var runCell = _swEl('div', { 'class':'sw-mini' }); runCell.appendChild(runBtn);
+  rRight.appendChild(runCell);
+  rRight.appendChild(_swEl('div', { 'class':'sw-scanstatus' },
+    _swIcon('pulse') + '<div><span>Scan Status</span><b id="swScanStatus">Standing by</b></div>'));
+  reactor.appendChild(rLeft); reactor.appendChild(rRight);
+  reactorPanel.appendChild(reactor);
+  rowReactor.appendChild(reactorPanel);
+
+  var actionPanel = _swEl('section', { 'class':'sw-panel sw-actionpanel' });
+  var readBtn = _swEl('button', { type:'button', 'class':'sw-readbtn' },
+    _swIcon('doc') + '<span><span class="sw-rb-t">Read Latest Report</span>' +
+    '<span class="sw-rb-s">View the most recent intel report</span></span>' +
+    '<span class="sw-rb-arrow">' + _swIcon('chev') + '</span>');
+  readBtn.addEventListener('click', function () { _swClickCmd('read-report'); });
+  actionPanel.appendChild(readBtn);
+  var voiceRow = _swEl('button', { type:'button', 'class':'sw-voicerow', id:'swVoiceRow', 'data-on':'false' },
+    _swIcon('vol') + '<span class="sw-vl">Voice Output</span><span class="sw-vs" id="swVoiceState">OFF</span><span class="sw-switch"></span>');
+  voiceRow.addEventListener('click', function () {
+    try { var t = document.getElementById('xaiVoiceOutputToggle'); if (t) t.click(); } catch (_) {}
+    setTimeout(function () { try { renderDashboardV1Live(); } catch (_) {} }, 30);
+  });
+  actionPanel.appendChild(voiceRow);
+  rowReactor.appendChild(actionPanel);
+  main.appendChild(rowReactor);
+
+  // Row 2 — status strip
+  var strip = _swEl('div', { 'class':'sw-statusstrip' });
+  [['wallet','Wallets','swCellWallets',''], ['list','Queue','swCellQueue',''],
+   ['user','Helper Jobs','swCellHelpers',''], ['alert','Errors','swCellErrors','sw-warn'],
+   ['shield','Risk Score','swCellRisk','sw-gold'], ['target','Coverage','swCellCoverage','']
+  ].forEach(function (c) {
+    var cell = _swEl('div', { 'class':'sw-scell' + (c[3] ? ' ' + c[3] : '') },
+      _swIcon(c[0]) + '<div class="sw-sc-b"><span></span><b id="' + c[2] + '">—</b></div>');
+    cell.querySelector('span').textContent = c[1];
+    strip.appendChild(cell);
+  });
+  main.appendChild(strip);
+
+  // Row 3 — three columns
+  var cols = _swEl('div', { 'class':'sw-row-cols' });
+
+  var instruments = _swEl('section', { 'class':'sw-panel', id:'swInstruments' },
+    '<div class="sw-panel-title"><span class="sw-t"><span class="sw-dot"></span>LIVE SCAN INSTRUMENTS</span></div>' +
+    '<div class="sw-gaugerow" id="swGauges"></div><div id="swMeter"></div><div class="sw-tilerow" id="swTiles"></div>');
+  cols.appendChild(instruments);
+
+  var feed = _swEl('section', { 'class':'sw-panel', id:'swFeed' },
+    '<div class="sw-panel-title"><span class="sw-t"><span class="sw-dot"></span>LIVE ACTIVITY FEED</span>' +
+    '<span class="sw-tag">REAL-TIME</span></div><div class="sw-scroll" id="swFeedList"></div>');
+  cols.appendChild(feed);
+
+  var col3 = _swEl('div', { 'class':'sw-col3' });
+  var network = _swEl('section', { 'class':'sw-panel', id:'swNetwork' },
+    '<div class="sw-panel-title"><span class="sw-t"><span class="sw-dot"></span>NETWORK OVERVIEW</span>' +
+    '<span class="sw-tag">NODE MAP</span></div>' +
+    '<div class="sw-netwrap"><div class="sw-netmap" id="swNetMap"></div>' +
+    '<div class="sw-netlegend">' +
+    '<span class="sw-leg"><i style="background:#00FF00"></i>Watched</span>' +
+    '<span class="sw-leg"><i style="background:#00D9FF"></i>Discovered</span>' +
+    '<span class="sw-leg"><i style="background:#FF4D4D"></i>High Risk</span>' +
+    '<span class="sw-leg"><i style="background:#5A6B65"></i>Unknown</span></div></div>');
+  var viewMap = _swEl('button', { type:'button', 'class':'sw-cardbtn' }, 'VIEW MAP');
+  viewMap.addEventListener('click', function () { swNav('map'); });
+  network.appendChild(viewMap);
+  col3.appendChild(network);
+
+  var col3b = _swEl('div', { 'class':'sw-col3-bottom' });
+  var repevid = _swEl('section', { 'class':'sw-panel', id:'swRepEvid' },
+    '<div class="sw-panel-title"><span class="sw-t"><span class="sw-dot"></span>REPORT &amp; EVIDENCE</span>' +
+    '<span class="sw-tag">LATEST</span></div><div id="swRepBody"></div>');
+  var viewAll = _swEl('button', { type:'button', 'class':'sw-cardbtn' }, 'VIEW ALL');
+  viewAll.addEventListener('click', function () { _swClickCmd('read-report'); });
+  repevid.appendChild(viewAll);
+  col3b.appendChild(repevid);
+
+  var downloads = _swEl('section', { 'class':'sw-panel', id:'swDownloads' },
+    '<div class="sw-panel-title"><span class="sw-t"><span class="sw-dot"></span>DAILY REPORTS &amp; DOWNLOADS</span>' +
+    '<span class="sw-tag">TODAY</span></div><div id="swDlBody"></div>');
+  col3b.appendChild(downloads);
+  col3.appendChild(col3b);
+  cols.appendChild(col3);
+  main.appendChild(cols);
+  dash.appendChild(main);
+
+  // ── footer ──
+  dash.appendChild(_swEl('footer', { id:'swDashFooter' },
+    '<span>STATUS: <b id="swFootStatus">Standing by</b></span>' +
+    '<span class="sw-foot-r" id="swFootVer"></span>'));
+
+  // ── mobile bottom nav ──
+  var bottom = _swEl('nav', { id:'swDashBottomNav', 'aria-label':'Shadow Watch sections' });
+  SW_NAV_ITEMS.filter(function (i) { return SW_NAV_MOBILE.indexOf(i.id) >= 0; })
+    .forEach(function (it, i) { bottom.appendChild(_swNavBtn(it, i === 0)); });
+  var mMenu = _swEl('button', { type:'button', 'class':'sw-navbtn sw-dev-only' }, _swIcon('menu') + '<span>MENU</span>');
+  mMenu.addEventListener('click', function () { _swClickCmd('open-system'); });
+  bottom.appendChild(mMenu);
+  dash.appendChild(bottom);
+
+  return dash;
+}
+
+// ═══════════════ TRANSACTIONAL ADOPTION ═══════════════
+var _SW_LEGACY_SEL = ['#xrpmanAiCommandRoom', '#cmdLogPane', '#cmdReportPane', '.cmd-hero', '.cmd-orb-wrap'];
+function applyDashboardLayoutV1() {
+  if (window.__swDashApplied) return;
+  var cmd = document.getElementById('screen-command');
+  var room = document.getElementById('xrpmanAiCommandRoom');
+  if (!cmd || !room) return;                      // nothing to adopt — leave engine untouched
+  var hidden = [], dash = null;
   try {
-    var p = (typeof state !== 'undefined' && state.pack) ? state.pack : null;
-    var risk = (p && p.risk_score) || (typeof state !== 'undefined' ? state.riskScore : null) || null;
-    renderDashboardV1Live();
-    _swRenderFeed(p);
-    _swRenderNetwork(p);
-    _swRenderRepEvid(p, risk);
-  } catch (e) { try { console.error('[sw-dash] render failed:', e); } catch (_) {} }
-}
-if (typeof window !== 'undefined') {
-  window.renderDashboardV1 = renderDashboardV1;
-  window.renderDashboardV1Live = renderDashboardV1Live;
+    dash = _swBuildCockpit();                     // built fully detached
+    if (window.__swDashForceFail) throw new Error('forced adopter failure (test)');
+    // Hide the legacy interface (kept live in the DOM as the engine host + fallback)
+    _SW_LEGACY_SEL.forEach(function (sel) {
+      var els = cmd.querySelectorAll(sel);
+      for (var i = 0; i < els.length; i++) { els[i].classList.add('sw-legacy-hidden'); hidden.push(els[i]); }
+    });
+    cmd.insertBefore(dash, cmd.firstChild);
+    document.body.classList.add('sw-dash-v1');
+    window.__swDashApplied = true;
+    _swApplyDevGate();
+    renderDashboardV1();
+  } catch (e) {
+    try { console.error('[sw-cockpit] adopt failed — restoring legacy interface:', e); } catch (_) {}
+    for (var i = 0; i < hidden.length; i++) { try { hidden[i].classList.remove('sw-legacy-hidden'); } catch (_) {} }
+    try { if (dash && dash.parentNode) dash.parentNode.removeChild(dash); } catch (_) {}
+    try { document.body.classList.remove('sw-dash-v1'); } catch (_) {}
+    window.__swDashApplied = false;
+  }
 }
 
-// SVG donut gauge, built as a DOM element. frac (0..1) drives the arc; valText
-// is the exact readout — dynamic values enter ONLY via textContent/setAttribute.
-var _SW_GAUGE_C = 2 * Math.PI * 44;   // circumference for r=44
-var _SW_SVGNS = 'http://www.w3.org/2000/svg';
-function _swRiskColor(score) {
-  if (score >= 70) return 'var(--sw-red)';
-  if (score >= 40) return 'var(--sw-gold)';
-  return 'var(--sw-green)';
+// ═══════════════ RENDERERS (real state only) ═══════════════
+function _swReadPct() {
+  try {
+    var el = document.getElementById('xaiMissionPct');
+    var m = el && /(\d+)/.exec(el.textContent || '');
+    if (m) return Math.max(0, Math.min(100, parseInt(m[1], 10)));
+  } catch (_) {}
+  return 0;
 }
-function _swGauge(id, lbl, valText, frac, color) {
+var _SW_SEGS = 26;
+function _swRenderReactor() {
+  var pct = _swReadPct();
+  _swSetText('swReactorPct', pct + '%');
+  var stepEl = document.getElementById('xaiMissionStep');
+  _swSetText('swReactorPhase', (stepEl && (stepEl.textContent || '').trim()) || (_swScanning() ? 'SCANNING' : 'IDLE'));
+  var nextEl = document.getElementById('xaiNextStep');
+  _swSetText('swReactorNext', (nextEl && (nextEl.textContent || '').trim()) || 'NEXT: RUN MORNING SCAN');
+  _swSetText('swScanStatus', _swScanStatusText());
+  _swSetText('swFootStatus', _swScanStatusText());
+  var bar = document.getElementById('swSegBar');
+  if (bar) {
+    if (bar.childNodes.length !== _SW_SEGS) {
+      _swClear(bar);
+      for (var i = 0; i < _SW_SEGS; i++) bar.appendChild(_swEl('div', { 'class':'sw-seg' }));
+    }
+    var lit = Math.round((pct / 100) * _SW_SEGS);
+    for (var j = 0; j < _SW_SEGS; j++) {
+      var seg = bar.childNodes[j], on = j < lit;
+      // cyan → green → gold across the bar (matches the reference gradient)
+      var t = j / Math.max(1, _SW_SEGS - 1);
+      seg.style.background = on ? (t < 0.42 ? 'var(--sw-cyan)' : (t < 0.72 ? 'var(--sw-green)' : 'var(--sw-gold)')) : '#141B1F';
+      seg.style.boxShadow = on ? '0 0 6px rgba(0,255,0,.25)' : 'none';
+    }
+  }
+  var rb = document.getElementById('swRunBtn');
+  if (rb) { var busy = _swScanning(); rb.textContent = busy ? 'SCANNING…' : 'RUN SCAN'; rb.disabled = busy; rb.style.opacity = busy ? '.5' : '1'; }
+  var vr = document.getElementById('swVoiceRow');
+  if (vr) {
+    var t2 = document.getElementById('xaiVoiceOutputToggle');
+    var on2 = !!(t2 && t2.getAttribute('data-voice-on') === 'true');
+    vr.setAttribute('data-on', on2 ? 'true' : 'false');
+    _swSetText('swVoiceState', on2 ? 'ON' : 'OFF');
+  }
+}
+// semicircular gauge with needle (matches the reference instruments)
+var _SW_ARC_LEN = Math.PI * 48;
+function _swGauge(lbl, valText, subText, frac, color) {
   var f = Math.max(0, Math.min(1, Number(frac) || 0));
-  var dash = (f * _SW_GAUGE_C).toFixed(1) + ' ' + _SW_GAUGE_C.toFixed(1);
-  var arcCol = color || 'var(--sw-green)';
-  var vt = String(valText);
-  var fs = vt.length > 5 ? 13 : (vt.length > 3 ? 16 : 20);
-  var wrap = document.createElement('div'); wrap.className = 'sw-gauge';
-  var svg = document.createElementNS(_SW_SVGNS, 'svg');
-  svg.setAttribute('viewBox', '0 0 100 100'); svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', lbl + ' ' + vt);          // setAttribute — never parses HTML
-  var track = document.createElementNS(_SW_SVGNS, 'circle');
-  track.setAttribute('class', 'sw-gauge-track');
-  track.setAttribute('cx', '50'); track.setAttribute('cy', '50'); track.setAttribute('r', '44');
-  track.setAttribute('fill', 'none'); track.setAttribute('stroke-width', '8');
-  var arc = document.createElementNS(_SW_SVGNS, 'circle');
-  arc.setAttribute('class', 'sw-gauge-arc'); if (id) arc.setAttribute('id', id);
-  arc.setAttribute('cx', '50'); arc.setAttribute('cy', '50'); arc.setAttribute('r', '44');
-  arc.setAttribute('fill', 'none'); arc.setAttribute('stroke', arcCol); arc.setAttribute('stroke-width', '8');
-  arc.setAttribute('stroke-linecap', 'round'); arc.setAttribute('stroke-dasharray', dash);
-  arc.setAttribute('transform', 'rotate(-90 50 50)');
-  var txt = document.createElementNS(_SW_SVGNS, 'text');
-  txt.setAttribute('class', 'sw-gauge-svgval'); txt.setAttribute('x', '50'); txt.setAttribute('y', '50');
-  txt.setAttribute('text-anchor', 'middle'); txt.setAttribute('dominant-baseline', 'central');
-  txt.setAttribute('style', 'font-size:' + fs + 'px;fill:' + arcCol);
-  txt.textContent = vt;
-  svg.appendChild(track); svg.appendChild(arc); svg.appendChild(txt);
-  var lblDiv = document.createElement('div'); lblDiv.className = 'sw-gauge-lbl'; lblDiv.textContent = lbl;
-  wrap.appendChild(svg); wrap.appendChild(lblDiv);
+  var wrap = _swEl('div', { 'class':'sw-gauge' });
+  var cap = _swEl('div', { 'class':'sw-gauge-cap' }); cap.textContent = lbl; wrap.appendChild(cap);
+  var ang = Math.PI * (1 - f);
+  var nx = (60 + 36 * Math.cos(ang)).toFixed(2), ny = (60 - 36 * Math.sin(ang)).toFixed(2);
+  var svg = _swEl('div', {}, '');
+  var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  s.setAttribute('viewBox', '0 0 120 72'); s.setAttribute('role', 'img');
+  s.setAttribute('aria-label', lbl + ' ' + valText);
+  function path(cls, stroke, dash) {
+    var p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('d', 'M 12 60 A 48 48 0 0 1 108 60');
+    p.setAttribute('fill', 'none'); p.setAttribute('stroke-width', '9'); p.setAttribute('stroke-linecap', 'round');
+    p.setAttribute('class', cls); if (stroke) p.setAttribute('stroke', stroke);
+    if (dash) p.setAttribute('stroke-dasharray', dash);
+    return p;
+  }
+  s.appendChild(path('sw-gauge-track', '', ''));
+  s.appendChild(path('sw-gauge-arc', color, (f * _SW_ARC_LEN).toFixed(1) + ' ' + _SW_ARC_LEN.toFixed(1)));
+  var nd = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  nd.setAttribute('x1', '60'); nd.setAttribute('y1', '60'); nd.setAttribute('x2', nx); nd.setAttribute('y2', ny);
+  nd.setAttribute('stroke', color); nd.setAttribute('stroke-width', '2.4'); nd.setAttribute('stroke-linecap', 'round');
+  s.appendChild(nd);
+  var hub = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  hub.setAttribute('cx', '60'); hub.setAttribute('cy', '60'); hub.setAttribute('r', '3.6'); hub.setAttribute('fill', color);
+  s.appendChild(hub);
+  svg.appendChild(s); wrap.appendChild(svg);
+  var v = _swEl('div', { 'class':'sw-gauge-val' }); v.style.color = color; v.textContent = valText; wrap.appendChild(v);
+  var sub = _swEl('div', { 'class':'sw-gauge-sub' }); sub.textContent = subText; wrap.appendChild(sub);
   return wrap;
 }
-function _swTile(lbl, val) {
-  var t = document.createElement('div'); t.className = 'sw-tile';
-  var v = document.createElement('div'); v.className = 'sw-tile-val'; v.textContent = String(val);
-  var l = document.createElement('div'); l.className = 'sw-tile-lbl'; l.textContent = String(lbl);
-  t.appendChild(v); t.appendChild(l); return t;
-}
-// Live-first instruments: values advance mid-scan from real sources; anything
-// not yet available shows WAITING / — (never a manufactured 0).
+function _swRiskColor(s) { return s >= 70 ? 'var(--sw-red)' : (s >= 40 ? 'var(--sw-gold)' : 'var(--sw-green)'); }
 function _swRenderInstruments(p, SP, scanning) {
   var DASH = '—';
   var g = document.getElementById('swGauges');
   if (g) {
-    // coverage — live during scan, else sealed pack, else —
     var checked = null, total = null;
     if (scanning && SP && SP.walletsTotal > 0) { checked = n(SP.walletsChecked); total = n(SP.walletsTotal); }
     else if (p) { checked = n(p.wallets_checked); total = n(p.watchlist_total); }
-    var covTxt  = (checked === null) ? DASH : (checked + '/' + total);
-    var covFrac = (checked !== null && total > 0) ? (checked / total) : 0;
-    // whale — real live count from state.large (may legitimately be 0), else —
+    var covTxt = (checked === null) ? DASH : (checked + ' / ' + total);
+    var covFrac = (checked !== null && total > 0) ? checked / total : 0;
     var largeArr = (typeof state !== 'undefined' && Array.isArray(state.large)) ? state.large
                  : (p && Array.isArray(p.large_transfers) ? p.large_transfers : null);
     var haveWhale = scanning || !!p || (largeArr && largeArr.length > 0);
     var whale = largeArr ? largeArr.length : 0;
-    // risk — real score if present, else WAITING (never fake 0)
     var riskObj = (typeof state !== 'undefined' && state.riskScore) ? state.riskScore : (p && p.risk_score ? p.risk_score : null);
-    var rScore  = riskObj ? n(riskObj.score) : null;
+    var rScore = riskObj ? n(riskObj.score) : null;
     _swClear(g);
-    g.appendChild(_swGauge('swGaugeCoverage', 'WALLET COVERAGE', covTxt, covFrac, 'var(--sw-cyan)'));
-    g.appendChild(_swGauge('swGaugeWhale', 'WHALE ACTIVITY', haveWhale ? String(whale) : DASH, Math.min(1, whale / 10), 'var(--sw-gold)'));
-    g.appendChild(_swGauge('swGaugeRisk', 'ACTIVITY RISK', rScore === null ? 'WAITING' : (rScore + '/100'),
+    g.appendChild(_swGauge('Wallet Coverage', covTxt, 'Scanned this pass', covFrac, 'var(--sw-green)'));
+    g.appendChild(_swGauge('Whale Activity', haveWhale ? _swPad2(whale) : DASH, 'Large transfers', Math.min(1, whale / 10), 'var(--sw-cyan)'));
+    g.appendChild(_swGauge('Activity Risk', rScore === null ? 'WAITING' : (rScore + ' / 100'), 'Elevated signal',
                            rScore === null ? 0 : rScore / 100, rScore === null ? 'var(--sw-text-muted)' : _swRiskColor(rScore)));
   }
   var m = document.getElementById('swMeter');
   if (m) {
     _swClear(m);
-    if (!p) { m.appendChild(_swEmpty('NET WATCHED FLOW · WAITING FOR SCAN')); }
-    else {
+    var box = _swEl('div', { 'class':'sw-netflow' });
+    if (!p) {
+      box.appendChild(_swEl('div', { 'class':'sw-nf-head' }, '<span class="sw-nf-ttl">Net Watched Flow</span>'));
+      var w = _swEl('div', { 'class':'sw-nf-val' }); w.style.color = 'var(--sw-text-muted)'; w.textContent = 'WAITING';
+      box.querySelector('.sw-nf-head').appendChild(w);
+    } else {
       var d = n(p.total_balance_delta_xrp);
       var mag = Math.min(1, Math.abs(d) / 5000000);
-      var pct = 50 + (d >= 0 ? 1 : -1) * mag * 50;
-      var left = Math.min(pct, 50), width = Math.abs(pct - 50);
-      var col = d > 0 ? 'var(--sw-green)' : (d < 0 ? 'var(--sw-red)' : 'var(--sw-text-muted)');
-      var title = document.createElement('div'); title.className = 'sw-panel-title'; title.style.margin = '2px 0 6px';
-      var t1 = document.createElement('span'); t1.textContent = 'NET WATCHED FLOW';
-      var t2 = document.createElement('span'); t2.style.color = col; t2.textContent = (d > 0 ? '+' : '') + fmt(d, 0) + ' XRP';
-      title.appendChild(t1); title.appendChild(t2);
-      var track = document.createElement('div'); track.className = 'sw-meter-track';
-      var zero = document.createElement('div'); zero.className = 'sw-meter-zero';
-      var fill = document.createElement('div'); fill.className = 'sw-meter-fill';
-      fill.style.left = left + '%'; fill.style.width = width + '%';
-      track.appendChild(zero); track.appendChild(fill);
-      m.appendChild(title); m.appendChild(track);
+      var pctp = 50 + (d >= 0 ? 1 : -1) * mag * 50;
+      var left = Math.min(pctp, 50), width = Math.abs(pctp - 50);
+      var col = d > 0 ? 'var(--sw-green)' : (d < 0 ? 'var(--sw-gold)' : 'var(--sw-text-muted)');
+      var head = _swEl('div', { 'class':'sw-nf-head' }, '<span class="sw-nf-ttl">Net Watched Flow</span>');
+      var val = _swEl('span', { 'class':'sw-nf-val' }); val.style.color = col;
+      val.textContent = (d > 0 ? '+' : '') + _swCompact(d) + ' XRP';
+      var dir = _swEl('span', { 'class':'sw-nf-dir' }); dir.textContent = d < 0 ? 'OUTFLOW' : (d > 0 ? 'INFLOW' : 'FLAT');
+      var right = _swEl('span', {}); right.appendChild(val); right.appendChild(document.createTextNode(' ')); right.appendChild(dir);
+      head.appendChild(right); box.appendChild(head);
+      var track = _swEl('div', { 'class':'sw-meter-track' }, '<div class="sw-meter-zero"></div>');
+      var fill = _swEl('div', { 'class':'sw-meter-fill' }); fill.style.left = left + '%'; fill.style.width = width + '%';
+      fill.style.background = col; track.appendChild(fill); box.appendChild(track);
+      box.appendChild(_swEl('div', { 'class':'sw-nf-scale' }, '<span>Outbound</span><span>0</span><span>Inbound</span>'));
     }
+    m.appendChild(box);
   }
   var t = document.getElementById('swTiles');
   if (t) {
@@ -21593,60 +21881,218 @@ function _swRenderInstruments(p, SP, scanning) {
     var txLive = (typeof state !== 'undefined' && Array.isArray(state.txs)) ? state.txs.length : 0;
     var ledgerTx = txLive ? txLive : (p ? n(p.tx_24h_count) : null);
     var shadow = p ? n(p.shadow_volume_xrp) : null;
-    var ev = (p && p.evidence_quality) ? p.evidence_quality : null;
+    var receipts = (typeof state !== 'undefined' && Array.isArray(state.receivers)) ? state.receivers.length
+                 : (p && Array.isArray(p.receiver_followthrough) ? p.receiver_followthrough.length : null);
     _swClear(t);
-    t.appendChild(_swTile('SHADOW VOL', shadow === null ? 'WAITING' : (shadow > 0 ? fmt(shadow, 0) + ' XRP' : '0')));
-    t.appendChild(_swTile('DISCOVERY', String(disc)));
-    t.appendChild(_swTile('EVIDENCE', ev ? (ev.grade + ' · ' + n(ev.score)) : 'WAITING'));
-    t.appendChild(_swTile('LEDGER TX', ledgerTx === null ? 'WAITING' : String(ledgerTx)));
+    function tile(lbl, val, sub, color) {
+      var el = _swEl('div', { 'class':'sw-tile' },
+        '<div class="sw-tile-lbl"></div><div class="sw-tile-val"></div><div class="sw-tile-sub"></div>');
+      el.querySelector('.sw-tile-lbl').textContent = lbl;
+      var v = el.querySelector('.sw-tile-val'); v.textContent = val; if (color) v.style.color = color;
+      el.querySelector('.sw-tile-sub').textContent = sub;
+      return el;
+    }
+    t.appendChild(tile('Shadow Volume', shadow === null ? 'WAITING' : _swCompact(shadow), 'XRP', 'var(--sw-cyan)'));
+    t.appendChild(tile('New Targets', _swPad2(disc), 'Discovered', 'var(--sw-green)'));
+    t.appendChild(tile('Evidence', receipts === null ? 'WAITING' : _swPad2(receipts), 'Receipts', 'var(--sw-gold)'));
+    t.appendChild(tile('Ledger TX', ledgerTx === null ? 'WAITING' : fmt(ledgerTx, 0), 'Confirmed', 'var(--sw-purple)'));
   }
+}
+function _swFeedIcon(cls) {
+  if (/EXCHANGE/.test(cls)) return ['coin', 'var(--sw-gold)'];
+  if (/WHALE/.test(cls))    return ['whale', 'var(--sw-cyan)'];
+  if (/ESCROW/.test(cls))   return ['shield', 'var(--sw-green)'];
+  if (/SPLIT|HOP/.test(cls))return ['pulse', 'var(--sw-purple)'];
+  return ['alert', 'var(--sw-red)'];
 }
 function _swRenderFeed(p) {
   var el = document.getElementById('swFeedList'); if (!el) return;
-  var large = (p && Array.isArray(p.large_transfers)) ? p.large_transfers
-            : ((typeof state !== 'undefined' && Array.isArray(state.large)) ? state.large : []);
+  var large = (typeof state !== 'undefined' && Array.isArray(state.large) && state.large.length) ? state.large
+            : ((p && Array.isArray(p.large_transfers)) ? p.large_transfers : []);
   _swClear(el);
-  if (!large.length) { el.appendChild(_swEmpty('NO FLAGGED ACTIVITY · RUN A SCAN')); return; }
-  large.slice(0, 14).forEach(function (tx) {
-    var amt   = fmt(n(tx.amount), 0) + ' XRP';
-    var cls   = String(tx.classification || 'TRANSFER').replace(/_/g, ' ');
-    var route = (tx.sender_label || 'UNKNOWN') + ' → ' + (tx.receiver_label || (tx.to ? _swShort(tx.to) : 'UNKNOWN'));
-    var row = document.createElement('div'); row.className = 'sw-feed-row';
-    var ico = document.createElement('div'); ico.className = 'sw-feed-ico'; ico.textContent = '⚡';
-    var body = document.createElement('div'); body.className = 'sw-feed-body';
-    var title = document.createElement('div'); title.className = 'sw-feed-title'; title.textContent = cls + ' · ' + amt;
-    var detail = document.createElement('div'); detail.className = 'sw-feed-detail'; detail.textContent = route;
-    body.appendChild(title); body.appendChild(detail);
-    var time = document.createElement('div'); time.className = 'sw-feed-time'; time.textContent = String(tx.confidence || '');
+  if (!large.length) { el.appendChild(_swEmpty('NO FLAGGED ACTIVITY YET · RUN A SCAN')); return; }
+  large.slice(0, 24).forEach(function (tx) {
+    var cls = String(tx.classification || 'TRANSFER').replace(/_/g, ' ');
+    var ic = _swFeedIcon(String(tx.classification || ''));
+    var row = _swEl('div', { 'class':'sw-feed-row' });
+    var ico = _swEl('div', { 'class':'sw-feed-ico' }, _swIcon(ic[0]));
+    ico.querySelector('svg').setAttribute('stroke', ic[1]);
+    var body = _swEl('div', { 'class':'sw-feed-body' });
+    var t1 = _swEl('div', { 'class':'sw-feed-title' });
+    t1.textContent = cls + ' · ' + _swCompact(n(tx.amount)) + ' XRP';
+    var t2 = _swEl('div', { 'class':'sw-feed-detail' });
+    t2.textContent = (tx.sender_label || _swShort(tx.from) || 'UNKNOWN') + ' → ' + (tx.receiver_label || _swShort(tx.to) || 'UNKNOWN');
+    body.appendChild(t1); body.appendChild(t2);
+    var time = _swEl('div', { 'class':'sw-feed-time' }); time.textContent = String(tx.confidence || '');
     row.appendChild(ico); row.appendChild(body); row.appendChild(time);
     el.appendChild(row);
   });
 }
-function _swRenderNetwork(p) {
-  var el = document.getElementById('swNetList'); if (!el) return;
-  _swClear(el);
-  if (!p) { el.appendChild(_swEmpty('NETWORK STATS LOAD ON SCAN')); return; }
-  var rl = n(p.rlusd_supply);
-  el.appendChild(_swMkRow('RLUSD SUPPLY', rl > 0 ? fmt(rl, 0) : '—', { nowrap: true }));
-  var acc = n(p.xrpl_accounts_created);
-  el.appendChild(_swMkRow('NEW FUNDED ACCTS' + (p.xrpl_metrics_date ? (' (' + p.xrpl_metrics_date + ')') : ''), acc > 0 ? ('+' + fmt(acc, 0)) : '—', { nowrap: true }));
-  var dex = n(p.xrpl_dex_volume_24h_usd);
-  el.appendChild(_swMkRow('XRPL DEX VOL 24H', dex > 0 ? ('$' + fmt(dex, 0)) : '—', { nowrap: true }));
-  var tvl = n(p.xrpl_evm_tvl_usd);
-  el.appendChild(_swMkRow('XRPL EVM TVL', tvl > 0 ? ('$' + fmt(tvl, 0)) : '—', { nowrap: true }));
-  el.appendChild(_swMkRow('LEDGER TX (24H)', String(n(p.tx_24h_count)), { nowrap: true }));
-  var btn = document.createElement('button'); btn.className = 'sw-cardbtn'; btn.type = 'button';
-  btn.textContent = 'VIEW MAP'; btn.addEventListener('click', function () { swNav('map'); });
-  el.appendChild(btn);
+// Node map from REAL scanned edges only — never a fabricated relationship.
+function _swRenderNodeMap() {
+  var host = document.getElementById('swNetMap'); if (!host) return;
+  var large = (typeof state !== 'undefined' && Array.isArray(state.large)) ? state.large : [];
+  _swClear(host);
+  if (!large.length) { host.appendChild(_swEmpty('NODE MAP BUILDS FROM SCANNED FLOWS')); return; }
+  var idx = {}, nodes = [], edges = [];
+  function node(addr, label) {
+    if (!addr) return -1;
+    if (idx[addr] == null) {
+      var known = (typeof KNOWN !== 'undefined') && KNOWN[addr];
+      var disc = false;
+      try { disc = (state.discoveryInbox || []).some(function (d) { return d && d.address === addr; }); } catch (_) {}
+      idx[addr] = nodes.length;
+      nodes.push({ addr: addr, label: label || (known && known.label) || _swShort(addr),
+                   kind: known ? 'watched' : (disc ? 'discovered' : 'unknown'), risk: false });
+    }
+    return idx[addr];
+  }
+  large.slice(0, 22).forEach(function (tx) {
+    var a = node(tx.from, tx.sender_label), b = node(tx.to, tx.receiver_label);
+    if (a < 0 || b < 0 || a === b) return;
+    var hi = String(tx.confidence || '').toUpperCase() === 'HIGH';
+    if (hi) { nodes[b].risk = true; }
+    edges.push({ a: a, b: b, hi: hi });
+  });
+  if (!nodes.length) { host.appendChild(_swEmpty('NODE MAP BUILDS FROM SCANNED FLOWS')); return; }
+  var W = 300, H = 196, cx = W / 2, cy = H / 2;
+  var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', nodes.length + ' scanned wallets, ' + edges.length + ' observed flows');
+  // deterministic ring layout (presentation only — edges are the real data)
+  nodes.forEach(function (nd, i) {
+    var ring = i % 2 === 0 ? 0.78 : 0.44;
+    var ang = (i / nodes.length) * Math.PI * 2 - Math.PI / 2;
+    nd.x = cx + Math.cos(ang) * (cx - 20) * ring;
+    nd.y = cy + Math.sin(ang) * (cy - 18) * ring;
+  });
+  edges.forEach(function (e) {
+    var l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    l.setAttribute('x1', nodes[e.a].x.toFixed(1)); l.setAttribute('y1', nodes[e.a].y.toFixed(1));
+    l.setAttribute('x2', nodes[e.b].x.toFixed(1)); l.setAttribute('y2', nodes[e.b].y.toFixed(1));
+    l.setAttribute('stroke', e.hi ? 'rgba(255,77,77,.5)' : 'rgba(0,255,0,.22)');
+    l.setAttribute('stroke-width', e.hi ? '1.1' : '0.7');
+    svg.appendChild(l);
+  });
+  var COLORS = { watched:'#00FF00', discovered:'#00D9FF', unknown:'#5A6B65' };
+  nodes.forEach(function (nd) {
+    var c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    c.setAttribute('cx', nd.x.toFixed(1)); c.setAttribute('cy', nd.y.toFixed(1));
+    c.setAttribute('r', nd.kind === 'watched' ? '5.4' : '4.2');
+    c.setAttribute('fill', nd.risk ? '#FF4D4D' : COLORS[nd.kind]);
+    c.setAttribute('opacity', nd.kind === 'unknown' ? '.62' : '1');
+    var ttl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    ttl.textContent = nd.label + ' (' + nd.kind + ')';
+    c.appendChild(ttl);
+    svg.appendChild(c);
+  });
+  host.appendChild(svg);
 }
 function _swRenderRepEvid(p, risk) {
   var el = document.getElementById('swRepBody'); if (!el) return;
   _swClear(el);
-  if (!p) { el.appendChild(_swEmpty('NO REPORT YET')); return; }
-  var ev = p.evidence_quality || {}, r = risk || {};
-  el.appendChild(_swMkRow('EVIDENCE GRADE', (ev.grade || '—') + ' (' + n(ev.score) + '/100)'));
-  el.appendChild(_swMkRow('ACTIVITY RISK', (r.score != null ? (n(r.score) + '/100') : '—')));
-  el.appendChild(_swMkRow('RISK LABEL', (r.label || '—')));
+  var large = (typeof state !== 'undefined' && Array.isArray(state.large)) ? state.large : [];
+  var receipts = (typeof state !== 'undefined' && Array.isArray(state.receivers)) ? state.receivers.length : 0;
+  var disc = (typeof state !== 'undefined' && Array.isArray(state.discoveryInbox)) ? state.discoveryInbox.length : 0;
+  var hi = large.filter(function (t) { return String(t.confidence || '').toUpperCase() === 'HIGH'; }).length;
+  if (!p && !large.length && !receipts && !disc) { el.appendChild(_swEmpty('NO REPORT YET')); return; }
+  function row(icon, label, val, cls) {
+    var r = _swEl('div', { 'class':'sw-lrow' + (cls ? ' ' + cls : '') }, _swIcon(icon) + '<span class="sw-lt"></span><span class="sw-lv"></span>');
+    r.querySelector('.sw-lt').textContent = label;
+    r.querySelector('.sw-lv').textContent = val;
+    return r;
+  }
+  el.appendChild(row('doc', 'Evidence receipts', _swPad2(receipts)));
+  el.appendChild(row('folder', 'Flows mapped', _swPad2(large.length)));
+  el.appendChild(row('alert', 'High risk alerts', _swPad2(hi), 'sw-risk'));
+  el.appendChild(row('user', 'New targets', _swPad2(disc)));
+}
+function _swRenderDownloads(p) {
+  var el = document.getElementById('swDlBody'); if (!el) return;
+  _swClear(el);
+  var when = '';
+  try { if (p && p.data_as_of_utc) when = 'Generated ' + String(p.data_as_of_utc); } catch (_) {}
+  function dl(label, sub, cmd, devOnly) {
+    var r = _swEl('div', { 'class':'sw-lrow' + (devOnly ? ' sw-dev-only' : '') },
+      _swIcon('doc') + '<span class="sw-lt"></span>');
+    var lt = r.querySelector('.sw-lt');
+    lt.textContent = label;
+    if (sub) { var s = document.createElement('small'); s.textContent = sub; lt.appendChild(s); }
+    var b = _swEl('button', { type:'button', 'class':'sw-dlbtn', 'aria-label':'Download ' + label }, _swIcon('dl'));
+    b.addEventListener('click', function () { _swClickCmd(cmd); });
+    r.appendChild(b);
+    return r;
+  }
+  el.appendChild(dl('Daily Report', when || (p ? '' : 'Available after a scan'), 'download-morning', false));
+  el.appendChild(dl('Total Report', 'Full forensic export', 'download-total', true));
+  el.appendChild(dl('Full Debug', 'Diagnostics bundle', 'download-debug', true));
+  var copy = _swEl('button', { type:'button', 'class':'sw-cardbtn' }, 'COPY MORNING REPORT');
+  copy.addEventListener('click', function () { _swClickCmd('copy-morning'); });
+  el.appendChild(copy);
+}
+
+// Cheap live pass — header, reactor, status strip, instruments, gate.
+// Piggybacks the existing status-strip tick AND _renderMissionUI progress ticks
+// (no new timer), so the cockpit advances during a scan.
+function renderDashboardV1Live() {
+  if (!window.__swDashApplied) return;
+  try {
+    var p = (typeof state !== 'undefined' && state.pack) ? state.pack : null;
+    var SP = window.XAI_SCAN_PROGRESS, scanning = _swScanning();
+    var txLive = (typeof state !== 'undefined' && Array.isArray(state.txs)) ? state.txs.length : 0;
+    var wTotal = (typeof KNOWN !== 'undefined') ? Object.keys(KNOWN).length
+               : (typeof WATCHLIST !== 'undefined' ? WATCHLIST.length : 0);
+    var wChecked = (scanning && SP && SP.walletsTotal > 0) ? n(SP.walletsChecked) : (p ? n(p.wallets_checked) : 0);
+    var qSize = (window.SHADOW_BLOOM_QUEUE && typeof window.SHADOW_BLOOM_QUEUE.size === 'function') ? window.SHADOW_BLOOM_QUEUE.size() : 0;
+    var errs = (typeof state !== 'undefined' && Array.isArray(state.errorLog)) ? state.errorLog.length : 0;
+    var helpers = _xaiHelpersCount();
+    var riskObj = (typeof state !== 'undefined' && state.riskScore) ? state.riskScore : (p && p.risk_score ? p.risk_score : null);
+    // header
+    _swSetText('swHConn', _swLink());
+    _swSetText('swHLedger', txLive ? fmt(txLive, 0) : (p ? fmt(n(p.tx_24h_count), 0) : '—'));
+    _swSetText('swHMode', 'Shadow Scan');
+    // reactor + minis
+    _swRenderReactor();
+    _swSetText('swMiniMode', _swMode());
+    _swSetText('swMiniWallets', String(wTotal));
+    _swSetText('swMiniQueue', String(qSize));
+    // HELPER JOBS readouts come from the shared run-local formatter
+    _swSetText('swMiniErrors', String(errs));
+    // status strip
+    _swSetText('swCellWallets', String(wTotal));
+    _swSetText('swCellQueue', String(qSize));
+    _swRenderHelperJobs();
+    _swSetText('swCellErrors', String(errs));
+    _swSetText('swCellRisk', riskObj ? (n(riskObj.score) + ' / 100') : 'WAITING');
+    _swSetText('swCellCoverage', (wChecked || p || scanning) ? (wChecked + ' / ' + wTotal) : '—');
+    var fv = document.getElementById('swFootVer');
+    if (fv && !fv.textContent) fv.textContent = 'XRPMAN // SHADOWWATCH ' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : '');
+    _swRenderInstruments(p, SP, scanning);
+    _swApplyDevGate();
+  } catch (_) {}
+}
+// Full pass — live + feed + node map + report/evidence + downloads.
+function renderDashboardV1() {
+  if (!window.__swDashApplied) return;
+  try {
+    var p = (typeof state !== 'undefined' && state.pack) ? state.pack : null;
+    var risk = (p && p.risk_score) || (typeof state !== 'undefined' ? state.riskScore : null) || null;
+    renderDashboardV1Live();
+    _swRenderFeed(p);
+    _swRenderNodeMap();
+    _swRenderRepEvid(p, risk);
+    _swRenderDownloads(p);
+    // MUST run last: the panels above create .sw-dev-only rows, so the internal
+    // access gate has to be re-applied after they exist (never render ungated).
+    _swApplyDevGate();
+  } catch (e) { try { console.error('[sw-cockpit] render failed:', e); } catch (_) {} }
+}
+if (typeof window !== 'undefined') {
+  window.renderDashboardV1 = renderDashboardV1;
+  window.renderDashboardV1Live = renderDashboardV1Live;
+  window.applyDashboardLayoutV1 = applyDashboardLayoutV1;
 }
 
 // ── Dashboard hardening smoke test (PR #8 audit fixes B1–B4) ──
@@ -21670,24 +22116,49 @@ function shadowWatchDashboardHardeningSmokeTest() {
     state.large = state.pack.large_transfers; state.riskScore = state.pack.risk_score;
     window.renderDashboardV1();
     var feedTxt = (document.getElementById('swFeedList') || {}).textContent || '';
-    var netTxt  = (document.getElementById('swNetList')  || {}).textContent || '';
-    var repTxt  = (document.getElementById('swRepBody')  || {}).textContent || '';
+    var netTxt  = (document.getElementById('swNetMap')   || {}).textContent || '';
+    var dashTxt = (document.getElementById('swDash')     || {}).textContent || '';
     check('B2: feed renders injected markup as literal text', feedTxt.indexOf('<img src=x') !== -1);
-    check('B2: network renders injected value as literal text', netTxt.indexOf('<img src=x') !== -1);
-    check('B2: report/evidence renders injected label as literal text', repTxt.indexOf('<img src=x') !== -1);
-    check('B2: no <img> element was injected', !document.querySelector('#swFeedList img, #swNetList img, #swRepBody img'));
+    check('B2: node-map labels render as literal text', netTxt.indexOf('<img src=x') !== -1);
+    check('B2: injected markup stays literal anywhere in the cockpit', dashTxt.indexOf('<img src=x') !== -1);
+    check('B2: no <img> element was injected', !document.querySelector('#swDash img'));
     check('B2: onerror payload did NOT execute (window.__swXss undefined)', typeof window.__swXss === 'undefined');
 
-    // B4 — helpers cell reflects the canonical SHADOW_HELPER_POOL.activeJobs count
-    var HP = window.SHADOW_HELPER_POOL;
-    if (HP && Array.isArray(HP.activeJobs)) {
-      var before = HP.activeJobs.length;
-      HP.activeJobs.push({ job_id: '__hardening_test__', status: 'ACTIVE' });
-      window.renderDashboardV1Live();
-      var cellTxt = (document.getElementById('swCellHelpers') || {}).textContent || '';
-      check('B4: helpers cell shows nonzero canonical count', cellTxt === String(before + 1) && (before + 1) > 0);
-      HP.activeJobs.pop(); window.renderDashboardV1Live();
-    } else { check('B4: SHADOW_HELPER_POOL.activeJobs present', false); }
+    // B4 — HELPER JOBS shows run-local completed / created (never the in-flight
+    // counter, never raw cumulative totals, failures never counted as completed)
+    var HP = window.SHADOW_HELPER_POOL, BUS = window.SHADOW_EVENT_BUS;
+    if (HP && HP.stats && BUS && typeof BUS.emit === 'function') {
+      var savedRun = _SW_HELPER_RUN;
+      var s0 = { c: HP.stats.jobs_created, d: HP.stats.jobs_completed, f: HP.stats.jobs_failed };
+      var cell = function () { return (document.getElementById('swCellHelpers') || {}).textContent || ''; };
+      var mini = function () { return (document.getElementById('swMiniHelpers') || {}).textContent || ''; };
+      // idle → honest unavailable state (no fabricated zero)
+      _SW_HELPER_RUN = null; _swRenderHelperJobs();
+      check('B4: idle shows honest unavailable state (—)', cell() === '—');
+      // a run starts: baseline captured off cumulative stats
+      HP.stats.jobs_created += 40; HP.stats.jobs_completed += 30; HP.stats.jobs_failed += 5; // pre-existing session totals
+      BUS.emit('shadow.helper_pool.started', {});
+      check('B4: empty helper queue does not fabricate work', cell() === '—');
+      // 12 created, 3 completed
+      HP.stats.jobs_created += 12; HP.stats.jobs_completed += 3;
+      BUS.emit('shadow.helper_job.completed', {});
+      check('B4: progress shows run-local 3 / 12 (not cumulative)', cell() === '3 / 12');
+      check('B4: both visible readouts agree', mini() === cell());
+      // 11 completed + 1 failed → failure must NOT count as completed
+      HP.stats.jobs_completed += 8; HP.stats.jobs_failed += 1;
+      BUS.emit('shadow.helper_job.failed', {});
+      check('B4: failure not counted as completed (11 / 12)', cell() === '11 / 12');
+      var t = (document.getElementById('swCellHelpers') || {}).getAttribute('title') || '';
+      check('B4: failure exposed in accessible title', /1 failed/.test(t));
+      // completed value persists after the pool finishes
+      BUS.emit('shadow.helper_pool.completed', {});
+      check('B4: completed value persists after run', cell() === '11 / 12');
+      check('B4: HP.stats not mutated for presentation',
+        HP.stats.jobs_created === s0.c + 52 && HP.stats.jobs_completed === s0.d + 41 && HP.stats.jobs_failed === s0.f + 6);
+      // restore
+      HP.stats.jobs_created = s0.c; HP.stats.jobs_completed = s0.d; HP.stats.jobs_failed = s0.f;
+      _SW_HELPER_RUN = savedRun; _swRenderHelperJobs();
+    } else { check('B4: helper pool + event bus present', false); }
 
     // B3 — coverage gauge advances live from XAI_SCAN_PROGRESS during a scan
     var SP = window.XAI_SCAN_PROGRESS;
@@ -21695,11 +22166,11 @@ function shadowWatchDashboardHardeningSmokeTest() {
       var sc = SP.walletsChecked, st = SP.walletsTotal, wasScanning = document.body.classList.contains('scanning');
       document.body.classList.add('scanning');
       SP.walletsTotal = 112; SP.walletsChecked = 5; window.renderDashboardV1Live();
-      var g1 = (document.querySelector('#swGauges .sw-gauge .sw-gauge-svgval') || {}).textContent || '';
-      check('B3: coverage gauge live = 5/112', g1 === '5/112');
+      var g1 = (document.querySelector('#swGauges .sw-gauge .sw-gauge-val') || {}).textContent || '';
+      check('B3: coverage gauge live = 5 / 112', g1 === '5 / 112');
       SP.walletsChecked = 50; window.renderDashboardV1Live();
-      var g2 = (document.querySelector('#swGauges .sw-gauge .sw-gauge-svgval') || {}).textContent || '';
-      check('B3: coverage gauge advanced to 50/112', g2 === '50/112');
+      var g2 = (document.querySelector('#swGauges .sw-gauge .sw-gauge-val') || {}).textContent || '';
+      check('B3: coverage gauge advanced to 50 / 112', g2 === '50 / 112');
       SP.walletsChecked = sc; SP.walletsTotal = st; if (!wasScanning) document.body.classList.remove('scanning');
     } else { check('B3: XAI_SCAN_PROGRESS present', false); }
 
@@ -26542,15 +27013,15 @@ function shadowWatchXrpmanAiCommandHeadSmokeTest() {
     const room  = cmdScreen.querySelector('#xrpmanAiCommandRoom');
     const hero  = cmdScreen.querySelector('.cmd-hero');
     const orb   = cmdScreen.querySelector('.cmd-orb-wrap');
-    // Redesign v1 (design/report-dashboard-v1): the command room is reparented
-    // into the #swDash grid shell, so #swDash becomes the first child while the
-    // room lives inside it. Accept either layout — the invariant we still guard
-    // is that the room is the primary content of the command screen, present and
-    // not buried outside the shell.
+    // Fixed cockpit: the command room is deliberately NOT visible content any
+    // more — the cockpit (#swDash) is the screen's primary content and the room
+    // is retained as the hidden engine host / emergency fallback. Accept either
+    // the legacy layout (room first child) or the cockpit layout (#swDash first
+    // child, room still present under #screen-command as the fallback).
     const dash = cmdScreen.querySelector('#swDash');
-    check('XRPMan AI command room is first child of #screen-command',
+    check('XRPMan AI command room is present as primary content or hidden fallback',
       cmdScreen.firstElementChild === room ||
-      (dash && cmdScreen.firstElementChild === dash && dash.contains(room)));
+      (dash && cmdScreen.firstElementChild === dash && cmdScreen.contains(room)));
     check('Legacy .cmd-hero still in DOM (hidden by CSS)',    !!hero);
     check('Legacy .cmd-orb-wrap still in DOM (hidden by CSS)', !!orb);
   }
@@ -30656,10 +31127,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // v3.16: migrate panels into the new screen containers BEFORE any other UI work
   try { migrateLayoutToScreens(); } catch (e) { console.error('[v3.16] migration failed:', e); }
   try { installScreenNav(); } catch (e) { console.error('[v3.16] nav binding failed:', e); }
-  // Restore saved active screen (default = command)
-  let saved = 'command';
-  try { saved = localStorage.getItem(SHADOW_ACTIVE_SCREEN_KEY) || 'command'; } catch {}
-  showScreen(saved);
+  // Single screen: the fixed cockpit (#screen-command) is the ONLY screen.
+  // Always land on it (ignore any saved legacy screen), then lift the boot
+  // cloak. Runs after migrate/adopt; if the adopter rolled back, 'command'
+  // still shows the intact legacy fallback — so revealing here is safe.
+  showScreen('command');
+  try { document.documentElement.classList.remove('sw-booting'); } catch (_) {}
   // ── v3.5: MATRIX RAIN BACKGROUND ───────────────────────────────
   // Canvas-driven katakana / hex / glyph cascade. Throttled, pauses when tab hidden.
   (function startMatrixRain() {
