@@ -106,7 +106,14 @@
     try { W = frame.contentWindow; D = frame.contentDocument; } catch (e) { return; }
     if (!W || !D) return;
     quietEngine();                                   // safe to call repeatedly
-    if (!(W.MORNING_REPORT_FLOAT && D.getElementById('scanBtn'))) return;
+    // Readiness must mean "the scan button actually works", not merely "the
+    // element exists". #scanBtn is in the static markup near the top of the
+    // console, but its click handler is attached in a DOMContentLoaded handler
+    // near the very end. Announcing "Ready" in between invites a press that
+    // does nothing. Require the document to be complete AND the handler bound.
+    var sb = D.getElementById('scanBtn');
+    if (D.readyState !== 'complete') return;
+    if (!(W.MORNING_REPORT_FLOAT && sb && typeof sb.onclick === 'function')) return;
     booted = true;
     // The console re-initialises its voice settings during its own boot, which
     // can flip voiceOutput back on after our first pass. Keep re-muting for a
@@ -120,7 +127,7 @@
     hookReport();
     goBtn.disabled = false;
     goBtn.textContent = 'GET TODAY’S REPORT';
-    say('Ready. Press the button to run this morning’s scan.');
+    say(restoredNote || 'Ready. Press the button to run this morning’s scan.');
   }
   frame.addEventListener('load', bootEngine);
 
@@ -148,8 +155,16 @@
         .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.text(); })
         .then(function (html) {
           if (!html || html.length < 10000) throw new Error('unexpected console payload');
+          // Strip the render-blocking third-party stylesheet. If this silently
+          // stops matching (the console is edited often), a pending third-party
+          // stylesheet blocks every following inline script and the engine never
+          // defines itself — the exact failure this page exists to prevent. So
+          // assert the marker is gone and fail loudly instead of degrading.
           html = html.replace(/<link\b[^>]*fonts\.googleapis\.com[^>]*>/gi, '');
-          html = html.replace(/<video\b[^>]*id=["']swBgVideo["'][\s\S]*?<\/video>/i, '');
+          if (/fonts\.googleapis\.com/i.test(html)) throw new Error('font-link strip failed');
+          // The decorative video is NOT regex-stripped: requiring a closing tag
+          // risks a catastrophic over-match that would delete script blocks.
+          // quietEngine() cancels it by ID at runtime instead.
           // Silence the console's voice BEFORE any of its scripts run, so the
           // spoken boot greeting never reaches the speech engine at all. This
           // page is read, not listened to.
@@ -264,28 +279,72 @@
   }
   function bodyHas(cls) { try { return D.body.classList.contains(cls); } catch (_) { return false; } }
 
+  var LAST_KEY = 'ladyk.lastReport.v1';
+  var restoredNote = '';
   function showReport(text) {
     if (!text) return;
     reportEl.textContent = text;          // textContent — never parsed as HTML
     reportEl.className = 'on';
     actions.className = 'row on';
+    // Keep the last good report so a reload, a crash, or a failed re-run never
+    // leaves her with nothing to read.
+    try { localStorage.setItem(LAST_KEY, JSON.stringify({ at: Date.now(), text: text })); } catch (_) {}
   }
+  (function restoreLast() {
+    try {
+      var raw = localStorage.getItem(LAST_KEY);
+      if (!raw) return;
+      var o = JSON.parse(raw);
+      if (!o || !o.text) return;
+      reportEl.textContent = o.text;
+      reportEl.className = 'on';
+      actions.className = 'row on';
+      var when = new Date(o.at);
+      var today = when.toDateString() === new Date().toDateString();
+      restoredNote = 'Showing your last report (' + (today ? 'today, ' : '') + when.toLocaleString() +
+        '). Press the button for a fresh one.';
+      say(restoredNote);
+    } catch (_) {}
+  })();
 
   // ── run ───────────────────────────────────────────────────────
   goBtn.addEventListener('click', function () {
     if (running || goBtn.disabled) return;
     running = true; captured = '';
     goBtn.disabled = true; goBtn.textContent = 'RUNNING…';
-    reportEl.className = ''; actions.className = 'row';
+    // Deliberately do NOT clear the existing report here: if this run fails,
+    // wiping it would leave her with nothing. It is replaced only when a new
+    // report is actually captured.
     say('Running this morning’s scan. This takes a few minutes — leave the page open.');
     setBar(0);
 
-    var started = false;
-    try { var sb = D.getElementById('scanBtn'); if (sb) { sb.click(); started = true; } } catch (_) {}
-    if (!started) started = clickCmd('run-scan');
-    if (!started) { fail('Could not start the scan. Refresh the page and try again.'); return; }
+    var clicked = false;
+    try { var sb = D.getElementById('scanBtn'); if (sb) { sb.click(); clicked = true; } } catch (_) {}
+    if (!clicked) clicked = clickCmd('run-scan');
+    if (!clicked) { fail('Could not start the scan. Refresh the page and try again.'); return; }
 
+    // Clicking is not the same as starting. run() bails out immediately if a
+    // scan is already in progress, and the button can be inert if the console
+    // is not fully wired — either way the old code started a 15-minute clock on
+    // a scan that never began. run() adds body.scanning synchronously, so wait
+    // for real evidence before committing to the long wait.
+    var startWait = 0;
+    var startCheck = setInterval(function () {
+      if (bodyHas('scanning') || bodyHas('building') || enginePct() > 0) {
+        clearInterval(startCheck); beginPolling();
+      } else if (++startWait > 20) {                 // ~6s
+        clearInterval(startCheck);
+        say('The scan did not start — the page needs a refresh. Pull down to reload, then try again.', 'err');
+        actions.className = 'row on';                // keep the debug log reachable
+        goBtn.disabled = false; goBtn.textContent = 'GET TODAY’S REPORT';
+        running = false; setBar(null);
+      }
+    }, 300);
+  });
+
+  function beginPolling() {
     var t0 = Date.now(), MAX = 15 * 60 * 1000;
+    var lastPct = -1, lastProgressAt = Date.now();
     clearInterval(pollTimer);
     pollTimer = setInterval(function () {
       var pct = enginePct();
@@ -293,11 +352,24 @@
       var step = engineStep();
       if (pct > 0) say('Scanning… ' + pct + '%' + (step ? ' · ' + step : ''));
 
+      if (pct !== lastPct) { lastPct = pct; lastProgressAt = Date.now(); }
+
       if (bodyHas('error')) {
         clearInterval(pollTimer);
-        say('The scan hit an error — usually a dropped connection. Press Try Again, or send the debug log.', 'err');
-        actions.className = 'row on';
-        goBtn.disabled = false; goBtn.textContent = 'TRY AGAIN'; running = false; setBar(null);
+        // A report can be fully built and still route through run()'s catch
+        // (e.g. a throw while saving the snapshot). Check for the report BEFORE
+        // declaring failure, so she is never shown a red error sitting directly
+        // above a perfectly good report.
+        clickCmd('read-report');
+        setTimeout(function () {
+          if (captured) {
+            say('Report ready · ' + new Date().toLocaleString() + ' (the scan reported a problem, but the report came through).', 'ok');
+          } else {
+            say('The scan hit a problem — usually a dropped connection. Press RUN AGAIN, or send the debug log.', 'err');
+          }
+          actions.className = 'row on';
+          goBtn.disabled = false; goBtn.textContent = 'RUN AGAIN'; running = false; setBar(null);
+        }, 700);
         return;
       }
       if (bodyHas('sealed')) {
@@ -306,18 +378,27 @@
         clickCmd('read-report');                       // our hook captures the text
         setTimeout(function () {
           if (captured) { say('Report ready · ' + new Date().toLocaleString(), 'ok'); }
-          else { say('The scan finished but the report did not come through. Try again, or send the debug log.', 'err'); actions.className = 'row on'; }
+          else { say('The scan finished but the report did not come through. Press RUN AGAIN, or send the debug log.', 'err'); actions.className = 'row on'; }
           goBtn.disabled = false; goBtn.textContent = 'RUN AGAIN'; running = false;
         }, 700);
         return;
       }
-      if (Date.now() - t0 > MAX) {
+      // Give up only when the scan has genuinely STALLED (no progress for 6
+      // minutes) or the overall cap is hit. Wall-clock alone punished her for
+      // locking the phone: timers suspend, and she returned to a red failure on
+      // a scan that was fine. Also: once the console is mid-scan, pressing the
+      // button again cannot work (run() self-guards), so the honest instruction
+      // is to reload — not "try again".
+      var stalled = Date.now() - lastProgressAt > 6 * 60 * 1000;
+      if (stalled || Date.now() - t0 > MAX) {
         clearInterval(pollTimer);
-        fail('The scan is taking longer than expected. Press Try Again, or send the debug log.');
+        say('The scan stopped responding. Reload the page, then press the button again — or send the debug log.', 'err');
         actions.className = 'row on';
+        goBtn.disabled = true; goBtn.textContent = 'RELOAD THE PAGE';
+        running = false; setBar(null);
       }
     }, 1000);
-  });
+  }
 
   // ── actions ───────────────────────────────────────────────────
   document.getElementById('copy').addEventListener('click', function () {
