@@ -3242,7 +3242,18 @@ const WATCHLIST = [
   ['HIGHVAL_rNxp4h',      'rNxp4h8apvRis6mJf9Sh8C6iRxfrDWN7AV', 'discovered_unknown_highval'], // recurring high-value, seen 10 scans, BITHUMB-adjacent
   // ── v16.20 discovery adds (2026-07-26): ADD-tier candidates (exchange-adjacent) ──
   ['HIGHVAL_rBuZfn',      'rBuZfn1m4tA6znziHsRp9AyC1M3qg6rgbF', 'discovered_unknown_highval'], // BITHUMB-adjacent · richlist #239 (35.7M) · score 135/200
-  ['LARGE_RECV_rDAE53',   'rDAE53VfMvftPB4ogpWGWvzkQxfht6JPxr', 'discovered_receiver']         // CRYPTO_COM/COINBASE/BINANCE/BITBANK adjacent · richlist #146 (74.2M) · score 125/200
+  ['LARGE_RECV_rDAE53',   'rDAE53VfMvftPB4ogpWGWvzkQxfht6JPxr', 'discovered_receiver'],        // CRYPTO_COM/COINBASE/BINANCE/BITBANK adjacent · richlist #146 (74.2M) · score 125/200
+  // ── 2026-07-31 scan SW20260731Z6A5K: 8 CRITICAL_ADD_REVIEW candidates ──
+  // Each carries its own discovery category (not flattened to 'whale'); the
+  // trailing note keeps the secondary category + why it surfaced.
+  ['WHALE_RECV_rarG6F',   'rarG6FaeYhnzSKSS5EEPofo4gFsPn2bZKk', 'discovered_whale'],           // exchange-adjacent · LARGE_RECV_rDAE53/COINBASE/BITBANK/CRYPTO_COM · richlist · score 200/200
+  ['WHALE_RECV_rBtttd',   'rBtttd61FExHC68vsZ8dqmS3DfjFEceA1A', 'discovered_whale'],           // exchange-adjacent · LARGE_RECV_rDAE53/COINBASE/BITBANK/CRYPTO_COM · richlist · score 200/200
+  ['WHALE_RECV_rfQ9Ec',   'rfQ9EcLkU6WnNmkS3EwUkFeXeN47Rk8Cvi', 'discovered_whale'],           // exchange-adjacent · LARGE_RECV_rDAE53/CRYPTO_COM/BITBANK/COINBASE · richlist · score 200/200
+  ['SPLITTER_rBNCyN',     'rBNCyNEwpaEbGP9nqkQeYcvwYAwwKkRzTR', 'next_hop_splitter'],          // ripple-sourced · WHALE_RECV_RIPPLE · richlist · score 175/200
+  ['WHALE_RECV_rhWj9g',   'rhWj9gaovwu2hZxYW7p388P8GRbuXFLQkK', 'discovered_whale'],           // exchange-adjacent · LARGE_RECV_rDAE53/COINBASE/BITBANK/CRYPTO_COM · richlist · score 175/200
+  ['EXOUT_RECV_rMdG3j',   'rMdG3ju8pgyVh29ELPWaDuA74CpWW6Fxns', 'discovered_receiver'],        // exchange-adjacent · WHALE_1.5B/COINBASE/CRYPTO_COM · richlist · score 175/200
+  ['WHALE_RECV_rQUUAj',   'rQUUAjDPTLWTEHrpNtQvryUdvd1afc6TcB', 'discovered_whale'],           // exchange-adjacent · UPBIT_COLD · richlist · score 175/200
+  ['WHALE_RECV_rN4Gia',   'rN4GiawFXbgMNtW12mVH4p7CWQDzXsRB5k', 'discovered_whale']            // watch-net · LARGE_RECV_rRmgo6 · richlist · score 165/200
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)
@@ -4722,25 +4733,60 @@ function buildRiskScore(pack) {
   const profileRisk = profiles.reduce((a, p) => a + ({
     WHALE_DISTRIBUTOR: 8, OTC_ROUTER: 8, DUST_RECEIVER: 5, EXCHANGE_HOT_FLOW: 3, FAILED_SCAN: 2
   }[p.archetype] || 0), 0);
-  let score = 0, drivers = [], suppressors = [];
-  score += Math.min(20, (pack.large_transfers || []).length * 5);
-  if ((pack.large_transfers || []).length) drivers.push('large transfer count');
-  score += Math.min(20, n(pack.shadow_volume_xrp) / 1000000);
-  if (n(pack.shadow_volume_xrp) > 0) drivers.push('shadow volume');
-  score += receiverFwd * 8; if (receiverFwd) drivers.push('receiver forwarding');
-  score += Math.min(10, dust * 1.5); if (dust) drivers.push('dust/tag flags');
-  score += Math.min(15, Math.abs(n(pack.total_balance_delta_xrp)) / 1000000);
-  if (Math.abs(n(pack.total_balance_delta_xrp)) > 0) drivers.push('net watchlist delta');
-  score += n(news.macro_risk_score) * 0.15;
-  score += n(news.regulatory_score) * 0.10;
-  score += n(news.banking_stress_score) * 0.10;
-  score += n(news.war_oil_score) * 0.10;
-  score += clusterRisk + Math.min(15, profileRisk);
+  // ── SCORING (recalibrated) ──────────────────────────────────
+  // The previous formula hard-capped each component with thresholds set for a
+  // much smaller watchlist: 4 large transfers maxed the transfer term, 20M XRP
+  // maxed shadow volume, 15M maxed net delta. With 112 watched wallets an
+  // ordinary morning blows through all three, so the score pinned at 100 and
+  // read "BLACK / EXTREME" on 21 of 22 recorded scans — carrying no information.
+  //
+  // Each component now uses soft saturation, v/(v+k), which approaches its cap
+  // without ever slamming into it, so a busy day and an exceptional day stay
+  // distinguishable. k is the "half-cap" level: the value that scores half of
+  // that component's weight. k scales with the watchlist so growing the watch
+  // list does not by itself inflate risk.
+  const watched = Math.max(1, n(pack.watchlist_total) || n(pack.wallets_checked) || 1);
+  const soft = (v, k, cap) => { v = Math.max(0, n(v)); k = Math.max(1e-9, k); return cap * (v / (v + k)); };
+  const K = {
+    large:  Math.max(8, watched * 0.27),        // ~30 transfers at 112 watched
+    shadow: Math.max(20e6, watched * 1.34e6),   // ~150M XRP at 112 watched
+    delta:  Math.max(5e6,  watched * 0.22e6),   // ~25M XRP at 112 watched
+    dust:   Math.max(10,   watched * 0.36),     // ~40 flags at 112 watched
+    fwd:    2                                   // 2 forwarding receivers
+  };
+  const largeN = (pack.large_transfers || []).length;
+  const shadowV = Math.abs(n(pack.shadow_volume_xrp));
+  const deltaV = Math.abs(n(pack.total_balance_delta_xrp));
+  const comp = {
+    large_transfers: soft(largeN,  K.large,  22),
+    shadow_volume:   soft(shadowV, K.shadow, 20),
+    net_delta:       soft(deltaV,  K.delta,  15),
+    dust_flags:      soft(dust,    K.dust,    8),
+    receiver_fwd:    soft(receiverFwd, K.fwd, 10),
+    // cluster/profile signals also saturate instead of stacking without limit
+    cluster:         soft(Math.max(0, clusterRisk), 20, 10),
+    profile:         soft(profileRisk, 20, 10),
+    news:            Math.min(15, n(news.macro_risk_score) * 0.15 + n(news.regulatory_score) * 0.10 +
+                                  n(news.banking_stress_score) * 0.10 + n(news.war_oil_score) * 0.10)
+  };
+  let drivers = [], suppressors = [];
+  if (largeN)      drivers.push('large transfer count');
+  if (shadowV > 0) drivers.push('shadow volume');
+  if (receiverFwd) drivers.push('receiver forwarding');
+  if (dust)        drivers.push('dust/tag flags');
+  if (deltaV > 0)  drivers.push('net watchlist delta');
   if (clusterRisk > 0) drivers.push('cluster risk');
   if (profileRisk > 0) drivers.push('wallet profile risk');
   if (clusterRisk < 0) suppressors.push('quiet cluster');
+  let score = 0;
+  for (const k in comp) score += comp[k];
+  if (clusterRisk < 0) score += Math.max(-8, clusterRisk * 0.4);   // quiet clusters still damp the score
   score = Math.max(0, Math.min(100, score));
+  // Round the reported components so the breakdown is auditable against the score.
+  const breakdown = {};
+  for (const k in comp) breakdown[k] = Math.round(comp[k] * 10) / 10;
   const out = { score: Math.round(score), label: riskBand(score), drivers, suppressors,
+    components: breakdown,
     confidence: pack.wallets_checked > 0 ? 'MEDIUM' : 'LOW',
     generated_at: new Date().toISOString() };
   state.riskScore = out;
