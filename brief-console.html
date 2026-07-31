@@ -4752,22 +4752,31 @@ function buildRiskScore(pack) {
     shadow: Math.max(20e6, watched * 1.34e6),   // ~150M XRP at 112 watched
     delta:  Math.max(5e6,  watched * 0.22e6),   // ~25M XRP at 112 watched
     dust:   Math.max(10,   watched * 0.36),     // ~40 flags at 112 watched
-    fwd:    2                                   // 2 forwarding receivers
+    fwd:    2,                                  // 2 forwarding receivers
+    // cluster/profile totals are sums over the watchlist, so their half-cap has
+    // to scale too — otherwise a bigger watchlist inflates risk on its own.
+    clprof: Math.max(20, watched * 0.18)        // 20 at 112 watched
   };
   const largeN = (pack.large_transfers || []).length;
   const shadowV = Math.abs(n(pack.shadow_volume_xrp));
   const deltaV = Math.abs(n(pack.total_balance_delta_xrp));
+  // Ledger weights deliberately sum to 90, ABOVE riskBand's BLACK threshold of
+  // 75, so severe on-chain activity alone can still reach BLACK / EXTREME.
+  // (An earlier pass summed them to exactly 75; because soft saturation only
+  // approaches a cap and never attains it, BLACK became unreachable from ledger
+  // data at any magnitude — a silent false-negative. Do not lower these below
+  // 75 in total.)
   const comp = {
-    large_transfers: soft(largeN,  K.large,  22),
-    shadow_volume:   soft(shadowV, K.shadow, 20),
-    net_delta:       soft(deltaV,  K.delta,  15),
-    dust_flags:      soft(dust,    K.dust,    8),
-    receiver_fwd:    soft(receiverFwd, K.fwd, 10),
+    large_transfers: soft(largeN,  K.large,  26),
+    shadow_volume:   soft(shadowV, K.shadow, 24),
+    net_delta:       soft(deltaV,  K.delta,  18),
+    dust_flags:      soft(dust,    K.dust,   10),
+    receiver_fwd:    soft(receiverFwd, K.fwd, 12),   // ledger subtotal cap = 90
     // cluster/profile signals also saturate instead of stacking without limit
-    cluster:         soft(Math.max(0, clusterRisk), 20, 10),
-    profile:         soft(profileRisk, 20, 10),
-    news:            Math.min(15, n(news.macro_risk_score) * 0.15 + n(news.regulatory_score) * 0.10 +
-                                  n(news.banking_stress_score) * 0.10 + n(news.war_oil_score) * 0.10)
+    cluster:         soft(Math.max(0, clusterRisk), K.clprof, 8),
+    profile:         soft(profileRisk, K.clprof, 8),
+    news:            soft(n(news.macro_risk_score) * 0.15 + n(news.regulatory_score) * 0.10 +
+                          n(news.banking_stress_score) * 0.10 + n(news.war_oil_score) * 0.10, 12, 12)
   };
   let drivers = [], suppressors = [];
   if (largeN)      drivers.push('large transfer count');
@@ -4778,15 +4787,27 @@ function buildRiskScore(pack) {
   if (clusterRisk > 0) drivers.push('cluster risk');
   if (profileRisk > 0) drivers.push('wallet profile risk');
   if (clusterRisk < 0) suppressors.push('quiet cluster');
-  let score = 0;
-  for (const k in comp) score += comp[k];
-  if (clusterRisk < 0) score += Math.max(-8, clusterRisk * 0.4);   // quiet clusters still damp the score
-  score = Math.max(0, Math.min(100, score));
-  // Round the reported components so the breakdown is auditable against the score.
+  let raw = 0;
+  for (const k in comp) raw += comp[k];
+  // Quiet clusters damp the score. QUIET_CLUSTER only fires when no other
+  // cluster did, so this is a flat -2; kept explicit and reported.
+  const suppression = clusterRisk < 0 ? Math.max(-8, clusterRisk * 0.4) : 0;
+  const preClamp = raw + suppression;
+  const score = Math.max(0, Math.min(100, preClamp));
+  // Score is ROUNDED before banding: deriving the label from the unrounded
+  // float let a raw 74.6 report {score: 75, label: 'ORANGE'} while every
+  // consumer that re-banded the rounded value showed BLACK.
+  const rounded = Math.round(score);
+  // The breakdown must reconcile with the score, so the adjustments that sit
+  // outside the components (suppression, clamping, rounding) are reported too.
   const breakdown = {};
   for (const k in comp) breakdown[k] = Math.round(comp[k] * 10) / 10;
-  const out = { score: Math.round(score), label: riskBand(score), drivers, suppressors,
+  const r1 = v => Math.round(v * 10) / 10;
+  const out = { score: rounded, label: riskBand(rounded), drivers, suppressors,
     components: breakdown,
+    adjustments: { components_total: r1(raw), suppression: r1(suppression),
+                   clamped_by: r1(score - preClamp), rounding: r1(rounded - score) },
+    scale_version: 2,
     confidence: pack.wallets_checked > 0 ? 'MEDIUM' : 'LOW',
     generated_at: new Date().toISOString() };
   state.riskScore = out;
@@ -13250,6 +13271,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       timestamp:      Date.now(),
       net_flow:       _n(pack.total_balance_delta_xrp || pack.net_delta_xrp),
       risk_score:     _n(pack.risk_score && pack.risk_score.score),
+      risk_scale:     _n((pack.risk_score && pack.risk_score.scale_version) || 1),
       large_receivers: receivers.slice(0, 50),
       wallets_checked: _n(pack.wallets_checked)
     };
@@ -13284,9 +13306,14 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         lines.push('\u2022 Net flow delta: ' + sign + human + ' XRP vs last scan.');
         any = true;
       }
-      // Risk score delta
+      // Risk score delta — only meaningful within one scoring scale. The
+      // recalibration (scale 2) changed what the number means, so comparing it
+      // to a scale-1 snapshot would report a large fabricated swing (every
+      // scale-1 scan was pinned at 100) that no ledger activity caused.
       var riskDelta = snap.risk_score - lastSnapshot.risk_score;
-      if (Math.abs(riskDelta) >= 5) {
+      // NB: _n() is scoped to _packToSnapshot, not available here.
+      var sameScale = (Number(snap.risk_scale) || 1) === (Number(lastSnapshot.risk_scale) || 1);
+      if (sameScale && Math.abs(riskDelta) >= 5) {
         lines.push('\u2022 Risk score delta: ' + (riskDelta >= 0 ? '+' : '') + riskDelta +
                    ' (now ' + snap.risk_score + '/100).');
         any = true;
@@ -20845,6 +20872,17 @@ async function run() {
       // Attach news to pack (may be partial if ceiling fired)
       p.news_intel = state.newsIntel;
 
+      // Re-score risk now that the news lane has resolved. buildRiskScore reads
+      // state.newsIntel, but it first runs BEFORE this step (news is fetched
+      // post-ledger by design), so the news term was always 0 on a session's
+      // first scan and stale on later ones. Recomputing here makes the news
+      // contribution reflect this scan's headlines. Ledger inputs are unchanged,
+      // so this only revises the news component.
+      try {
+        p.risk_score = buildRiskScore(p);
+        state.riskScore = p.risk_score;
+      } catch (e) { elog('risk re-score post-news', e); }
+
       const newsDiag = buildNewsRouteDiagnostics();
       p.news_diagnostics = newsDiag;
       state.newsDiagnostics = newsDiag;
@@ -21473,7 +21511,15 @@ function exitShadowWatchReport() {
 }
 if (typeof window !== 'undefined') { window.swNav = swNav; window.exitShadowWatchReport = exitShadowWatchReport; }
 // Delegate to the existing wired (hidden) command button — never re-implement.
+var _SW_DEV_ONLY_CMDS = ['download-total', 'download-debug', 'open-system'];
 function _swClickCmd(cmd) {
+  // Enforce the gate at the point of action, not only by hiding the control.
+  // Hiding alone is presentation; this makes the check real for every path
+  // (stray handler, keyboard activation, a future ungated render).
+  if (_SW_DEV_ONLY_CMDS.indexOf(cmd) >= 0 && !_swDevUnlocked()) {
+    try { console.warn('[sw-cockpit] "' + cmd + '" requires the developer unlock.'); } catch (_) {}
+    return false;
+  }
   try {
     var b = document.querySelector('#xaiCommandButtons [data-xai-cmd="' + cmd + '"]');
     if (b) { b.click(); return true; }
@@ -21606,9 +21652,31 @@ function _swBuildCockpit() {
 
   // ── header ──
   var header = _swEl('header', { id:'swDashHeader' });
-  header.appendChild(_swEl('div', { 'class':'sw-brandwrap' },
+  var brand = _swEl('div', { 'class':'sw-brandwrap' },
     '<svg class="sw-brandmark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="#00FF00" stroke-width="1.6"/><circle cx="12" cy="12" r="4.5" fill="none" stroke="#00FF00" stroke-width="2"/><circle cx="12" cy="12" r="1.6" fill="#00FF00"/></svg>' +
-    '<span class="sw-brand">SHADOW<b>WATCH</b></span>'));
+    '<span class="sw-brand">SHADOW<b>WATCH</b></span>');
+  // Developer unlock relay. The 9-tap easter egg is bound to #xaiAvatarShell,
+  // which now lives inside the hidden legacy room (offscreen, pointer-events
+  // none) — so after the cockpit mounts no real tap can ever reach it and the
+  // operator could never unlock Total / Full Debug / System Console again.
+  // Tapping the brand 9 times relays the taps to that same element, reusing the
+  // existing unlock rather than introducing a second access path.
+  (function () {
+    var taps = 0, last = 0;
+    brand.addEventListener('click', function () {
+      var now = Date.now();
+      if (now - last > 30000) taps = 0;          // same 30s window as the egg
+      last = now; taps++;
+      if (taps < 9) return;
+      taps = 0;
+      try {
+        var av = document.getElementById('xaiAvatarShell');
+        if (av) for (var i = 0; i < 9; i++) av.click();
+      } catch (_) {}
+      try { _swApplyDevGate(); } catch (_) {}    // reveal immediately, don't wait for the tick
+    });
+  })();
+  header.appendChild(brand);
   var chip = _swEl('span', { 'class':'sw-chip' }, '<span class="sw-chipdot"></span><span>XRPMAN</span>');
   header.appendChild(chip);
   header.appendChild(_swEl('div', { 'class':'sw-hsep' }));
