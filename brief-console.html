@@ -113,6 +113,16 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
 .sw-dash-v1 .sw-mini{min-width:0;}
 .sw-dash-v1 .sw-mini span{display:block;font:600 8.5px 'Rajdhani',sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--sw-text-muted);}
 .sw-dash-v1 .sw-mini b{display:block;font:700 14px/1.15 'Share Tech Mono',monospace;color:var(--sw-green);}
+/* RUN SCAN — the primary action on the cockpit; spans the stat grid so it is
+   immediately findable on a desktop screen instead of hiding in a stat cell. */
+.sw-dash-v1 .sw-runbtn{grid-column:span 2;display:flex;align-items:center;justify-content:center;gap:9px;
+  padding:12px 14px;margin-top:2px;cursor:pointer;border-radius:var(--sw-radius);
+  border:1px solid var(--sw-green);background:rgba(0,255,0,.12);color:var(--sw-green);
+  font:800 14px 'Rajdhani',sans-serif;letter-spacing:.16em;text-transform:uppercase;
+  box-shadow:0 0 16px rgba(0,255,0,.18);}
+.sw-dash-v1 .sw-runbtn:hover{background:rgba(0,255,0,.2);box-shadow:0 0 22px rgba(0,255,0,.3);}
+.sw-dash-v1 .sw-runbtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2.2;flex:0 0 auto;}
+.sw-dash-v1 .sw-runbtn[data-busy="true"]{opacity:.55;cursor:default;box-shadow:none;}
 .sw-dash-v1 .sw-scanstatus{grid-column:span 2;border:1px solid var(--sw-border);border-radius:var(--sw-radius-sm);
   padding:7px 9px;display:flex;align-items:center;gap:8px;margin-top:2px;}
 .sw-dash-v1 .sw-scanstatus svg{width:15px;height:15px;stroke:var(--sw-green);fill:none;stroke-width:2;flex:0 0 auto;}
@@ -21757,10 +21767,13 @@ function _swBuildCockpit() {
     '<div class="sw-mini"><span>Queue</span><b id="swMiniQueue">0</b></div>' +
     '<div class="sw-mini"><span>Helper Jobs</span><b id="swMiniHelpers">—</b></div>' +
     '<div class="sw-mini"><span>Errors</span><b id="swMiniErrors">0</b></div>');
-  var runBtn = _swEl('button', { type:'button', 'class':'sw-cardbtn', id:'swRunBtn', style:'margin-top:0' }, 'RUN SCAN');
+  // RUN SCAN is the one action on this screen, so it must read as a primary
+  // control. It previously used the small .sw-cardbtn style inside a stat cell
+  // and was genuinely hard to find on a desktop screen.
+  var runBtn = _swEl('button', { type:'button', 'class':'sw-runbtn', id:'swRunBtn' },
+    _swIcon('power') + '<span id="swRunLbl">RUN SCAN</span>');
   runBtn.addEventListener('click', function () { if (!_swScanning()) _swClickCmd('run-scan'); });
-  var runCell = _swEl('div', { 'class':'sw-mini' }); runCell.appendChild(runBtn);
-  rRight.appendChild(runCell);
+  rRight.appendChild(runBtn);
   rRight.appendChild(_swEl('div', { 'class':'sw-scanstatus' },
     _swIcon('pulse') + '<div><span>Scan Status</span><b id="swScanStatus">Standing by</b></div>'));
   reactor.appendChild(rLeft); reactor.appendChild(rRight);
@@ -21925,7 +21938,13 @@ function _swRenderReactor() {
     }
   }
   var rb = document.getElementById('swRunBtn');
-  if (rb) { var busy = _swScanning(); rb.textContent = busy ? 'SCANNING…' : 'RUN SCAN'; rb.disabled = busy; rb.style.opacity = busy ? '.5' : '1'; }
+  if (rb) {
+    var busy = _swScanning();
+    var rl = document.getElementById('swRunLbl');
+    if (rl) rl.textContent = busy ? 'SCANNING…' : 'RUN SCAN';   // keep the icon
+    rb.disabled = busy;
+    rb.setAttribute('data-busy', busy ? 'true' : 'false');
+  }
   var vr = document.getElementById('swVoiceRow');
   if (vr) {
     var t2 = document.getElementById('xaiVoiceOutputToggle');

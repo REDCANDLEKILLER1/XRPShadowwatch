@@ -1286,3 +1286,37 @@
         #boot-btn .boot-arrow { flex-shrink: 0; font-size: 22px; line-height: 1; opacity: 0.85; }
         @media (prefers-reduced-motion: reduce) { #boot-btn { animation: none; box-shadow: 0 0 24px rgba(0,255,0,0.4); } }
     
+/* ════════════════════════════════════════════════════════════════
+   DESKTOP SHELL (>=900px)
+   The app is mobile-first and desktop simply stretched every element
+   edge-to-edge: on a 1920px screen the header stats, the XRPMAN strip and
+   the nav tabs smeared across the full width with large dead gaps, which is
+   why the PC view read as broken while the phone view looked right.
+   These rules constrain the shell to a readable centred column — the same
+   treatment #feed / #hvt-list / #mc-grid already get — without changing any
+   markup, IDs or behaviour.
+   ════════════════════════════════════════════════════════════════ */
+@media (min-width: 900px) {
+  :root { --sw-shell-max: 1180px; }
+
+  /* Header: keep the bar full-bleed (background/border) but centre its content */
+  #hud-top > .header-section { max-width: var(--sw-shell-max); margin-left: auto; margin-right: auto; width: 100%; }
+
+  /* XRPMan assistant strip + the tactical button row */
+  #xrpman-strip { max-width: var(--sw-shell-max); margin-left: auto; margin-right: auto; width: 100%; }
+
+  /* Nav tabs: stop each tab growing to ~270px on a wide screen */
+  /* width:100% matters — .tab-bar is a flex item, so max-width alone made it
+     shrink-to-fit and crushed all seven tabs together. */
+  #hud-bottom .tab-bar { max-width: var(--sw-shell-max); margin-left: auto; margin-right: auto;
+    width: 100%; align-self: stretch; }
+
+  /* View content: same centred column so panels don't float in a sea of black */
+  .view-panel { max-width: var(--sw-shell-max); margin-left: auto; margin-right: auto; width: 100%; }
+
+  /* The stat cells were spaced across the full width; keep them grouped */
+  #hud-top .hdr-row, #hud-top .hdr-toprow { max-width: var(--sw-shell-max); margin-left: auto; margin-right: auto; width: 100%; }
+}
+
+/* Very wide / ultrawide: widen slightly but never go full-bleed */
+@media (min-width: 1600px) { :root { --sw-shell-max: 1320px; } }
