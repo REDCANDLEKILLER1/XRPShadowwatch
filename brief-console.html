@@ -150,12 +150,14 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
 .sw-dash-v1 .sw-scell.sw-warn svg{stroke:var(--sw-red);} .sw-dash-v1 .sw-scell.sw-warn b{color:var(--sw-red);}
 .sw-dash-v1 .sw-scell.sw-gold svg{stroke:var(--sw-gold);} .sw-dash-v1 .sw-scell.sw-gold b{color:var(--sw-gold);}
 /* ════════ instruments ════════ */
-/* instruments fill the column: the gauge block absorbs the spare height so the
-   meter + tiles stay anchored at the bottom (no scattered dead space) */
-.sw-dash-v1 #swInstruments{justify-content:flex-start;}
+/* Instruments fill their column evenly instead of leaving one large dead gap
+   with the gauges floating in the middle: the three blocks (gauges, net flow,
+   tiles) are distributed, and the gauges scale up to use the available height. */
+.sw-dash-v1 #swInstruments{justify-content:space-evenly;}
 .sw-dash-v1 .sw-gaugerow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;
-  flex:1 1 auto;align-content:center;min-height:0;}
-@media (min-height:860px){ .sw-dash-v1 .sw-gauge svg{max-width:154px;} }
+  flex:0 0 auto;align-content:center;}
+@media (min-height:820px){ .sw-dash-v1 .sw-gauge svg{max-width:172px;} }
+@media (min-height:960px){ .sw-dash-v1 .sw-gauge svg{max-width:190px;} }
 .sw-dash-v1 .sw-gauge{text-align:center;min-width:0;}
 .sw-dash-v1 .sw-gauge-cap{font:700 8.5px 'Rajdhani',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--sw-text-muted);margin-bottom:2px;}
 .sw-dash-v1 .sw-gauge svg{width:100%;max-width:132px;height:auto;overflow:visible;}
@@ -21792,7 +21794,7 @@ function _swBuildCockpit() {
     '<span class="sw-leg"><i style="background:#00D9FF"></i>Discovered</span>' +
     '<span class="sw-leg"><i style="background:#FF4D4D"></i>High Risk</span>' +
     '<span class="sw-leg"><i style="background:#5A6B65"></i>Unknown</span></div></div>');
-  var viewMap = _swEl('button', { type:'button', 'class':'sw-cardbtn' }, 'VIEW MAP');
+  var viewMap = _swEl('button', { type:'button', 'class':'sw-cardbtn' }, 'VIEW MAP  \u2192');
   viewMap.addEventListener('click', function () { swNav('map'); });
   network.appendChild(viewMap);
   col3.appendChild(network);
@@ -21801,7 +21803,7 @@ function _swBuildCockpit() {
   var repevid = _swEl('section', { 'class':'sw-panel', id:'swRepEvid' },
     '<div class="sw-panel-title"><span class="sw-t"><span class="sw-dot"></span>REPORT &amp; EVIDENCE</span>' +
     '<span class="sw-tag">LATEST</span></div><div id="swRepBody"></div>');
-  var viewAll = _swEl('button', { type:'button', 'class':'sw-cardbtn' }, 'VIEW ALL');
+  var viewAll = _swEl('button', { type:'button', 'class':'sw-cardbtn' }, 'VIEW ALL  \u2192');
   viewAll.addEventListener('click', function () { _swClickCmd('read-report'); });
   repevid.appendChild(viewAll);
   col3b.appendChild(repevid);
@@ -22012,6 +22014,21 @@ function _swRenderInstruments(p, SP, scanning) {
     t.appendChild(tile('Ledger TX', ledgerTx === null ? 'WAITING' : fmt(ledgerTx, 0), 'Confirmed', 'var(--sw-purple)'));
   }
 }
+// Real elapsed time from the tx date. Returns '' when there is no usable date
+// so the caller can fall back rather than invent a time.
+function _swAgo(iso) {
+  try {
+    if (!iso) return '';
+    var t = Date.parse(iso);
+    if (!isFinite(t)) return '';
+    var s = Math.floor((Date.now() - t) / 1000);
+    if (s < 0) return '';
+    if (s < 60)    return s + 's ago';
+    if (s < 3600)  return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    return Math.floor(s / 86400) + 'd ago';
+  } catch (_) { return ''; }
+}
 function _swFeedIcon(cls) {
   if (/EXCHANGE/.test(cls)) return ['coin', 'var(--sw-gold)'];
   if (/WHALE/.test(cls))    return ['whale', 'var(--sw-cyan)'];
@@ -22037,7 +22054,10 @@ function _swRenderFeed(p) {
     var t2 = _swEl('div', { 'class':'sw-feed-detail' });
     t2.textContent = (tx.sender_label || _swShort(tx.from) || 'UNKNOWN') + ' → ' + (tx.receiver_label || _swShort(tx.to) || 'UNKNOWN');
     body.appendChild(t1); body.appendChild(t2);
-    var time = _swEl('div', { 'class':'sw-feed-time' }); time.textContent = String(tx.confidence || '');
+    var time = _swEl('div', { 'class':'sw-feed-time' });
+    // Prefer a real relative timestamp (the reference shows "10s ago"); fall
+    // back to the confidence grade when the tx carries no usable date.
+    time.textContent = _swAgo(tx.date) || String(tx.confidence || '');
     row.appendChild(ico); row.appendChild(body); row.appendChild(time);
     el.appendChild(row);
   });
