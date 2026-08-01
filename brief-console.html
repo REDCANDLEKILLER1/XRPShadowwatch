@@ -14,9 +14,11 @@
 <style id="sw-dash-v1">
 :root{
   --sw-green:#00FF00; --sw-green-soft:#76FF76; --sw-cyan:#00D9FF; --sw-gold:#FFC83D;
-  --sw-red:#FF4D4D; --sw-purple:#B45CFF; --sw-blue:#4DA6FF;
+  --sw-red:#FF4D4D; --sw-purple:#B45CFF;
+  --sw-blue:#4DA6FF; --sw-blue-soft:#8FCBFF;
+  --sw-gold-soft:#FFE08A;
   --sw-bg:#04070A; --sw-bg-raised:#0A1016; --sw-panel:#080D12;
-  --sw-border:rgba(120,160,150,0.18); --sw-border-active:rgba(0,255,0,0.55);
+  --sw-border:rgba(120,160,180,0.20); --sw-border-active:rgba(0,255,0,0.55);
   --sw-text:#E6F1EA; --sw-text-muted:#7C8C86;
   --sw-radius:10px; --sw-radius-sm:7px;
   --sw-gap:8px; --sw-rail-w:186px; --sw-header-h:52px; --sw-footer-h:22px;
@@ -52,7 +54,7 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
   font:700 10px/1 'Rajdhani',sans-serif;letter-spacing:.14em;text-transform:uppercase;
   color:var(--sw-text);margin:0 0 8px;flex:0 0 auto;}
 .sw-dash-v1 .sw-panel-title .sw-t{display:flex;align-items:center;gap:7px;}
-.sw-dash-v1 .sw-panel-title .sw-tag{font:700 9px 'Rajdhani',sans-serif;letter-spacing:.12em;color:var(--sw-cyan);}
+.sw-dash-v1 .sw-panel-title .sw-tag{font:700 9px 'Rajdhani',sans-serif;letter-spacing:.12em;color:var(--sw-blue-soft);}
 .sw-dash-v1 .sw-dot{width:6px;height:6px;border-radius:50%;background:var(--sw-green);
   box-shadow:0 0 7px var(--sw-green);flex:0 0 auto;}
 /* ════════ header ════════ */
@@ -164,6 +166,7 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
 .sw-dash-v1 .sw-scell b{display:block;font:700 15px/1.1 'Share Tech Mono',monospace;color:var(--sw-green);white-space:nowrap;}
 .sw-dash-v1 .sw-scell.sw-warn svg{stroke:var(--sw-red);} .sw-dash-v1 .sw-scell.sw-warn b{color:var(--sw-red);}
 .sw-dash-v1 .sw-scell.sw-gold svg{stroke:var(--sw-gold);} .sw-dash-v1 .sw-scell.sw-gold b{color:var(--sw-gold);}
+.sw-dash-v1 .sw-scell:last-child svg{stroke:var(--sw-blue);} .sw-dash-v1 .sw-scell:last-child b{color:var(--sw-blue-soft);}
 /* ════════ instruments ════════ */
 /* Instruments fill their column evenly instead of leaving one large dead gap
    with the gauges floating in the middle: the three blocks (gauges, net flow,
@@ -191,6 +194,18 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
 .sw-dash-v1 .sw-meter-zero{position:absolute;top:-2px;bottom:-2px;left:50%;width:2px;background:var(--sw-green);}
 .sw-dash-v1 .sw-nf-scale{display:flex;justify-content:space-between;font:600 7.5px 'Rajdhani',sans-serif;letter-spacing:.1em;color:var(--sw-text-muted);}
 .sw-dash-v1 .sw-tilerow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:8px;flex:0 0 auto;}
+/* section subtitle — quieter than a panel title, used inside a panel */
+.sw-dash-v1 .sw-subttl{font:700 8.5px 'Rajdhani',sans-serif;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--sw-blue-soft);opacity:.75;margin:10px 0 5px;flex:0 0 auto;
+  display:flex;align-items:center;gap:7px;}
+.sw-dash-v1 .sw-subttl::after{content:"";flex:1 1 auto;height:1px;background:linear-gradient(90deg,rgba(143,203,255,.28),transparent);}
+/* market & network boxes — gold for value, blue for network */
+.sw-dash-v1 .sw-mktrow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;flex:0 0 auto;}
+.sw-dash-v1 .sw-mkt{background:linear-gradient(180deg,rgba(12,20,28,.9),rgba(8,13,18,.9));
+  border:1px solid rgba(120,160,190,.20);border-radius:var(--sw-radius-sm);padding:7px 8px;min-width:0;}
+.sw-dash-v1 .sw-mkt-l{font:700 7.5px 'Rajdhani',sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--sw-text-muted);}
+.sw-dash-v1 .sw-mkt-v{font:800 14px/1.2 'Orbitron',sans-serif;color:var(--sw-gold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sw-dash-v1 .sw-mkt-s{font:600 7.5px 'Rajdhani',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--sw-text-muted);opacity:.8;}
 .sw-dash-v1 .sw-tile{background:var(--sw-bg-raised);border:1px solid var(--sw-border);border-radius:var(--sw-radius-sm);
   padding:8px 4px;text-align:center;min-width:0;}
 .sw-dash-v1 .sw-tile-lbl{font:600 7.5px 'Rajdhani',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--sw-text-muted);}
@@ -21840,7 +21855,10 @@ function _swBuildCockpit() {
 
   var instruments = _swEl('section', { 'class':'sw-panel', id:'swInstruments' },
     '<div class="sw-panel-title"><span class="sw-t"><span class="sw-dot"></span>LIVE SCAN INSTRUMENTS</span></div>' +
-    '<div class="sw-gaugerow" id="swGauges"></div><div id="swMeter"></div><div class="sw-tilerow" id="swTiles"></div>');
+    '<div class="sw-gaugerow" id="swGauges"></div><div id="swMeter"></div>' +
+    '<div class="sw-tilerow" id="swTiles"></div>' +
+    '<div class="sw-subttl" id="swMktTtl">MARKET &amp; NETWORK</div>' +
+    '<div class="sw-mktrow" id="swMarket"></div>');
   cols.appendChild(instruments);
 
   // Middle column: activity feed on top, live scan log beneath. The log is what
@@ -22110,6 +22128,37 @@ function _swAgo(iso) {
     return Math.floor(s / 86400) + 'd ago';
   } catch (_) { return ''; }
 }
+// Market + network context. These are the LEDGER DIAGNOSTICS values the report
+// already publishes; the node map displaced them from the dashboard, and they
+// also fill the dead space under the tiles. Real pack fields only — a missing
+// value shows an em dash, never a placeholder number.
+function _swRenderMarket(p) {
+  var el = document.getElementById('swMarket'); if (!el) return;
+  _swClear(el);
+  function box(lbl, val, sub, color) {
+    var d = _swEl('div', { 'class':'sw-mkt' },
+      '<div class="sw-mkt-l"></div><div class="sw-mkt-v"></div><div class="sw-mkt-s"></div>');
+    d.querySelector('.sw-mkt-l').textContent = lbl;
+    var v = d.querySelector('.sw-mkt-v'); v.textContent = val; if (color) v.style.color = color;
+    d.querySelector('.sw-mkt-s').textContent = sub || '';
+    return d;
+  }
+  var GOLD = 'var(--sw-gold)', BLUE = 'var(--sw-blue)', CYAN = 'var(--sw-cyan)';
+  var price = p ? n(p.xrp_price) : 0, dpct = p ? n(p.xrp_delta_24h_pct) : 0;
+  el.appendChild(box('XRP PRICE', price > 0 ? ('$' + price.toFixed(4)) : '—',
+    price > 0 ? ((dpct > 0 ? '+' : '') + dpct.toFixed(2) + '% 24h') : 'no feed', GOLD));
+  var vol = p ? n(p.xrp_volume_24h) : 0;
+  el.appendChild(box('MARKET VOL', vol > 0 ? ('$' + _swCompact(vol)) : '—', 'exchanges 24h', GOLD));
+  var dex = p ? n(p.xrpl_dex_volume_24h_usd) : 0;
+  el.appendChild(box('XRPL DEX', dex > 0 ? ('$' + _swCompact(dex)) : '—', 'native 24h', BLUE));
+  var rl = p ? n(p.rlusd_supply) : 0;
+  el.appendChild(box('RLUSD', rl > 0 ? _swCompact(rl) : '—', 'supply', BLUE));
+  var acc = p ? n(p.xrpl_accounts_created) : 0;
+  el.appendChild(box('NEW ACCOUNTS', acc > 0 ? ('+' + fmt(acc, 0)) : '—',
+    (p && p.xrpl_metrics_date) ? String(p.xrpl_metrics_date) : 'funded/day', CYAN));
+  var tvl = p ? n(p.xrpl_evm_tvl_usd) : 0;
+  el.appendChild(box('EVM TVL', tvl > 0 ? ('$' + _swCompact(tvl)) : '—', 'sidechain', BLUE));
+}
 function _swFeedIcon(cls) {
   if (/EXCHANGE/.test(cls)) return ['coin', 'var(--sw-gold)'];
   if (/WHALE/.test(cls))    return ['whale', 'var(--sw-cyan)'];
@@ -22304,6 +22353,7 @@ function renderDashboardV1Live() {
     var fv = document.getElementById('swFootVer');
     if (fv && !fv.textContent) fv.textContent = 'XRPMAN // SHADOWWATCH ' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : '');
     _swRenderInstruments(p, SP, scanning);
+    _swRenderMarket(p);
     _swRenderLog();
     _swApplyDevGate();
   } catch (_) {}
