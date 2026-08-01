@@ -1299,6 +1299,14 @@
 @media (min-width: 900px) {
   :root { --sw-shell-max: 1180px; }
 
+  /* The project has no universal box-sizing reset, so `width:100%` on a padded
+     element resolves to 100% of the parent's CONTENT box *plus* its own padding
+     and border. #xrpman-strip (12px padding + 1px border a side) overhung the
+     viewport by 26px that way — 11px of it past the scroll edge. Every element
+     centred below takes width:100%, so they all need border-box. */
+  #hud-top > .header-section, #xrpman-strip, #hud-bottom .tab-bar,
+  .view-panel, #hud-top .hdr-row, #hud-top .hdr-toprow { box-sizing: border-box; }
+
   /* Header: keep the bar full-bleed (background/border) but centre its content */
   #hud-top > .header-section { max-width: var(--sw-shell-max); margin-left: auto; margin-right: auto; width: 100%; }
 
@@ -1320,3 +1328,103 @@
 
 /* Very wide / ultrawide: widen slightly but never go full-bleed */
 @media (min-width: 1600px) { :root { --sw-shell-max: 1320px; } }
+
+/* ════════════════════════════════════════════════════════════════
+   PC LIVE WALL (>=1100px)  —  one screen, everything moving
+   The app is mobile-first; on desktop #hud-top costs 304px and #hud-bottom is
+   pinned to 55vh, so ~50% of a 1080px screen is spent before content starts and
+   the map/graph canvases (which size from their own CSS box) end up tiny.
+   Wall mode collapses the header, gives the deck the rest of the screen, and
+   lays the real canvases out as tiles that animate simultaneously.
+   Scoped to >=1100px so the phone layout is untouched.
+   ════════════════════════════════════════════════════════════════ */
+@media (min-width: 1100px) {
+  /* — compact header: drop the title block and assistant strip, keep the live
+       stat cells and the tactical buttons. Hidden elements stay in the DOM
+       because #alert-toggle drives the header bell and #status-text drives the
+       connection light. — */
+  body.sw-wall #hud-top .hdr-row,
+  body.sw-wall #hud-top #xrpman-strip { display: none !important; }
+  body.sw-wall #hud-top { padding-top: 10px; padding-bottom: 8px; }
+  body.sw-wall #hud-top .header-section { padding-top: 0; padding-bottom: 0; }
+  body.sw-wall #hud-top .stat-grid { margin: 0 auto; }
+  body.sw-wall #hud-top .tactical-bar { margin-top: 6px; }
+
+  /* — the deck takes everything under the compact header — */
+  body.sw-wall #hud-bottom { top: var(--sw-wall-top, 118px); height: auto !important; bottom: 0; }
+  body.sw-wall #command-deck { height: 100%; display: flex; flex-direction: column; }
+  body.sw-wall #view-home.view-panel { flex: 1 1 auto; min-height: 0; max-width: none; padding: 0; overflow: hidden;
+    display: flex; flex-direction: column; }
+
+  /* — the wall — */
+  /* #view-home also holds the Mission Control cards; in wall mode they would
+     share the flex column and starve the wall (measured: 371px of 915px). The
+     cards are re-presented as tool tiles inside the wall, so hide the originals
+     rather than duplicating them. */
+  body.sw-wall #view-home > *:not(#swWall) { display: none !important; }
+  #swWall { display: none; }
+  body.sw-wall #swWall {
+    display: grid; gap: 10px; padding: 10px; flex: 1 1 auto; height: auto; min-height: 0; box-sizing: border-box;
+    grid-template-columns: minmax(0,1.35fr) minmax(0,1fr);
+    grid-template-rows: minmax(0,1.25fr) minmax(0,1fr);
+    grid-template-areas: "map graph" "feed tools";
+  }
+  body.sw-wall #swWall.wall-zoom { grid-template-areas: "zoom zoom" "zoom zoom"; }
+  body.sw-wall #swWall.wall-zoom > .wall-tile { display: none; }
+  body.sw-wall #swWall.wall-zoom > .wall-tile.is-zoom { display: flex; grid-area: zoom; }
+
+  .wall-tile { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0;
+    background: rgba(4,10,8,.82); border: 1px solid rgba(120,160,180,.22); border-radius: 12px; overflow: hidden;
+    backdrop-filter: blur(4px); }
+  .wall-tile[data-area="map"]   { grid-area: map; }
+  .wall-tile[data-area="graph"] { grid-area: graph; }
+  .wall-tile[data-area="feed"]  { grid-area: feed; }
+  .wall-tile[data-area="tools"] { grid-area: tools; }
+  .wall-head { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+    border-bottom: 1px solid rgba(120,160,180,.16); background: rgba(0,0,0,.35); }
+  .wall-head b { font: 700 10px 'Rajdhani', sans-serif; letter-spacing: .14em; text-transform: uppercase; color: #d9ecdf; }
+  .wall-head .wall-dot { width: 6px; height: 6px; border-radius: 50%; background: #00ff00; box-shadow: 0 0 7px #00ff00; }
+  .wall-head .wall-sp { flex: 1 1 auto; }
+  .wall-head .wall-tag { font: 700 8.5px 'Rajdhani', sans-serif; letter-spacing: .12em; color: #8FCBFF; }
+  .wall-x { background: transparent; border: 1px solid rgba(120,160,180,.3); color: #cfe6d8; cursor: pointer;
+    border-radius: 6px; width: 26px; height: 22px; display: flex; align-items: center; justify-content: center; padding: 0; }
+  .wall-x:hover { border-color: rgba(0,255,0,.6); color: #00ff00; }
+  .wall-x svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2; }
+  .wall-body { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; }
+  /* the adopted canvases fill their tile; their rAF loops re-measure this box
+     every frame, so an expand is picked up automatically */
+  .wall-body > canvas { display: block; width: 100%; height: 100%; }
+  .wall-scroll { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; padding: 4px 8px; }
+  .wall-scroll::-webkit-scrollbar { width: 5px; }
+  .wall-scroll::-webkit-scrollbar-thumb { background: rgba(120,160,180,.28); border-radius: 3px; }
+
+  /* tools tile — compact cards for the secondary features */
+  .wall-tools { position: absolute; inset: 0; overflow-y: auto; padding: 8px; display: grid; gap: 7px;
+    grid-template-columns: repeat(2, minmax(0,1fr)); align-content: start; }
+  .wall-card { text-align: left; cursor: pointer; border-radius: 9px; padding: 9px 10px; min-width: 0;
+    background: linear-gradient(180deg, rgba(12,20,28,.92), rgba(8,13,18,.92));
+    border: 1px solid rgba(120,160,180,.2); color: #dcefe3; }
+  .wall-card:hover { border-color: rgba(0,255,0,.5); }
+  .wall-card b { display: block; font: 700 10px 'Rajdhani', sans-serif; letter-spacing: .1em; text-transform: uppercase; }
+  .wall-card i { display: block; font: 400 8.5px 'Share Tech Mono', monospace; color: #7C8C86; font-style: normal; margin-top: 2px; }
+  .wall-card.gold b { color: #FFC83D; } .wall-card.blue b { color: #8FCBFF; } .wall-card.green b { color: #00ff00; }
+
+  /* — background: a slow, near-invisible drift. Deliberately NOT matrix rain
+       behind live data: moving glyphs compete with the numbers for attention.
+       Rain stays on the splash/boot screen where there is no data to fight. — */
+  body.sw-wall::before { content: ""; position: fixed; inset: -20%; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(38% 30% at 22% 26%, rgba(0,255,120,.055), transparent 60%),
+      radial-gradient(32% 26% at 78% 68%, rgba(90,170,255,.05), transparent 60%),
+      radial-gradient(26% 22% at 60% 18%, rgba(255,200,61,.032), transparent 60%);
+    animation: swWallDrift 46s ease-in-out infinite alternate; }
+  @keyframes swWallDrift {
+    0%   { transform: translate3d(-2%, -1%, 0) scale(1); }
+    50%  { transform: translate3d(1.5%, 1%, 0) scale(1.04); }
+    100% { transform: translate3d(2%, -1.5%, 0) scale(1); }
+  }
+  body.sw-wall #hud-bottom, body.sw-wall #hud-top { position: absolute; z-index: 2; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body.sw-wall::before { animation: none !important; }
+}

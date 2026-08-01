@@ -759,5 +759,226 @@
     <script src="src/js/boot-greeter.js"></script>
     <script src="src/js/boot-scanner.js"></script>
     <script src="src/js/pwa.js"></script>
+
+    <!-- ════════════════════════════════════════════════════════════
+         PC LIVE WALL — desktop-only single-screen dashboard.
+         Must be a CLASSIC script loaded AFTER app.js: it assigns app.js's
+         top-level `mapActive` / `graphActive` by bare name (they are global
+         lexical bindings, NOT properties of window, so window.mapActive fails).
+         ════════════════════════════════════════════════════════════ -->
+    <script>
+    (function () {
+      'use strict';
+      var MIN = 1100;
+      var wall = null, adopted = [], started = { map:false, graph:false }, zoomed = null, active = false;
+
+      function desktop() { return window.matchMedia('(min-width: ' + MIN + 'px)').matches; }
+      function el(tag, attrs, html) {
+        var e = document.createElement(tag);
+        if (attrs) for (var k in attrs) { if (k === 'class') e.className = attrs[k]; else e.setAttribute(k, attrs[k]); }
+        if (html != null) e.innerHTML = html;      // static markup only
+        return e;
+      }
+      function tile(area, title, tag) {
+        var t = el('div', { 'class':'wall-tile', 'data-area':area });
+        var head = el('div', { 'class':'wall-head' },
+          '<span class="wall-dot"></span><b></b><span class="wall-sp"></span>' +
+          '<span class="wall-tag"></span>' +
+          '<button type="button" class="wall-x" title="Expand / restore" aria-label="Expand or restore panel">' +
+          '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5"/></svg></button>');
+        head.querySelector('b').textContent = title;
+        head.querySelector('.wall-tag').textContent = tag || '';
+        head.querySelector('.wall-x').addEventListener('click', function (ev) { ev.stopPropagation(); toggleZoom(t); });
+        var body = el('div', { 'class':'wall-body' });
+        t.appendChild(head); t.appendChild(body);
+        t._body = body;
+        return t;
+      }
+      function toggleZoom(t) {
+        if (!wall) return;
+        if (zoomed === t) { zoomed = null; wall.classList.remove('wall-zoom'); t.classList.remove('is-zoom'); }
+        else {
+          if (zoomed) zoomed.classList.remove('is-zoom');
+          zoomed = t; wall.classList.add('wall-zoom'); t.classList.add('is-zoom');
+        }
+        // The canvases re-measure their own box every frame, so no resize call is
+        // needed. The layout change is instant (no CSS transition) on purpose:
+        // an animated expand would reallocate the backing store every frame.
+      }
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && zoomed) toggleZoom(zoomed); });
+
+      // Move a live node into a tile, remembering where it came from.
+      function adopt(node, body) {
+        if (!node || !body) return;
+        adopted.push({ node:node, parent:node.parentNode, next:node.nextSibling,
+                       cssW:node.style.width, cssH:node.style.height });
+        body.appendChild(node);
+      }
+      function restore() {
+        for (var i = adopted.length - 1; i >= 0; i--) {
+          var a = adopted[i];
+          try { a.node.style.width = a.cssW; a.node.style.height = a.cssH;
+                if (a.parent) a.parent.insertBefore(a.node, a.next); } catch (_) {}
+        }
+        adopted = [];
+      }
+
+      function build() {
+        var home = document.getElementById('view-home');
+        if (!home || document.getElementById('swWall')) return document.getElementById('swWall');
+        var w = el('div', { id:'swWall' });
+        var mapT   = tile('map',   'BUBBLE MAP',   'LIVE');
+        var graphT = tile('graph', 'WALLET GRAPH', 'TRACE');
+        var feedT  = tile('feed',  'LIVE FEED',    'XRPL STREAM');
+        var toolT  = tile('tools', 'TOOLS',        'ALL SYSTEMS');
+        [mapT, graphT, feedT, toolT].forEach(function (t) { w.appendChild(t); });
+        w._tiles = { map:mapT, graph:graphT, feed:feedT, tools:toolT };
+        home.insertBefore(w, home.firstChild);
+        wall = w;
+        return w;
+      }
+
+      function fillTools(body) {
+        var grid = el('div', { 'class':'wall-tools' });
+        // Only wire actions that exist; each is the app's own function.
+        var CARDS = [
+          ['DAILY BRIEF',      'Coffee & Crypto report',  'green', function(){ switchView('brief'); try{ loadBriefConsole(); }catch(_){} }],
+          ['SESSION REPORT',   'Raw scanner export',      'blue',  function(){ openIntelDashboard(); }],
+          ['EVIDENCE LOCKER',  'Saved anomalies',         'gold',  function(){ switchView('case'); }],
+          ['WALLET ID',        'Resolve a wallet label',  'blue',  function(){ openWalletResolver(); }],
+          ['DISCOVERY INBOX',  'Review candidates',       'green', function(){ openDiscoveryInbox(); }],
+          ['HVT WATCHLIST',    'High-value targets',      'gold',  function(){ switchView('hvt'); }],
+          ['ESCROW WATCH',     'Unlock calendar',         'blue',  function(){ try{ openEscrowWatch(); }catch(_){ switchView('report'); } }],
+          ['WHAT’S NEW',  'Latest changes',          'green', function(){ showWhatsNew(); }]
+        ];
+        CARDS.forEach(function (c) {
+          var fn = c[3];
+          var b = el('button', { type:'button', 'class':'wall-card ' + c[2] }, '<b></b><i></i>');
+          b.querySelector('b').textContent = c[0];
+          b.querySelector('i').textContent = c[1];
+          b.addEventListener('click', function () { try { fn(); } catch (e) { try { console.warn('[wall]', e); } catch(_){} } });
+          grid.appendChild(b);
+        });
+        body.appendChild(grid);
+      }
+
+      // Run BOTH visualisations at once. switchView is exclusive — every call
+      // clears mapActive/graphActive unless the target IS that view — so the
+      // flags must be re-asserted after EVERY router pass, not once on entry.
+      // Restart a loop only when its flag was false: a false flag means the rAF
+      // chain has already died, so this is also the re-entrancy guard (calling
+      // loopMap() while a chain is live would double bubble speed and draw cost).
+      function assertLoops() {
+        try {
+          var liveMap = (typeof mapActive !== 'undefined') && mapActive;
+          var liveGraph = (typeof graphActive !== 'undefined') && graphActive;
+          mapActive = true; graphActive = true;
+          if (!liveMap)   { started.map = true;   loopMap(); }
+          if (!liveGraph) { started.graph = true; updateGraph(); }
+        } catch (e) { try { console.warn('[wall] loop start failed:', e); } catch (_) {} }
+      }
+
+      function enter() {
+        if (!desktop()) return;
+        if (active) { assertLoops(); return; }   // already mounted — just re-arm
+        var w = build(); if (!w) return;
+        active = true;
+        document.body.classList.add('sw-wall');
+        // header height drives where the deck starts
+        try {
+          var ht = document.getElementById('hud-top');
+          if (ht) document.documentElement.style.setProperty('--sw-wall-top', Math.round(ht.getBoundingClientRect().height) + 'px');
+        } catch (_) {}
+
+        // Adopt the REAL canvases. Their panels stay in the DOM; only the
+        // canvases move, so every handler bound to them keeps working.
+        adopt(document.getElementById('map-canvas'),   w._tiles.map._body);
+        adopt(document.getElementById('graph-canvas'), w._tiles.graph._body);
+        // Live feed list
+        adopt(document.getElementById('feed'), w._tiles.feed._body);
+        try { w._tiles.feed._body.firstChild.classList.add('wall-scroll'); } catch (_) {}
+        if (!w._tiles.tools._body.firstChild) fillTools(w._tiles.tools._body);
+
+        assertLoops();
+
+        // The decorative three.js starfield renders 2500 particles every frame
+        // and never stops; it is fully covered by the wall, so park it.
+        try { if (window.__swStarPause) window.__swStarPause(true); } catch (_) {}
+      }
+
+      function leave() {
+        if (!active) return;
+        active = false;
+        if (zoomed) { try { toggleZoom(zoomed); } catch (_) {} }
+        // Stop both chains before the canvases move back, so no frame draws
+        // into a re-parented element. The router sets the correct flag next.
+        try { mapActive = false; graphActive = false; started.map = false; started.graph = false; } catch (_) {}
+        restore();
+        document.body.classList.remove('sw-wall');
+        try { if (window.__swStarPause) window.__swStarPause(false); } catch (_) {}
+        // Hand control back to the router; it will set the flags for the view
+        // it is switching to.
+      }
+
+      // Wall owns HOME on desktop. Any other view exits it.
+      function sync(id) { if (desktop() && id === 'home') enter(); else leave(); }
+
+      function hook() {
+        if (typeof switchView !== 'function' || switchView.__swWall) return false;
+        var orig = switchView;
+        switchView = function (id) {
+          if (id !== 'home') leave();          // release canvases BEFORE the router runs
+          var r = orig.apply(this, arguments);
+          try { sync(id); } catch (_) {}
+          return r;
+        };
+        switchView.__swWall = true;
+        try { window.switchView = switchView; } catch (_) {}
+        return true;
+      }
+
+      function tutorialOpen() {
+        try {
+          var t = document.getElementById('tutorial-overlay');
+          return !!(t && getComputedStyle(t).display !== 'none' && t.offsetParent !== null);
+        } catch (_) { return false; }
+      }
+      function boot() {
+        if (!hook()) { setTimeout(boot, 200); return; }
+        var home = document.getElementById('view-home');
+        if (home && home.classList.contains('active')) { sync('home'); return; }
+        // On desktop the wall IS the landing screen — that is the whole point of
+        // it. The tutorial drives the app to 'live' during first-run onboarding,
+        // so wait for it to finish rather than fighting it, then land on the
+        // wall. Never do this on a phone.
+        if (!desktop()) return;
+        var tries = 0;
+        (function land() {
+          if (++tries > 40) return;                  // ~20s ceiling
+          if (tutorialOpen()) { setTimeout(land, 500); return; }
+          if (!desktop()) return;
+          var h = document.getElementById('view-home');
+          if (h && !h.classList.contains('active')) { try { switchView('home'); } catch (_) {} }
+          else sync('home');
+        })();
+      }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function(){ setTimeout(boot, 300); });
+      else setTimeout(boot, 300);
+
+      window.addEventListener('resize', function () {
+        if (!desktop()) { leave(); return; }
+        var home = document.getElementById('view-home');
+        if (home && home.classList.contains('active')) {
+          enter();
+          try {
+            var ht = document.getElementById('hud-top');
+            if (ht) document.documentElement.style.setProperty('--sw-wall-top', Math.round(ht.getBoundingClientRect().height) + 'px');
+          } catch (_) {}
+        }
+      });
+      window.swWallEnter = enter; window.swWallLeave = leave;
+    })();
+    </script>
+
 </body>
 </html>
