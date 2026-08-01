@@ -98,6 +98,11 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
 .sw-dash-v1 .sw-row-cols{display:grid;gap:var(--sw-gap);min-width:0;min-height:0;
   grid-template-columns:minmax(0,1.12fr) minmax(0,0.82fr) minmax(0,1.26fr);}
 .sw-dash-v1 .sw-col3{display:grid;gap:var(--sw-gap);min-width:0;min-height:0;grid-template-rows:minmax(0,1fr) auto;}
+/* middle column: activity feed over the live scan log */
+.sw-dash-v1 .sw-col-mid{display:grid;gap:var(--sw-gap);min-width:0;min-height:0;
+  grid-template-rows:minmax(0,1.15fr) minmax(0,0.85fr);}
+.sw-dash-v1 .sw-logbody{margin:0;flex:1 1 auto;min-height:0;overflow:auto;white-space:pre-wrap;
+  word-break:break-word;font:400 9.5px/1.45 'Share Tech Mono',monospace;color:var(--sw-text-muted);}
 .sw-dash-v1 .sw-col3-bottom{display:grid;gap:var(--sw-gap);grid-template-columns:minmax(0,1fr) minmax(0,1fr);min-width:0;}
 /* ════════ reactor core ════════ */
 .sw-dash-v1 .sw-reactor{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:14px;}
@@ -3773,6 +3778,18 @@ async function scanWallets(ws) {
     state.wallets = rows.slice();      // mid-scan render
     renderWallets();
     setBar('hudWalletBar', phase1Done / rows.length * 50);   // 0-50% on bar = Phase 1
+    // Publish live wallet progress. XAI_SCAN_PROGRESS was only ever updated by
+    // _pollWallets(), which reads state.pack — and state.pack is not assigned
+    // until the very END of the scan, so the wallet-coverage gauge and the
+    // mission UI sat empty for the whole scan. Publish it from the loop itself.
+    try {
+      if (window.XAI_SCAN_PROGRESS) {
+        window.XAI_SCAN_PROGRESS.walletsTotal   = rows.length;
+        window.XAI_SCAN_PROGRESS.walletsChecked = phase1Done;
+        window.XAI_SCAN_PROGRESS.phase          = 'WALLET_PROGRESS';
+      }
+      if (window.__swDashApplied && typeof window.renderDashboardV1Live === 'function') window.renderDashboardV1Live();
+    } catch (_) {}
     setText('hudChecked', rows.filter(r => r.status === 'CHECKED').length);
     setText('hudFailed', rows.filter(r => r.status === 'FAILED').length);
     setText('hudInvalid', rows.filter(r => r.status === 'INVALID_ADDR').length);
@@ -3835,6 +3852,14 @@ async function scanWallets(ws) {
     phase2Done = i + chunk.length;
     shadowProgress(56, 78, phase2Done / Math.max(needTx.length, 1));
     setBar('hudWalletBar', 50 + phase2Done / Math.max(needTx.length, 1) * 50);
+    try {
+      if (window.XAI_SCAN_PROGRESS) {
+        window.XAI_SCAN_PROGRESS.walletsTotal   = rows.length;
+        window.XAI_SCAN_PROGRESS.walletsChecked = rows.length;   // balances all read
+        window.XAI_SCAN_PROGRESS.phase          = 'LEDGER';
+      }
+      if (window.__swDashApplied && typeof window.renderDashboardV1Live === 'function') window.renderDashboardV1Live();
+    } catch (_) {}
   }
 
   // ── DEDUPE: one ledger transaction = one row ──────────────────
@@ -21818,10 +21843,21 @@ function _swBuildCockpit() {
     '<div class="sw-gaugerow" id="swGauges"></div><div id="swMeter"></div><div class="sw-tilerow" id="swTiles"></div>');
   cols.appendChild(instruments);
 
+  // Middle column: activity feed on top, live scan log beneath. The log is what
+  // the operator watches to see what Shadow Watch is doing right now; the
+  // cockpit rebuild hid the legacy #cmdLogPane and never replaced it, so it had
+  // nowhere to appear.
+  var mid = _swEl('div', { 'class':'sw-col-mid' });
   var feed = _swEl('section', { 'class':'sw-panel', id:'swFeed' },
     '<div class="sw-panel-title"><span class="sw-t"><span class="sw-dot"></span>LIVE ACTIVITY FEED</span>' +
     '<span class="sw-tag">REAL-TIME</span></div><div class="sw-scroll" id="swFeedList"></div>');
-  cols.appendChild(feed);
+  mid.appendChild(feed);
+  var logPanel = _swEl('section', { 'class':'sw-panel', id:'swLogPanel' },
+    '<div class="sw-panel-title"><span class="sw-t"><span class="sw-dot"></span>LIVE SCAN LOG</span>' +
+    '<span class="sw-tag" id="swLogTag">IDLE</span></div>' +
+    '<pre class="sw-scroll sw-logbody" id="swLogBody"></pre>');
+  mid.appendChild(logPanel);
+  cols.appendChild(mid);
 
   var col3 = _swEl('div', { 'class':'sw-col3' });
   var network = _swEl('section', { 'class':'sw-panel', id:'swNetwork' },
@@ -22081,6 +22117,25 @@ function _swFeedIcon(cls) {
   if (/SPLIT|HOP/.test(cls))return ['pulse', 'var(--sw-purple)'];
   return ['alert', 'var(--sw-red)'];
 }
+// Mirror the engine's own log sink into the cockpit. log() writes to
+// #statusFeed, so we follow that element rather than inventing a second stream.
+// textContent only — log lines can contain wallet labels from the ledger.
+var _swLogLast = '';
+function _swRenderLog() {
+  var out = document.getElementById('swLogBody'); if (!out) return;
+  var src = document.getElementById('statusFeed');
+  var txt = src ? (src.textContent || '') : '';
+  if (txt !== _swLogLast) {
+    _swLogLast = txt;
+    var lines = txt.split('\n');
+    if (lines.length > 200) lines = lines.slice(-200);      // bounded
+    out.textContent = lines.join('\n');
+    var atBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 40;
+    if (atBottom) out.scrollTop = out.scrollHeight;          // follow unless scrolled up
+  }
+  var tag = document.getElementById('swLogTag');
+  if (tag) { var m = _swMode(); tag.textContent = (m === 'SCANNING' || m === 'BUILDING') ? 'RUNNING' : m; }
+}
 function _swRenderFeed(p) {
   var el = document.getElementById('swFeedList'); if (!el) return;
   var large = (typeof state !== 'undefined' && Array.isArray(state.large) && state.large.length) ? state.large
@@ -22249,6 +22304,7 @@ function renderDashboardV1Live() {
     var fv = document.getElementById('swFootVer');
     if (fv && !fv.textContent) fv.textContent = 'XRPMAN // SHADOWWATCH ' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : '');
     _swRenderInstruments(p, SP, scanning);
+    _swRenderLog();
     _swApplyDevGate();
   } catch (_) {}
 }
