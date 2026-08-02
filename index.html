@@ -862,21 +862,43 @@
         body.appendChild(grid);
       }
 
+      // ── Loop lifecycle ──────────────────────────────────────────────────
       // Run BOTH visualisations at once. switchView is exclusive — every call
       // clears mapActive/graphActive unless the target IS that view — so the
-      // flags must be re-asserted after EVERY router pass, not once on entry.
-      // Restart a loop only when its flag was false: a false flag means the rAF
-      // chain has already died, so this is also the re-entrancy guard (calling
-      // loopMap() while a chain is live would double bubble speed and draw cost).
-      function assertLoops() {
+      // flags must be re-armed after EVERY router pass, not once on entry.
+      //
+      // A FLAG IS NOT A LIVENESS TEST. loopMap()/updateGraph() check their flag
+      // at the TOP of the callback (app.js:1479, :860), so a chain only dies when
+      // its next frame actually runs. switchView clears the flag in the same
+      // synchronous task we then read it in, so "flag is false" does NOT mean the
+      // chain is dead — it means the chain has not looked yet. An earlier version
+      // of this file used the flag as its re-entrancy guard and leaked one extra
+      // rAF chain per HOME<->MAP round trip (measured: 39 concurrent chains on
+      // one canvas, bubble physics stepping 12x per frame).
+      //
+      // So: kill by flag, let a frame boundary pass so every pending callback
+      // observes false and returns without re-queueing, and only THEN start
+      // exactly one chain. Two frames, because a callback queued during the
+      // current frame would not otherwise have run yet. The ~32ms gap is
+      // invisible; a duplicated chain is permanent.
+      var restartToken = 0;
+      function restartLoops(wantMap, wantGraph) {
+        var mine = ++restartToken;              // collapses overlapping restarts
         try {
-          var liveMap = (typeof mapActive !== 'undefined') && mapActive;
-          var liveGraph = (typeof graphActive !== 'undefined') && graphActive;
-          mapActive = true; graphActive = true;
-          if (!liveMap)   { started.map = true;   loopMap(); }
-          if (!liveGraph) { started.graph = true; updateGraph(); }
-        } catch (e) { try { console.warn('[wall] loop start failed:', e); } catch (_) {} }
+          mapActive = false; graphActive = false;
+          started.map = false; started.graph = false;
+        } catch (e) { try { console.warn('[wall] loop stop failed:', e); } catch (_) {} return; }
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            if (mine !== restartToken) return;  // a newer restart supersedes this one
+            try {
+              if (wantMap)   { mapActive = true;   started.map = true;   loopMap(); }
+              if (wantGraph) { graphActive = true; started.graph = true; updateGraph(); }
+            } catch (e) { try { console.warn('[wall] loop start failed:', e); } catch (_) {} }
+          });
+        });
       }
+      function assertLoops() { restartLoops(true, true); }
 
       function enter() {
         if (!desktop()) return;
@@ -901,9 +923,10 @@
 
         assertLoops();
 
-        // The decorative three.js starfield renders 2500 particles every frame
-        // and never stops; it is fully covered by the wall, so park it.
-        try { if (window.__swStarPause) window.__swStarPause(true); } catch (_) {}
+        // The decorative three.js starfield updates 2500 particles and renders a
+        // full-viewport WebGL frame every tick, and it never stops. The wall
+        // covers it completely, so park the work while we are up.
+        try { window.__swStarsPaused = true; } catch (_) {}
       }
 
       function leave() {
@@ -914,8 +937,23 @@
         // into a re-parented element. The router sets the correct flag next.
         try { mapActive = false; graphActive = false; started.map = false; started.graph = false; } catch (_) {}
         restore();
+        // The scroll class is wall-only styling (position:absolute; inset:0). If
+        // it rides home on #feed it turns the LIVE panel's feed into a full-panel
+        // overlay that paints over the filter bar and swallows its clicks.
+        try {
+          var f = document.getElementById('feed');
+          if (f) f.classList.remove('wall-scroll');
+        } catch (_) {}
+        // Detach the shell too. #swWall's display:none lives inside the >=1100px
+        // media query, so an orphan left in #view-home becomes a visible, unstyled
+        // skeleton (duplicate tool buttons above Mission Control) the moment the
+        // window narrows. build() recreates the whole subtree on the next enter().
+        try {
+          if (wall && wall.parentNode) wall.parentNode.removeChild(wall);
+        } catch (_) {}
+        wall = null; zoomed = null;
         document.body.classList.remove('sw-wall');
-        try { if (window.__swStarPause) window.__swStarPause(false); } catch (_) {}
+        try { window.__swStarsPaused = false; } catch (_) {}
         // Hand control back to the router; it will set the flags for the view
         // it is switching to.
       }
@@ -927,8 +965,17 @@
         if (typeof switchView !== 'function' || switchView.__swWall) return false;
         var orig = switchView;
         switchView = function (id) {
+          var wasUp = active;
           if (id !== 'home') leave();          // release canvases BEFORE the router runs
           var r = orig.apply(this, arguments);
+          // The router starts the target view's loop itself (app.js:2027-2028) in
+          // this same task — while our chain is still queued for the coming frame.
+          // Left alone that is a second chain on the same canvas. Re-normalise so
+          // exactly one survives. Only when we were actually up: off the wall this
+          // is the app's own untouched path and must stay that way.
+          if (wasUp && id !== 'home' && (id === 'map' || id === 'graph')) {
+            try { restartLoops(id === 'map', id === 'graph'); } catch (_) {}
+          }
           try { sync(id); } catch (_) {}
           return r;
         };

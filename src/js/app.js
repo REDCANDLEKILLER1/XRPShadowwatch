@@ -1337,6 +1337,10 @@
         }
         function animate() {
             requestAnimationFrame(animate);
+            // The PC live wall covers this decorative starfield completely. Skip
+            // the 2500-particle update and the WebGL draw while it is up, but keep
+            // the chain alive so resuming is instant and no restart race exists.
+            if (window.__swStarsPaused) return;
             if (!particles) return;
             const pos = particles.geometry.attributes.position.array;
             const spd = particles.geometry.attributes.speed.array;

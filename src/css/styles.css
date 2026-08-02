@@ -1338,6 +1338,14 @@
    lays the real canvases out as tiles that animate simultaneously.
    Scoped to >=1100px so the phone layout is untouched.
    ════════════════════════════════════════════════════════════════ */
+
+/* UNCONDITIONAL, deliberately outside the media query below. leave() detaches
+   #swWall, but if a teardown is ever missed the leftover must not become a
+   visible unstyled skeleton (tile headings + duplicate tool buttons above
+   Mission Control) the instant the window narrows past 1100px. The rule inside
+   the media block cannot do this job — below 1100px it does not apply at all. */
+#swWall { display: none; }
+
 @media (min-width: 1100px) {
   /* — compact header: drop the title block and assistant strip, keep the live
        stat cells and the tactical buttons. Hidden elements stay in the DOM
@@ -1373,9 +1381,12 @@
   body.sw-wall #swWall.wall-zoom > .wall-tile { display: none; }
   body.sw-wall #swWall.wall-zoom > .wall-tile.is-zoom { display: flex; grid-area: zoom; }
 
+  /* No backdrop-filter here. These tiles permanently contain repainting canvases
+     with an animated gradient behind them, so a blur surface would be re-evaluated
+     every single frame instead of once — measured at 6.3fps with the blur against
+     22.2fps without it. The opaque background below gives the same look for free. */
   .wall-tile { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0;
-    background: rgba(4,10,8,.82); border: 1px solid rgba(120,160,180,.22); border-radius: 12px; overflow: hidden;
-    backdrop-filter: blur(4px); }
+    background: rgba(4,10,8,.94); border: 1px solid rgba(120,160,180,.22); border-radius: 12px; overflow: hidden; }
   .wall-tile[data-area="map"]   { grid-area: map; }
   .wall-tile[data-area="graph"] { grid-area: graph; }
   .wall-tile[data-area="feed"]  { grid-area: feed; }
@@ -1394,9 +1405,13 @@
   /* the adopted canvases fill their tile; their rAF loops re-measure this box
      every frame, so an expand is picked up automatically */
   .wall-body > canvas { display: block; width: 100%; height: 100%; }
-  .wall-scroll { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; padding: 4px 8px; }
-  .wall-scroll::-webkit-scrollbar { width: 5px; }
-  .wall-scroll::-webkit-scrollbar-thumb { background: rgba(120,160,180,.28); border-radius: 3px; }
+  /* Scoped to a tile body on purpose. #feed is adopted into the wall and carries
+     this class; if it ever rides home on the node, an unscoped rule would turn the
+     LIVE panel's feed into a full-panel overlay covering its own filter bar. leave()
+     strips the class — this scoping means a leak is inert even if that fails. */
+  .wall-body > .wall-scroll { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; padding: 4px 8px; }
+  .wall-body > .wall-scroll::-webkit-scrollbar { width: 5px; }
+  .wall-body > .wall-scroll::-webkit-scrollbar-thumb { background: rgba(120,160,180,.28); border-radius: 3px; }
 
   /* tools tile — compact cards for the secondary features */
   .wall-tools { position: absolute; inset: 0; overflow-y: auto; padding: 8px; display: grid; gap: 7px;
