@@ -179,7 +179,19 @@ const WATCHLIST = [
   ['WHALE_RECV_rhWj9g',   'rhWj9gaovwu2hZxYW7p388P8GRbuXFLQkK', 'discovered_whale'],           // exchange-adjacent · LARGE_RECV_rDAE53/COINBASE/BITBANK/CRYPTO_COM · richlist · score 175/200
   ['EXOUT_RECV_rMdG3j',   'rMdG3ju8pgyVh29ELPWaDuA74CpWW6Fxns', 'discovered_receiver'],        // exchange-adjacent · WHALE_1.5B/COINBASE/CRYPTO_COM · richlist · score 175/200
   ['WHALE_RECV_rQUUAj',   'rQUUAjDPTLWTEHrpNtQvryUdvd1afc6TcB', 'discovered_whale'],           // exchange-adjacent · UPBIT_COLD · richlist · score 175/200
-  ['WHALE_RECV_rN4Gia',   'rN4GiawFXbgMNtW12mVH4p7CWQDzXsRB5k', 'discovered_whale']            // watch-net · LARGE_RECV_rRmgo6 · richlist · score 165/200
+  ['WHALE_RECV_rN4Gia',   'rN4GiawFXbgMNtW12mVH4p7CWQDzXsRB5k', 'discovered_whale'],           // watch-net · LARGE_RECV_rRmgo6 · richlist · score 165/200
+  // ── 2026-08-03 scan SW20260803GO3CH: the 7 the run itself recommended ──
+  // 13 candidates ranked; these are the CRITICAL_ADD_REVIEW (3) and
+  // RECOMMEND_FOR_WATCH (4) tiers. The 6 REVIEW-tier candidates (scores 85-90)
+  // were left out deliberately — they are the scanner's own lower bucket.
+  // Behavioral evidence only. Flagged, not identified; nobody gets a badge.
+  ['WHALE_RECV_rUrYCc',   'rUrYCcn3UkgC2ZXDWDvWT1D8VmM2X5Yiws', 'discovered_whale'],           // exchange-adjacent · SPLITTER_r4nydG/COINBASE_HOT/BITBANK_COLD · richlist #474 (12.2M) · score 190/200
+  ['WHALE_RECV_rNU4eA',   'rNU4eAowPuixS5ZCWaRL72UUeKgxcKExpK', 'discovered_whale'],           // exchange-adjacent · LARGE_RECV_rDAE53/SPLITTER_rBNCyN/CRYPTO_COM · richlist #627 (5.7M) · score 175/200
+  ['WHALE_RECV_rNUnZ9',   'rNUnZ9NRnGdfeiQCWYkYXWkmF4A8iFgpg9', 'discovered_whale'],           // watch-net · LARGE_RECV_rUjfTQ · richlist #162 (59.3M) · score 165/200
+  ['SPLITTER_rfumbc',     'rfumbc2NDjHaDCpgfJRLSafRJNKi6CuwVH', 'next_hop_splitter'],          // routing-node · HIGHVAL_rBuZfn · richlist #251 (30.7M) · score 140/200
+  ['LARGE_RECV_rQDQgw',   'rQDQgwpXdpQdVoaCXQHSYcWkHhgKspnzXn', 'discovered_receiver'],        // watch-net · LARGE_RECV_rDAE53/LARGE_RECV_r9onsz · richlist #1511 (1.4M) · score 125/200
+  ['SPLITTER_rnU65s',     'rnU65s4J4ffJF5VtTEuHtEdWMKc1m9AR5J', 'next_hop_splitter'],          // ripple-sourced · RIPPLE_305M_G · richlist #726 (4.3M) · score 125/200
+  ['HIGHVAL_rGDreB',      'rGDreBvnHrX1get7na3J4oowN19ny4GzFn', 'discovered_unknown_highval']  // exchange-adjacent · BITBANK_JP/WHALE_PRIV_17/LARGE_RECV_r97Kea · richlist #683 (5M) · score 120/200
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)
@@ -18654,7 +18666,7 @@ function _swBuildCockpit() {
   header.appendChild(_swEl('div', { 'class':'sw-hsep' }));
   header.appendChild(_swEl('div', { 'class':'sw-hstat' }, '<span>Connection</span><b id="swHConn" class="sw-live">Standby</b>'));
   header.appendChild(_swEl('div', { 'class':'sw-hsep' }));
-  header.appendChild(_swEl('div', { 'class':'sw-hstat' }, '<span>Ledger TX</span><b id="swHLedger">—</b>'));
+  header.appendChild(_swEl('div', { 'class':'sw-hstat' }, '<span>Ledger Index</span><b id="swHLedger">—</b>'));
   header.appendChild(_swEl('div', { 'class':'sw-hsep' }));
   header.appendChild(_swEl('div', { 'class':'sw-hstat' }, '<span>Scan Mode</span><b id="swHMode">Shadow Scan</b>'));
   header.appendChild(_swEl('div', { 'class':'sw-hspacer' }));
@@ -19210,6 +19222,71 @@ function _swRenderDownloads(p) {
   el.appendChild(copy);
 }
 
+// ── REAL VALIDATED LEDGER INDEX ────────────────────────────────────────────
+// The header used to show the watched-transaction count under a "Ledger TX"
+// label, which duplicated the LEDGER TX instrument tile and told you nothing
+// about the ledger itself. This binds it to the actual validated ledger
+// sequence, the way the reference design asked for.
+//
+// Endpoint confirmed live by an operator source probe on 2026-08-03: every
+// other xrpscan metrics path 404s; only /api/v1/network/server_info answers 200.
+// Its payload carries the sequence twice, so we read it two independent ways:
+//   info.validated_ledger.seq   (rippled's own field)
+//   info.complete_ledgers       ("105979114-106044127" — upper bound is latest)
+// Fetched through the existing proxy cascade (/api/proxy first) and refreshed
+// off the existing render tick, so this adds NO new timer. On any failure the
+// cell keeps its last good value, or shows an em dash. It never invents one.
+var _SW_LEDGER = { seq: null, ts: 0, inflight: false };
+function _swParseLedgerSeq(j) {
+  try {
+    var info = (j && j.info) ? j.info : j;
+    if (!info) return null;
+    var vl = info.validated_ledger;
+    if (vl) {
+      var direct = Number(vl.seq != null ? vl.seq : vl.ledger_index);
+      if (isFinite(direct) && direct > 0) return Math.round(direct);
+    }
+    if (typeof info.complete_ledgers === 'string') {
+      // "105979114-106044127" or "a-b,c-d" — the last number is the newest
+      var nums = info.complete_ledgers.match(/\d+/g);
+      if (nums && nums.length) {
+        var last = Number(nums[nums.length - 1]);
+        if (isFinite(last) && last > 0) return Math.round(last);
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+function _swRefreshLedgerIndex() {
+  var now = Date.now();
+  if (_SW_LEDGER.inflight) return;
+  // Throttle on the ATTEMPT, not on success. Gating this behind `seq !== null`
+  // would mean a dead endpoint never throttles at all: proxyFetch walks a
+  // five-proxy cascade, so every render tick would fire five requests at five
+  // third-party services forever. Retry sooner while we still have nothing to
+  // show, slower once the cell is populated.
+  var wait = (_SW_LEDGER.seq !== null) ? 60000 : 30000;
+  if ((now - _SW_LEDGER.ts) < wait) return;
+  _SW_LEDGER.ts = now;
+  _SW_LEDGER.inflight = true;
+  (async function () {
+    try {
+      var got = await proxyFetch('https://api.xrpscan.com/api/v1/network/server_info', 9000);
+      var j = await got.response.json();
+      var seq = _swParseLedgerSeq(j);
+      if (seq !== null) { _SW_LEDGER.seq = seq; _SW_LEDGER.ts = Date.now(); }
+    } catch (_) {
+      // keep the last good value; the attempt stamp above holds off the retry
+    } finally { _SW_LEDGER.inflight = false; }
+  })();
+}
+// A ledger index is an identifier, not a magnitude — fmt() would compact
+// 106044127 to "106.04M", which is useless for looking a ledger up.
+function _swLedgerText(seq) {
+  if (seq === null || !isFinite(seq)) return '—';
+  return String(Math.round(seq)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
 // Cheap live pass — header, reactor, status strip, instruments, gate.
 // Piggybacks the existing status-strip tick AND _renderMissionUI progress ticks
 // (no new timer), so the cockpit advances during a scan.
@@ -19228,7 +19305,8 @@ function renderDashboardV1Live() {
     var riskObj = (typeof state !== 'undefined' && state.riskScore) ? state.riskScore : (p && p.risk_score ? p.risk_score : null);
     // header
     _swSetText('swHConn', _swLink());
-    _swSetText('swHLedger', txLive ? fmt(txLive, 0) : (p ? fmt(n(p.tx_24h_count), 0) : '—'));
+    _swRefreshLedgerIndex();                        // throttled; no new timer
+    _swSetText('swHLedger', _swLedgerText(_SW_LEDGER.seq));
     _swSetText('swHMode', 'Shadow Scan');
     // reactor + minis
     _swRenderReactor();
