@@ -4102,8 +4102,53 @@ function runAutoWalletDiscovery(pack) {
     state.discoveryHistory = state.discoveryHistory.slice(-DISCOVERY_MAX_HISTORY);
   }
 
+  // Stamp of THIS discovery run. Every candidate actually observed in it gets
+  // last_seen === this value (set in the scoring loop above), so it is the only
+  // reliable way to tell a fresh sighting from an inbox leftover.
+  state.discoveryLastRunISO = nowISO;
+
   persistDiscoveryInbox();
   return capped;
+}
+
+// ── FRESH vs CARRIED-OVER ───────────────────────────────────────────────────
+// state.discoveryInbox is CUMULATIVE: entries persist across scans until they
+// are reviewed or rejected. So its length is "everything ever queued", not
+// "what this scan found" — reporting it as the latter overstated the discovery
+// count every day and the gap widened as the inbox grew (2026-08-04: reported
+// "12 related wallets found" when 9 were seen that scan and 3 were leftovers
+// last seen on 07-30, 07-31 and 08-03).
+//
+// An entry was seen in the current run iff its last_seen matches the run stamp.
+// If there is no stamp yet (no discovery run this session, e.g. a reload with a
+// restored inbox) we cannot make the distinction, so callers fall back to
+// treating the whole inbox as current — never silently reporting zero.
+function _discoveryRunStamp() {
+  return (typeof state !== 'undefined' && state.discoveryLastRunISO) || null;
+}
+function _discoverySeenThisRun(c) {
+  const stamp = _discoveryRunStamp();
+  if (!stamp) return true;                       // cannot tell — do not under-report
+  return !!c && c.last_seen === stamp;
+}
+function _discoverySplit(list) {
+  const all = Array.isArray(list) ? list : [];
+  const stamp = _discoveryRunStamp();
+  if (!stamp) return { fresh: all, carried: [], known: false };
+  const fresh = all.filter(_discoverySeenThisRun);
+  return { fresh, carried: all.filter(c => !_discoverySeenThisRun(c)), known: true };
+}
+// Single source of truth for every "new / discovered this scan" readout in the
+// UI. Three surfaces previously rendered state.discoveryInbox.length under a
+// "new" label — the New Targets tile, the Report & Evidence row, and the
+// mobile brief's DISCOVERED row — so each inflated by the size of the standing
+// review backlog.
+function _swFreshDiscoveryCount() {
+  try {
+    const inbox = (typeof state !== 'undefined' && Array.isArray(state.discoveryInbox))
+                  ? state.discoveryInbox : [];
+    return _discoverySplit(inbox).fresh.length;
+  } catch (_) { return 0; }
 }
 
 // Build a clean human-readable summary for daily report
@@ -4113,18 +4158,25 @@ function buildDiscoverySummaryLines() {
 
   // v3.27: prefer AUTO_WALLET_FINDER tier counts when available.
   // Falls back to legacy review_status counting if module is absent.
-  let total = inbox.length;
+  let total = _discoverySplit(inbox).fresh.length;
+  let carriedOver = _discoverySplit(inbox).carried.length;
   let recommended = 0;
   let topLine = '';
   if (typeof window.AUTO_WALLET_FINDER !== 'undefined') {
     try {
       const suggestedList = window.AUTO_WALLET_FINDER.buildSuggestedWatchlistAdditions(state.pack || {});
-      total = suggestedList.length;
-      recommended = suggestedList.filter(c =>
+      // "found" means found IN THIS SCAN. Leftovers still awaiting review are
+      // reported on their own line rather than folded into the headline count.
+      const split = _discoverySplit(suggestedList);
+      total = split.fresh.length;
+      carriedOver = split.carried.length;
+      recommended = split.fresh.filter(c =>
         c.action_tier === 'CRITICAL_ADD_REVIEW' || c.action_tier === 'RECOMMEND_FOR_WATCH'
       ).length;
-      if (suggestedList.length) {
-        const t = suggestedList[0];
+      // the top candidate must also come from this scan, not from the backlog
+      const rank = split.fresh.length ? split.fresh : suggestedList;
+      if (rank.length) {
+        const t = rank[0];
         topLine = '• Top candidate: ' + t.address.slice(0, 6) + '…' + t.address.slice(-4) +
                   ' · ' + t.classification + ' · score ' + t.score + '/200 · ' + t.action_tier + '.';
       }
@@ -4133,8 +4185,8 @@ function buildDiscoverySummaryLines() {
     }
   }
   if (!recommended) {
-    recommended = inbox.filter(r =>
-      r.review_status === 'RECOMMENDED' || r.recommended_action === 'RECOMMEND_FOR_WATCH').length;
+    recommended = inbox.filter(r => _discoverySeenThisRun(r) &&
+      (r.review_status === 'RECOMMENDED' || r.recommended_action === 'RECOMMEND_FOR_WATCH')).length;
   }
   if (!topLine && inbox[0]) {
     const top = inbox[0];
@@ -4148,12 +4200,21 @@ function buildDiscoverySummaryLines() {
   lines.push('• Auto Discovery: ' + total + ' related wallet' +
              (total === 1 ? '' : 's') + ' found; ' + recommended +
              ' recommended for review.');
+  // Leftovers are real and still pending — surfaced, not hidden, but never
+  // counted as something this scan found.
+  if (carriedOver > 0) {
+    lines.push('• Also still in the review queue from earlier scans: ' + carriedOver +
+               ' candidate' + (carriedOver === 1 ? '' : 's') + ' (not seen this scan).');
+  }
   if (topLine) lines.push(topLine);
   // v3.29: richlist crosscheck line (only when richlist is imported and crosscheck ran)
   try {
     const universe = (typeof state !== 'undefined') ? (state.richlistUniverse || null) : null;
     if (universe) {
-      const inboxAddrs = (typeof state !== 'undefined' ? (state.discoveryInbox || []) : [])
+      // same rule as the headline: crosscheck what this scan surfaced, not the
+      // whole standing inbox
+      const inboxAddrs = _discoverySplit(
+        (typeof state !== 'undefined' ? (state.discoveryInbox || []) : [])).fresh
         .map(c => c.address);
       const richlistMatches = inboxAddrs.filter(a => universe[a]).length;
       const highBal = Object.values(universe)
@@ -4857,6 +4918,12 @@ if (typeof window !== 'undefined') {
           related_watched_wallets: c.related_watched_wallets || [],
           first_seen:         c.first_seen || c.first_seen_at || null,
           last_seen:          c.last_seen  || c.last_seen_at  || null,
+          // Was this candidate actually observed in the current scan, or is it
+          // an inbox leftover from an earlier one still awaiting review? Consumers
+          // must not treat the exported list as "what this scan found".
+          seen_this_scan:     (typeof _discoverySeenThisRun === 'function')
+                                ? _discoverySeenThisRun({ last_seen: c.last_seen || c.last_seen_at || null })
+                                : true,
           seen_count:         c.seen_count || 1,
           total_value_xrp:    +c.total_value_xrp || 0,
           max_value_xrp:      +c.max_value_xrp || 0,
@@ -4931,7 +4998,12 @@ if (typeof window !== 'undefined') {
     lines.push('SUGGESTED WATCHLIST ADDITIONS');
     lines.push('Generated: ' + now);
     lines.push('Scan: ' + scanId);
-    lines.push('Total candidates ranked: ' + list.length);
+    const _split = (typeof _discoverySplit === 'function') ? _discoverySplit(list) : { fresh: list, carried: [], known: false };
+    lines.push('Found in this scan: ' + _split.fresh.length);
+    if (_split.carried.length) {
+      lines.push('Carried over from earlier scans (not seen this scan): ' + _split.carried.length);
+    }
+    lines.push('Total in review queue: ' + list.length);
     lines.push('Top exported: ' + top.length);
     lines.push('');
     lines.push('═══════════════════════════════════════════════════════');
@@ -4981,6 +5053,8 @@ if (typeof window !== 'undefined') {
         }
       }
       lines.push('Seen across scans:      ' + c.seen_count);
+      lines.push('Seen in this scan:      ' + (c.seen_this_scan ? 'YES'
+                 : 'NO — carried over, last seen ' + (c.last_seen || 'unknown')));
       lines.push('Total value (XRP):      ' + c.total_value_xrp.toLocaleString());
       lines.push('Max single value (XRP): ' + c.max_value_xrp.toLocaleString());
       lines.push('Tx count:               ' + c.tx_count);
@@ -5018,6 +5092,8 @@ if (typeof window !== 'undefined') {
     const list = buildSuggestedWatchlistAdditions(pack);
     const top = list.slice(0, 250);
     const now = new Date().toISOString();
+    const _sp = (typeof _discoverySplit === 'function') ? _discoverySplit(list) : { fresh: list, carried: [] };
+    const _fresh = _sp.fresh, _carried = _sp.carried;
     return {
       version: 'v3.32a-helper-runtime-proof-lock',
       generated_at: now,
@@ -5028,13 +5104,24 @@ if (typeof window !== 'undefined') {
                 (state.seal.scan_id || state.seal.report_id)) ||
                (typeof state !== 'undefined' && state.lastReportId) ||
                null,
+      // total_candidates is the whole standing review queue, which is CUMULATIVE
+      // across scans — it is not "what this scan found". found_this_scan is.
       total_candidates: list.length,
+      found_this_scan: _fresh.length,
+      carried_over_from_earlier_scans: _carried.length,
       total_exported: top.length,
       tier_counts: {
         critical_add_review:  list.filter(c => c.action_tier === 'CRITICAL_ADD_REVIEW').length,
         recommend_for_watch:  list.filter(c => c.action_tier === 'RECOMMEND_FOR_WATCH').length,
         review:               list.filter(c => c.action_tier === 'REVIEW').length,
         monitor:              list.filter(c => c.action_tier === 'MONITOR').length
+      },
+      // same tiers, restricted to candidates actually observed in this scan
+      tier_counts_this_scan: {
+        critical_add_review:  _fresh.filter(c => c.action_tier === 'CRITICAL_ADD_REVIEW').length,
+        recommend_for_watch:  _fresh.filter(c => c.action_tier === 'RECOMMEND_FOR_WATCH').length,
+        review:               _fresh.filter(c => c.action_tier === 'REVIEW').length,
+        monitor:              _fresh.filter(c => c.action_tier === 'MONITOR').length
       },
       candidates: top,
       safety: {
@@ -7805,7 +7892,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         });
       }
       try {
-        var inbox=(typeof state!=='undefined'&&Array.isArray(state.discoveryInbox))?state.discoveryInbox.length:0;
+        // "new wallet(s)" means new in this scan — the inbox is cumulative
+        var inbox=(typeof _swFreshDiscoveryCount==='function')?_swFreshDiscoveryCount():0;
         if (inbox) h+='<div class="mbt-sw-row"><span class="mbt-sw-lbl">DISCOVERED</span><span class="mbt-sw-val">'+inbox+' new wallet(s)</span></div>';
       } catch(_){}
       if (ev&&ev.length){ ev.slice(0,10).forEach(function(c){
@@ -19005,7 +19093,9 @@ function _swRenderInstruments(p, SP, scanning) {
   }
   var t = document.getElementById('swTiles');
   if (t) {
-    var disc = (typeof state !== 'undefined' && Array.isArray(state.discoveryInbox)) ? state.discoveryInbox.length : 0;
+    // "New Targets" must mean new THIS scan. The inbox is cumulative, so using
+    // its length here counted every unreviewed leftover as a fresh find.
+    var disc = _swFreshDiscoveryCount();
     var txLive = (typeof state !== 'undefined' && Array.isArray(state.txs)) ? state.txs.length : 0;
     var ledgerTx = txLive ? txLive : (p ? n(p.tx_24h_count) : null);
     var shadow = p ? n(p.shadow_volume_xrp) : null;
@@ -19191,7 +19281,7 @@ function _swRenderRepEvid(p, risk) {
   _swClear(el);
   var large = (typeof state !== 'undefined' && Array.isArray(state.large)) ? state.large : [];
   var receipts = (typeof state !== 'undefined' && Array.isArray(state.receivers)) ? state.receivers.length : 0;
-  var disc = (typeof state !== 'undefined' && Array.isArray(state.discoveryInbox)) ? state.discoveryInbox.length : 0;
+  var disc = _swFreshDiscoveryCount();          // new this scan, not inbox total
   var hi = large.filter(function (t) { return String(t.confidence || '').toUpperCase() === 'HIGH'; }).length;
   if (!p && !large.length && !receipts && !disc) { el.appendChild(_swEmpty('NO REPORT YET')); return; }
   function row(icon, label, val, cls) {
