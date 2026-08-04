@@ -191,7 +191,14 @@ const WATCHLIST = [
   ['SPLITTER_rfumbc',     'rfumbc2NDjHaDCpgfJRLSafRJNKi6CuwVH', 'next_hop_splitter'],          // routing-node · HIGHVAL_rBuZfn · richlist #251 (30.7M) · score 140/200
   ['LARGE_RECV_rQDQgw',   'rQDQgwpXdpQdVoaCXQHSYcWkHhgKspnzXn', 'discovered_receiver'],        // watch-net · LARGE_RECV_rDAE53/LARGE_RECV_r9onsz · richlist #1511 (1.4M) · score 125/200
   ['SPLITTER_rnU65s',     'rnU65s4J4ffJF5VtTEuHtEdWMKc1m9AR5J', 'next_hop_splitter'],          // ripple-sourced · RIPPLE_305M_G · richlist #726 (4.3M) · score 125/200
-  ['HIGHVAL_rGDreB',      'rGDreBvnHrX1get7na3J4oowN19ny4GzFn', 'discovered_unknown_highval']  // exchange-adjacent · BITBANK_JP/WHALE_PRIV_17/LARGE_RECV_r97Kea · richlist #683 (5M) · score 120/200
+  ['HIGHVAL_rGDreB',      'rGDreBvnHrX1get7na3J4oowN19ny4GzFn', 'discovered_unknown_highval'], // exchange-adjacent · BITBANK_JP/WHALE_PRIV_17/LARGE_RECV_r97Kea · richlist #683 (5M) · score 120/200
+  // ── 2026-08-04 scan SW20260804WTJNA: the 3 the run recommended ──
+  // A quieter board than 08-03: no CRITICAL_ADD_REVIEW candidates at all,
+  // 3 RECOMMEND_FOR_WATCH and 9 REVIEW. Same rule as before — the recommended
+  // tier lands, the REVIEW bucket does not.
+  ['SPLITTER_r3zUhJ',     'r3zUhJWabAMMLT5n631r2wDh9RP3dN1bRy', 'next_hop_splitter'],          // splitter-chain · SPLITTER_r4wf7e · richlist #1080 (2.4M) · score 125/200
+  ['HIGHVAL_rJn2zA',      'rJn2zAPdFA193sixJwuFixRkYDUtx3apQh', 'discovered_unknown_highval'], // exchange-adjacent · WHALE_RECV_rhuCPE/BITHUMB_HOT/SPLITTER_rBNCyN · richlist #730 (4.3M) · score 120/200
+  ['LARGE_RECV_rsZsiN',   'rsZsiNLTJ3XLK4NP3HU7MPMvcFrtPKQNwd', 'discovered_receiver']         // exchange-adjacent · COINBASE_HOT · richlist #478 (12M) · score 100/200
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)
