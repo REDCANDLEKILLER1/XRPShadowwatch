@@ -630,11 +630,27 @@ function _buildEvidence(interps, pack){
               _arr(pack&&pack.discovery_candidates);
     var fresh=inbox.filter(function(c){ return c && c.review_status!=='REJECTED' && c.review_status!=='SUPPRESSED'; });
     if(fresh.length){
-      // fresh is the CUMULATIVE discovery inbox (not new-this-scan), so say so
-      // honestly — the actionable "add these" set is the smaller ranked list.
-      var netLead=_nvPick(['The discovery net now holds ','I’ve got ','The watch net is carrying ','Flagged on the net right now: '],seed,12);
+      // fresh is the CUMULATIVE discovery queue (not new-this-scan). The report
+      // also prints "Watched wallets: N" in LEDGER DIAGNOSTICS, so two different
+      // wallet counts land in one document — 172 here against 130 there on
+      // 2026-08-05. Both were right and the pairing still read as a
+      // contradiction. Name what each number IS, and put them in one sentence so
+      // the relationship is explicit instead of left to the reader.
+      var watched=0;
+      try{
+        watched=_num(pack&&(pack.watchlist_total||pack.wallets_total))||0;
+        if(!watched&&typeof KNOWN!=='undefined') watched=Object.keys(KNOWN).length;
+      }catch(_){}
+      // Every variant names the discovery queue on purpose. The rotation used to
+      // include phrasings with no such word ("I've got ", "Flagged on the net
+      // right now: "), so whether the report even mentioned discovery came down
+      // to which variant the day's seed picked — and the smoke assertion that
+      // looks for /DISCOVERY/i passed or failed with it.
+      var netLead=_nvPick(['The discovery queue is holding ','On the discovery pile I have ','The discovery queue is carrying ','In the discovery queue right now: '],seed,12);
       var netTail=_nvPick([' — flagged, not trusted; behavioral evidence only, nobody gets a badge automatically.',' — every one flagged on behavior, not identity; nobody gets a badge for free.',' — suspects, not the convicted; the Ledger earns the flag, I don’t hand it out.'],seed,13);
-      parts.push(netLead+fresh.length+' flagged wallet'+(fresh.length===1?'':'s')+netTail);
+      var watchedClause=watched?(', separate from the '+watched+' wallets on the permanent watch list'):'';
+      parts.push(netLead+fresh.length+' flagged candidate'+(fresh.length===1?'':'s')+
+                 watchedClause+netTail);
     }
   } catch(_){}
   if(news&&news.has_signal)   parts.push(newsLead+' '+_lc1(news.summary));

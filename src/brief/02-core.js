@@ -4143,12 +4143,18 @@ function _discoverySplit(list) {
 // "new" label — the New Targets tile, the Report & Evidence row, and the
 // mobile brief's DISCOVERED row — so each inflated by the size of the standing
 // review backlog.
+// Returns NULL — not a number — when this session has not run a discovery pass,
+// because then there is no way to tell new from carried-over. Readouts labelled
+// "NEW" must show an em dash in that case. Falling back to the inbox length put
+// the whole standing backlog under a "NEW TARGETS" heading: on a reloaded page
+// with a restored inbox the tile read 33 when nothing at all was new.
 function _swFreshDiscoveryCount() {
   try {
+    if (!_discoveryRunStamp()) return null;
     const inbox = (typeof state !== 'undefined' && Array.isArray(state.discoveryInbox))
                   ? state.discoveryInbox : [];
     return _discoverySplit(inbox).fresh.length;
-  } catch (_) { return 0; }
+  } catch (_) { return null; }
 }
 
 // Build a clean human-readable summary for daily report
@@ -18541,7 +18547,12 @@ function _swSetText(id, val) { var e = document.getElementById(id); if (e) e.tex
 function _swClear(el) { while (el && el.firstChild) el.removeChild(el.firstChild); }
 function _swEmpty(t) { var d = document.createElement('div'); d.className = 'sw-empty'; d.textContent = String(t); return d; }
 function _swShort(a) { a = String(a || ''); return a.length > 12 ? (a.slice(0, 6) + '…' + a.slice(-4)) : a; }
-function _swPad2(n) { n = Number(n) || 0; return (n < 10 && n >= 0) ? ('0' + n) : String(n); }
+// null / undefined means "not knowable yet" and must render as an em dash —
+// never as 00, which reads as a real measured zero.
+function _swPad2(n) {
+  if (n === null || n === undefined) return '—';
+  n = Number(n) || 0; return (n < 10 && n >= 0) ? ('0' + n) : String(n);
+}
 function _swCompact(v) {
   v = Number(v) || 0; var a = Math.abs(v), s = v < 0 ? '-' : '';
   if (a >= 1e9) return s + (a / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
@@ -18638,14 +18649,29 @@ function _swHelperStats() {
   } catch (_) { return null; }
 }
 // Shared formatter — the single source for every visible HELPER JOBS readout.
+// HELPER JOBS explained, because a cell that only ever shows an em dash looks
+// broken rather than idle: the helper pool deliberately does NOT run during the
+// scan. It starts ~2s after shadow.report.sealed, so the enrichment it does can
+// never influence the report it is enriching. That means this readout is EMPTY
+// for the whole scan by design, and only fills in a few seconds after the report
+// appears. The hover text now says so instead of leaving it a mystery, and a run
+// that started with nothing queued reports 0 / 0 rather than hiding behind a
+// dash — "it ran and found nothing to do" is a different fact from "it never ran".
 function _swHelperJobs() {
   var now = _swHelperStats();
-  if (!now || !_SW_HELPER_RUN) return { text: '—', title: 'No helper run yet this session', failed: 0 };
+  if (!now || !_SW_HELPER_RUN) return { text: '—',
+    title: 'Idle. Helper jobs run a few seconds AFTER the report seals, so they cannot influence it — nothing to report yet this session.',
+    failed: 0 };
   var b = _SW_HELPER_RUN.base;
   var created = Math.max(0, now.created - b.created);
   var completed = Math.max(0, now.completed - b.completed);
   var failed = Math.max(0, now.failed - b.failed);
-  if (created === 0) return { text: '—', title: 'Helper run started with no queued candidates', failed: 0 };
+  // Stays an em dash on purpose: audit blocker B4 requires that an empty queue
+  // is not dressed up as work done ("0 / 0" would read as a measured result).
+  // The distinction between "never ran" and "ran with nothing queued" lives in
+  // the hover text instead, where it cannot be mistaken for a metric.
+  if (created === 0) return { text: '—',
+    title: 'Helper run started but had no queued candidates — nothing for it to enrich this scan.', failed: 0 };
   var title = completed + ' of ' + created + ' helper jobs completed this run';
   if (failed > 0) title += ' · ' + failed + ' failed (not counted as completed)';
   return { text: completed + ' / ' + created, title: title, failed: failed };
