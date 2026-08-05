@@ -1123,10 +1123,52 @@ function assertSourceBinding(report, interpretations){
   return null;
 }
 
+// Remove text that is QUOTED JOURNALISM rather than a Shadow Watch claim:
+// the cited headlines and the citation/sources block. An exchange named inside
+// a headline we are quoting is the publisher's assertion, not ours.
+//
+// 2026-08-05: this is why the daily report went out empty. Three cited headlines
+// named Binance ("XRP's Realized Volatility Drops to 3-Month Low on Binance" and
+// two others). assertLabelProvenance scanned the whole report, found the string,
+// found no wallet-label provenance for it — because there was no wallet claim to
+// back, only a news title — and hard-blocked the entire public narrative. The
+// ledger evidence that day was intact. It is a landmine: it fires whenever the
+// news router happens to cite a headline naming a major exchange, so the report
+// survived 08-04 only because that day's Binance headline was never selected.
+function _stripQuotedJournalism(report, interpretations){
+  var out=String(report||'');
+  // citations are never identity claims — cut the trailing blocks wholesale
+  ['\nSources','\nSOURCES','\nNEWS USED'].forEach(function(marker){
+    var at=out.indexOf(marker);
+    if(at>-1) out=out.slice(0,at);
+  });
+  _arr(interpretations).forEach(function(i){
+    _arr(i.source_refs).forEach(function(r){
+      if(!r||r.kind!=='news_article') return;
+      var t=String(r.label||'');
+      if(t.length<8) return;                 // too short to be a headline; skip
+      var guard=0;
+      for(var at=out.indexOf(t); at>-1 && guard<200; at=out.indexOf(t), guard++){
+        var end=at+t.length;
+        // ref.label is title.slice(0,80), so a longer headline leaves a tail —
+        // extend the cut to the end of that headline segment (they are joined
+        // with ' · ' and terminated by a period or newline).
+        var stop=out.slice(end).search(/\s·\s|\n|\.\s|\.$/);
+        if(stop>-1&&stop<160) end+=stop;
+        out=out.slice(0,at)+' '+out.slice(end);
+      }
+    });
+  });
+  out=out.replace(/^\s*\[\d+\][^\n]*$/gm,'');  // any leftover "[2] u.today — ..." lines
+  return out;
+}
+
 function assertLabelProvenance(report, interpretations){
-  // Named entities in report must have operator_reviewed or richlist_seed provenance
+  // Named entities CLAIMED BY US must have operator_reviewed or richlist_seed
+  // provenance. Quoted headlines are excluded — see _stripQuotedJournalism.
   var exchanges=['Bithumb','Binance','Coinbase','Kraken','Upbit',
     'Crypto.com','Bitstamp','Bitso','SBI VC Trade','Ripple Labs'];
+  var scanned=_stripQuotedJournalism(report, interpretations);
   var allRefs=[];
   _arr(interpretations).forEach(function(i){
     _arr(i.source_refs).forEach(function(r){
@@ -1136,7 +1178,7 @@ function assertLabelProvenance(report, interpretations){
   });
   for(var i=0;i<exchanges.length;i++){
     var ex=exchanges[i];
-    if(report.indexOf(ex)>-1){
+    if(scanned.indexOf(ex)>-1){
       var found=allRefs.some(function(l){
         return l&&l.toLowerCase().indexOf(ex.toLowerCase())>-1;
       });
