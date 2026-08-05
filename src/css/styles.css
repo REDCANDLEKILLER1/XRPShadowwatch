@@ -126,6 +126,10 @@
 
         #toast {
             /* v16.7.2: moved off dead-center → bottom snackbar so it no longer covers the action buttons */
+            /* v16.7.3: on the PC live wall this centred snackbar landed squarely on the
+               LIVE FEED tile's TRACE / SCAN / SAVE buttons — i.e. on top of the very
+               controls that fire it, every single time evidence was saved. See the
+               body.sw-wall override further down, which parks it clear of the tiles. */
             position: absolute; bottom: calc(76px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
             background: rgba(0, 50, 0, 0.95); border: 1px solid var(--lime-main);
             color: white; padding: 12px 24px; border-radius: 4px;
@@ -1423,6 +1427,59 @@
   .wall-card b { display: block; font: 700 10px 'Rajdhani', sans-serif; letter-spacing: .1em; text-transform: uppercase; }
   .wall-card i { display: block; font: 400 8.5px 'Share Tech Mono', monospace; color: #7C8C86; font-style: normal; margin-top: 2px; }
   .wall-card.gold b { color: #FFC83D; } .wall-card.blue b { color: #8FCBFF; } .wall-card.green b { color: #00ff00; }
+
+  /* Anything that scrolls inside a tile must LOOK like it scrolls. Without a
+     visible track the tools grid and the feed just appear truncated. */
+  .wall-tools::-webkit-scrollbar { width: 6px; }
+  .wall-tools::-webkit-scrollbar-thumb { background: rgba(120,160,180,.35); border-radius: 3px; }
+  .wall-tools::-webkit-scrollbar-track { background: rgba(255,255,255,.04); }
+  .wall-tools, .wall-body > .wall-scroll { scrollbar-width: thin; scrollbar-color: rgba(120,160,180,.35) rgba(255,255,255,.04); }
+
+  /* — TOAST ON THE WALL —
+     The default snackbar is centred 76px off the bottom, which on the wall is
+     dead centre of the LIVE FEED tile, covering its TRACE / SCAN / SAVE row.
+     Saving evidence therefore hid the buttons used to save evidence. Park it in
+     the bottom-right gutter instead: clear of all four tiles' controls, still
+     obviously part of the app, and it never moves onto anything clickable. */
+  body.sw-wall #toast {
+    position: fixed; left: auto; right: 14px; transform: none;
+    bottom: calc(14px + env(safe-area-inset-bottom));
+    max-width: 320px; padding: 9px 16px; font-size: 12.5px;
+    box-shadow: 0 0 18px rgba(0,255,0,.45); z-index: 6000;
+  }
+}
+
+/* ── SHORT LAPTOP SCREENS ────────────────────────────────────────────────────
+   Reported from a real laptop: the bottom row of the wall was unusable. The
+   grid gave the top row 1.25fr, so on a ~560px-tall viewport the feed and tools
+   tiles got ~163px each. The tools tile holds 8 cards in 2 columns — 4 rows
+   needing ~210px — so half of them sat below the fold, and the feed showed
+   barely one row. Both scroll internally, but with no visible track they simply
+   read as cut off.
+
+   Map and graph tolerate being smaller far better than a list of controls does,
+   so on short screens the rows even out and the cards get compact. Measured at
+   1366x560: 4 of 8 tool cards unreachable before, 0 after.
+   ──────────────────────────────────────────────────────────────────────────── */
+@media (min-width: 1100px) and (max-height: 820px) {
+  body.sw-wall #swWall { grid-template-rows: minmax(0,1fr) minmax(0,1.06fr); gap: 8px; padding: 8px; }
+  .wall-head { padding: 4px 9px; }
+  .wall-head b { font-size: 9.5px; }
+  .wall-x { width: 22px; height: 19px; }
+  .wall-tools { padding: 6px; gap: 5px; }
+  .wall-card { padding: 5px 8px; border-radius: 7px; }
+  .wall-card b { font-size: 9px; letter-spacing: .08em; }
+  .wall-card i { font-size: 8px; margin-top: 1px; }
+}
+/* Very short (a laptop with a taskbar and a bookmarks bar): drop the card
+   subtitles entirely rather than let the grid overflow again. The card titles
+   still say what each one does. */
+@media (min-width: 1100px) and (max-height: 660px) {
+  .wall-card i { display: none; }
+  .wall-card { padding: 6px 8px; }
+}
+
+@media (min-width: 1100px) {
 
   /* — background: a slow, near-invisible drift. Deliberately NOT matrix rain
        behind live data: moving glyphs compete with the numbers for attention.
