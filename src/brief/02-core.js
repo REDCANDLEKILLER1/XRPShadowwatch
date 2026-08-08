@@ -198,7 +198,18 @@ const WATCHLIST = [
   // tier lands, the REVIEW bucket does not.
   ['SPLITTER_r3zUhJ',     'r3zUhJWabAMMLT5n631r2wDh9RP3dN1bRy', 'next_hop_splitter'],          // splitter-chain · SPLITTER_r4wf7e · richlist #1080 (2.4M) · score 125/200
   ['HIGHVAL_rJn2zA',      'rJn2zAPdFA193sixJwuFixRkYDUtx3apQh', 'discovered_unknown_highval'], // exchange-adjacent · WHALE_RECV_rhuCPE/BITHUMB_HOT/SPLITTER_rBNCyN · richlist #730 (4.3M) · score 120/200
-  ['LARGE_RECV_rsZsiN',   'rsZsiNLTJ3XLK4NP3HU7MPMvcFrtPKQNwd', 'discovered_receiver']         // exchange-adjacent · COINBASE_HOT · richlist #478 (12M) · score 100/200
+  ['LARGE_RECV_rsZsiN',   'rsZsiNLTJ3XLK4NP3HU7MPMvcFrtPKQNwd', 'discovered_receiver'],        // exchange-adjacent · COINBASE_HOT · richlist #478 (12M) · score 100/200
+  // ── 2026-08-08 scan SW202608083Y26B: the recommended tier ──
+  // 1 CRITICAL_ADD_REVIEW + 4 RECOMMEND_FOR_WATCH. Three of these are carried
+  // over rather than new this scan: they were recommended on an earlier day and
+  // have persisted in the queue since, which is a stronger signal than a
+  // one-off sighting, not a weaker one. The 11 REVIEW and 2 MONITOR tier
+  // candidates are left in the queue as usual.
+  ['EXOUT_RECV_rLHzPs',   'rLHzPsX6oXkzU2qL12kHCH8G8cnZv1rBJh', 'discovered_receiver'],        // exchange-adjacent · WHALE_RECV_rhWj9g/LARGE_RECV_rDAE53/WHALE_RECV_rarG6F · no richlist match · score 175/200
+  ['LARGE_RECV_rMvCas',   'rMvCasZ9cohYrSZRNYPTZfoaaSUQMfgQ8G', 'discovered_receiver'],        // exchange-adjacent · HIGHVAL_rNxp4h/HIGHVAL_rJn2zA/CRYPTO_COM · richlist #289 (23.8M) · score 135/200
+  ['LARGE_RECV_rKRYAq',   'rKRYAqMFTTGMZ47eXJVRKcqLJgnPQbXisg', 'discovered_receiver'],        // splitter-chain · SPLITTER_r3zUhJ · richlist #839 (3.5M) · score 125/200 · carried since 08-04
+  ['LARGE_RECV_ragnEu',   'ragnEuoM7mRMP7pVpWprZdJe9vNuVyCKKT', 'discovered_receiver'],        // watch-net · LARGE_RECV_rUjfTQ · no richlist match · score 125/200 · carried since 08-05
+  ['HIGHVAL_rpNF49',      'rpNF4938Y8zCrqFP2owDHjMUdpAxMs49JD', 'discovered_unknown_highval']  // exchange-adjacent · CRYPTO_COM · richlist #129 (98.4M) · score 125/200 · carried since 08-04
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)
@@ -19214,12 +19225,35 @@ function _swRenderLog() {
   var tag = document.getElementById('swLogTag');
   if (tag) { var m = _swMode(); tag.textContent = (m === 'SCANNING' || m === 'BUILDING') ? 'RUNNING' : m; }
 }
-function _swRenderFeed(p) {
+// The panel is labelled LIVE ACTIVITY FEED / REAL-TIME, so it has to behave that
+// way. Two faults, both reported from a live scan sitting at 56%:
+//
+//  1. It was rendered ONLY by renderDashboardV1(), the full pass that runs at
+//     scan-complete — never by the live tick. analyzeFlags() fills state.large
+//     around the 80% mark, so flagged moves existed for the last fifth of every
+//     scan with nothing on screen showing them.
+//  2. The empty state read "RUN A SCAN" while a scan was actively running.
+//
+// Now driven from the live tick as well, with the row signature checked first so
+// an unchanged feed is not torn down and rebuilt several times a second (that
+// would also fight the operator's scroll position).
+var _SW_FEED_SIG = null;
+function _swRenderFeed(p, force) {
   var el = document.getElementById('swFeedList'); if (!el) return;
   var large = (typeof state !== 'undefined' && Array.isArray(state.large) && state.large.length) ? state.large
             : ((p && Array.isArray(p.large_transfers)) ? p.large_transfers : []);
+  var scanning = _swScanning();
+  var sig = large.length + '|' + (large.length ? String(large[0].hash || large[0].amount || '') : '') + '|' + scanning;
+  if (!force && sig === _SW_FEED_SIG) return;      // nothing changed — leave the DOM alone
+  _SW_FEED_SIG = sig;
   _swClear(el);
-  if (!large.length) { el.appendChild(_swEmpty('NO FLAGGED ACTIVITY YET · RUN A SCAN')); return; }
+  if (!large.length) {
+    // Never tell someone to run a scan while their scan is running.
+    el.appendChild(_swEmpty(scanning
+      ? 'WATCHING THE LEDGER · NOTHING FLAGGED YET'
+      : 'NO FLAGGED ACTIVITY YET · RUN A SCAN'));
+    return;
+  }
   large.slice(0, 24).forEach(function (tx) {
     var cls = String(tx.classification || 'TRANSFER').replace(/_/g, ' ');
     var ic = _swFeedIcon(String(tx.classification || ''));
@@ -19450,6 +19484,10 @@ function renderDashboardV1Live() {
     _swRenderInstruments(p, SP, scanning);
     _swRenderMarket(p);
     _swRenderLog();
+    // Feed rides the live tick so flagged moves appear the moment analyzeFlags()
+    // produces them (~80% through a scan) instead of only at scan-complete.
+    // Self-guards on a row signature, so this is a no-op when nothing changed.
+    _swRenderFeed(p);
     _swApplyDevGate();
   } catch (_) {}
 }
@@ -19460,7 +19498,7 @@ function renderDashboardV1() {
     var p = (typeof state !== 'undefined' && state.pack) ? state.pack : null;
     var risk = (p && p.risk_score) || (typeof state !== 'undefined' ? state.riskScore : null) || null;
     renderDashboardV1Live();
-    _swRenderFeed(p);
+    _swRenderFeed(p, true);          // force: full pass always repaints
     _swRenderNodeMap();
     _swRenderRepEvid(p, risk);
     _swRenderDownloads(p);
