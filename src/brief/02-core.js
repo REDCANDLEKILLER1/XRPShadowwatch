@@ -18645,6 +18645,46 @@ function _xaiHelpersCount() {
 }
 if (typeof window !== 'undefined') window._xaiHelpersCount = _xaiHelpersCount;
 
+// ── FLAGGED MOVES — the live number that replaced HELPER JOBS ────
+// HELPER JOBS occupied two prime cockpit slots but could not show anything while
+// a scan was running: the helper pool starts ~2s AFTER shadow.report.sealed by
+// design, so its only honest state during a scan is an em dash. An instrument
+// that can only read "—" while you are watching is worse than no instrument.
+// Replaced with the count of large/flagged moves in the current scan, which
+// actually moves — analyzeFlags() fills state.large right after the wallet pass.
+//
+// "—" until analyzeFlags() has run, then the real count. That distinction is the
+// point: before the wallet pass finishes we have not looked yet, so reporting 0
+// would claim a clean board we have not actually verified. state.flags always
+// receives at least one line once analyzeFlags() completes, so it is the marker.
+function _swFlaggedMoves() {
+  try {
+    var analyzed = (typeof state !== 'undefined' && Array.isArray(state.flags) && state.flags.length > 0);
+    var live = (typeof state !== 'undefined' && Array.isArray(state.large)) ? state.large.length : null;
+    var p = (typeof state !== 'undefined' && state.pack) ? state.pack : null;
+    if (!analyzed) {
+      if (p && Array.isArray(p.large_transfers)) {
+        return { text: String(p.large_transfers.length),
+                 title: p.large_transfers.length + ' flagged move(s) in the last sealed report.' };
+      }
+      return { text: '—', title: 'Not looked yet — flagged moves are identified once the wallet pass completes.' };
+    }
+    return { text: String(live),
+             title: live + ' large or anomaly-flagged move' + (live === 1 ? '' : 's') +
+                    ' this scan (whale transfers >= 1M XRP and flagged patterns).' };
+  } catch (_) { return { text: '—', title: '' }; }
+}
+function _swRenderFlaggedMoves() {
+  var f = _swFlaggedMoves();
+  ['swCellFlagged', 'swMiniFlagged'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = f.text;                      // XSS-safe
+    el.setAttribute('title', f.title);
+    el.setAttribute('aria-label', 'Flagged moves: ' + f.title);
+  });
+}
+
 // ── HELPER JOBS — run-local completed / created ──────────────────
 //  activeJobs.length is a short-lived in-flight counter (jobs are removed the
 //  moment they finish) and the pool only starts AFTER the report is sealed, so
@@ -18843,8 +18883,12 @@ function _swBuildCockpit() {
     '<div class="sw-mini"><span>Mode</span><b id="swMiniMode">READY</b></div>' +
     '<div class="sw-mini"><span>Wallets</span><b id="swMiniWallets">0</b></div>' +
     '<div class="sw-mini"><span>Queue</span><b id="swMiniQueue">0</b></div>' +
-    '<div class="sw-mini"><span>Helper Jobs</span><b id="swMiniHelpers">—</b></div>' +
-    '<div class="sw-mini"><span>Errors</span><b id="swMiniErrors">0</b></div>');
+    '<div class="sw-mini"><span>Flagged Moves</span><b id="swMiniFlagged">—</b></div>' +
+    '<div class="sw-mini"><span>Errors</span><b id="swMiniErrors">0</b></div>' +
+    // Helper-jobs instrumentation stays live and audited (blocker B4 asserts on
+    // it) — it is just no longer given a visible cockpit slot, because it cannot
+    // report anything until after the report seals. Kept in the DOM, hidden.
+    '<b id="swMiniHelpers" hidden style="display:none">—</b>');
   // RUN SCAN is the one action on this screen, so it must read as a primary
   // control. It previously used the small .sw-cardbtn style inside a stat cell
   // and was genuinely hard to find on a desktop screen.
@@ -18878,7 +18922,7 @@ function _swBuildCockpit() {
   // Row 2 — status strip
   var strip = _swEl('div', { 'class':'sw-statusstrip' });
   [['wallet','Wallets','swCellWallets',''], ['list','Queue','swCellQueue',''],
-   ['user','Helper Jobs','swCellHelpers',''], ['alert','Errors','swCellErrors','sw-warn'],
+   ['whale','Flagged Moves','swCellFlagged',''], ['alert','Errors','swCellErrors','sw-warn'],
    ['shield','Risk Score','swCellRisk','sw-gold'], ['target','Coverage','swCellCoverage','']
   ].forEach(function (c) {
     var cell = _swEl('div', { 'class':'sw-scell' + (c[3] ? ' ' + c[3] : '') },
@@ -18886,6 +18930,8 @@ function _swBuildCockpit() {
     cell.querySelector('span').textContent = c[1];
     strip.appendChild(cell);
   });
+  // See the note on swMiniHelpers: kept live and audited, no longer given a slot.
+  strip.appendChild(_swEl('b', { id:'swCellHelpers', hidden:'hidden', style:'display:none' }, ''));
   main.appendChild(strip);
 
   // Row 3 — three columns
@@ -19475,6 +19521,10 @@ function renderDashboardV1Live() {
     // status strip
     _swSetText('swCellWallets', String(wTotal));
     _swSetText('swCellQueue', String(qSize));
+    // FLAGGED MOVES is the live cockpit readout that replaced HELPER JOBS.
+    // Helper jobs still update their now-hidden elements, so the audited B4
+    // behaviour is unchanged — it simply no longer occupies a visible slot.
+    _swRenderFlaggedMoves();
     _swRenderHelperJobs();
     _swSetText('swCellErrors', String(errs));
     _swSetText('swCellRisk', riskObj ? (n(riskObj.score) + ' / 100') : 'WAITING');
