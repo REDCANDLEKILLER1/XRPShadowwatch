@@ -838,6 +838,120 @@
         return w;
       }
 
+      // ── GRAPH SEEDING ───────────────────────────────────────────────────
+      // On first open the WALLET GRAPH tile was an empty black box: graphNodes
+      // is only filled by traceWallet() -> processTrace(), so before anyone
+      // clicks TRACE there is nothing to draw. Two sources fix that, both REAL
+      // — no invented nodes and no fabricated edges, ever:
+      //   (2) the last trace, persisted and restored, tagged LAST TRACE
+      //   (1) failing that, the largest High Value Target, traced for real over
+      //       the socket the app already has open (one account_tx, the exact
+      //       request the TRACE button makes — not a scan)
+      var GKEY = 'SW_WALL_GRAPH_V1';
+      function graphTag(text) {
+        _graphSrc = text;
+        try {
+          var t = wall && wall._tiles && wall._tiles.graph;
+          var el2 = t && t.querySelector('.wall-tag');
+          if (el2) el2.textContent = text;
+        } catch (_) {}
+      }
+      function saveGraph() {
+        try {
+          if (typeof graphNodes === 'undefined' || !graphNodes.length) return;
+          // Persist only what we drew: real addresses from real account_tx results.
+          localStorage.setItem(GKEY, JSON.stringify({
+            ts: Date.now(),
+            center: (graphNodes.find(function (n) { return n.type === 'CENTER'; }) || {}).id || null,
+            nodes: graphNodes.slice(0, 40).map(function (n) {
+              return { id:n.id, x:n.x, y:n.y, type:n.type, color:n.color };
+            }),
+            edges: (typeof graphEdges !== 'undefined' ? graphEdges : []).slice(0, 80)
+          }));
+        } catch (_) {}
+      }
+      function restoreGraph() {
+        try {
+          var raw = localStorage.getItem(GKEY); if (!raw) return false;
+          var d = JSON.parse(raw);
+          if (!d || !Array.isArray(d.nodes) || !d.nodes.length) return false;
+          graphNodes = d.nodes.map(function (n) { return { id:n.id, x:n.x, y:n.y, type:n.type, color:n.color, vx:0, vy:0 }; });
+          graphEdges = Array.isArray(d.edges) ? d.edges : [];
+          var age = Date.now() - (d.ts || 0);
+          var days = Math.floor(age / 86400000);
+          graphTag(days >= 1 ? ('LAST TRACE · ' + days + 'D AGO') : 'LAST TRACE');
+          return true;
+        } catch (_) { return false; }
+      }
+      // Largest HVT by the size already encoded in its own label (1.7B > 845M).
+      // Reading the existing label is not the same as inventing a balance; if no
+      // label carries a size we simply take the first HVT rather than guess.
+      function topHvt() {
+        try {
+          if (typeof PRELOADED_HVTS === 'undefined' || !PRELOADED_HVTS.length) return null;
+          var best = null, bestVal = -1;
+          PRELOADED_HVTS.forEach(function (h) {
+            if (!h || !h.address || h.address.length < 25) return;
+            var m = String(h.label || '').match(/(\d+(?:\.\d+)?)\s*([BM])/i);
+            var v = m ? (parseFloat(m[1]) * (m[2].toUpperCase() === 'B' ? 1e9 : 1e6)) : 0;
+            if (v > bestVal) { bestVal = v; best = h; }
+          });
+          return best;
+        } catch (_) { return null; }
+      }
+      // What the tile is currently showing, so the tag survives a wall rebuild.
+      // leave() destroys #swWall and build() recreates the tile with its default
+      // 'TRACE' tag; seedGraph() then early-returns because the nodes are still
+      // there, so without this the tag silently reverted on every HOME re-entry.
+      var _graphSrc = null;
+      function graphTagRefresh() { if (_graphSrc) graphTag(_graphSrc); }
+      var _seedTries = 0;
+      function seedGraph() {
+        try {
+          if (typeof graphNodes === 'undefined') return;
+          if (graphNodes.length) { graphTagRefresh(); return; }   // real data already on screen
+          if (restoreGraph()) return;                    // (2) last trace
+          var t = topHvt(); if (!t) return;              // (1) top HVT
+          // Draw the centre immediately so the tile is never blank, then ask the
+          // ledger for its real neighbours. If the trace returns nothing, one
+          // honest labelled node is still better than an empty box.
+          graphNodes.push({ id:t.address, x:0, y:0, type:'CENTER', color:'#ffd700', vx:0, vy:0 });
+          graphTag('TOP HVT · ' + String(t.label || '').slice(0, 18));
+          var s = (typeof socket !== 'undefined') ? socket : null;
+          if (s && s.readyState === 1) {
+            s.send(JSON.stringify({ id:'trace_' + t.address, command:'account_tx', account:t.address, limit:10 }));
+          } else if (_seedTries++ < 10) {
+            setTimeout(function () { if (graphNodes.length <= 1) seedGraph2(t); }, 1500);
+          }
+        } catch (_) {}
+      }
+      // Retry path once the socket comes up — the centre node already exists by
+      // now, so only the ledger request is repeated.
+      function seedGraph2(t) {
+        try {
+          var s = (typeof socket !== 'undefined') ? socket : null;
+          if (s && s.readyState === 1) {
+            s.send(JSON.stringify({ id:'trace_' + t.address, command:'account_tx', account:t.address, limit:10 }));
+          } else if (_seedTries++ < 10) {
+            setTimeout(function () { seedGraph2(t); }, 1500);
+          }
+        } catch (_) {}
+      }
+      // Persist whatever a real trace produces, so the next open has (2).
+      (function hookTrace() {
+        try {
+          if (typeof processTrace !== 'function' || processTrace.__swWall) return;
+          var orig = processTrace;
+          processTrace = function () {
+            var r = orig.apply(this, arguments);
+            try { saveGraph(); graphTag('TRACE'); } catch (_) {}
+            return r;
+          };
+          processTrace.__swWall = true;
+          try { window.processTrace = processTrace; } catch (_) {}
+        } catch (_) {}
+      })();
+
       function fillTools(body) {
         var grid = el('div', { 'class':'wall-tools' });
         // Only wire actions that exist; each is the app's own function.
@@ -922,6 +1036,9 @@
         if (!w._tiles.tools._body.firstChild) fillTools(w._tiles.tools._body);
 
         assertLoops();
+        // Never present an empty spider graph: restore the last real trace, or
+        // trace the top HVT for real. Runs after adoption so the canvas is sized.
+        seedGraph();
 
         // The decorative three.js starfield updates 2500 particles and renders a
         // full-viewport WebGL frame every tick, and it never stops. The wall
@@ -1024,6 +1141,7 @@
         }
       });
       window.swWallEnter = enter; window.swWallLeave = leave;
+      window.swWallSeedGraph = seedGraph;   // exposed for the regression harness
     })();
     </script>
 
