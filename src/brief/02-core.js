@@ -209,7 +209,17 @@ const WATCHLIST = [
   ['LARGE_RECV_rMvCas',   'rMvCasZ9cohYrSZRNYPTZfoaaSUQMfgQ8G', 'discovered_receiver'],        // exchange-adjacent · HIGHVAL_rNxp4h/HIGHVAL_rJn2zA/CRYPTO_COM · richlist #289 (23.8M) · score 135/200
   ['LARGE_RECV_rKRYAq',   'rKRYAqMFTTGMZ47eXJVRKcqLJgnPQbXisg', 'discovered_receiver'],        // splitter-chain · SPLITTER_r3zUhJ · richlist #839 (3.5M) · score 125/200 · carried since 08-04
   ['LARGE_RECV_ragnEu',   'ragnEuoM7mRMP7pVpWprZdJe9vNuVyCKKT', 'discovered_receiver'],        // watch-net · LARGE_RECV_rUjfTQ · no richlist match · score 125/200 · carried since 08-05
-  ['HIGHVAL_rpNF49',      'rpNF4938Y8zCrqFP2owDHjMUdpAxMs49JD', 'discovered_unknown_highval']  // exchange-adjacent · CRYPTO_COM · richlist #129 (98.4M) · score 125/200 · carried since 08-04
+  ['HIGHVAL_rpNF49',      'rpNF4938Y8zCrqFP2owDHjMUdpAxMs49JD', 'discovered_unknown_highval'], // exchange-adjacent · CRYPTO_COM · richlist #129 (98.4M) · score 125/200 · carried since 08-04
+  // ── 2026-08-09 scan SW20260809MBHXI: promoted on PERSISTENCE, not on tier ──
+  // This scan recommended nothing: 0 CRITICAL_ADD_REVIEW, 0 RECOMMEND_FOR_WATCH,
+  // 11 REVIEW, 1 MONITOR. The usual rule would have added no wallet at all.
+  // This one is added on the scanner's OWN other criterion — seen_count >= 3 is
+  // a HIGH pattern-memory signal (02-core.js: addSignal('pattern_memory', ...)),
+  // and it is why this address keeps appearing in the report's PATTERN MEMORY
+  // section. It has 16 sightings across 45 days (2026-06-25 -> 2026-08-09) and
+  // was the ONLY candidate seen in today's scan. Its score sits at 85 because it
+  // has no richlist match, not because the behavioural evidence is weak.
+  ['HIGHVAL_rYmTPY',      'rYmTPYVPLv4EbhTN4Uw8nfvjyShLGESMV',  'discovered_unknown_highval']  // exchange-adjacent · BITHUMB_HOT (75) / WHALE_RECV_rhuCPE / LARGE_RECV_rDAE53 · no richlist match · seen 16x over 45 days · score 85/200
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)
