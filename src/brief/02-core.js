@@ -13296,7 +13296,7 @@ function exportPatternMemory() {
   const mem = getPatternMemory();
   const base = shadowFileBase ? shadowFileBase('PatternMemory') : 'ShadowWatch_PatternMemory';
   if (typeof downloadJsonFile === 'function') {
-    downloadJsonFile(mem, base + '.json');
+    downloadJsonFile(base + '.json', mem);
   } else {
     const a = document.createElement('a');
     a.href = 'data:application/json,' + encodeURIComponent(JSON.stringify(mem, null, 2));
@@ -13713,7 +13713,7 @@ function exportNewsDoctorHistoryJson() {
   const hist = getNewsDoctorHistory();
   const base = shadowFileBase ? shadowFileBase('NewsDoctorHistory') : 'ShadowWatch_NewsDoctorHistory';
   if (typeof downloadJsonFile === 'function') {
-    downloadJsonFile(hist, base + '.json');
+    downloadJsonFile(base + '.json', hist);
   } else {
     const a = document.createElement('a');
     a.href = 'data:application/json,' + encodeURIComponent(JSON.stringify(hist, null, 2));
@@ -14923,7 +14923,7 @@ function exportNewsSourceStrategyTxt() {
   state.newsSourceStrategy = _newsSourceStrategyToText(strategy);
   const base = typeof shadowFileBase === 'function' ? shadowFileBase('NewsSourceStrategy') : 'ShadowWatch_NewsSourceStrategy';
   if (typeof downloadTextFile === 'function') {
-    downloadTextFile(state.newsSourceStrategy, base + '.txt');
+    downloadTextFile(base + '.txt', state.newsSourceStrategy);
   }
 }
 
@@ -15236,14 +15236,14 @@ function renderNewsRouterPanel() {
     try {
       const base = typeof shadowFileBase === 'function' ? shadowFileBase('NewsRouter') : 'ShadowWatch_NewsRouter';
       const txt = _newsRouterToText(router);
-      if (typeof downloadTextFile === 'function') downloadTextFile(txt, base + '.txt');
+      if (typeof downloadTextFile === 'function') downloadTextFile(base + '.txt', txt);
     } catch(e) { elog('exportNewsRouter', e); }
   });
   const btnJson = document.getElementById('btnExportNewsRouterJson');
   if (btnJson) btnJson.addEventListener('click', () => {
     try {
       const base = typeof shadowFileBase === 'function' ? shadowFileBase('NewsRouter') : 'ShadowWatch_NewsRouter';
-      if (typeof downloadJsonFile === 'function') downloadJsonFile(router, base + '.json');
+      if (typeof downloadJsonFile === 'function') downloadJsonFile(base + '.json', router);
     } catch(e) { elog('exportNewsRouterJson', e); }
   });
 }

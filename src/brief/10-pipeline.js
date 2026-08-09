@@ -61,32 +61,85 @@ function _getLabel(address, pack){
       }
     }
   }
-  // Check richlist seed (window.KNOWN array in main app)
-  var known = _safe(function(){
-    return window.KNOWN||window.WATCHED_WALLETS||
-           (window.state&&(window.state.knownWallets||window.state.watched))||[];
-  }, []);
-  if(Array.isArray(known)){
-    for(var j=0;j<known.length;j++){
-      var k=known[j];
-      var ka=k&&(k.address||k.addr||k.a||'');
-      if(ka===address && (k.label||k.name||k.cat)){
-        var kentry={
-          name: k.label||k.name||k.cat,
-          provenance: k.reviewed?'operator_reviewed':'richlist_seed',
-          id: k.address||address
-        };
-        _labelCache[address]=kentry;
-        return kentry;
-      }
-    }
+  // ── SHARED IDENTITY REGISTRY — a real-world name, where one is established ──
+  // This is the only source that may NAME an entity. Everything else stays
+  // behavioural.
+  var ident = _safe(function(){
+    var R = (typeof window!=='undefined') && window.SW_WALLET_IDENTITIES;
+    return (R && R[address]) || null;
+  }, null);
+  if(ident && ident.name){
+    var ie={
+      name: ident.name,
+      // The registry is operator-curated and committed to source, so it is
+      // legitimate provenance for assertLabelProvenance. Confidence is carried
+      // through rather than flattened, so a CONFIRMED and a PUBLIC_SOURCE claim
+      // remain distinguishable downstream.
+      provenance: 'operator_reviewed',
+      confidence: ident.confidence || 'PUBLIC_SOURCE',
+      entityType: ident.type || null,
+      identified: true,
+      id: address
+    };
+    _labelCache[address]=ie;
+    return ie;
+  }
+
+  // ── WATCHED-BUT-NOT-IDENTIFIED — a behavioural handle, never a name ──
+  // The previous code looked for window.KNOWN, which does not exist: KNOWN is
+  // declared `const` at classic-script top level (02-core.js), which creates a
+  // LEXICAL global, not a window property. It then ran Array.isArray() against
+  // it, and KNOWN is an object keyed by address, not an array. Two independent
+  // reasons this branch could never return anything — which is why every report
+  // ever published said "an unidentified wallet" for wallets the app had
+  // labelled, and why allRefs in assertLabelProvenance was always empty.
+  var watched = _safe(function(){
+    if(typeof KNOWN!=='undefined' && KNOWN && KNOWN[address]) return KNOWN[address];
+    if(typeof window!=='undefined' && window.KNOWN && window.KNOWN[address]) return window.KNOWN[address];
+    return null;
+  }, null);
+  if(watched && (watched.label||watched.cat)){
+    var we={
+      // Deliberately NOT the raw handle: "SPLITTER_rDsbeo" is an internal
+      // identifier, not something a reader should see, and printing it would
+      // imply an identity we do not have.
+      name: null,
+      handle: watched.label || null,
+      cat: watched.cat || null,
+      provenance: 'behavioral_watchlist',
+      identified: false,
+      id: address
+    };
+    _labelCache[address]=we;
+    return we;
   }
   return null;
 }
+// How a wallet should be DESCRIBED when we have no identity for it. Being on the
+// watch list is itself information — "a watched routing wallet" is both honest
+// and more use to a reader than "an unidentified wallet".
+var _CAT_PHRASE = {
+  exchange:                   'an exchange wallet',
+  escrow:                     'a Ripple escrow wallet',
+  whale:                      'a watched whale wallet',
+  next_hop_splitter:          'a watched routing wallet',
+  discovered_whale:           'a tracked whale wallet',
+  discovered_receiver:        'a tracked receiving wallet',
+  discovered_unknown_highval: 'a tracked high-value wallet'
+};
 function _entityName(address, pack, fallback){
   var lbl=_getLabel(address,pack);
-  if(lbl && lbl.name) return { name: lbl.name, provenance: lbl.provenance, id: lbl.id };
-  return { name: fallback||'an unidentified wallet', provenance: null, id: null };
+  // 1. a real, sourced identity — name it
+  if(lbl && lbl.name) return { name: lbl.name, provenance: lbl.provenance,
+                               confidence: lbl.confidence, identified: true, id: lbl.id };
+  // 2. watched but not identified — describe what it is, do not name it
+  if(lbl && lbl.identified === false){
+    var phrase = _CAT_PHRASE[lbl.cat];
+    if(phrase) return { name: phrase, provenance: 'behavioral_watchlist',
+                        identified: false, id: lbl.id };
+  }
+  // 3. genuinely unknown
+  return { name: fallback||'an unidentified wallet', provenance: null, identified: false, id: null };
 }
 function _plain(name, provenance){
   // Convert internal labels to plain English where provenance allows
@@ -190,7 +243,10 @@ function summarizeLargeMoves(pack){
       // Add label registry refs for named wallets
       [tx.from||tx.sender, tx.to||tx.receiver].forEach(function(addr){
         var lbl=_getLabel(addr,pack);
-        if(lbl) refs.push({
+        // Only an IDENTITY counts as a label reference. A behavioural watchlist
+        // entry has name:null and must not inflate evidence_level, nor appear as
+        // provenance for naming an entity.
+        if(lbl && lbl.name) refs.push({
           kind:'label_registry',id:lbl.id,url:null,
           label:lbl.name,provenance:lbl.provenance
         });
@@ -328,7 +384,7 @@ function summarizeReceiverFollowthrough(pack){
     [held,fwd,split].forEach(function(r){
       if(!r||!r.address) return;
       var lbl=_getLabel(r.address,pack);
-      if(lbl) refs.push({kind:'label_registry',id:lbl.id,url:null,
+      if(lbl && lbl.name) refs.push({kind:'label_registry',id:lbl.id,url:null,
                           label:lbl.name,provenance:lbl.provenance});
     });
     return _contract({

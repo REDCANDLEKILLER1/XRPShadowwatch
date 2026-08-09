@@ -556,6 +556,9 @@
          concepts re-implemented from an external reference): escape/util, token
          identity, flow classification, wallet scoring, watchdog, tx-family
          counter. Loaded before app.js so the engine can use window.SW.* -->
+    <!-- Shared wallet identity registry — MUST load before app.js, which reads
+         window.SW_WALLET_IDENTITIES at parse time. Also loaded by brief-console.html. -->
+    <script src="src/shared/wallet-identities.js"></script>
     <script src="src/js/intel/sw-util.js"></script>
     <script src="src/js/intel/sw-token-intel.js"></script>
     <script src="src/js/intel/sw-txn-counter.js"></script>
