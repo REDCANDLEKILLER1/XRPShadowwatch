@@ -5,9 +5,15 @@
 // only way both can see the same registry. This file is the single source of
 // truth; do not re-declare these anywhere else.
 //
-// confidence:
-//   CONFIRMED     — corroborated across sources / verified by the operator
-//   PUBLIC_SOURCE — published by a public labeller (XRPScan, Bithomp, etc.)
+// confidence, strongest first:
+//   CONFIRMED         — corroborated across sources / verified by the operator
+//   PUBLIC_SOURCE     — published by a public labeller (XRPScan, Bithomp, etc.)
+//   OPERATOR_ASSERTED — the operator named it when adding it to the watch list
+//                       (carries `source: watchlist_label:<LABEL>`). This is a
+//                       CLAIM, not an external verification. It is weaker than the
+//                       two above and is tracked separately on purpose: if any of
+//                       these is ever contradicted by a public source, the public
+//                       source wins and the entry should be corrected or dropped.
 // type: EXCH (exchange) · RIPPLE (Ripple-controlled) · HVT (named high-value holder)
 //
 // An entry here is an IDENTITY CLAIM and is treated as such by the report: it is
@@ -568,5 +574,77 @@ window.SW_WALLET_IDENTITIES = {
   "name": "BTC Markets",
   "type": "HVT",
   "confidence": "PUBLIC_SOURCE"
+ },
+ "rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh": {
+  "name": "Binance",
+  "type": "EXCH",
+  "confidence": "OPERATOR_ASSERTED",
+  "source": "watchlist_label:BINANCE_HOT"
+ },
+ "rwshjBngGqMRJgGYvEJXGMkg5DS2GX3U3q": {
+  "name": "Binance",
+  "type": "EXCH",
+  "confidence": "OPERATOR_ASSERTED",
+  "source": "watchlist_label:BINANCE_COLD_1"
+ },
+ "rE5LDXksLZHsRgGUgqu7NiTSDd5zFz7rsW": {
+  "name": "Binance",
+  "type": "EXCH",
+  "confidence": "OPERATOR_ASSERTED",
+  "source": "watchlist_label:BINANCE_COLD_2"
+ },
+ "r3bqvUfF9weyxZqwo6qumBV2Q5k8LzepjJ": {
+  "name": "Binance",
+  "type": "EXCH",
+  "confidence": "OPERATOR_ASSERTED",
+  "source": "watchlist_label:BINANCE_PEG_BRIDGE"
+ },
+ "rw2ciyaNshpHe7bCHo4bRWq6pqqynnWKQg": {
+  "name": "Coinbase",
+  "type": "EXCH",
+  "confidence": "OPERATOR_ASSERTED",
+  "source": "watchlist_label:COINBASE_HOT"
+ },
+ "rG6FZ31hDHN1K5Dkbma3PSB5uVCuVVRzfn": {
+  "name": "Huobi",
+  "type": "EXCH",
+  "confidence": "OPERATOR_ASSERTED",
+  "source": "watchlist_label:HUOBI_MAIN"
+ },
+ "rH5wodHpZzeXBAWE36nMoRXGqeEjSdbzWU": {
+  "name": "UPbit",
+  "type": "EXCH",
+  "confidence": "OPERATOR_ASSERTED",
+  "source": "watchlist_label:UPBIT_COLD"
+ },
+ "rpPcmcGQ5iTXDc5zF5owxwTifkTs1qYrA6": {
+  "name": "Uphold",
+  "type": "EXCH",
+  "confidence": "OPERATOR_ASSERTED",
+  "source": "watchlist_label:UPHOLD_CUSTODY"
+ },
+ "rB1kVfLSxpXCw7sLCBcm5LFZYzkS6xmwSK": {
+  "name": "bitbank",
+  "type": "EXCH",
+  "confidence": "OPERATOR_ASSERTED",
+  "source": "watchlist_label:BITBANK_COLD"
+ },
+ "rN3t4Epm69GXM1Bx42Ne1opfai7eUvmopY": {
+  "name": "Coincheck",
+  "type": "EXCH",
+  "confidence": "OPERATOR_ASSERTED",
+  "source": "watchlist_label:COINCHECK_COLD"
+ },
+ "rN1yT2hkfMt89CJVsXdvnKqRJbqm7TC8uo": {
+  "name": "Bybit",
+  "type": "EXCH",
+  "confidence": "OPERATOR_ASSERTED",
+  "source": "watchlist_label:BYBIT_CUSTODY"
+ },
+ "rw3fRcmn5PJyPKuvtAwHDSpEqoW2JKmKbu": {
+  "name": "Bithumb",
+  "type": "EXCH",
+  "confidence": "OPERATOR_ASSERTED",
+  "source": "watchlist_label:BITHUMB_HOT"
  }
 };
