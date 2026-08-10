@@ -1500,3 +1500,45 @@
 @media (prefers-reduced-motion: reduce) {
   body.sw-wall::before { animation: none !important; }
 }
+
+/* ════════════════════════════════════════════════════════════════
+   WALLET HISTORY PANEL
+   Click a wallet -> real account_tx rows from the live socket. A
+   counterparty is NAMED only when the shared identity registry names it;
+   otherwise it shows its role or its address. Same rule as the report.
+   ════════════════════════════════════════════════════════════════ */
+#wallet-history{position:fixed;inset:auto 0 0 0;z-index:10001;max-height:78vh;
+  display:none;flex-direction:column;background:#04070a;border-top:2px solid var(--lime-main);
+  box-shadow:0 -14px 44px rgba(0,0,0,.85);border-radius:14px 14px 0 0;overflow:hidden;}
+#wallet-history.wh-open{display:flex;}
+@media (min-width:900px){
+  #wallet-history{inset:auto auto 0 50%;transform:translateX(-50%);width:min(720px,94vw);
+    max-height:70vh;border:2px solid var(--lime-main);border-radius:14px;margin-bottom:18px;}
+}
+#wallet-history .wh-head{display:flex;align-items:flex-start;gap:12px;padding:13px 15px;
+  border-bottom:1px solid #1b3326;background:rgba(0,255,0,.04);flex:0 0 auto;}
+#wh-title{font:700 14px 'Rajdhani',sans-serif;letter-spacing:.08em;color:#eafff0;text-transform:uppercase;}
+#wh-addr{font:400 9.5px 'Share Tech Mono',monospace;color:#5f8f74;word-break:break-all;margin-top:2px;}
+#wh-sub{font:600 9.5px 'Rajdhani',sans-serif;letter-spacing:.09em;color:#7C8C86;text-transform:uppercase;margin-top:3px;}
+#wallet-history .wh-x{margin-left:auto;background:transparent;border:1px solid #2a4634;color:#9fdcb6;
+  width:30px;height:30px;border-radius:8px;font-size:19px;line-height:1;cursor:pointer;flex:0 0 auto;}
+#wallet-history .wh-x:hover{border-color:var(--lime-main);color:var(--lime-main);}
+#wh-rows{overflow-y:auto;padding:8px 10px 16px;flex:1 1 auto;min-height:0;}
+#wh-rows .wh-msg{padding:26px 12px;text-align:center;color:#5f8f74;
+  font:600 11px 'Rajdhani',sans-serif;letter-spacing:.08em;text-transform:uppercase;}
+#wh-rows .wh-summary{padding:8px 6px 10px;margin-bottom:4px;border-bottom:1px solid #17281d;
+  font:700 10.5px 'Rajdhani',sans-serif;letter-spacing:.07em;color:#8FCBFF;text-transform:uppercase;}
+#wh-rows .wh-row{display:flex;align-items:center;gap:9px;padding:8px 6px;border-bottom:1px solid #101b14;}
+#wh-rows .wh-row:hover{background:rgba(0,255,0,.045);}
+.wh-dir{font:700 8.5px 'Rajdhani',sans-serif;letter-spacing:.1em;padding:2px 6px;border-radius:4px;flex:0 0 auto;}
+.wh-in{color:#00ff88;background:rgba(0,255,136,.12);}
+.wh-out{color:#ffaa00;background:rgba(255,170,0,.12);}
+.wh-amt{font:700 11.5px 'Share Tech Mono',monospace;color:#eafff0;flex:0 0 auto;min-width:88px;}
+.wh-arrow{color:#4d6b58;flex:0 0 auto;}
+.wh-party{font:600 11px 'Rajdhani',sans-serif;letter-spacing:.04em;flex:1 1 auto;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* a named entity reads differently from a described one — on purpose */
+.wh-party.wh-named{color:#00ff00;}
+.wh-party.wh-watched{color:#8FCBFF;}
+.wh-party.wh-unknown{color:#7C8C86;font-family:'Share Tech Mono',monospace;font-size:10px;}
+.wh-time{font:400 9px 'Share Tech Mono',monospace;color:#4d6b58;flex:0 0 auto;}

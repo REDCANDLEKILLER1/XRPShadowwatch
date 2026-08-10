@@ -1549,6 +1549,10 @@
                 try { d = JSON.parse(e.data); } catch(err){ return; }
                 if(d.type==='transaction') handleTx(d.transaction, d.meta); 
                 if(d.type==='ledgerClosed' && document.getElementById('ledger-display')) document.getElementById('ledger-display').innerText = d.ledger_index; 
+                // "hist_" is excluded here on purpose: a wallet-history request also
+                // carries result.transactions, and without this it would be dumped
+                // into the wallet graph as if the operator had asked for a trace.
+                if(d.id && d.id.indexOf("hist_") === 0) { try { if(window.SW_WALLET_HISTORY) SW_WALLET_HISTORY.handleResp(d); } catch(_){} return; }
                 if(d.result && d.result.transactions && !(d.id && (d.id.indexOf("cvol_") === 0 || d.id.indexOf("risk_") === 0 || d.id.indexOf("esc_") === 0))) processTrace(d.result.account, d.result.transactions);
 
                 if(d.id && d.id.indexOf("cvol_") === 0) { handleChainVolResp(d); return; }
@@ -1909,6 +1913,9 @@
                 document.getElementById('mod-copy-wallet').onclick = () => copyHash(b.id);
                 document.getElementById('mod-copy-hash').style.display = 'none';
                 document.getElementById('mod-save-btn').style.display = 'none';
+                var _hb = document.getElementById('mod-hist-btn');
+                if (_hb) { _hb.style.display = 'block';
+                  _hb.onclick = function(){ closeModal(); if (window.openWalletHistory) openWalletHistory(b.id); }; }
             } else {
                 document.getElementById('mod-from').innerText = b.from; 
                 document.getElementById('mod-to').innerText = b.to; 
@@ -1920,6 +1927,9 @@
                 document.getElementById('mod-copy-wallet').onclick = () => copyHash(b.from); 
                 document.getElementById('mod-save-btn').style.display = 'block';
                 document.getElementById('mod-save-btn').onclick = () => { saveCase({hash:b.hash, amt:b.val, from:b.from, to:b.to}); closeModal(); showToast("EVIDENCE SECURED"); }; 
+                var _hb2 = document.getElementById('mod-hist-btn');
+                if (_hb2) { _hb2.style.display = 'block';
+                  _hb2.onclick = function(){ closeModal(); if (window.openWalletHistory) openWalletHistory(b.from); }; }
             }
             document.getElementById('bubble-modal').classList.add('modal-active'); 
         } 

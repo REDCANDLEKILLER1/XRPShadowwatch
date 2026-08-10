@@ -134,10 +134,25 @@
             <button id="mod-scan-btn" class="mod-btn">SCAN LEDGER</button>
             <button id="mod-copy-hash" class="mod-btn">COPY HASH</button>
             <button id="mod-copy-wallet" class="mod-btn">COPY SENDER</button>
+            <button id="mod-hist-btn" class="mod-btn">HISTORY</button>
             <button id="mod-save-btn" class="mod-btn mod-save">SAVE EVID</button>
         </div>
         <button onclick="closeModal()" class="w-full text-red-500 text-xs mt-4">CLOSE INTEL</button>
     </div> 
+
+    <!-- WALLET HISTORY — real account_tx rows from the live socket. Counterparties
+         are named only when the shared identity registry names them. -->
+    <div id="wallet-history">
+      <div class="wh-head">
+        <div>
+          <div id="wh-title">Wallet history</div>
+          <div id="wh-addr"></div>
+          <div id="wh-sub"></div>
+        </div>
+        <button class="wh-x" onclick="closeWalletHistory()" aria-label="Close wallet history">&times;</button>
+      </div>
+      <div id="wh-rows"></div>
+    </div>
 
     <div id="toast">NOTIFICATION</div>
     <div id="app-background"></div>
@@ -691,6 +706,7 @@
     <!-- OUTER APP = live tactical watcher (XRPMAN SHADOW WATCH v16.7.1).
          Deeper forensic/report engine lives in ./brief-console.html (BRIEF tab). -->
     <script src="src/js/app.js"></script>
+    <script src="src/js/wallet-history.js"></script>
     <script src="src/js/risk.js"></script>
     <script src="src/js/escrow-watch.js"></script>
 
