@@ -18919,12 +18919,17 @@ function _swBuildCockpit() {
     '<div class="sw-reactor-pct" id="swReactorPct">0%</div></div>' +
     '<div class="sw-segbar" id="swSegBar"></div>' +
     '<div class="sw-reactor-next" id="swReactorNext">NEXT: RUN MORNING SCAN</div>');
-  var rRight = _swEl('div', { 'class':'sw-minigrid' },
-    '<div class="sw-mini"><span>Mode</span><b id="swMiniMode">READY</b></div>' +
-    '<div class="sw-mini"><span>Wallets</span><b id="swMiniWallets">0</b></div>' +
-    '<div class="sw-mini"><span>Queue</span><b id="swMiniQueue">0</b></div>' +
-    '<div class="sw-mini"><span>Flagged Moves</span><b id="swMiniFlagged">—</b></div>' +
-    '<div class="sw-mini"><span>Errors</span><b id="swMiniErrors">0</b></div>' +
+  // ── The reactor's right column holds the GAUGES, not a stat grid ──────────
+  // It used to carry Mode / Wallets / Queue / Flagged Moves / Errors. Four of
+  // those five repeat the status strip that sits a few pixels below, and the
+  // fifth (Mode) is already said twice over — by the phase line under REACTOR
+  // CORE and by the RUN SCAN button, which reads "SCANNING…" while a scan runs.
+  // So it was a block of duplication in the most valuable space on the screen,
+  // while the three gauges — the instruments worth watching — sat below the fold.
+  // Swapped. Nothing is lost: every number the minis showed is still on the
+  // status strip, which also adds Risk Score and Coverage.
+  var rRight = _swEl('div', { 'class':'sw-reactor-gauges' },
+    '<div class="sw-gaugerow" id="swGauges"></div>' +
     // Helper-jobs instrumentation stays live and audited (blocker B4 asserts on
     // it) — it is just no longer given a visible cockpit slot, because it cannot
     // report anything until after the report seals. Kept in the DOM, hidden.
@@ -18985,7 +18990,9 @@ function _swBuildCockpit() {
 
   var instruments = _swEl('section', { 'class':'sw-panel', id:'swInstruments' },
     '<div class="sw-panel-title"><span class="sw-t"><span class="sw-dot"></span>LIVE SCAN INSTRUMENTS</span></div>' +
-    '<div class="sw-gaugerow" id="swGauges"></div><div id="swMeter"></div>' +
+    // #swGauges now lives in the reactor row — see the note there. This panel
+    // keeps the net-flow meter, the tiles and MARKET & NETWORK.
+    '<div id="swMeter"></div>' +
     '<div class="sw-tilerow" id="swTiles"></div>' +
     '<div class="sw-subttl" id="swMktTtl">MARKET &amp; NETWORK</div>' +
     '<div class="sw-mktrow" id="swMarket"></div>');
@@ -19556,11 +19563,7 @@ function renderDashboardV1Live() {
     _swSetText('swHMode', 'Shadow Scan');
     // reactor + minis
     _swRenderReactor();
-    _swSetText('swMiniMode', _swMode());
-    _swSetText('swMiniWallets', String(wTotal));
-    _swSetText('swMiniQueue', String(qSize));
     // HELPER JOBS readouts come from the shared run-local formatter
-    _swSetText('swMiniErrors', String(errs));
     // status strip
     _swSetText('swCellWallets', String(wTotal));
     _swSetText('swCellQueue', String(qSize));

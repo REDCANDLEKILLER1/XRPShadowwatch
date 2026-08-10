@@ -553,7 +553,43 @@ function _lc1(s){
   // Don't de-capitalize acronyms / brand names when the first word already
   // carries a second capital (CLARITY, ETF, JPMorgan, XRP, SEC, DEX...).
   if(/^[A-Z][A-Z0-9]/.test(s)) return s;
+  // ...nor a PROPER NOUN. This rule only caught SHOUTED words, so once wallets
+  // started being named the 2026-08-10 brief read "bitstamp and Bitso absorbed
+  // 11.45M XRP" and "ripple Price Prediction: ...". A sentence that opens with a
+  // real entity or a headline must keep its capital.
+  // Split on whitespace only — a dot can be INSIDE a name ("Crypto.com"), so
+  // splitting on it would test "Crypto" and miss. Trailing punctuation is
+  // stripped by the normaliser in _isProperNoun.
+  var first = s.split(/\s+/)[0];
+  if(first && _isProperNoun(first)) return s;
   return s.charAt(0).toLowerCase()+s.slice(1);
+}
+// A first word is a proper noun if the shared identity registry knows it as an
+// entity — that registry IS the list of names this report is allowed to use, so
+// it is exactly the right authority — or if it is a well-known name the registry
+// has no wallet for.
+var _PROPER_EXTRA = ['ripple','xrpl','coinbase','binance','kraken','bitstamp','bitso','bithumb',
+                     'upbit','bybit','okx','huobi','gemini','uphold','coincheck','bitbank',
+                     'coinone','mexc','gate','kucoin','bitfinex','bitget','revolut','evernorth'];
+var _properCache = null;
+function _isProperNoun(word){
+  var w = String(word||'').toLowerCase().replace(/[^a-z0-9.]/g,'');
+  if(!w) return false;
+  if(_properCache === null){
+    _properCache = {};
+    _PROPER_EXTRA.forEach(function(n){ _properCache[n] = true; });
+    try {
+      var R = (typeof window!=='undefined') && window.SW_WALLET_IDENTITIES;
+      if(R) Object.keys(R).forEach(function(a){
+        var nm = R[a] && R[a].name; if(!nm) return;
+        // index each word of a multi-word entity ("BTC Markets", "SBI VC Trade")
+        String(nm).toLowerCase().split(/\s+/).forEach(function(p){
+          p = p.replace(/[^a-z0-9.]/g,''); if(p.length>2) _properCache[p] = true;
+        });
+      });
+    } catch(_){}
+  }
+  return !!_properCache[w];
 }
 // XRPMan's in-character asides — his ethos from the theme (receipts, tracing,
 // telling on the banks). Used to give the morning read personality and room.
@@ -1545,6 +1581,8 @@ window.PUBLIC_REPORT_PIPELINE_V1={
     assertNoArrayDumps:           assertNoArrayDumps,
     assertFallbackContentRequirements: assertFallbackContentRequirements
   },
+  // exposed for the regression harness — same reason the assertions are
+  internals: { lc1: _lc1, isProperNoun: _isProperNoun, plain: _plain },
   stats:{ get fallbackCount(){ return _fallbackCount; },
           get buildFailCount(){ return _buildFailCount; } },
   lastAudit:        function(){ return _lastAudit; },

@@ -153,6 +153,17 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
 .sw-dash-v1 .sw-seg{flex:1 1 0;border-radius:2px;background:#141B1F;min-width:0;}
 .sw-dash-v1 .sw-reactor-next{font:600 10px 'Share Tech Mono',monospace;letter-spacing:.06em;color:var(--sw-text-muted);text-transform:uppercase;}
 .sw-dash-v1 .sw-minigrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 10px;align-content:start;}
+/* The reactor's right column now holds the three gauges instead of a stat grid
+   that repeated the status strip. It is a narrow column (320px on desktop, full
+   width when the row stacks on a phone), so the gauges are capped tighter here
+   than they were in the wide instruments panel. */
+.sw-dash-v1 .sw-reactor-gauges{display:flex;flex-direction:column;justify-content:center;min-width:0;}
+.sw-dash-v1 .sw-reactor-gauges .sw-gaugerow{gap:4px;}
+.sw-dash-v1 .sw-reactor-gauges .sw-gauge svg{max-width:96px;}
+.sw-dash-v1 .sw-reactor-gauges .sw-gauge-val{font-size:14px;}
+.sw-dash-v1 .sw-reactor-gauges .sw-gauge-cap{font-size:7.5px;letter-spacing:.08em;}
+.sw-dash-v1 .sw-reactor-gauges .sw-gauge-sub{font-size:7px;}
+@media (min-width:1200px){ .sw-dash-v1 .sw-reactor-gauges .sw-gauge svg{max-width:104px;} }
 .sw-dash-v1 .sw-mini{min-width:0;}
 .sw-dash-v1 .sw-mini span{display:block;font:600 8.5px 'Rajdhani',sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--sw-text-muted);}
 .sw-dash-v1 .sw-mini b{display:block;font:700 14px/1.15 'Share Tech Mono',monospace;color:var(--sw-green);}
