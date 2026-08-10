@@ -326,6 +326,154 @@ function usd(v) { v = n(v); return v ? '$' + fmt(v, 0) : '—'; }
 function pct(v) { const d = n(v); return (d >= 0 ? '+' : '') + d.toFixed(2) + '%'; }
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
+// ── READER-FACING WALLET NAMES (evidence lines) ─────────────────
+// The evidence sections (LARGE MOVES, holder dominance, pattern memory, the
+// ledger paragraph) were printing the WATCHLIST's internal handles straight
+// through: "LARGE_RECV_rDAE53 → WHALE_RECV_rfQ9Ec". Those handles are keys we
+// made up to track a wallet; they are not names, they mean nothing to a reader,
+// and worse, that address IS in the identity registry as Binance — so the app
+// knew the answer and printed a bookkeeping string instead.
+//
+// _swWho() is the single resolver every reader-facing line goes through:
+//   1. src/shared/wallet-identities.js has a sourced identity  → NAME it
+//   2. on the watch list, no identity                          → describe the
+//      role + short address ("whale receiver rfQ9Ec…"), never the handle
+//   3. neither                                                 → short address
+// Rule 1 is the ONLY path that may produce a real-world name, which is what
+// keeps assertLabelProvenance satisfiable: every name in the report body traces
+// to a committed registry entry. Everything else stays behavioural.
+const _SW_ROLE_BY_CAT = {
+  exchange:                   'exchange wallet',
+  escrow:                     'escrow wallet',
+  whale:                      'whale wallet',
+  next_hop_splitter:          'routing wallet',
+  discovered_whale:           'whale wallet',
+  discovered_receiver:        'receiving wallet',
+  discovered_unknown_highval: 'high-value wallet',
+  discovered:                 'watched wallet'
+};
+// Longest prefix first — WHALE_RECV_ must win over WHALE_.
+const _SW_ROLE_BY_HANDLE = [
+  ['EXOUT_RECV_',  'exchange-outflow receiver'],
+  ['WHALE_RECV_',  'whale receiver'],
+  ['LARGE_RECV_',  'large-transfer receiver'],
+  ['NEXTHOP_',     'next-hop wallet'],
+  ['SPLITTER_',    'routing wallet'],
+  ['HIGHVAL_',     'high-value wallet'],
+  ['DISCOVERED_',  'watched wallet'],
+  ['WHALE_',       'whale wallet'],
+  ['RIPPLE_',      'escrow wallet']
+];
+// An internal handle: all-caps/underscore bookkeeping, e.g. BINANCE_HOT,
+// WHALE_RECV_rfQ9Ec, RIPPLE_1.3B. Never printed to a reader.
+const _SW_HANDLE_RE = /^[A-Z][A-Z0-9_.]*(_[A-Za-z0-9]+)?$/;
+// A raw address, or one already shortened for display ("rDAE53…JPxr"). Either
+// way it is an address, not a name, and belongs in the address branch.
+const _SW_ADDRISH_RE = /^r[1-9A-HJ-NP-Za-km-z]{4,}(…|\.\.\.|$)/;
+function _swIsHandle(s) {
+  return typeof s === 'string' && _SW_HANDLE_RE.test(s) && /[_]/.test(s);
+}
+function _swRoleFromHandle(h) {
+  for (let i = 0; i < _SW_ROLE_BY_HANDLE.length; i++) {
+    if (h.indexOf(_SW_ROLE_BY_HANDLE[i][0]) === 0) return _SW_ROLE_BY_HANDLE[i][1];
+  }
+  return null;
+}
+function _swIdentity(addr) {
+  try {
+    const R = (typeof window !== 'undefined') && window.SW_WALLET_IDENTITIES;
+    return (R && addr && R[addr]) || null;
+  } catch (_) { return null; }
+}
+function _swWatched(addr) {
+  try {
+    if (addr && typeof KNOWN !== 'undefined' && KNOWN && KNOWN[addr]) return KNOWN[addr];
+  } catch (_) {}
+  return null;
+}
+// addr        — the XRPL address, when the caller has it (always prefer this)
+// fallbackLbl — whatever label the caller was going to print (may be a handle,
+//               a pre-shortened address, or 'UNKNOWN')
+// opts.bare   — return just the short address for tier 3, with no "unidentified
+//               wallet" prefix (for lines that already say what the slot is)
+function _swWho(addr, fallbackLbl, opts) {
+  opts = opts || {};
+  const short = a => (typeof a === 'string' && a.length > 12) ? ca(a) : (a || '');
+  const ident = _swIdentity(addr);
+  if (ident && ident.name) return ident.name;
+
+  const w = _swWatched(addr);
+  const handle = (w && w.label) || (_swIsHandle(fallbackLbl) ? fallbackLbl : null);
+  let role = (w && w.cat) ? _SW_ROLE_BY_CAT[w.cat] : null;
+  if (!role && handle) role = _swRoleFromHandle(handle);
+  if (role) {
+    const tail = addr ? short(addr) : _swHandleTail(handle);
+    return tail ? role + ' ' + tail : role;
+  }
+  // A label that is already plain human text (not one of our handles, not a raw
+  // or pre-shortened address, not the placeholder) is worth keeping as-is.
+  if (fallbackLbl && !_swIsHandle(fallbackLbl) && fallbackLbl !== 'UNKNOWN' &&
+      !_SW_ADDRISH_RE.test(fallbackLbl)) {
+    return fallbackLbl;
+  }
+  if (addr) return opts.bare ? short(addr) : 'unidentified wallet ' + short(addr);
+  if (typeof fallbackLbl === 'string' && fallbackLbl.indexOf('…') > 0) {
+    return opts.bare ? fallbackLbl : 'unidentified wallet ' + fallbackLbl;
+  }
+  return 'an unidentified wallet';
+}
+// "WHALE_RECV_rfQ9Ec" → "rfQ9Ec…" — the handle's trailing address fragment is
+// the only part of it that carries information, and it's what distinguishes two
+// wallets with the same role when we don't have the full address.
+function _swHandleTail(h) {
+  if (!h) return '';
+  const m = /(r[1-9A-HJ-NP-Za-km-z]{4,})$/.exec(h);
+  return m ? m[1] + '…' : '';
+}
+// A list of addresses as reader-facing names, with repeats collapsed. A cluster
+// can hold several addresses belonging to the SAME identity — once they resolve
+// through the registry, "Binance + Binance + Binance" is what you'd get without
+// this, which reads like three parties instead of one entity's three wallets.
+function _swWhoList(addrs, opts) {
+  opts = opts || {};
+  const order = [], count = {};
+  (addrs || []).forEach(a => {
+    const nm = _swWho(a, null, { bare: true });
+    if (count[nm] == null) { count[nm] = 0; order.push(nm); }
+    count[nm]++;
+  });
+  const out = order.map(nm => count[nm] > 1 ? nm + ' ×' + count[nm] : nm);
+  const cap = opts.max || 0;
+  if (cap && out.length > cap) return out.slice(0, cap).concat('+' + (out.length - cap) + ' more');
+  return out;
+}
+// Machine classification codes, said in English. The code stays available in the
+// JSON payload; the prose shouldn't make a reader decode SCREAMING_SNAKE_CASE.
+const _SW_CLS_PHRASE = {
+  UNKNOWN_FLOW:                   'unclassified flow',
+  WATCHLIST_INTERNAL:             'watchlist-internal transfer',
+  EXCHANGE_OUTFLOW:               'exchange outflow',
+  EXCHANGE_INFLOW:                'exchange inflow',
+  WHALE_TO_UNKNOWN:               'whale to unidentified wallet',
+  ESCROW_FLOW:                    'escrow flow',
+  NEXT_HOP_HOLDING:               'holding',
+  NEXT_HOP_FORWARDING_DETECTED:   'forwarding onward',
+  NEXT_HOP_SPLITTER:              'splitting onward',
+  RECEIVER_HOLDING_UNKNOWN:       'holding, purpose unknown',
+  LARGE_TRANSFER_RECEIVER:        'large-transfer receiver',
+  SHARED_COUNTERPARTY:            'shared counterparty',
+  LOW_VALUE_NOISE:                'low-value noise'
+};
+function _swCls(code) {
+  if (!code) return 'unclassified flow';
+  return _SW_CLS_PHRASE[code] || String(code).toLowerCase().replace(/_/g, ' ');
+}
+// Confidence reads as a plain word in prose; the bracket already marks it out.
+function _swConf(c) { return String(c || 'MEDIUM').toLowerCase(); }
+if (typeof window !== 'undefined') {
+  window._swWho = _swWho; window._swCls = _swCls; window._swConf = _swConf;
+}
+
 // ── LOGGING ────────────────────────────────────────────────────
 function log(msg) {
   const el = $('statusFeed'); if (!el) return;
@@ -2381,7 +2529,7 @@ function buildXRPMainReport(p) {
     if (hasConcentration || hasCluster) {
       r.push('8. HOLDER DOMINANCE WATCH');
       if (over1B > 0) {
-        const labels = hd.thresholds.over_1B.wallets.slice(0, 3).map(w => w.label).join(', ');
+        const labels = hd.thresholds.over_1B.wallets.slice(0, 3).map(w => _swWho(w.address, w.label, { bare: true })).join(', ');
         r.push(`• Wallets over 1B XRP: ${over1B} (${labels}${hd.thresholds.over_1B.wallets.length > 3 ? '...' : ''})`);
       }
       if (over500M > 0 && over500M > over1B) {
@@ -2398,12 +2546,15 @@ function buildXRPMainReport(p) {
       if (accumulators.length) {
         const top = accumulators[0];
         const gained = n(top.balance_xrp) - n(top.prev_balance_xrp);
-        r.push(`• Highest active accumulator: ${top.label} (+${fmt(gained, 0)} XRP this window)`);
+        r.push(`• Highest active accumulator: ${_swWho(top.address, top.label, { bare: true })} (+${fmt(gained, 0)} XRP this window)`);
       }
       // Strongest behavioral cluster
       if (hasCluster) {
         const top = bc.clusters[0];
-        r.push(`• Strongest behavioral cluster: ${top.wallets_label.join(' + ')} [${top.confidence}] — ${fmt(top.combined_xrp_balance, 0)} XRP combined (${top.combined_pct_of_supply.toFixed(3)}% of supply)`);
+        const clusterNames = (top.wallets_display && top.wallets_display.length)
+          ? top.wallets_display.slice(0, 6).concat(top.wallets_display.length > 6 ? ['+' + (top.wallets_display.length - 6) + ' more'] : [])
+          : _swWhoList(top.wallets_addr || [], { max: 6 });
+        r.push(`• Strongest behavioral cluster: ${clusterNames.join(' + ')} [${_swConf(top.confidence)}] — ${fmt(top.combined_xrp_balance, 0)} XRP combined (${top.combined_pct_of_supply.toFixed(3)}% of supply)`);
       }
       r.push('• Confidence note: behavioral links are not ownership proof.');
       r.push('');
@@ -12559,13 +12710,21 @@ function renderTopLargeTransfers(largeTransfers, max) {
   const seen = {};
   const deduped = [];
   sorted.forEach(t => {
-    const sender = t.sender_label || t.label || 'UNKNOWN';
-    const recvLabel = (t.receiver_label && t.receiver_label !== 'UNKNOWN')
-                    ? t.receiver_label
-                    : (t.to ? 'unknown receiver (' + (t.to.slice(0,6) + '…' + t.to.slice(-4)) + ')' : 'unknown receiver');
+    // v3.36: both ends go through _swWho, so a wallet the registry can identify
+    // is NAMED here instead of printing the internal handle we track it by.
+    let sender = _swWho(t.from, t.sender_label || t.label);
+    let recvLabel = _swWho(t.to, (t.receiver_label && t.receiver_label !== 'UNKNOWN') ? t.receiver_label : null);
+    // Two different wallets of the same entity resolve to the same name, and
+    // "Binance → Binance" hides the fact that these are two distinct addresses.
+    // Keep the name — it is the true answer — and add the address that tells
+    // them apart.
+    if (sender === recvLabel && t.from && t.to && t.from !== t.to) {
+      sender    += ' ' + ca(t.from);
+      recvLabel += ' ' + ca(t.to);
+    }
     const amt = fmt(n(t.amount), 0);
-    const cls = t.classification || 'UNKNOWN_FLOW';
-    const conf = t.confidence || 'MEDIUM';
+    const cls = _swCls(t.classification);
+    const conf = _swConf(t.confidence);
     const key = sender + '>' + recvLabel + '>' + amt + '>' + cls;
     if (seen[key] != null) { deduped[seen[key]].count++; return; }
     seen[key] = deduped.length;
@@ -12584,14 +12743,14 @@ function renderReceiverFollowthrough(receivers, max) {
   const sorted = filtered.sort((a, b) => n(b.forwarded_large_count) - n(a.forwarded_large_count));
   const top = sorted.slice(0, max || 5);
   return top.map(r => {
-    const addr = r.address.slice(0, 6) + '…' + r.address.slice(-4);
+    const who = _swWho(r.address, r.label, { bare: true });
     const bal = r.balance_xrp != null ? fmt(n(r.balance_xrp), 0) + ' XRP' : 'balance unknown';
     const fwd = n(r.forwarded_large_count);
     const fwdNote = fwd > 0
       ? 'forwarded ' + fwd + ' large tx (' + fmt(n(r.forwarded_large_total_xrp), 0) + ' XRP)'
       : 'held — no large forward';
-    const cls = r.classification || 'NEXT_HOP_HOLDING';
-    return '• ' + addr + ': ' + bal + ', ' + fwdNote + ' · ' + cls + ' [' + (r.confidence || 'MEDIUM') + ']';
+    const cls = _swCls(r.classification || 'NEXT_HOP_HOLDING');
+    return '• ' + who + ': ' + bal + ', ' + fwdNote + ' · ' + cls + ' [' + _swConf(r.confidence) + ']';
   });
 }
 
@@ -12776,7 +12935,7 @@ function shadowWatchSection(buckets, p) {
     if (Math.abs(top.delta) < 100) return null;
     const verb = top.delta > 0 ? 'gained' : 'lost';
     const sign = top.delta > 0 ? '+' : '-';
-    return `${top.label} ${verb} ${sign}${fmt(Math.abs(top.delta), 0)} XRP`;
+    return `${_swWho(top.address, top.label, { bare: true })} ${verb} ${sign}${fmt(Math.abs(top.delta), 0)} XRP`;
   }
   function topMoversList(walletsInGroup, max) {
     if (!walletsInGroup) return [];
@@ -12784,7 +12943,7 @@ function shadowWatchSection(buckets, p) {
       .filter(w => Math.abs(w.delta) >= 100)
       .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
       .slice(0, max || 2)
-      .map(w => `${w.label} ${w.delta > 0 ? 'gained' : 'dropped'} ${w.delta > 0 ? '+' : '-'}${fmt(Math.abs(w.delta), 0)} XRP`);
+      .map(w => `${_swWho(w.address, w.label, { bare: true })} ${w.delta > 0 ? 'gained' : 'dropped'} ${w.delta > 0 ? '+' : '-'}${fmt(Math.abs(w.delta), 0)} XRP`);
   }
 
   // 1. Ripple Escrow / Corporate Hubs
@@ -12937,7 +13096,7 @@ function anomalySection(buckets, p, netDelta) {
 
   // Build evidence string from top 4 movers
   const movers = sorted.slice(0, 4)
-    .map(w => `${w.label} ${w.delta > 0 ? 'gained +' : 'fell -'}${fmt(Math.abs(w.delta), 0)} XRP`);
+    .map(w => `${_swWho(w.address, w.label, { bare: true })} ${w.delta > 0 ? 'gained +' : 'fell -'}${fmt(Math.abs(w.delta), 0)} XRP`);
   const conclusion = bridgeQuiet
     ? 'That points to custody/exchange reshuffling more than sidechain exit traffic.'
     : 'Bridge flow plus wallet rotation suggests cross-rail rebalancing.';
@@ -13054,7 +13213,7 @@ function missionDebrief(buckets, p, netDelta, news) {
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
   if (results.length) {
     const top3 = results.slice(0, 3).map(w =>
-      `${w.label} ${w.delta > 0 ? 'gained' : 'bled'} ${fmt(Math.abs(w.delta), 0)} XRP`
+      `${_swWho(w.address, w.label, { bare: true })} ${w.delta > 0 ? 'gained' : 'bled'} ${fmt(Math.abs(w.delta), 0)} XRP`
     ).join(', ');
     parts.push(top3 + '.');
   }
@@ -13505,8 +13664,8 @@ function updatePatternMemory(pack) {
   (pack.large_transfers || []).forEach(t => {
     if (t.from && t.to) {
       const key = 'sender_receiver:' + t.from + ':' + t.to;
-      const sLabel = t.sender_label || t.from.slice(0, 8);
-      const rLabel = t.receiver_label || t.to.slice(0, 8);
+      const sLabel = _swWho(t.from, t.sender_label);
+      const rLabel = _swWho(t.to, t.receiver_label);
       upsertPattern(key, 'REPEATED_SENDER_RECEIVER',
         'Repeated large transfer: ' + sLabel + ' → ' + rLabel + ' (' + fmt(n(t.amount), 0) + ' XRP flags).',
         pack.report_id || pack.scan_id || '');
@@ -13516,17 +13675,19 @@ function updatePatternMemory(pack) {
   // 2. Same receiver from multiple watched wallets (multi-watched receiver)
   const receiverWatched = {};
   (pack.large_transfers || []).forEach(t => {
-    if (t.to && t.sender_label && !KNOWN[t.to]) {
+    // Keyed on the sender's ADDRESS, not its handle: the address is what the
+    // registry can resolve to a name, and two handles can be one entity.
+    if (t.to && t.from && t.sender_label && !KNOWN[t.to]) {
       if (!receiverWatched[t.to]) receiverWatched[t.to] = new Set();
-      receiverWatched[t.to].add(t.sender_label);
+      receiverWatched[t.to].add(t.from);
     }
   });
   Object.keys(receiverWatched).forEach(recv => {
     if (receiverWatched[recv].size >= 2) {
       const key = 'multi_watched_receiver:' + recv;
-      const senders = Array.from(receiverWatched[recv]).slice(0, 3).join(' + ');
+      const senders = _swWhoList(Array.from(receiverWatched[recv]), { max: 3 }).join(' + ');
       upsertPattern(key, 'MULTI_WATCHED_RECEIVER',
-        'Address ' + recv.slice(0, 10) + '… received from ' + receiverWatched[recv].size +
+        _swWho(recv, null, { bare: true }) + ' received from ' + receiverWatched[recv].size +
         ' watched wallets (' + senders + '). Suggests routing or aggregation.',
         pack.report_id || '');
     }
@@ -13538,7 +13699,7 @@ function updatePatternMemory(pack) {
       const key = 'dest_tag:' + f.to + ':' + (f.tag || 'none');
       upsertPattern(key, 'REPEATED_DEST_TAG',
         'Destination tag cluster: ' + (f.unique_from) + ' unique senders to ' +
-        f.to.slice(0, 10) + '… tag=' + (f.tag || 'none') + '. Repeated routing signal.',
+        _swWho(f.to, null, { bare: true }) + ', tag=' + (f.tag || 'none') + '. Repeated routing signal.',
         pack.report_id || '');
     }
   });
@@ -13550,7 +13711,7 @@ function updatePatternMemory(pack) {
       (cluster.shared_counterparties || []).forEach(addr => {
         const key = 'cluster_counterparty:' + addr;
         upsertPattern(key, 'CLUSTER_COUNTERPARTY_REPEAT',
-          'Address ' + addr.slice(0, 10) + '… appears as shared counterparty in behavioral cluster.',
+          _swWho(addr, null, { bare: true }) + ' appears as shared counterparty in behavioral cluster.',
           pack.report_id || '');
       });
     });
@@ -13561,7 +13722,7 @@ function updatePatternMemory(pack) {
     if (h.top_address) {
       const key = 'discovery_candidate:' + h.top_address;
       upsertPattern(key, 'REPEATED_DISCOVERY_CANDIDATE',
-        'Address ' + h.top_address + '… appeared in multiple discovery scans. Repeat behavioral signal.',
+        _swWho(h.top_address, null, { bare: true }) + ' appeared in multiple discovery scans. Repeat behavioral signal.',
         h.generated_at || '');
     }
   });
@@ -13572,12 +13733,12 @@ function updatePatternMemory(pack) {
     if (n(r.forwarded_large_count) > 0) {
       const key = 'receiver_split:' + r.address;
       upsertPattern(key, 'REPEATED_RECEIVER_SPLIT',
-        'Receiver ' + r.address.slice(0, 10) + '… repeatedly forwards large amounts. Suggests routing.',
+        'Receiver ' + _swWho(r.address, r.label, { bare: true }) + ' repeatedly forwards large amounts. Suggests routing.',
         pack.report_id || '');
     } else {
       const key = 'receiver_hold:' + r.address;
       upsertPattern(key, 'REPEATED_RECEIVER_HOLD',
-        'Receiver ' + r.address.slice(0, 10) + '… repeatedly holds after large inflow. Suggests accumulation.',
+        'Receiver ' + _swWho(r.address, r.label, { bare: true }) + ' repeatedly holds after large inflow. Suggests accumulation.',
         pack.report_id || '');
     }
   });
@@ -14128,18 +14289,14 @@ function buildLedgerNarrativeParagraph(pack) {
     lines.push('Shadow volume: ' + fmt(i.shadowVol, 0) + ' XRP across ' + i.largeTxs.length + ' flagged transfer' + (i.largeTxs.length === 1 ? '' : 's') + '.');
   }
   if (i.topTx) {
-    const sender = i.topTx.sender_label || i.topTx.label || 'unknown sender';
-    const recvLabel = (i.topTx.receiver_label && i.topTx.receiver_label !== 'UNKNOWN')
-                    ? i.topTx.receiver_label
-                    : 'an unknown receiver (' + (i.topTx.to ? i.topTx.to.slice(0, 6) + '…' + i.topTx.to.slice(-4) : '?') + ')';
-    lines.push('Strongest single transfer: ' + sender + ' → ' + recvLabel + ', ' + fmt(n(i.topTx.amount), 0) + ' XRP. Classification: ' + (i.topTx.classification || 'UNKNOWN_FLOW') + ' [' + (i.topTx.confidence || 'MEDIUM') + '].');
+    const sender = _swWho(i.topTx.from, i.topTx.sender_label || i.topTx.label);
+    const recvLabel = _swWho(i.topTx.to, (i.topTx.receiver_label && i.topTx.receiver_label !== 'UNKNOWN') ? i.topTx.receiver_label : null);
+    lines.push('Strongest single transfer: ' + sender + ' → ' + recvLabel + ', ' + fmt(n(i.topTx.amount), 0) + ' XRP. Classification: ' + _swCls(i.topTx.classification) + ' [' + _swConf(i.topTx.confidence) + '].');
   }
   if (i.forwardingReceiver) {
-    const addr = i.forwardingReceiver.address;
-    lines.push('Receiver ' + addr.slice(0, 8) + '…' + addr.slice(-4) + ' forwarded ' + n(i.forwardingReceiver.forwarded_large_count) + ' large tx onward — consistent with routing, not holding.');
+    lines.push('Receiver ' + _swWho(i.forwardingReceiver.address, i.forwardingReceiver.label, { bare: true }) + ' forwarded ' + n(i.forwardingReceiver.forwarded_large_count) + ' large tx onward — consistent with routing, not holding.');
   } else if (i.holdingReceiver) {
-    const addr = i.holdingReceiver.address;
-    lines.push('Receiver ' + addr.slice(0, 8) + '…' + addr.slice(-4) + ' held position after inflow — no large forward detected.');
+    lines.push('Receiver ' + _swWho(i.holdingReceiver.address, i.holdingReceiver.label, { bare: true }) + ' held position after inflow — no large forward detected.');
   }
   return lines.join(' ');
 }
@@ -17075,6 +17232,10 @@ function buildBehavioralClusters(txs, walletResults, watchlistAddresses) {
       external_counterparty: external,
       wallets_addr: wallets,
       wallets_label: wallets.map(labelOf),
+      // Reader-facing: registry names where we have them, role + short address
+      // otherwise, same-identity duplicates collapsed. wallets_label keeps the
+      // internal handles for the JSON payload and operator tooling.
+      wallets_display: _swWhoList(wallets),
       combined_xrp_balance: combinedBalance,
       combined_pct_of_supply: _pctOfSupply(combinedBalance),
       tx_count: details.count,
@@ -17159,7 +17320,10 @@ async function runRelatedOfferScan(ws) {
   // Flatten + dedupe tx-history candidates
   const flatMap = new Map();
   for (const [watchedAddr, cands] of candidatesByWatched.entries()) {
-    const watchedLabel = KNOWN[watchedAddr]?.label || watchedAddr.slice(0, 12) + '...';
+    // Reader-facing from the start: this string reaches the offer-watch section
+    // and the discovery inbox's "related watched wallets" evidence, so it must
+    // be a name or a role, never the internal handle.
+    const watchedLabel = _swWho(watchedAddr, KNOWN[watchedAddr]?.label, { bare: true });
     for (const c of cands) {
       if (!flatMap.has(c.address)) {
         flatMap.set(c.address, { ...c, watchedLabels: new Set(), reasonsByWatched: [], sources: new Set(['tx_history']) });
@@ -17235,7 +17399,10 @@ async function runRelatedOfferScan(ws) {
 
   state.relatedOffers.candidates_by_watched = {};
   for (const [watchedAddr, cands] of candidatesByWatched.entries()) {
-    const watchedLabel = KNOWN[watchedAddr]?.label || watchedAddr.slice(0, 12) + '...';
+    // Reader-facing from the start: this string reaches the offer-watch section
+    // and the discovery inbox's "related watched wallets" evidence, so it must
+    // be a name or a role, never the internal handle.
+    const watchedLabel = _swWho(watchedAddr, KNOWN[watchedAddr]?.label, { bare: true });
     state.relatedOffers.candidates_by_watched[watchedLabel] = cands.map(c => ({
       ...c, offers_found: (offersByAddr[c.address] || []).length
     }));
