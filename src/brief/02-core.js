@@ -219,7 +219,26 @@ const WATCHLIST = [
   // section. It has 16 sightings across 45 days (2026-06-25 -> 2026-08-09) and
   // was the ONLY candidate seen in today's scan. Its score sits at 85 because it
   // has no richlist match, not because the behavioural evidence is weak.
-  ['HIGHVAL_rYmTPY',      'rYmTPYVPLv4EbhTN4Uw8nfvjyShLGESMV',  'discovered_unknown_highval']  // exchange-adjacent · BITHUMB_HOT (75) / WHALE_RECV_rhuCPE / LARGE_RECV_rDAE53 · no richlist match · seen 16x over 45 days · score 85/200
+  ['HIGHVAL_rYmTPY',      'rYmTPYVPLv4EbhTN4Uw8nfvjyShLGESMV',  'discovered_unknown_highval'], // exchange-adjacent · BITHUMB_HOT (75) / WHALE_RECV_rhuCPE / LARGE_RECV_rDAE53 · no richlist match · seen 16x over 45 days · score 85/200
+  // ── 2026-08-10 scan SW202608108Q3FA: the operator's full queue, all 13 ──
+  // A departure from the usual rule, recorded so it is not mistaken for drift:
+  // this scan recommended ONE wallet (rs2dgz). The other 12 are REVIEW (10) and
+  // MONITOR (2) — tiers previously left in the queue — and were added because the
+  // operator supplied the full list explicitly. Labels stay behavioural handles;
+  // identity comes from the shared registry, never from the label.
+  ['HIGHVAL_rs2dgz',      'rs2dgzYeqYqsk8bvkQR5YPyqsXYcA24MP2', 'discovered_unknown_highval'],  // IDENTIFIED: MEXC (CONFIRMED) · recommend_for_watch · exchange-adjacent · BITBANK_JP/LARGE_RECV_r97Kea · seen 25x · score 120/200
+  ['LARGE_RECV_rsSgDo',   'rsSgDoNSuZeknxk3owx4Z7PJzoH5cthGEQ', 'discovered_receiver'],         // review · watch-net · WHALE_PRIV_16 · seen 1x · score 90/200
+  ['SPLITTER_rLuvSF',     'rLuvSFafgVja7ZgEtoqa1SwSt1xNGaztLZ', 'next_hop_splitter'],           // review · routing-node · LARGE_RECV_rUjfTQ · seen 2x · score 90/200
+  ['SPLITTER_rwRCtT',     'rwRCtT6VZD8ce9smQYw4bgmUbgnJPvty48', 'next_hop_splitter'],           // review · routing-node · LARGE_RECV_ra8xqX · seen 1x · score 90/200
+  ['LARGE_RECV_rGsMk4',   'rGsMk4nK4M8MtcjVbjUeaJBppjjKpXyJ7F', 'discovered_receiver'],         // review · watch-net · LARGE_RECV_rUjfTQ · seen 2x · score 90/200
+  ['SPLITTER_rsnrCW',     'rsnrCWJMXkiTZLpEmKMBKKMkNyQAThCUxk', 'next_hop_splitter'],           // review · splitter-chain · SPLITTER_rXzRVo/GENESIS_WHALE_8 · seen 1x · score 90/200
+  ['SPLITTER_rh4Wne',     'rh4WneLFo6FsAko8UvCApGHvBYUFkKMDw8', 'next_hop_splitter'],           // review · routing-node · LARGE_RECV_rQDQgw · seen 2x · score 90/200
+  ['LARGE_RECV_rhyc2Q',   'rhyc2QxaHV5pVEtMSPNr27or475C2bQQNd', 'discovered_receiver'],         // review · watch-net · LARGE_RECV_rQDQgw · seen 2x · score 90/200
+  ['LARGE_RECV_rn7d8b',   'rn7d8bZhsdz9ecf586XsvbmVePfxYGrs34', 'discovered_receiver'],         // review · splitter-chain · LARGE_RECV_rQDQgw/SPLITTER_rBNCyN · seen 1x · score 90/200
+  ['LARGE_RECV_r44AzN',   'r44AzNe4LSHQkB95qm6pQCauJ3Vz7Yx3iU', 'discovered_receiver'],         // review · exchange-adjacent · COINCHECK_COLD/COINBASE_HOT · seen 4x · score 85/200
+  ['LARGE_RECV_raN2ev',   'raN2ev7xZCJei22Y6rJshVVmWCQKgpp9Jg', 'discovered_receiver'],         // review · exchange-adjacent · COINBASE_HOT · seen 4x · score 85/200
+  ['LARGE_RECV_rhzZYH',   'rhzZYHFopep75YksYPtb8KAJKoooqMZtV3', 'discovered_receiver'],         // monitor · exchange-adjacent · COINBASE_HOT · seen 1x · score 50/200
+  ['LARGE_RECV_rfah8j',   'rfah8jhiJwPhcWEn2eQZehWqKKqAWGjxp1', 'discovered_receiver']          // monitor · watch-net · seen 1x · score 35/200
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)
