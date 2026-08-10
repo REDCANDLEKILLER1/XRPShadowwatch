@@ -173,6 +173,17 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
 .sw-dash-v1 .sw-scanstatus b{font:600 11px 'Rajdhani',sans-serif;color:var(--sw-green);display:block;}
 /* ════════ read-report + voice card ════════ */
 .sw-dash-v1 .sw-actionpanel{display:flex;flex-direction:column;gap:8px;justify-content:center;}
+/* LIVE SCAN LOG promoted into row 1. It must have a real height of its own —
+   row 1 is auto-height, so without this the <pre> collapses and the panel that
+   is supposed to be watched during a scan shows one line. */
+.sw-dash-v1 .sw-logpanel-top{display:flex;flex-direction:column;min-height:210px;max-height:260px;}
+.sw-dash-v1 .sw-logpanel-top .sw-logbody{flex:1 1 auto;min-height:0;}
+/* Voice moved into the header: compact, still obviously a switch. */
+.sw-dash-v1 .sw-hvoice{gap:6px;}
+.sw-dash-v1 .sw-hvoice .sw-vs{color:var(--sw-text-muted);letter-spacing:.1em;}
+.sw-dash-v1 .sw-hvoice[data-on="true"]{border-color:var(--sw-border-active);background:rgba(0,255,0,0.07);}
+.sw-dash-v1 .sw-hvoice[data-on="true"] .sw-vs{color:var(--sw-green);}
+.sw-dash-v1 .sw-hvoice[data-on="true"] svg{stroke:var(--sw-green);}
 .sw-dash-v1 .sw-readbtn{display:flex;align-items:center;gap:11px;width:100%;text-align:left;cursor:pointer;
   border:1px solid var(--sw-border-active);border-radius:var(--sw-radius);background:rgba(0,255,0,0.05);
   color:var(--sw-green);padding:11px 13px;}
@@ -347,6 +358,7 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
   .sw-dash-v1 .sw-hbtn .sw-hbtn-t{display:none;}
   .sw-dash-v1 .sw-hbtn.sw-exit .sw-hbtn-t{display:inline;}
   .sw-dash-v1 .sw-row-reactor{grid-template-columns:minmax(0,1fr);}
+  .sw-dash-v1 .sw-logpanel-top{min-height:190px;max-height:230px;}
   .sw-dash-v1 .sw-reactor{grid-template-columns:minmax(0,1fr);gap:10px;}
   .sw-dash-v1 .sw-minigrid{grid-template-columns:repeat(3,minmax(0,1fr));}
   .sw-dash-v1 .sw-scanstatus{grid-column:span 3;}

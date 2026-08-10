@@ -18852,6 +18852,17 @@ function _swBuildCockpit() {
   header.appendChild(_swEl('div', { 'class':'sw-hsep' }));
   header.appendChild(_swEl('div', { 'class':'sw-hstat' }, '<span>Scan Mode</span><b id="swHMode">Shadow Scan</b>'));
   header.appendChild(_swEl('div', { 'class':'sw-hspacer' }));
+  // Voice lives in the header now: still one tap from the top and obviously a
+  // control, but no longer occupying a full row next to the live readouts.
+  // Keeps its previous ids so the live updater and every test still find it.
+  var voiceRow = _swEl('button', { type:'button', 'class':'sw-hbtn sw-hvoice', id:'swVoiceRow', 'data-on':'false',
+                                   title:'Toggle spoken report output' },
+    _swIcon('vol') + '<span class="sw-hbtn-t sw-vs" id="swVoiceState">OFF</span>');
+  voiceRow.addEventListener('click', function () {
+    try { var t = document.getElementById('xaiVoiceOutputToggle'); if (t) t.click(); } catch (_) {}
+    setTimeout(function () { try { renderDashboardV1Live(); } catch (_) {} }, 30);
+  });
+  header.appendChild(voiceRow);
   var menuBtn = _swEl('button', { type:'button', 'class':'sw-hbtn sw-dev-only' }, _swIcon('bars') + '<span class="sw-hbtn-t">MENU</span>');
   menuBtn.addEventListener('click', function () { _swClickCmd('open-system'); });
   header.appendChild(menuBtn);
@@ -18906,12 +18917,25 @@ function _swBuildCockpit() {
     _swIcon('power') + '<span id="swRunLbl">RUN SCAN</span>');
   runBtn.addEventListener('click', function () { if (!_swScanning()) _swClickCmd('run-scan'); });
   rRight.appendChild(runBtn);
-  rRight.appendChild(_swEl('div', { 'class':'sw-scanstatus' },
-    _swIcon('pulse') + '<div><span>Scan Status</span><b id="swScanStatus">Standing by</b></div>'));
   reactor.appendChild(rLeft); reactor.appendChild(rRight);
   reactorPanel.appendChild(reactor);
   rowReactor.appendChild(reactorPanel);
 
+  // ── LAYOUT: the live log is the thing you actually watch during a scan ──
+  // It used to sit below the activity feed, far enough down that on a phone you
+  // could not see it at all while a scan ran — the one panel that is changing
+  // second by second was the one panel off screen. It now takes the prime
+  // right-hand slot in row 1. Scan Status and Read Latest Report moved down into
+  // the mid column (they are glanced at, not watched), and the voice toggle went
+  // to the header — still one tap from the top, out of the way of the readouts.
+  var logPanel = _swEl('section', { 'class':'sw-panel sw-logpanel-top', id:'swLogPanel' },
+    '<div class="sw-panel-title"><span class="sw-t"><span class="sw-dot"></span>LIVE SCAN LOG</span>' +
+    '<span class="sw-tag" id="swLogTag">IDLE</span></div>' +
+    '<pre class="sw-scroll sw-logbody" id="swLogBody"></pre>');
+  rowReactor.appendChild(logPanel);
+  main.appendChild(rowReactor);
+
+  // Built here, appended lower down in the mid column.
   var actionPanel = _swEl('section', { 'class':'sw-panel sw-actionpanel' });
   var readBtn = _swEl('button', { type:'button', 'class':'sw-readbtn' },
     _swIcon('doc') + '<span><span class="sw-rb-t">Read Latest Report</span>' +
@@ -18919,15 +18943,8 @@ function _swBuildCockpit() {
     '<span class="sw-rb-arrow">' + _swIcon('chev') + '</span>');
   readBtn.addEventListener('click', function () { _swClickCmd('read-report'); });
   actionPanel.appendChild(readBtn);
-  var voiceRow = _swEl('button', { type:'button', 'class':'sw-voicerow', id:'swVoiceRow', 'data-on':'false' },
-    _swIcon('vol') + '<span class="sw-vl">Voice Output</span><span class="sw-vs" id="swVoiceState">OFF</span><span class="sw-switch"></span>');
-  voiceRow.addEventListener('click', function () {
-    try { var t = document.getElementById('xaiVoiceOutputToggle'); if (t) t.click(); } catch (_) {}
-    setTimeout(function () { try { renderDashboardV1Live(); } catch (_) {} }, 30);
-  });
-  actionPanel.appendChild(voiceRow);
-  rowReactor.appendChild(actionPanel);
-  main.appendChild(rowReactor);
+  actionPanel.appendChild(_swEl('div', { 'class':'sw-scanstatus' },
+    _swIcon('pulse') + '<div><span>Scan Status</span><b id="swScanStatus">Standing by</b></div>'));
 
   // Row 2 — status strip
   var strip = _swEl('div', { 'class':'sw-statusstrip' });
@@ -18964,11 +18981,8 @@ function _swBuildCockpit() {
     '<div class="sw-panel-title"><span class="sw-t"><span class="sw-dot"></span>LIVE ACTIVITY FEED</span>' +
     '<span class="sw-tag">REAL-TIME</span></div><div class="sw-scroll" id="swFeedList"></div>');
   mid.appendChild(feed);
-  var logPanel = _swEl('section', { 'class':'sw-panel', id:'swLogPanel' },
-    '<div class="sw-panel-title"><span class="sw-t"><span class="sw-dot"></span>LIVE SCAN LOG</span>' +
-    '<span class="sw-tag" id="swLogTag">IDLE</span></div>' +
-    '<pre class="sw-scroll sw-logbody" id="swLogBody"></pre>');
-  mid.appendChild(logPanel);
+  // Read Latest Report + Scan Status now live here, where the log used to be.
+  mid.appendChild(actionPanel);
   cols.appendChild(mid);
 
   var col3 = _swEl('div', { 'class':'sw-col3' });
