@@ -838,19 +838,76 @@ async function connectXRPL() {
   throw new Error('All XRPL servers failed');
 }
 
-function xrpl(ws, cmd) {
+// ── LIVE SOCKET ────────────────────────────────────────────────
+// Leave the app mid-scan and the OS closes the WebSocket. Nothing here used to
+// notice: ws was captured once at boot and every later request was sent into a
+// dead socket. The WebSocket spec says a send() on a CLOSING or CLOSED socket is
+// DISCARDED SILENTLY — no throw, no error — so each request then sat out its
+// full 15-second timeout before failing, and the per-wallet catch marked the row
+// FAILED and moved on to the next one. At 8-parallel over 187 wallets that is
+// ~6 minutes of dead air in the balance pass, and the tx pass does it again.
+// That is the "it never finishes" everyone was watching: not a hang, a scan
+// grinding through a dozen minutes of guaranteed timeouts.
+//
+// The socket now lives on state so a reconnect can be swapped in underneath every
+// in-flight call without touching a single call site.
+function _sockOpen(w) { try { return !!w && w.readyState === 1; } catch (_) { return false; } }
+
+async function _ensureSock(ws) {
+  if (_sockOpen(ws)) return ws;
+  if (_sockOpen(state._sock)) return state._sock;
+  // One shared reconnect for the whole scan: 8 parallel wallets hitting a dead
+  // socket must not open 8 connections.
+  if (state._reconnecting) return await state._reconnecting;
+  if (n(state._reconnectFails) >= 3) return null;   // stop trying, fail fast
+  state._reconnecting = (async () => {
+    try {
+      log('XRPL link dropped — reconnecting…');
+      const nw = await connectXRPL();
+      state._sock = nw;
+      state._reconnectFails = 0;
+      log('XRPL link re-established. Scan continues.');
+      return nw;
+    } catch (e) {
+      state._reconnectFails = n(state._reconnectFails) + 1;
+      elog('mid-scan reconnect', e);
+      return null;
+    } finally {
+      const done = state._reconnecting;
+      setTimeout(() => { if (state._reconnecting === done) state._reconnecting = null; }, 0);
+    }
+  })();
+  return await state._reconnecting;
+}
+
+async function xrpl(ws, cmd) {
+  const sock = await _ensureSock(ws);
+  if (!sock) throw new Error('XRPL link down');
   return new Promise((res, rej) => {
     const id = Math.random().toString(36).slice(2);
-    const timer = setTimeout(() => rej(new Error('timeout ' + cmd.command)), 15000);
+    let settled = false;
+    function done(fn, arg) {
+      if (settled) return; settled = true;
+      clearTimeout(timer);
+      try { sock.removeEventListener('message', onMsg); } catch (_) {}
+      try { sock.removeEventListener('close', onClose); } catch (_) {}
+      fn(arg);
+    }
+    const timer = setTimeout(() => done(rej, new Error('timeout ' + cmd.command)), 15000);
     function onMsg(ev) {
       let j; try { j = JSON.parse(ev.data); } catch { return; }
       if (j.id !== id) return;
-      clearTimeout(timer);
-      ws.removeEventListener('message', onMsg);
-      j.status === 'success' ? res(j.result) : rej(new Error(j.error_message || j.error || 'xrpl error'));
+      j.status === 'success' ? done(res, j.result)
+                             : done(rej, new Error(j.error_message || j.error || 'xrpl error'));
     }
-    ws.addEventListener('message', onMsg);
-    ws.send(JSON.stringify({ ...cmd, id }));
+    // Fail the instant the socket goes, instead of waiting out 15s for a reply
+    // that can no longer arrive. This is what turns a 12-minute zombie scan into
+    // a reconnect that takes a second.
+    function onClose() { done(rej, new Error('XRPL link closed mid-request')); }
+    sock.addEventListener('message', onMsg);
+    sock.addEventListener('close', onClose);
+    try { sock.send(JSON.stringify({ ...cmd, id })); }
+    catch (e) { done(rej, e instanceof Error ? e : new Error(String(e))); }
   });
 }
 
@@ -18142,6 +18199,11 @@ async function run() {
     if (!ws) {
       throw new Error('XRPL connection unavailable — cannot scan ledger. Check network or XRPL server settings.');
     }
+    // Hand the socket to state so a mid-scan reconnect can replace it without
+    // any of the scan's call sites holding a stale reference.
+    state._sock = ws;
+    state._reconnectFails = 0;
+    state._reconnecting = null;
     shadowSay('Reading watched wallets…', 'WALLETS', 30);
     log('Scanning ' + getActiveWatchlist().length + ' wallets (parallel x' + SCAN_PARALLEL + ', tier-based pages, smart skip)...');
     await scanWallets(ws);
@@ -18411,6 +18473,8 @@ async function run() {
       try { if (navigator.vibrate) navigator.vibrate(180); } catch {}
     }
     state.scanning = false;
+    state._sock = null;
+    state._reconnecting = null;
   }
 }
 
@@ -28956,6 +29020,22 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   })();
+
+  // ── COMING BACK TO THE SCREEN MID-SCAN ─────────────────────────
+  // The reported symptom: leave the app while it is scanning, come back, and it
+  // never finishes. Backgrounding the page lets the OS close the WebSocket and
+  // freezes the timers; on return the scan is still walking its wallet list,
+  // sending every request into a dead socket. Rather than wait for the next
+  // request to discover that, reconnect the moment the screen is visible again.
+  // _ensureSock shares one attempt, so this races safely with any in-flight call.
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden || !state.scanning) return;
+    if (_sockOpen(state._sock)) return;
+    log('Screen returned with the XRPL link down — reconnecting…');
+    _ensureSock(null).then(function (sock) {
+      if (!sock) log('Reconnect failed. Press RUN SHADOW WATCH to start a fresh scan.');
+    }).catch(function () {});
+  });
 
   setDefaults();
   installDevUnlock();
