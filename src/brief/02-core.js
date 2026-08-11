@@ -244,6 +244,25 @@ const WATCHLIST = [
   ['HIGHVAL_rDxfhN',    'rDxfhNRgCDNDckm45zT5ayhKDC4Ljm7UoP', 'discovered_unknown_highval'],
   ['HIGHVAL_rwXnv8',    'rwXnv8BfEHi7WmkLXZ6ChcWX9hMnSsTMNK', 'discovered_unknown_highval'],
   ['LARGE_RECV_rHfwtj', 'rHfwtjakCgMA7z9AbugfNYV3UvdyugZMr2', 'discovered_receiver'],
+
+  // ── Coreum bridge incident, 2026-08-09 ────────────────────────────────────
+  // ~199,916 XRP left the Coreum bridge's XRPL operations account in 97 minutes,
+  // in 94 payments the bridge's own 17-of-28 relayer quorum signed. Source:
+  // xrpl.to Insights, 2026-08-11 — every claim carries a validated tx hash and
+  // the totals are reproducible with account_tx over ledgers 106,183,346–842.
+  // All five addresses below verified against base58check before adding.
+  //
+  // Only the BRIDGE is named in the identity registry — it is a published,
+  // official operations account. The four wallets that received and moved the
+  // funds are tracked behaviourally and nothing more: the article's account of
+  // who they belong to is an allegation we did not verify, and this app does not
+  // hand out badges. The handles carry the context for the operator; _swWho
+  // still describes them to a reader as receiving wallets.
+  ['COREUM_BRIDGE',            'rxXXXeMX8Gy5YvibvGLnQJ1XKKD7UswM1', 'exchange'],
+  ['COREUM_INC_FRONT_A',       'rfXSfH2q4zhGWdw45nYcWfjvFN5ZfwE1U6', 'discovered_receiver'],
+  ['COREUM_INC_FRONT_B',       'rwt8PJhyXWgW8uwmTjmQ7Rw89tJHELFgb5', 'discovered_receiver'],
+  ['COREUM_INC_STAGING_A',     'rnaBRmXU6ZS7orU6Qj38wsBYQmqHPbrhA9', 'discovered_receiver'],
+  ['COREUM_INC_STAGING_B',     'r3jV8g599WMR9zeFi5m1rbvXyEwNWwYFXt', 'discovered_receiver'],
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)

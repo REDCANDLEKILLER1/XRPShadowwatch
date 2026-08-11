@@ -20,6 +20,12 @@
 // the only thing that lets the brief name a real entity. Everything NOT in here
 // stays behavioural — flagged, not identified. Never add a guess.
 window.SW_WALLET_IDENTITIES = {
+ "rxXXXeMX8Gy5YvibvGLnQJ1XKKD7UswM1": {
+  "name": "Coreum Bridge",
+  "type": "EXCH",
+  "confidence": "PUBLIC_SOURCE",
+  "source": "Coreum bridge XRPL operations account, per the published bridge specification (CoreumFoundation/coreumbridge-xrpl) and xrpl.to Insights 2026-08-11"
+ },
  "rPyCQm8E5j78PDbrfKF24fRC7qUAk1kDMZ": {
   "name": "Bithumb",
   "type": "EXCH",

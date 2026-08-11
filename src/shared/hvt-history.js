@@ -21,6 +21,16 @@
 
   var KEY = 'SW_SHARED_HVT_HISTORY_V1';
   var FLOOR_XRP = 1e6;          // below this a "high value target" is not high value
+  // Smallest peak worth judging a drain against. The Coreum bridge held ~200,410
+  // XRP and ended at 493.5 — 99.75% gone in 97 minutes, unmistakably an event —
+  // and the first version of this file called it LIGHT, because 200K is under the
+  // 1M high-value floor and the floor short-circuited the drain check entirely.
+  // Those are two different questions: "is this still a high-value target" is
+  // absolute, "has this wallet been emptied" is relative and true at any size.
+  // The floor now decides only the LIGHT label; MIN_JUDGE_XRP decides whether we
+  // have enough to call a drain at all, and sits 100× lower so a five-figure
+  // wallet collapsing still registers while dust stays quiet.
+  var MIN_JUDGE_XRP  = 1e4;
   var DRAINED_RATIO  = 0.05;    // ≤5% of what it used to hold
   var BLEEDING_RATIO = 0.60;    // ≥40% of it gone
 
@@ -135,13 +145,18 @@
     var expected = expectedFor(addr, rec);
     var delta = (rec && rec.prev != null) ? (xrpNow - rec.prev) : null;
 
-    if (expected < FLOOR_XRP) {
+    // Too small to say anything about — never seen holding enough for "drained"
+    // to be a meaningful word.
+    if (expected < MIN_JUDGE_XRP) {
       return { state: xrpNow < FLOOR_XRP ? 'LIGHT' : 'OK',
                expected: expected, ratio: null, peak: rec ? rec.peak : 0, delta: delta, gone: 0 };
     }
     var ratio = expected > 0 ? (xrpNow / expected) : null;
     var state = ratio <= DRAINED_RATIO ? 'DRAINED'
               : ratio <= BLEEDING_RATIO ? 'BLEEDING'
+              // Holding its position, but never big enough to be a high-value
+              // target in the first place — worth saying, not worth alerting on.
+              : (xrpNow < FLOOR_XRP && expected < FLOOR_XRP) ? 'LIGHT'
               : 'OK';
     return { state: state, expected: expected, ratio: ratio,
              peak: rec ? rec.peak : 0, delta: delta, gone: expected - xrpNow };
@@ -210,6 +225,7 @@
   window.SW_HVT_HISTORY = {
     record: record, get: get, all: all, status: status, alerts: alerts,
     stats: stats, exportSeed: exportSeed, downloadSeed: downloadSeed, reset: reset,
-    FLOOR_XRP: FLOOR_XRP, DRAINED_RATIO: DRAINED_RATIO, BLEEDING_RATIO: BLEEDING_RATIO
+    FLOOR_XRP: FLOOR_XRP, MIN_JUDGE_XRP: MIN_JUDGE_XRP,
+    DRAINED_RATIO: DRAINED_RATIO, BLEEDING_RATIO: BLEEDING_RATIO
   };
 })();

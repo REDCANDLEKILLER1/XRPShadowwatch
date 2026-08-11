@@ -1,6 +1,6 @@
 // ── SHARED HIGH-VALUE TARGET ROSTER ──────────────────────────────────────────
 // The one list of wallets both apps consider high-value. Before this file the
-// live wall watched 74 targets and the report console watched 153, and only
+// live wall watched 74 targets and the report console watched 158, and only
 // 45 addresses were on both — so a wallet could be a headline in the morning
 // brief and completely absent from the HVT board, or drain to nothing on the
 // board without the report ever looking at it.
@@ -20,14 +20,14 @@
 // Regenerate with scripts/build-hvt-roster.js after adding wallets to either
 // app. Do not hand-edit — the generator is the source of truth.
 //
-// 182 targets · 94 with a sourced identity · 31 carrying a size claim
+// 187 targets · 95 with a sourced identity · 31 carrying a size claim
 window.SW_HVT_ROSTER = {
  "version": 1,
  "generated": "2026-08-11",
  "stats": {
-  "total": 182,
-  "identified": 94,
-  "from_report_only": 108,
+  "total": 187,
+  "identified": 95,
+  "from_report_only": 113,
   "from_wall_only": 29,
   "both": 45,
   "with_expected": 31,
@@ -740,6 +740,18 @@ window.SW_HVT_ROSTER = {
    ]
   },
   {
+   "address": "rxXXXeMX8Gy5YvibvGLnQJ1XKKD7UswM1",
+   "label": "Coreum Bridge",
+   "handle": "COREUM_BRIDGE",
+   "type": "EXCH",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
    "address": "r4DymtkgUAh2wqRxVfdd3Xtswzim6eC6c5",
    "label": "Crypto.com",
    "handle": "WHALE_RECV_r4Dymt",
@@ -1277,6 +1289,54 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 20000000,
    "sources": [
     "wall"
+   ]
+  },
+  {
+   "address": "rfXSfH2q4zhGWdw45nYcWfjvFN5ZfwE1U6",
+   "label": "COREUM_INC_FRONT_A",
+   "handle": "COREUM_INC_FRONT_A",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rwt8PJhyXWgW8uwmTjmQ7Rw89tJHELFgb5",
+   "label": "COREUM_INC_FRONT_B",
+   "handle": "COREUM_INC_FRONT_B",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rnaBRmXU6ZS7orU6Qj38wsBYQmqHPbrhA9",
+   "label": "COREUM_INC_STAGING_A",
+   "handle": "COREUM_INC_STAGING_A",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "r3jV8g599WMR9zeFi5m1rbvXyEwNWwYFXt",
+   "label": "COREUM_INC_STAGING_B",
+   "handle": "COREUM_INC_STAGING_B",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "sources": [
+    "report"
    ]
   },
   {
