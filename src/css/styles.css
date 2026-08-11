@@ -130,13 +130,20 @@
                LIVE FEED tile's TRACE / SCAN / SAVE buttons — i.e. on top of the very
                controls that fire it, every single time evidence was saved. See the
                body.sw-wall override further down, which parks it clear of the tiles. */
-            position: absolute; bottom: calc(76px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
-            background: rgba(0, 50, 0, 0.95); border: 1px solid var(--lime-main);
-            color: white; padding: 12px 24px; border-radius: 4px;
-            font-family: 'Share Tech Mono'; font-size: 14px; letter-spacing: 1px;
+            /* v16.8: parked at the TOP, under the header, instead of floating above
+               the bottom nav. At bottom:76px centred it landed squarely on the HVT
+               rows' TRACE / SCAN buttons and on the live-feed tiles' controls — the
+               very controls that fire it — so every save covered the thing you were
+               about to tap next. It is a receipt, not a dialog: small, cornered, and
+               gone in 1.5s. */
+            position: fixed; top: calc(8px + env(safe-area-inset-top)); right: 10px;
+            left: auto; bottom: auto; transform: none;
+            background: rgba(0, 40, 0, 0.94); border: 1px solid var(--lime-main);
+            color: #ccffcc; padding: 6px 12px; border-radius: 4px;
+            font-family: 'Share Tech Mono'; font-size: 11px; letter-spacing: 1px;
             opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 6000;
-            box-shadow: 0 0 30px var(--lime-main); font-weight: bold; text-align: center;
-            max-width: calc(100vw - 32px);
+            box-shadow: 0 0 14px rgba(0,255,0,0.35); font-weight: bold; text-align: center;
+            max-width: calc(100vw - 20px);
         }
         .toast-show { opacity: 1 !important; } 
 
@@ -446,7 +453,50 @@
         }
         .hvt-row:hover { background: rgba(0,50,0,0.6); border-left-color: var(--gold-hvt); }
         
-        .hvt-row.inactive { opacity: 0.3; order: 99; pointer-events: none; } /* Pushes to bottom */
+        /* An inactive/empty target still sorts to the bottom and still reads as
+           dimmed — but it stays CLICKABLE. pointer-events:none here meant the one
+           row you most want to open (a high-value target that is now empty) was
+           the one row you could not trace or scan. */
+        .hvt-row.inactive { opacity: 0.45; order: 99; }
+        .hvt-row.inactive:hover { opacity: 1; }
+
+        /* ── DRAIN WATCH ──────────────────────────────────────────────────────
+           A target holding far less than a target of its size should is the whole
+           reason to keep a board like this. It gets a rail and a badge, not a
+           popup: it should be findable at a glance and never in the way. */
+        .hvt-status {
+            font-size: 8px; font-family: 'Share Tech Mono', monospace; letter-spacing: .5px;
+            margin-top: 3px; line-height: 1.2;
+        }
+        .hvt-status.st-drained  { color: #ff5555; text-shadow: 0 0 6px rgba(255,60,60,.45); }
+        .hvt-status.st-bleeding { color: #ffaa33; }
+        .hvt-row.hvt-drained    { border-left-color: #ff4444; background: rgba(40,0,0,0.42); }
+        .hvt-row.hvt-bleeding   { border-left-color: #ffaa33; }
+        /* Drained targets outrank everything else on the board, including the
+           dimmed-inactive ordering above — an emptied 100M wallet is the headline. */
+        .hvt-row.hvt-drained    { order: -1; opacity: 1; }
+
+        .hvt-alert-bar {
+            padding: 7px 10px; text-align: center; cursor: pointer;
+            font-family: 'Share Tech Mono', monospace; font-size: 10px; letter-spacing: 1px;
+            color: #ffaa33; background: rgba(40,24,0,.6); border-bottom: 1px solid rgba(255,170,51,.35);
+        }
+        .hvt-alert-bar.has-drained { color: #ff6666; background: rgba(40,0,0,.6); border-bottom-color: rgba(255,68,68,.4); }
+        .hvt-alert-bar:hover { filter: brightness(1.25); }
+
+        /* `order` only does anything inside a flex/grid container, and #hvt-list
+           was a plain block — so `.hvt-row.inactive { order: 99 }` above has been
+           dead since it was written, and inactive targets never actually sank to
+           the bottom. Column flex restores that intent and is what lets a drained
+           target hoist to the top where it belongs. */
+        #hvt-list { display: flex; flex-direction: column; }
+        /* The label / address / status column is stacked by Tailwind utility
+           classes in the markup. Restate it here so the row still lays out when
+           the Tailwind CDN is slow or blocked — otherwise the three lines run
+           together and the drain badge lands on top of the balance. min-width:0
+           lets a long label ellipsise instead of pushing the buttons off-screen. */
+        .hvt-row > div:first-child { display: flex; flex-direction: column; min-width: 0; }
+        .hvt-row .hvt-label, .hvt-row .hvt-addr { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         
         .hvt-label { font-size: 11px; font-weight: bold; color: var(--gold-hvt); }
         .hvt-addr { font-size: 9px; font-family: monospace; color: #666; }
@@ -1441,11 +1491,11 @@
      Saving evidence therefore hid the buttons used to save evidence. Park it in
      the bottom-right gutter instead: clear of all four tiles' controls, still
      obviously part of the app, and it never moves onto anything clickable. */
+  /* The base rule now parks the toast top-right, which is clear of all four
+     tiles on the wall too. Only the size differs here. */
   body.sw-wall #toast {
-    position: fixed; left: auto; right: 14px; transform: none;
-    bottom: calc(14px + env(safe-area-inset-bottom));
-    max-width: 320px; padding: 9px 16px; font-size: 12.5px;
-    box-shadow: 0 0 18px rgba(0,255,0,.45); z-index: 6000;
+    max-width: 320px; padding: 8px 14px; font-size: 12px;
+    box-shadow: 0 0 18px rgba(0,255,0,.45);
   }
 }
 

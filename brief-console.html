@@ -3154,6 +3154,12 @@ v3.13–v3.16 — related offers, holder dominance, report desk, screen router.<
 <!-- Shared wallet identity registry (same file the main app loads). This is what
      lets the report name a real entity instead of "an unidentified wallet". -->
 <script src="/src/shared/wallet-identities.js"></script>
+<!-- The shared HVT roster + balance history. Absolute paths: ladyk.html
+     document.writes this console into an about:blank iframe, where a relative
+     URL would resolve against the parent's base and 404. -->
+<script src="/src/shared/hvt-roster.js"></script>
+<script src="/src/shared/hvt-balance-seed.js"></script>
+<script src="/src/shared/hvt-history.js"></script>
 <script src="/src/brief/02-core.js"></script>
 <script src="/src/brief/03-news-timer-hotfix.js"></script>
 

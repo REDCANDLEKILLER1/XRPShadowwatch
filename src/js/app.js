@@ -212,7 +212,10 @@
           h+='<div style="font-size:8px;color:#2a5530;margin-bottom:10px">CHECKED: '+_htmlEsc(r.last_checked)+'</div>';
           h+='<div style="display:flex;flex-wrap:wrap;gap:6px;">';
           h+='<button onclick="copyHash(\''+_htmlEsc(addr)+'\');showToast(\'ADDRESS COPIED\')" style="'+_rBtnSty()+'">COPY WALLET</button>';
-          h+='<a href="https://xrpscan.com/account/'+encodeURIComponent(addr)+'" target="_blank" rel="noopener noreferrer" style="'+_rBtnSty()+'text-decoration:none;display:inline-block">XRPSCAN</a>';
+          // Our own reader, not XRPScan. The socket that feeds this app can pull
+          // the account's history directly, and it labels the counterparties from
+          // the shared registry — which an external explorer cannot do.
+          h+='<button onclick="closeWalletResolver();openWalletHistory(\''+_htmlEsc(addr)+'\')" style="'+_rBtnSty()+'">HISTORY</button>';
           h+='<button onclick="closeWalletResolver();var gi=document.getElementById(\'graph-input\');if(gi)gi.value=\''+_htmlEsc(addr)+'\';switchView(\'graph\');traceWallet(\''+_htmlEsc(addr)+'\')" style="'+_rBtnSty()+'">TRACE WALLET</button>';
           h+='<button onclick="_resolverAddLabel(\''+_htmlEsc(addr)+'\')" style="'+_rBtnSty()+'">ADD LABEL</button>';
           h+='<button onclick="_resolverAddToDiscovery()" style="'+_rBtnSty()+'">ADD TO INBOX</button>';
@@ -274,7 +277,7 @@
             h+='<div style="font-size:8px;margin-bottom:5px;"><span style="color:#446644">REASON: </span><span style="color:#aaffaa">'+_htmlEsc(c.reason||'')+'</span></div>';
             h+='<div style="font-size:8px;margin-bottom:7px;"><span style="color:#446644">STATUS: </span><span style="color:'+sc+'">'+_htmlEsc(c.status||'NEW')+'</span></div>';
             h+='<div style="display:flex;flex-wrap:wrap;gap:4px;">';
-            h+='<a href="https://xrpscan.com/account/'+encodeURIComponent(c.address)+'" target="_blank" rel="noopener noreferrer" style="'+_rBtnSty()+'text-decoration:none">SCAN</a>';
+            h+='<button onclick="closeDiscoveryInbox();openWalletHistory(\''+_htmlEsc(c.address)+'\')" style="'+_rBtnSty()+'">SCAN</button>';
             h+='<button onclick="closeDiscoveryInbox();var gi=document.getElementById(\'graph-input\');if(gi)gi.value=\''+_htmlEsc(c.address)+'\';switchView(\'graph\');traceWallet(\''+_htmlEsc(c.address)+'\')" style="'+_rBtnSty()+'">TRACE</button>';
             h+='<button onclick="openWalletResolver(\''+_htmlEsc(c.address)+'\')" style="'+_rBtnSty()+'">RESOLVE ID</button>';
             if (c.status==='NEW'||c.status==='REVIEWED'){
@@ -639,7 +642,11 @@
             { label: "BITBANK_JP", address: "rw7m3CtVHwGSdhFjV4MyJozmZJv3DYQnsA", type: "EXCH" },
             { label: "COINONE_KR", address: "rDKw32dPXHfoeGoD3kVtm76ia1WbxYtU7D", type: "EXCH" },
             { label: "CRYPTO_COM", address: "rKNwXQh9GMjaU8uTqKLECsqyib47g5dMvo", type: "EXCH" },
-            { label: "BITRUE_COLD", address: "rB3gZey7VwlD9Ka3Z1Qx13rV9f3F2qJ6", type: "EXCH" },
+            // BITRUE_COLD removed: "rB3gZey7VwlD9Ka3Z1Qx13rV9f3F2qJ6" is not a valid
+            // XRPL address — it is 32 chars and contains a lowercase L, which is not
+            // in the base58 alphabet the ledger uses. It could never resolve, so it
+            // sat on the board forever as a dead row and burned a scan slot every
+            // sweep. Re-add it when we have the real Bitrue cold address.
             { label: "INDODAX_COLD", address: "rU2mEJSLqBRkYLVTv55rFTgQYkDBqVyTRU", type: "EXCH" },
             { label: "HUOBI_MAIN", address: "rG6FZ31hDHN1K5Dkbma3PSB5uVCuVVRzfn", type: "EXCH" },
             { label: "RIPPLE_1.3B", address: "rMQ98K56yXJbDGv49ZSmW51sLn94Xe1mu1", type: "HVT" },
@@ -1177,28 +1184,37 @@
             const list = document.getElementById('hvt-list');
             list.innerHTML = "";
             
-            // Combine arrays for display
-            const allTargets = [...customHvts.map(c => ({...c, type: 'MANUAL'})), ...PRELOADED_HVTS];
+            const allTargets = getAllHVTTargets();
             
             allTargets.forEach((t, index) => {
                 const div = document.createElement('div');
                 div.className = "hvt-row";
                 div.id = `row-${t.address}`; // Assign ID for updates
                 
-                // Add a small delay to the animation for a "scanning" effect
-                div.style.animation = `fadeIn 0.5s ease-out ${index * 0.05}s forwards`;
+                // Staggered fade for a "scanning" effect — but CAPPED. At 0.05s per
+                // row this was fine for 76 targets and unusable at 179: the tail of
+                // the list sat at opacity:0 for nine seconds, and a drained target
+                // hoisted to the top by CSS `order` kept its late index, so the one
+                // row that most needed to be seen was the one still invisible.
+                div.style.animation = `fadeIn 0.4s ease-out ${Math.min(index, 12) * 0.03}s forwards`;
                 div.style.opacity = "0"; // Start hidden for animation
                 
+                // SCAN opens OUR wallet history panel. It used to hand the
+                // address to openScan(), which is a transaction-hash helper — so
+                // it built https://xrpscan.com/tx/<wallet address>, sending the
+                // operator off-app to a URL that was wrong anyway. We read
+                // account_tx off the same socket the board already uses.
                 div.innerHTML = `
                     <div class="flex flex-col">
                         <span class="hvt-label">${_htmlEsc(t.label)}</span>
                         <span class="hvt-addr">${t.address.substring(0,8)}...${t.address.substring(t.address.length-6)}</span>
+                        <span id="st-${t.address}" class="hvt-status" style="display:none"></span>
                     </div>
                     <div class="text-right">
                         <div id="bal-${t.address}" class="hvt-bal text-gray-500">SCANNING...</div>
                         <div class="hvt-actions">
                             <button class="hvt-btn" onclick="traceWallet('${t.address}')">TRACE</button>
-                            <button class="hvt-btn" onclick="openScan('${t.address}')">SCAN</button>
+                            <button class="hvt-btn" onclick="openWalletHistory('${t.address}')">SCAN</button>
                         </div>
                     </div>
                 `;
@@ -1206,6 +1222,81 @@
             });
         }
         
+        // ── HVT DRAIN WATCH ─────────────────────────────────────────────
+        // A wallet is on this board because it held a lot of XRP. If it now holds
+        // almost none, that is the most interesting thing the board can tell you
+        // — and looking at today's number alone can never show it. The judgement
+        // lives in src/shared/hvt-history.js so the report console applies the
+        // same rule to the same numbers.
+        //
+        // "Nearly empty" is measured against the wallet's own high-water mark, or
+        // against the size its label claims ("20M Split 1", "100M Outbound
+        // Receiver") when we have not watched it long enough to have one. A
+        // target labelled 100M holding 50 XRP is not a rounding error.
+        function _fmtXrpShort(v){
+            v = Number(v)||0;
+            if (v >= 1e9) return (v/1e9).toFixed(2)+'B';
+            if (v >= 1e6) return (v/1e6).toFixed(1)+'M';
+            if (v >= 1e3) return (v/1e3).toFixed(0)+'K';
+            return v.toFixed(0);
+        }
+        function paintHVTStatus(addr, bal){
+            var el = document.getElementById('st-' + addr);
+            if (!el || !window.SW_HVT_HISTORY) return;
+            var st;
+            try { st = SW_HVT_HISTORY.status(addr, bal); } catch(_) { return; }
+            var row = document.getElementById('row-' + addr);
+            if (row) row.classList.remove('hvt-drained','hvt-bleeding');
+            if (st.state === 'DRAINED' || st.state === 'BLEEDING') {
+                var pct = st.ratio != null ? Math.max(0, Math.round((1 - st.ratio) * 100)) : 0;
+                el.textContent = (st.state === 'DRAINED' ? '\u25b2 DRAINED' : '\u25b3 BLEEDING') +
+                                 ' \u00b7 ' + pct + '% of ' + _fmtXrpShort(st.expected) + ' gone';
+                el.className = 'hvt-status ' + (st.state === 'DRAINED' ? 'st-drained' : 'st-bleeding');
+                el.style.display = '';
+                if (row) row.classList.add(st.state === 'DRAINED' ? 'hvt-drained' : 'hvt-bleeding');
+            } else {
+                el.style.display = 'none';
+                el.textContent = '';
+            }
+            _renderHVTAlertBar();
+        }
+        var _hvtAlertRaf = 0;
+        function _renderHVTAlertBar(){
+            if (_hvtAlertRaf) return;                       // coalesce a scan burst into one paint
+            _hvtAlertRaf = requestAnimationFrame(function(){
+                _hvtAlertRaf = 0;
+                var bar = document.getElementById('hvt-alert-bar');
+                if (!bar || !window.SW_HVT_HISTORY) return;
+                var st; try { st = SW_HVT_HISTORY.stats(); } catch(_) { return; }
+                if (!st.drained && !st.bleeding) { bar.style.display = 'none'; return; }
+                var parts = [];
+                if (st.drained)  parts.push(st.drained + ' DRAINED');
+                if (st.bleeding) parts.push(st.bleeding + ' BLEEDING');
+                bar.textContent = '\u25b2 ' + parts.join(' \u00b7 ') + '  \u2014  tap to investigate';
+                bar.className = 'hvt-alert-bar' + (st.drained ? ' has-drained' : '');
+                bar.style.display = '';
+            });
+        }
+        function _hvtScrollToFirstAlert(){
+            try {
+                var a = SW_HVT_HISTORY.alerts();
+                if (!a.length) return;
+                var row = document.getElementById('row-' + a[0].address);
+                if (row) { row.scrollIntoView({behavior:'smooth', block:'center'}); return; }
+                if (window.openWalletHistory) openWalletHistory(a[0].address);
+            } catch(_) {}
+        }
+        // Downloads the next version of src/shared/hvt-balance-seed.js. The browser
+        // cannot write to the repo, so the loop closes through the operator:
+        // export, commit, and every device starts from these peaks instead of blind.
+        function exportHVTHistory(){
+            if (!window.SW_HVT_HISTORY) { showToast('HISTORY UNAVAILABLE'); return; }
+            var st = SW_HVT_HISTORY.stats();
+            if (!st.tracked) { showToast('NO BALANCES READ YET'); return; }
+            SW_HVT_HISTORY.downloadSeed();
+            showToast('HISTORY EXPORTED \u00b7 ' + st.tracked + ' TARGETS');
+        }
+
         // Add CSS Animation for rows
         const styleSheet = document.createElement("style");
         styleSheet.innerText = `@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }`;
@@ -1224,11 +1315,40 @@
         var SCAN_TICK_MS = 1400;       // gap between batches
         var SCAN_COOLDOWN_MS = 25000;  // rest after a full pass (no stacking sweeps)
         var SCAN_RECONNECT_MS = 4000;  // wait + retry if socket not open (backoff)
-        function getActiveScanList(){
+        // The wall's targets and the report console's watch list used to be two
+        // separate lists that happened to overlap by 45 addresses. src/shared/
+        // hvt-roster.js is now the union of both, so a wallet that matters to the
+        // morning brief also shows up on this board and gets its balance watched.
+        // PRELOADED_HVTS and customHvts still come first — the roster ADDS, it
+        // never removes what either app already had.
+        function getAllHVTTargets(){
             var seen={}, out=[];
-            PRELOADED_HVTS.forEach(function(h){ if(h&&h.address&&!seen[h.address]){seen[h.address]=1;out.push(h.address);} });
-            customHvts.forEach(function(c){ if(c&&c.address&&!seen[c.address]){seen[c.address]=1;out.push(c.address);} });
+            // The ledger's base58 alphabet has no 0, O, I or l. An address that fails
+            // this can never resolve — it would occupy a scan slot and a row forever,
+            // reading as a dead target rather than an invalid one.
+            var XRPL_ADDR = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
+            // Same rule the report uses: the identity registry is the only thing
+            // allowed to NAME a wallet, and when it has a name that name wins over
+            // the internal handle. "BINANCE_HOT" is a filing key we invented;
+            // "Binance" is what the board should say.
+            function add(addr, label, type, origin){
+                if(!addr || seen[addr] || !XRPL_ADDR.test(addr)) return;
+                var id = null;
+                try { id = (window.SW_WALLET_IDENTITIES || {})[addr] || null; } catch(_) {}
+                var shown = (id && id.name) || label || (addr.slice(0,10)+'\u2026');
+                seen[addr]=1;
+                out.push({address:addr, label:shown, type:(id&&id.type)||type||'HVT', origin:origin, identified:!!(id&&id.name)});
+            }
+            customHvts.forEach(function(c){ if(c&&c.address) add(c.address, c.label, 'HVT', 'MANUAL'); });
+            PRELOADED_HVTS.forEach(function(h){ if(h&&h.address) add(h.address, h.label, h.type, 'PRELOAD'); });
+            try{
+                var R = window.SW_HVT_ROSTER;
+                if (R && R.targets) R.targets.forEach(function(t){ add(t.address, t.label, t.type, 'ROSTER'); });
+            }catch(_){}
             return out;
+        }
+        function getActiveScanList(){
+            return getAllHVTTargets().map(function(t){ return t.address; });
         }
         function _sendBalReq(addr){
             try{
@@ -1563,7 +1683,17 @@
                     const acc = d.id.replace("bal_", "");
                     const el = document.getElementById('bal-' + acc);
                     const row = document.getElementById('row-' + acc);
-                    
+
+                    if (d.result && d.result.account_data) {
+                        // Record BEFORE painting, and record whether or not this
+                        // address has a row on screen — the shared history is the
+                        // point, and the report console reads the same store.
+                        try {
+                            const _b = parseFloat(d.result.account_data.Balance) / 1000000;
+                            if (window.SW_HVT_HISTORY && isFinite(_b)) SW_HVT_HISTORY.record(acc, _b, 'wall');
+                        } catch(_) {}
+                    }
+
                     if(el && row) {
                         if (d.error === 'actNotFound') {
                             el.innerText = "[INACTIVE]";
@@ -1580,6 +1710,7 @@
                                 el.style.color = "#00ff00";
                                 row.classList.remove('inactive');
                             }
+                            paintHVTStatus(acc, bal);
                         }
                     }
                 }
@@ -1926,7 +2057,11 @@
                 document.getElementById('mod-copy-hash').onclick = () => copyHash(b.hash); 
                 document.getElementById('mod-copy-wallet').onclick = () => copyHash(b.from); 
                 document.getElementById('mod-save-btn').style.display = 'block';
-                document.getElementById('mod-save-btn').onclick = () => { saveCase({hash:b.hash, amt:b.val, from:b.from, to:b.to}); closeModal(); showToast("EVIDENCE SECURED"); }; 
+                // saveCase() already toasts on a successful save. Calling showToast here too
+                // fired it a second time — and fired it even when saveCase had rejected
+                // the row as a duplicate, so re-opening a saved case always flashed
+                // "EVIDENCE SECURED" at you for something it had not just saved.
+                document.getElementById('mod-save-btn').onclick = () => { saveCase({hash:b.hash, amt:b.val, from:b.from, to:b.to}); closeModal(); }; 
                 var _hb2 = document.getElementById('mod-hist-btn');
                 if (_hb2) { _hb2.style.display = 'block';
                   _hb2.onclick = function(){ closeModal(); if (window.openWalletHistory) openWalletHistory(b.from); }; }
@@ -1951,7 +2086,15 @@
             showToast("MAP FILTER: " + mode.toUpperCase());
         } 
 
-        function showToast(msg) { const t = document.getElementById('toast'); t.innerText = msg; t.classList.add('toast-show'); setTimeout(() => t.classList.remove('toast-show'), 2000); }
+        var _toastTimer = 0;
+        function showToast(msg) {
+            const t = document.getElementById('toast'); if (!t) return;
+            t.innerText = msg; t.classList.add('toast-show');
+            // One timer, restarted — back-to-back toasts used to leave the earlier
+            // timeout running, so the second one vanished early or lingered.
+            clearTimeout(_toastTimer);
+            _toastTimer = setTimeout(() => t.classList.remove('toast-show'), 1500);
+        }
         function openScan(h) { 
             if(h.includes('/')) window.open(`https://xrpscan.com/${h}`, '_blank');
             else window.open(`https://xrpscan.com/tx/${h}`, '_blank'); 

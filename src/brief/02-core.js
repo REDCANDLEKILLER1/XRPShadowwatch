@@ -256,6 +256,35 @@ const WATCHLIST = [
   } catch (e) { /* silent */ }
 })();
 
+// v16.8: merge the SHARED HVT ROSTER. The live wall watched 76 targets and this
+// console watched 149, overlapping on only 45 — so a wallet could drain to
+// nothing on the HVT board without the morning brief ever looking at it, and a
+// brief headline could be absent from the board entirely. src/shared/
+// hvt-roster.js is the union; this adds whatever it carries that the hard-coded
+// WATCHLIST above does not already have. Additive only — nothing is removed, and
+// a roster wallet with a sourced identity keeps the identity registry as the one
+// thing allowed to NAME it.
+(function mergeSharedRoster() {
+  try {
+    const R = (typeof window !== 'undefined') && window.SW_HVT_ROSTER;
+    if (!R || !Array.isArray(R.targets)) return;
+    const CAT = { EXCH: 'exchange', RIPPLE: 'escrow', HVT: 'whale' };
+    let added = 0;
+    for (const t of R.targets) {
+      if (!t || !t.address || !BASE58_RE.test(t.address)) continue;
+      if (WATCHLIST.some(x => x.address === t.address)) continue;
+      WATCHLIST.push({
+        // The handle stays internal; _swWho() decides what a reader sees.
+        label: t.handle || ('ROSTER_' + t.address.slice(1, 7)),
+        address: t.address,
+        cat: CAT[t.type] || 'whale'
+      });
+      added++;
+    }
+    if (added) try { console.log('[HVT-ROSTER] merged ' + added + ' shared target(s) into the watch list'); } catch (_) {}
+  } catch (_) { /* the console must still boot without the roster */ }
+})();
+
 const KNOWN = Object.fromEntries(WATCHLIST.map(w => [w.address, w]));
 
 // ── v3.8: WALLET GROUP CLASSIFIER ──
@@ -1007,6 +1036,24 @@ async function scanWallets(ws) {
     rows.filter(w => w.status === 'CHECKED')
       .map(w => [w.address, { label: w.label, balance_xrp: w.balance_xrp, ts: new Date().toISOString() }])
   )));
+
+  // v16.8: feed the SHARED balance history. This console and the live wall are
+  // separate documents but the same origin, so they already share a localStorage
+  // — writing here means the wall's HVT board can flag a drained target from a
+  // balance THIS scan read, without waiting for its own sweep to come round. The
+  // reverse holds too: the wall's readings are here when the report runs.
+  try {
+    if (window.SW_HVT_HISTORY) {
+      let n0 = 0;
+      rows.forEach(w => {
+        if (w.status === 'CHECKED' && w.address && isFinite(n(w.balance_xrp))) {
+          SW_HVT_HISTORY.record(w.address, n(w.balance_xrp), 'report');
+          n0++;
+        }
+      });
+      if (n0) log('shared balance history updated for ' + n0 + ' wallet(s)');
+    }
+  } catch (_) { /* never let the shared store break a scan */ }
   const checked = rows.filter(w => w.status === 'CHECKED').length;
   const total = active.length;
   setText('hudWalletBadge', checked + '/' + total);

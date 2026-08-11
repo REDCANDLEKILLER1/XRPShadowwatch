@@ -490,8 +490,12 @@
                     <div class="flex gap-2">
                         <button onclick="addManualHVT()" class="flex-1 bg-yellow-900/20 border border-yellow-600 text-yellow-500 text-[10px] font-bold py-1 hover:bg-yellow-500 hover:text-black transition-colors">ADD TARGET</button>
                         <button onclick="exportHVTList()" class="flex-1 bg-black border border-yellow-800 text-yellow-700 text-[10px] font-bold py-1 hover:border-yellow-500 hover:text-yellow-500 transition-colors">EXPORT DB</button>
+                        <button onclick="exportHVTHistory()" class="flex-1 bg-black border border-yellow-800 text-yellow-700 text-[10px] font-bold py-1 hover:border-yellow-500 hover:text-yellow-500 transition-colors" title="Download the shared balance baseline to commit">EXPORT HISTORY</button>
                     </div>
                 </div>
+                <!-- Drain watch: how many targets are holding far less than a
+                     target of their size should. Hidden until something is. -->
+                <div id="hvt-alert-bar" class="hvt-alert-bar" style="display:none" onclick="_hvtScrollToFirstAlert()"></div>
                 <div id="hvt-list">
                     <div class="text-center text-gray-600 mt-12 font-tech text-xs">LOADING TARGETS...</div>
                 </div>
@@ -574,6 +578,13 @@
     <!-- Shared wallet identity registry — MUST load before app.js, which reads
          window.SW_WALLET_IDENTITIES at parse time. Also loaded by brief-console.html. -->
     <script src="src/shared/wallet-identities.js"></script>
+    <!-- The one HVT roster both apps read, the cold balance baseline, and the
+         shared balance store. Same-origin means brief-console.html writes into
+         the same localStorage the wall reads, so the two apps keep each other
+         current without either waiting on the other to run. -->
+    <script src="src/shared/hvt-roster.js"></script>
+    <script src="src/shared/hvt-balance-seed.js"></script>
+    <script src="src/shared/hvt-history.js"></script>
     <script src="src/js/intel/sw-util.js"></script>
     <script src="src/js/intel/sw-token-intel.js"></script>
     <script src="src/js/intel/sw-txn-counter.js"></script>
