@@ -238,7 +238,12 @@ const WATCHLIST = [
   ['LARGE_RECV_r44AzN',   'r44AzNe4LSHQkB95qm6pQCauJ3Vz7Yx3iU', 'discovered_receiver'],         // review · exchange-adjacent · COINCHECK_COLD/COINBASE_HOT · seen 4x · score 85/200
   ['LARGE_RECV_raN2ev',   'raN2ev7xZCJei22Y6rJshVVmWCQKgpp9Jg', 'discovered_receiver'],         // review · exchange-adjacent · COINBASE_HOT · seen 4x · score 85/200
   ['LARGE_RECV_rhzZYH',   'rhzZYHFopep75YksYPtb8KAJKoooqMZtV3', 'discovered_receiver'],         // monitor · exchange-adjacent · COINBASE_HOT · seen 1x · score 50/200
-  ['LARGE_RECV_rfah8j',   'rfah8jhiJwPhcWEn2eQZehWqKKqAWGjxp1', 'discovered_receiver']          // monitor · watch-net · seen 1x · score 35/200
+  ['LARGE_RECV_rfah8j',   'rfah8jhiJwPhcWEn2eQZehWqKKqAWGjxp1', 'discovered_receiver'],         // monitor · watch-net · seen 1x · score 35/200
+  // ── 2026-08-11 scan SC-MSOO837V — surfaced this scan, checksum-verified ──
+  ['WHALE_RECV_rhuqpD', 'rhuqpDZ2XNjWzvZ16wJhmJF5JDaU3NdvE7', 'discovered_whale'],
+  ['HIGHVAL_rDxfhN',    'rDxfhNRgCDNDckm45zT5ayhKDC4Ljm7UoP', 'discovered_unknown_highval'],
+  ['HIGHVAL_rwXnv8',    'rwXnv8BfEHi7WmkLXZ6ChcWX9hMnSsTMNK', 'discovered_unknown_highval'],
+  ['LARGE_RECV_rHfwtj', 'rHfwtjakCgMA7z9AbugfNYV3UvdyugZMr2', 'discovered_receiver'],
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)
@@ -274,8 +279,14 @@ const WATCHLIST = [
       if (!t || !t.address || !BASE58_RE.test(t.address)) continue;
       if (WATCHLIST.some(x => x.address === t.address)) continue;
       WATCHLIST.push({
-        // The handle stays internal; _swWho() decides what a reader sees.
-        label: t.handle || ('ROSTER_' + t.address.slice(1, 7)),
+        // v16.8.1: was `t.handle || 'ROSTER_' + addr.slice(1,7)`. handle is null
+        // for every target that came from the live wall, so 30 wallets — Gate.io,
+        // Bitfinex, Gemini among them — got a made-up ROSTER_xxxxxx handle even
+        // though the roster carried their real name the whole time, and any code
+        // path printing KNOWN[addr].label raw leaked it into the report. The
+        // roster's own label is the right fallback: a registry NAME when it has
+        // one, the wall's own label otherwise.
+        label: t.handle || t.label || ('ROSTER_' + t.address.slice(1, 7)),
         address: t.address,
         cat: CAT[t.type] || 'whale'
       });
@@ -4007,12 +4018,16 @@ function collectDiscoveryCandidates(pack) {
   (pack.large_transfers || []).forEach(t => {
     if (t.to) {
       bump(t.to, 'large_transfer', {
-        reason: 'destination of large transfer (' + fmt(n(t.amount), 0) + ' XRP) from ' + (t.sender_label || 'unknown sender'),
+        reason: 'destination of large transfer (' + fmt(n(t.amount), 0) + ' XRP) from ' +
+                (t.from ? _swWho(t.from, t.sender_label, { bare: true }) : (t.sender_label || 'unknown sender')),
         value_xrp: n(t.amount),
         tx_count: 1,
         last_seen: t.ts || t.timestamp,
         active_last_24h: true,  // large_transfers are window-scoped
-        related_watched: t.sender_label ? [t.sender_label] : []
+        // Resolved, not raw: this Set is also fed by the related-offer path,
+        // which already resolves. Two spellings of one wallet used to land in it
+        // side by side ("LARGE_RECV_rn7d8b, receiving wallet rn7d8b…rs34").
+        related_watched: t.from ? [_swWho(t.from, t.sender_label, { bare: true })] : []
       });
     }
   });
@@ -4054,9 +4069,10 @@ function collectDiscoveryCandidates(pack) {
       (cluster.shared_counterparties || []).forEach(addr => {
         if (addr) {
           bump(addr, 'shared_counterparty', {
-            reason: 'shared counterparty across cluster: ' + (cluster.wallets_label || []).join(' + '),
+            reason: 'shared counterparty across cluster: ' +
+                    (cluster.wallets_display || _swWhoList(cluster.wallets_addr || [], { max: 6 })).join(' + '),
             shared_counterparty_count: (cluster.wallets || cluster.wallets_label || []).length,
-            related_watched: cluster.wallets_label || []
+            related_watched: cluster.wallets_display || _swWhoList(cluster.wallets_addr || [])
           });
         }
       });
@@ -4080,10 +4096,14 @@ function collectDiscoveryCandidates(pack) {
     state.coordination.pairs.forEach(pair => {
       if (pair.score > 0 && pair.shared_receiver) {
         bump(pair.shared_receiver, 'coordination_receiver', {
+          // Coordination pairs carry labels but no addresses, so _swWho falls
+          // back to its handle→role rule — still a description, never the handle.
           reason: 'same-hour coordinated receiver for ' +
-                  (pair.label_a || 'wallet A') + ' + ' + (pair.label_b || 'wallet B') +
+                  _swWho(pair.addr_a, pair.label_a, { bare: true }) + ' + ' +
+                  _swWho(pair.addr_b, pair.label_b, { bare: true }) +
                   ' (score ' + n(pair.score) + ')',
-          related_watched: [pair.label_a, pair.label_b].filter(Boolean)
+          related_watched: [pair.label_a && _swWho(pair.addr_a, pair.label_a, { bare: true }),
+                            pair.label_b && _swWho(pair.addr_b, pair.label_b, { bare: true })].filter(Boolean)
         });
       }
     });
@@ -4145,21 +4165,21 @@ function collectDiscoveryCandidates(pack) {
       const toIsExch   = KNOWN[t.to]   && KNOWN[t.to].cat   === 'exchange';
       if (fromIsExch && t.to && !_isWatchedAddress(t.to)) {
         bump(t.to, 'exchange_adjacent', {
-          reason: 'received funds from exchange ' + KNOWN[t.from].label,
+          reason: 'received funds from exchange ' + _swWho(t.from, KNOWN[t.from].label, { bare: true }),
           value_xrp: n(t.amount),
           tx_count: 1,
           exchange_adjacent: true,
           active_last_24h: true,
-          related_watched: [KNOWN[t.from].label]
+          related_watched: [_swWho(t.from, KNOWN[t.from].label, { bare: true })]
         });
       } else if (toIsExch && t.from && !_isWatchedAddress(t.from)) {
         bump(t.from, 'exchange_adjacent', {
-          reason: 'sent funds to exchange ' + KNOWN[t.to].label,
+          reason: 'sent funds to exchange ' + _swWho(t.to, KNOWN[t.to].label, { bare: true }),
           value_xrp: n(t.amount),
           tx_count: 1,
           exchange_adjacent: true,
           active_last_24h: true,
-          related_watched: [KNOWN[t.to].label]
+          related_watched: [_swWho(t.to, KNOWN[t.to].label, { bare: true })]
         });
       }
     });

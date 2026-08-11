@@ -647,7 +647,14 @@
             // in the base58 alphabet the ledger uses. It could never resolve, so it
             // sat on the board forever as a dead row and burned a scan slot every
             // sweep. Re-add it when we have the real Bitrue cold address.
-            { label: "INDODAX_COLD", address: "rU2mEJSLqBRkYLVTv55rFTgQYkDBqVyTRU", type: "EXCH" },
+            // INDODAX_COLD removed: "rU2mEJSLqBRkYLVTv55rFTgQYkDBqVyTRU" uses only
+            // legal base58 characters and is the right length, so the shape check
+            // passes it — but its base58check checksum is wrong, and the ledger
+            // rejects it outright ("scanOffers: Account malformed" in the
+            // 2026-08-11 error log). Re-add when we have the real Indodax cold
+            // address. scripts/build-hvt-roster.js now verifies the checksum, which
+            // is what caught this one; the regex below stays as a cheap runtime
+            // shape guard, since the expensive check belongs at build time.
             { label: "HUOBI_MAIN", address: "rG6FZ31hDHN1K5Dkbma3PSB5uVCuVVRzfn", type: "EXCH" },
             { label: "RIPPLE_1.3B", address: "rMQ98K56yXJbDGv49ZSmW51sLn94Xe1mu1", type: "HVT" },
             { label: "RIPPLE_845M", address: "rKveEyR1SrkWbJX214xcfH43ZsoGMb3PEv", type: "HVT" },

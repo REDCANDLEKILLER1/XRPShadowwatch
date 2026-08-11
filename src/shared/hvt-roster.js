@@ -1,6 +1,6 @@
 // ── SHARED HIGH-VALUE TARGET ROSTER ──────────────────────────────────────────
 // The one list of wallets both apps consider high-value. Before this file the
-// live wall watched 75 targets and the report console watched 149, and only
+// live wall watched 74 targets and the report console watched 153, and only
 // 45 addresses were on both — so a wallet could be a headline in the morning
 // brief and completely absent from the HVT board, or drain to nothing on the
 // board without the report ever looking at it.
@@ -20,15 +20,15 @@
 // Regenerate with scripts/build-hvt-roster.js after adding wallets to either
 // app. Do not hand-edit — the generator is the source of truth.
 //
-// 179 targets · 94 with a sourced identity · 31 carrying a size claim
+// 182 targets · 94 with a sourced identity · 31 carrying a size claim
 window.SW_HVT_ROSTER = {
  "version": 1,
- "generated": "2026-08-10",
+ "generated": "2026-08-11",
  "stats": {
-  "total": 179,
+  "total": 182,
   "identified": 94,
-  "from_report_only": 104,
-  "from_wall_only": 30,
+  "from_report_only": 108,
+  "from_wall_only": 29,
   "both": 45,
   "with_expected": 31,
   "rejected_invalid": 0
@@ -1388,6 +1388,18 @@ window.SW_HVT_ROSTER = {
    ]
   },
   {
+   "address": "rDxfhNRgCDNDckm45zT5ayhKDC4Ljm7UoP",
+   "label": "HIGHVAL_rDxfhN",
+   "handle": "HIGHVAL_rDxfhN",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
    "address": "rGDreBvnHrX1get7na3J4oowN19ny4GzFn",
    "label": "HIGHVAL_rGDreB",
    "handle": "HIGHVAL_rGDreB",
@@ -1424,9 +1436,9 @@ window.SW_HVT_ROSTER = {
    ]
   },
   {
-   "address": "rYmTPYVPLv4EbhTN4Uw8nfvjyShLGESMV",
-   "label": "HIGHVAL_rYmTPY",
-   "handle": "HIGHVAL_rYmTPY",
+   "address": "rwXnv8BfEHi7WmkLXZ6ChcWX9hMnSsTMNK",
+   "label": "HIGHVAL_rwXnv8",
+   "handle": "HIGHVAL_rwXnv8",
    "type": "HVT",
    "identified": false,
    "confidence": null,
@@ -1436,15 +1448,15 @@ window.SW_HVT_ROSTER = {
    ]
   },
   {
-   "address": "rU2mEJSLqBRkYLVTv55rFTgQYkDBqVyTRU",
-   "label": "INDODAX_COLD",
-   "handle": null,
-   "type": "EXCH",
+   "address": "rYmTPYVPLv4EbhTN4Uw8nfvjyShLGESMV",
+   "label": "HIGHVAL_rYmTPY",
+   "handle": "HIGHVAL_rYmTPY",
+   "type": "HVT",
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
    "sources": [
-    "wall"
+    "report"
    ]
   },
   {
@@ -1607,6 +1619,18 @@ window.SW_HVT_ROSTER = {
    "address": "rGsMk4nK4M8MtcjVbjUeaJBppjjKpXyJ7F",
    "label": "LARGE_RECV_rGsMk4",
    "handle": "LARGE_RECV_rGsMk4",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rHfwtjakCgMA7z9AbugfNYV3UvdyugZMr2",
+   "label": "LARGE_RECV_rHfwtj",
+   "handle": "LARGE_RECV_rHfwtj",
    "type": "HVT",
    "identified": false,
    "confidence": null,
@@ -2123,6 +2147,18 @@ window.SW_HVT_ROSTER = {
    "address": "raLybBkX8HMsFG4EJGnTsBiNhnJS1Lqwmn",
    "label": "WHALE_PRIV_C",
    "handle": "WHALE_PRIV_C",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rhuqpDZ2XNjWzvZ16wJhmJF5JDaU3NdvE7",
+   "label": "WHALE_RECV_rhuqpD",
+   "handle": "WHALE_RECV_rhuqpD",
    "type": "HVT",
    "identified": false,
    "confidence": null,

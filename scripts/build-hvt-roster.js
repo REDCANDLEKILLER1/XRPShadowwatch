@@ -31,10 +31,29 @@ function expectedFromLabel(s) {
 
 const CAT_TYPE = { exchange: 'EXCH', escrow: 'RIPPLE', whale: 'HVT' };
 
-// XRPL base58 excludes 0 O I l. An address that fails this is not a wallet the
-// ledger can ever answer for — it just returns actNotFound forever and reads as
-// a dead target on the board. Drop it here rather than shipping it to both apps.
-const XRPL_ADDR = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
+// An address the ledger will never answer for is a dead row on the board and a
+// wasted scan slot every sweep. The alphabet check alone is not enough — it
+// passed BITRUE_COLD (lowercase L, caught) but ALSO passed INDODAX_COLD, which
+// the ledger rejects outright ("scanOffers: Account malformed"). Only the
+// base58check checksum catches a typo that happens to use legal characters.
+const crypto = require('crypto');
+const B58 = 'rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz';
+function b58decode(s) {
+  let n = 0n;
+  for (const c of s) { const i = B58.indexOf(c); if (i < 0) return null; n = n * 58n + BigInt(i); }
+  let h = n.toString(16); if (h.length % 2) h = '0' + h;
+  const body = n === 0n ? Buffer.alloc(0) : Buffer.from(h, 'hex');
+  let pad = 0; for (const c of s) { if (c === B58[0]) pad++; else break; }
+  return Buffer.concat([Buffer.alloc(pad), body]);
+}
+function isXrplAddress(s) {
+  if (typeof s !== 'string' || !/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(s)) return false;
+  const b = b58decode(s);
+  // 1 version byte (0x00 for an account) + 20 payload + 4 checksum
+  if (!b || b.length !== 25 || b[0] !== 0) return false;
+  const sha = x => crypto.createHash('sha256').update(x).digest();
+  return sha(sha(b.subarray(0, 21))).subarray(0, 4).equals(b.subarray(21));
+}
 const rejected = [];
 
 const byAddr = new Map();
@@ -48,7 +67,7 @@ report.forEach(r => put(r.address, { handle: r.handle, type: CAT_TYPE[r.cat] || 
 wall.forEach(w => put(w.address, { wall_label: w.label, type: w.type }, 'wall'));
 
 const targets = [...byAddr.values()].filter(t => {
-  if (XRPL_ADDR.test(t.address)) return true;
+  if (isXrplAddress(t.address)) return true;
   rejected.push({ address: t.address, label: t.wall_label || t.handle, sources: t.sources });
   return false;
 }).map(t => {
@@ -122,6 +141,6 @@ const out = header + body.replace('__GENERATED__', stamp);
 fs.writeFileSync(R + 'src/shared/hvt-roster.js', out);
 console.log('wrote src/shared/hvt-roster.js — ' + JSON.stringify(stats));
 if (rejected.length) {
-  console.log('\nREJECTED (not a valid XRPL address — would never resolve):');
+  console.log('\nREJECTED (fails base58check — the ledger will never answer for these):');
   rejected.forEach(r => console.log('  ' + r.address + '  ' + (r.label || '') + '  [' + r.sources.join(',') + ']'));
 }
