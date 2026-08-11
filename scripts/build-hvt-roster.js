@@ -18,6 +18,23 @@ const wall = [...hvtSrc.matchAll(/label:\s*"([^"]+)",\s*address:\s*"(r[^"]+)",\s
 const regSrc = fs.readFileSync(R + 'src/shared/wallet-identities.js', 'utf8');
 const REG = JSON.parse(regSrc.slice(regSrc.indexOf('{'), regSrc.lastIndexOf('}') + 1));
 
+// A size we know from a SOURCE rather than from the label or from our own
+// scanning. Kept as an explicit, annotated map rather than folded into the label
+// parser, because every entry here is a number this app did not read off the
+// ledger itself and that distinction has to stay visible.
+//
+// The bridge is the case that forced it: we started watching it AFTER it was
+// emptied, so its first reading (493.5 XRP) becomes its own high-water mark and
+// the drain watch has nothing to measure against — the single most important
+// fact about the wallet is invisible precisely because we arrived late.
+const SOURCED_EXPECTED = {
+  // Held ~200,410 XRP before the 2026-08-09 drain; ~199,916 left in 97 minutes.
+  // xrpl.to Insights 2026-08-11, reproducible with account_tx over ledgers
+  // 106,183,346-842. Our own 2026-08-11 scan independently read the OTHER side
+  // of this number — 493.543894 XRP remaining, against the article's 493.5.
+  'rxXXXeMX8Gy5YvibvGLnQJ1XKKD7UswM1': 200410
+};
+
 // "20M Split 1" / "RIPPLE_1.3B" / "Main 300M Reserve" → the size the label claims.
 // This is what makes a drained target detectable: a wallet labelled 100M holding
 // 50 XRP is not a rounding error, it is an event.
@@ -80,7 +97,8 @@ const targets = [...byAddr.values()].filter(t => {
     type: (id && id.type) || t.type || 'HVT',
     identified: !!(id && id.name),
     confidence: (id && id.confidence) || null,
-    expected_xrp: expectedFromLabel(t.wall_label) || expectedFromLabel(t.handle) || null,
+    expected_xrp: SOURCED_EXPECTED[t.address] || expectedFromLabel(t.wall_label) || expectedFromLabel(t.handle) || null,
+    expected_source: SOURCED_EXPECTED[t.address] ? 'published_source' : (expectedFromLabel(t.wall_label) || expectedFromLabel(t.handle) ? 'label_claim' : null),
     sources: t.sources.sort()
   };
 });

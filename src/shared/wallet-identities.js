@@ -26,6 +26,30 @@ window.SW_WALLET_IDENTITIES = {
   "confidence": "PUBLIC_SOURCE",
   "source": "Coreum bridge XRPL operations account, per the published bridge specification (CoreumFoundation/coreumbridge-xrpl) and xrpl.to Insights 2026-08-11"
  },
+ "rfXSfH2q4zhGWdw45nYcWfjvFN5ZfwE1U6": {
+  "name": "Coreum outflow \u2014 front A",
+  "type": "HVT",
+  "confidence": "PUBLIC_SOURCE",
+  "source": "Received ~107,397 XRP of the 2026-08-09 Coreum bridge outflow (xrpl.to Insights 2026-08-11, reproducible via account_tx over ledgers 106,183,346-842). Our own 2026-08-11 scan read 2.999993 XRP against the article's \"roughly 3 XRP\". This names what the wallet DID on the ledger, not who owns it."
+ },
+ "rwt8PJhyXWgW8uwmTjmQ7Rw89tJHELFgb5": {
+  "name": "Coreum outflow \u2014 front B",
+  "type": "HVT",
+  "confidence": "PUBLIC_SOURCE",
+  "source": "Received ~92,519 XRP of the 2026-08-09 Coreum bridge outflow (xrpl.to Insights 2026-08-11). Our own 2026-08-11 scan read 2.999993 XRP. Ledger behaviour, not ownership."
+ },
+ "rnaBRmXU6ZS7orU6Qj38wsBYQmqHPbrhA9": {
+  "name": "Coreum outflow \u2014 staging A",
+  "type": "HVT",
+  "confidence": "PUBLIC_SOURCE",
+  "source": "Second hop of the 2026-08-09 Coreum bridge outflow; created 2026-06-28, six weeks before the front wallets (xrpl.to Insights 2026-08-11). Our own 2026-08-11 scan read 90,960.97 XRP still held. Ledger behaviour, not ownership."
+ },
+ "r3jV8g599WMR9zeFi5m1rbvXyEwNWwYFXt": {
+  "name": "Coreum outflow \u2014 staging B",
+  "type": "HVT",
+  "confidence": "PUBLIC_SOURCE",
+  "source": "Second hop of the 2026-08-09 Coreum bridge outflow; created 2026-06-28. Our own 2026-08-11 scan read 48,999.69 XRP still held. Ledger behaviour, not ownership."
+ },
  "rPyCQm8E5j78PDbrfKF24fRC7qUAk1kDMZ": {
   "name": "Bithumb",
   "type": "EXCH",

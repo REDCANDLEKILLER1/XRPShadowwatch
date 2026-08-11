@@ -20,17 +20,17 @@
 // Regenerate with scripts/build-hvt-roster.js after adding wallets to either
 // app. Do not hand-edit — the generator is the source of truth.
 //
-// 187 targets · 95 with a sourced identity · 31 carrying a size claim
+// 187 targets · 99 with a sourced identity · 32 carrying a size claim
 window.SW_HVT_ROSTER = {
  "version": 1,
  "generated": "2026-08-11",
  "stats": {
   "total": 187,
-  "identified": 95,
+  "identified": 99,
   "from_report_only": 113,
   "from_wall_only": 29,
   "both": 45,
-  "with_expected": 31,
+  "with_expected": 32,
   "rejected_invalid": 0
  },
  "targets": [
@@ -42,6 +42,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -54,6 +55,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -66,6 +68,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -78,6 +81,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -90,6 +94,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -102,6 +107,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -114,6 +120,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "OPERATOR_ASSERTED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -126,6 +133,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -139,6 +147,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -152,6 +161,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -165,6 +175,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -178,6 +189,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -190,6 +202,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "OPERATOR_ASSERTED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -202,6 +215,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "OPERATOR_ASSERTED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -215,6 +229,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -227,6 +242,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -240,6 +256,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -253,6 +270,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": 325000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -266,6 +284,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -278,6 +297,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -291,6 +311,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -304,6 +325,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -316,6 +338,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -328,6 +351,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -341,6 +365,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": 1700000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -354,6 +379,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -366,6 +392,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "OPERATOR_ASSERTED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -378,6 +405,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -390,6 +418,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "OPERATOR_ASSERTED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -402,6 +431,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -415,6 +445,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -427,6 +458,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -439,6 +471,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -451,6 +484,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 1800000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -464,6 +498,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "OPERATOR_ASSERTED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -476,6 +511,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -488,6 +524,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -500,6 +537,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -513,6 +551,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -526,6 +565,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -538,6 +578,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -550,6 +591,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -563,6 +605,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -576,6 +619,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "OPERATOR_ASSERTED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -588,6 +632,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -600,6 +645,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 500000000,
+   "expected_source": "label_claim",
    "sources": [
     "report"
    ]
@@ -612,6 +658,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 500000000,
+   "expected_source": "label_claim",
    "sources": [
     "report"
    ]
@@ -624,6 +671,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 500000000,
+   "expected_source": "label_claim",
    "sources": [
     "report"
    ]
@@ -636,6 +684,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -648,6 +697,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -660,6 +710,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -672,6 +723,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "OPERATOR_ASSERTED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -685,6 +737,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -697,6 +750,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -709,6 +763,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "OPERATOR_ASSERTED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -721,6 +776,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -734,6 +790,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -746,7 +803,60 @@ window.SW_HVT_ROSTER = {
    "type": "EXCH",
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": 200410,
+   "expected_source": "published_source",
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rfXSfH2q4zhGWdw45nYcWfjvFN5ZfwE1U6",
+   "label": "Coreum outflow — front A",
+   "handle": "COREUM_INC_FRONT_A",
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rwt8PJhyXWgW8uwmTjmQ7Rw89tJHELFgb5",
+   "label": "Coreum outflow — front B",
+   "handle": "COREUM_INC_FRONT_B",
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rnaBRmXU6ZS7orU6Qj38wsBYQmqHPbrhA9",
+   "label": "Coreum outflow — staging A",
+   "handle": "COREUM_INC_STAGING_A",
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "r3jV8g599WMR9zeFi5m1rbvXyEwNWwYFXt",
+   "label": "Coreum outflow — staging B",
+   "handle": "COREUM_INC_STAGING_B",
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -759,6 +869,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -772,6 +883,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -785,6 +897,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -797,6 +910,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -809,6 +923,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -821,6 +936,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -833,6 +949,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -845,6 +962,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -857,6 +975,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "OPERATOR_ASSERTED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -870,6 +989,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -882,6 +1002,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -894,6 +1015,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "CONFIRMED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -906,6 +1028,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -918,6 +1041,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 500000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -931,6 +1055,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 300000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -944,6 +1069,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -957,6 +1083,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -969,6 +1096,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 305000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -982,6 +1110,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 845000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -995,6 +1124,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 500000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -1008,6 +1138,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 1300000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -1021,6 +1152,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 500000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -1034,6 +1166,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 500000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -1047,6 +1180,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 1200000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -1060,6 +1194,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 500000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -1073,6 +1208,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "OPERATOR_ASSERTED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1085,6 +1221,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 500000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -1098,6 +1235,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 500000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -1111,6 +1249,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 500000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -1124,6 +1263,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 500000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -1137,6 +1277,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 500000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -1150,6 +1291,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 500000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -1163,6 +1305,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 500000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -1176,6 +1319,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report",
     "wall"
@@ -1189,6 +1333,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "wall"
    ]
@@ -1201,6 +1346,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "OPERATOR_ASSERTED",
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1213,6 +1359,7 @@ window.SW_HVT_ROSTER = {
    "identified": true,
    "confidence": "PUBLIC_SOURCE",
    "expected_xrp": 1500000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -1226,6 +1373,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": 100000000,
+   "expected_source": "label_claim",
    "sources": [
     "report",
     "wall"
@@ -1239,6 +1387,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": 20000000,
+   "expected_source": "label_claim",
    "sources": [
     "wall"
    ]
@@ -1251,6 +1400,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": 20000000,
+   "expected_source": "label_claim",
    "sources": [
     "wall"
    ]
@@ -1263,6 +1413,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": 20000000,
+   "expected_source": "label_claim",
    "sources": [
     "wall"
    ]
@@ -1275,6 +1426,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": 20000000,
+   "expected_source": "label_claim",
    "sources": [
     "wall"
    ]
@@ -1287,56 +1439,9 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": 20000000,
+   "expected_source": "label_claim",
    "sources": [
     "wall"
-   ]
-  },
-  {
-   "address": "rfXSfH2q4zhGWdw45nYcWfjvFN5ZfwE1U6",
-   "label": "COREUM_INC_FRONT_A",
-   "handle": "COREUM_INC_FRONT_A",
-   "type": "HVT",
-   "identified": false,
-   "confidence": null,
-   "expected_xrp": null,
-   "sources": [
-    "report"
-   ]
-  },
-  {
-   "address": "rwt8PJhyXWgW8uwmTjmQ7Rw89tJHELFgb5",
-   "label": "COREUM_INC_FRONT_B",
-   "handle": "COREUM_INC_FRONT_B",
-   "type": "HVT",
-   "identified": false,
-   "confidence": null,
-   "expected_xrp": null,
-   "sources": [
-    "report"
-   ]
-  },
-  {
-   "address": "rnaBRmXU6ZS7orU6Qj38wsBYQmqHPbrhA9",
-   "label": "COREUM_INC_STAGING_A",
-   "handle": "COREUM_INC_STAGING_A",
-   "type": "HVT",
-   "identified": false,
-   "confidence": null,
-   "expected_xrp": null,
-   "sources": [
-    "report"
-   ]
-  },
-  {
-   "address": "r3jV8g599WMR9zeFi5m1rbvXyEwNWwYFXt",
-   "label": "COREUM_INC_STAGING_B",
-   "handle": "COREUM_INC_STAGING_B",
-   "type": "HVT",
-   "identified": false,
-   "confidence": null,
-   "expected_xrp": null,
-   "sources": [
-    "report"
    ]
   },
   {
@@ -1347,6 +1452,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1359,6 +1465,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1371,6 +1478,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1383,6 +1491,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1395,6 +1504,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1407,6 +1517,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1419,6 +1530,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1431,6 +1543,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1443,6 +1556,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1455,6 +1569,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1467,6 +1582,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1479,6 +1595,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1491,6 +1608,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1503,6 +1621,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1515,6 +1634,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1527,6 +1647,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1539,6 +1660,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1551,6 +1673,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1563,6 +1686,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1575,6 +1699,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1587,6 +1712,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1599,6 +1725,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1611,6 +1738,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1623,6 +1751,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1635,6 +1764,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1647,6 +1777,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1659,6 +1790,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1671,6 +1803,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1683,6 +1816,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1695,6 +1829,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1707,6 +1842,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1719,6 +1855,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1731,6 +1868,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1743,6 +1881,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1755,6 +1894,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1767,6 +1907,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1779,6 +1920,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1791,6 +1933,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1803,6 +1946,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1815,6 +1959,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1827,6 +1972,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1839,6 +1985,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1851,6 +1998,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1863,6 +2011,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1875,6 +2024,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1887,6 +2037,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1899,6 +2050,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1911,6 +2063,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": 1800000000,
+   "expected_source": "label_claim",
    "sources": [
     "report"
    ]
@@ -1923,6 +2076,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1935,6 +2089,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1947,6 +2102,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1959,6 +2115,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1971,6 +2128,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1983,6 +2141,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -1995,6 +2154,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2007,6 +2167,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2019,6 +2180,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2031,6 +2193,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2043,6 +2206,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2055,6 +2219,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2067,6 +2232,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2079,6 +2245,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2091,6 +2258,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2103,6 +2271,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2115,6 +2284,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2127,6 +2297,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2139,6 +2310,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2151,6 +2323,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2163,6 +2336,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2175,6 +2349,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2187,6 +2362,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2199,6 +2375,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2211,6 +2388,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2223,6 +2401,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2235,6 +2414,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2247,6 +2427,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2259,6 +2440,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2271,6 +2453,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2283,6 +2466,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2295,6 +2479,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2307,6 +2492,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
@@ -2319,6 +2505,7 @@ window.SW_HVT_ROSTER = {
    "identified": false,
    "confidence": null,
    "expected_xrp": null,
+   "expected_source": null,
    "sources": [
     "report"
    ]
