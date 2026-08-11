@@ -515,6 +515,7 @@ const _SW_CLS_PHRASE = {
   EXCHANGE_INFLOW:                'exchange inflow',
   WHALE_TO_UNKNOWN:               'whale to unidentified wallet',
   ESCROW_FLOW:                    'escrow flow',
+  FRESH_ACCOUNT_RECEIVER:         'brand-new account taking size',
   NEXT_HOP_HOLDING:               'holding',
   NEXT_HOP_FORWARDING_DETECTED:   'forwarding onward',
   NEXT_HOP_SPLITTER:              'splitting onward',
@@ -1064,11 +1065,14 @@ async function scanWallets(ws) {
           }
           if (!amt && typeof t.Amount === 'string') amt = drops(t.Amount);
         }
+        const _sig = _sigMode(t);
         state.txs.push({
           account: row.address, label: row.label, cat: row.cat,
           type: t.TransactionType, hash: t.hash || item.hash || '',
           date: iso, from: t.Account || '', to: escrowDest || t.Destination || '',
-          amount: amt, currency: cur, destination_tag: t.DestinationTag ?? ''
+          amount: amt, currency: cur, destination_tag: t.DestinationTag ?? '',
+          // Who authorised this — see _sigMode.
+          sig_mode: _sig.mode, signer_count: _sig.count
         });
       }
     } catch (e) {
@@ -1148,6 +1152,51 @@ async function scanWallets(ws) {
   if (b) b.className = 'panel-badge ' + (checked === total ? 'ok' : checked > 0 ? 'warn' : 'bad');
 }
 
+// ── WHO SIGNED IT ─────────────────────────────────────────────
+// The Coreum bridge drain turned entirely on this question. A widely-shared
+// warning said XRP was "leaking out through the issuer" via an account flag; the
+// ledger said every one of those 94 payments carried the bridge's own account in
+// the Account field with an empty SigningPubKey and 17 signatures in Signers —
+// the bridge PAID the money out, its own relayer quorum authorising each one.
+// Same money, same direction, completely different event, and the only way to
+// tell them apart is to read the signature.
+//
+// XRPL encodes it plainly: a single-key transaction carries a hex SigningPubKey
+// and no Signers; a multi-signed one carries an empty SigningPubKey and a Signers
+// array holding one entry per co-signer. Some API shapes omit SigningPubKey
+// entirely, so presence of Signers is the primary test and the key is the
+// fallback — anything else is honestly 'unknown' rather than guessed.
+function _sigMode(t) {
+  try {
+    if (Array.isArray(t.Signers) && t.Signers.length > 0)
+      return { mode: 'multisig', count: t.Signers.length };
+    if (typeof t.SigningPubKey === 'string' && t.SigningPubKey.length > 0)
+      return { mode: 'single', count: 1 };
+    if (t.SigningPubKey === '')            // empty key, no Signers we can see
+      return { mode: 'multisig', count: 0 };
+  } catch (_) {}
+  return { mode: 'unknown', count: 0 };
+}
+// How to say it in a report line. Never printed for a single-key transfer —
+// that is the ordinary case and saying so on every line would be noise.
+function _sigPhrase(t) {
+  if (!t || t.sig_mode !== 'multisig') return '';
+  const c = n(t.signer_count);
+  return c > 0 ? ' · signed by ' + c + '-key quorum' : ' · multisig-signed';
+}
+
+// An account younger than this, receiving a large transfer, is reported as such.
+// 48h rather than the ~2h the Coreum front wallets actually had: the point is to
+// catch the pattern, and a wallet opened yesterday to take millions today is the
+// same story told a day slower.
+const FRESH_ACCOUNT_HOURS = 48;
+function _ageText(h) {
+  if (h == null || !isFinite(h)) return '';
+  if (h < 1)  return Math.max(1, Math.round(h * 60)) + ' minutes old';
+  if (h < 48) return Math.round(h) + ' hours old';
+  return Math.round(h / 24) + ' days old';
+}
+
 // ── ANALYZE FLAGS ─────────────────────────────────────────────
 function classify(t) {
   const f = KNOWN[t.from], to = KNOWN[t.to];
@@ -1206,6 +1255,32 @@ function analyzeFlags() {
     if (w.delta_xrp !== null && Math.abs(w.delta_xrp) >= 1000000)
       flags.push(`HIGH BALANCE_DELTA >1M: ${w.label} ${w.delta_xrp > 0 ? '+' : ''}${fmt(w.delta_xrp, 2)} XRP`);
   }
+  // ── SIGNING-HABIT WATCH ──────────────────────────────────────
+  // Teach the shared store how each watched wallet authorises payments, and
+  // surface the moment that changes. Only senders we actually watch are tracked:
+  // a stranger's signing habit is not something we have any history for.
+  state.sigChanges = [];
+  try {
+    if (window.SW_HVT_HISTORY && SW_HVT_HISTORY.recordSig) {
+      const seenSig = Object.create(null);
+      for (const t of state.txs) {
+        if (!t.from || !KNOWN[t.from]) continue;
+        if (t.sig_mode !== 'multisig' && t.sig_mode !== 'single') continue;
+        const k = t.from + '|' + t.sig_mode;
+        if (seenSig[k]) continue;              // one vote per wallet per mode per scan
+        seenSig[k] = 1;
+        const ch = SW_HVT_HISTORY.recordSig(t.from, t.sig_mode, t.signer_count);
+        if (ch) state.sigChanges.push(ch);
+      }
+      state.sigChanges.forEach(c => {
+        const who = _swWho(c.address, (KNOWN[c.address] || {}).label, { bare: true });
+        flags.push((c.to === 'single' ? 'HIGH' : 'MEDIUM') + ' SIGNING_MODE_CHANGE: ' + who +
+          ' now signs ' + (c.to === 'single' ? 'with a single key' : 'by quorum') +
+          ' (was ' + (c.from === 'single' ? 'single-key' : 'quorum') + ')');
+      });
+    }
+  } catch (_) { /* the signing watch must never break a scan */ }
+
   if (!flags.length) flags.push('No 24h tx/delta anomaly detected. Scan-based, not filler.');
   state.flags = flags; state.large = large; state.frags = frags;
   if ($('flagsBox')) $('flagsBox').textContent = flags.join('\n');
@@ -1225,6 +1300,23 @@ async function scanReceivers(ws) {
     try {
       const info = await xrpl(ws, { command: 'account_info', account: addr, ledger_index: 'validated' });
       rec.balance_xrp = drops(info.account_data.Balance);
+      // ── HOW OLD IS THIS ACCOUNT? ──────────────────────────────
+      // Both wallets that took the Coreum bridge outflow were created under two
+      // hours before the first payment landed. "Millions of XRP into an account
+      // opened this afternoon" is the loudest signal on the ledger and we were
+      // not reading it. One extra call, forward from the beginning: the first
+      // transaction an account ever appears in is the payment that funded it.
+      try {
+        const first = await xrpl(ws, { command: 'account_tx', account: addr,
+          ledger_index_min: -1, ledger_index_max: -1, limit: 1, forward: true });
+        const f0 = (first.transactions || [])[0];
+        const ft = f0 && (f0.tx_json || f0.tx || {});
+        const fiso = ft && ft.date ? rip(ft.date) : '';
+        if (fiso) {
+          rec.created_at = fiso;
+          rec.age_hours = Math.max(0, (Date.now() - new Date(fiso).getTime()) / 3600000);
+        }
+      } catch (_) { /* age is a bonus signal — never fail the receiver for it */ }
       const tx = await xrpl(ws, { command: 'account_tx', account: addr, ledger_index_min: -1, ledger_index_max: -1, limit, forward: false });
       const cutoff = Date.now() - 86400000;
       for (const item of (tx.transactions || [])) {
@@ -1240,10 +1332,16 @@ async function scanReceivers(ws) {
         if (amt >= 100000000000) continue; // implausible (≥ total supply) → data artifact
         if (t.Account === addr && amt >= 1000000) { rec.forwarded_large_count++; rec.forwarded_large_total_xrp += amt; }
       }
-      rec.classification = rec.forwarded_large_count > 0 ? 'NEXT_HOP_FORWARDING_DETECTED'
+      // An account that did not exist yesterday, taking millions today, is a
+      // stronger read than whether it forwarded or held — so it wins the
+      // classification. FRESH_ACCOUNT_RECEIVER is exactly the shape both Coreum
+      // front wallets had: created hours earlier, funded once, emptied onward.
+      rec.fresh_account = rec.age_hours != null && rec.age_hours <= FRESH_ACCOUNT_HOURS;
+      rec.classification = rec.fresh_account ? 'FRESH_ACCOUNT_RECEIVER'
+        : rec.forwarded_large_count > 0 ? 'NEXT_HOP_FORWARDING_DETECTED'
         : rec.balance_xrp >= src.amount * 0.5 ? 'RECEIVER_STILL_HOLDING_SIZE'
         : 'RECEIVER_BALANCE_LOW_OR_SPLIT';
-      rec.confidence = rec.forwarded_large_count > 0 ? 'HIGH' : 'MEDIUM';
+      rec.confidence = (rec.fresh_account || rec.forwarded_large_count > 0) ? 'HIGH' : 'MEDIUM';
     } catch (e) {
       rec.error = e.message; rec.classification = 'NEXT_HOP_SCAN_FAILED'; rec.confidence = 'LOW';
     }
@@ -4058,7 +4156,9 @@ function collectDiscoveryCandidates(pack) {
         shared_counterparty_count: 0,
         is_blacklisted: false,
         is_dust_only: false,
-        is_already_watched: false
+        is_already_watched: false,
+        fresh_account: false,
+        age_hours: null
       };
       candidates.set(addr, rec);
     }
@@ -4086,6 +4186,12 @@ function collectDiscoveryCandidates(pack) {
       if (fields.exchange_adjacent)   rec.exchange_adjacent = true;
       if (fields.shared_counterparty_count != null && fields.shared_counterparty_count > rec.shared_counterparty_count) {
         rec.shared_counterparty_count = n(fields.shared_counterparty_count);
+      }
+      if (fields.fresh_account)       rec.fresh_account = true;
+      // Keep the YOUNGEST reading — an account only gets newer-looking if we
+      // previously read it wrong.
+      if (fields.age_hours != null && (rec.age_hours == null || fields.age_hours < rec.age_hours)) {
+        rec.age_hours = n(fields.age_hours);
       }
     }
   }
@@ -4119,6 +4225,18 @@ function collectDiscoveryCandidates(pack) {
         forwarded_large_count: n(r.forwarded_large_count),
         active_last_24h: true
       });
+      // The account's own age, as its own piece of evidence. A wallet that did
+      // not exist yesterday and is holding millions today is the finding — it
+      // should not be buried inside a classification string.
+      if (r.fresh_account && r.age_hours != null) {
+        bump(r.address, 'fresh_account', {
+          reason: 'account is only ' + _ageText(r.age_hours) +
+                  ' — it did not exist before this money arrived',
+          fresh_account: true,
+          age_hours: r.age_hours,
+          active_last_24h: true
+        });
+      }
     }
   });
 
@@ -5042,6 +5160,13 @@ if (typeof window !== 'undefined') {
         (c.related_watched_wallets || []).length >= 1)                score += 20;  // sends to known exchange after watched
     if (c.repeated_dest_tag)                                          score += 15;  // shared destination tag
     if (c.active_last_24h)                                            score += 10;  // same-hour cluster proxy
+    // An account created hours ago, receiving a large transfer, is the single
+    // strongest shape on this list — it is what both Coreum front wallets looked
+    // like. Weighted at the top alongside "destination of a large transfer",
+    // and only when there is real size behind it, so a new small wallet is not
+    // promoted for being new.
+    if (c.fresh_account && maxVal >= 1_000_000)                       score += 50;
+    else if (c.fresh_account && value >= 100_000)                     score += 25;
 
     // NEGATIVE WEIGHTS
     if (c.is_dust_only)                                               score -= 60;  // dust-only behavior
@@ -12871,11 +12996,12 @@ function renderTopLargeTransfers(largeTransfers, max) {
     const key = sender + '>' + recvLabel + '>' + amt + '>' + cls;
     if (seen[key] != null) { deduped[seen[key]].count++; return; }
     seen[key] = deduped.length;
-    deduped.push({ sender: sender, recvLabel: recvLabel, amt: amt, cls: cls, conf: conf, count: 1 });
+    deduped.push({ sender: sender, recvLabel: recvLabel, amt: amt, cls: cls, conf: conf,
+                   sig: _sigPhrase(t), count: 1 });
   });
   return deduped.slice(0, max || 5).map(d =>
     '• ' + d.sender + ' → ' + d.recvLabel + ' · ' + d.amt + ' XRP · ' + d.cls + ' [' + d.conf + ']' +
-    (d.count > 1 ? ' ×' + d.count : '')
+    d.sig + (d.count > 1 ? ' ×' + d.count : '')
   );
 }
 
@@ -12893,7 +13019,8 @@ function renderReceiverFollowthrough(receivers, max) {
       ? 'forwarded ' + fwd + ' large tx (' + fmt(n(r.forwarded_large_total_xrp), 0) + ' XRP)'
       : 'held — no large forward';
     const cls = _swCls(r.classification || 'NEXT_HOP_HOLDING');
-    return '• ' + who + ': ' + bal + ', ' + fwdNote + ' · ' + cls + ' [' + _swConf(r.confidence) + ']';
+    const age = r.age_hours != null ? ', account ' + _ageText(r.age_hours) : '';
+    return '• ' + who + ': ' + bal + age + ', ' + fwdNote + ' · ' + cls + ' [' + _swConf(r.confidence) + ']';
   });
 }
 

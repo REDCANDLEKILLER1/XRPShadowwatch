@@ -130,6 +130,54 @@
   function get(addr) { return load()[addr] || null; }
   function all() { return load(); }
 
+  // ── HOW A WALLET SIGNS ──────────────────────────────────────────────────────
+  // A bridge, a custody pool or a corporate treasury signs with a quorum. If an
+  // account that has only ever multi-signed suddenly authorises a payment with a
+  // single key, the interesting question is not where the money went — it is who
+  // just became able to move it alone. The reverse (single → multisig) is the
+  // ordinary shape of an account being secured, and is worth noting, not alarming.
+  //
+  // This lives in the shared store for the same reason balances do: the wall and
+  // the report console both see transactions, and whichever sees one first should
+  // teach the other. Counts are kept per mode so one malformed row cannot flip a
+  // wallet's established habit.
+  function recordSig(addr, mode, signerCount) {
+    if (!addr || (mode !== 'multisig' && mode !== 'single')) return null;
+    var s = load();
+    var r = s[addr] || (s[addr] = { peak: 0, peakAt: null, last: 0, lastAt: null,
+                                    prev: null, prevAt: null, n: 0, from: 'sig' });
+    r.sig = r.sig || { multisig: 0, single: 0, mode: null, since: null, changedAt: null, from: null, quorum: 0 };
+    r.sig[mode]++;
+    if (mode === 'multisig' && n(signerCount) > r.sig.quorum) r.sig.quorum = n(signerCount);
+
+    // An established habit needs more than one sighting; until then just record.
+    var established = r.sig.mode;
+    var total = r.sig.multisig + r.sig.single;
+    var changed = null;
+    if (!established) {
+      if (total >= 2) { r.sig.mode = mode; r.sig.since = _now(); }
+    } else if (established !== mode && r.sig[mode] >= 2) {
+      // Two independent sightings of the new mode before we call it a change, so
+      // a single odd row never raises this.
+      changed = { address: addr, from: established, to: mode, at: _now(), quorum: r.sig.quorum };
+      r.sig.from = established; r.sig.mode = mode;
+      r.sig.changedAt = changed.at;
+    }
+    save();
+    return changed;
+  }
+  function sigOf(addr) { var r = get(addr); return (r && r.sig) || null; }
+  // Every wallet whose signing habit has changed — the report asks for this.
+  function sigChanges() {
+    var s = load(), out = [];
+    Object.keys(s).forEach(function (a) {
+      var g = s[a] && s[a].sig;
+      if (g && g.changedAt && g.from && g.from !== g.mode)
+        out.push({ address: a, from: g.from, to: g.mode, at: g.changedAt, quorum: g.quorum });
+    });
+    return out;
+  }
+
   // The judgement. Only ever fires when we know what the wallet USED to be worth
   // — with no peak and no size claim in the label there is nothing to drain from,
   // and calling that "drained" would be a guess.
@@ -222,8 +270,12 @@
 
   function reset() { _mem = {}; save(); }
 
+  // n() lives in the report console but not on the wall; keep this file standalone.
+  function n(v) { var x = Number(v); return isFinite(x) ? x : 0; }
+
   window.SW_HVT_HISTORY = {
     record: record, get: get, all: all, status: status, alerts: alerts,
+    recordSig: recordSig, sigOf: sigOf, sigChanges: sigChanges,
     stats: stats, exportSeed: exportSeed, downloadSeed: downloadSeed, reset: reset,
     FLOOR_XRP: FLOOR_XRP, MIN_JUDGE_XRP: MIN_JUDGE_XRP,
     DRAINED_RATIO: DRAINED_RATIO, BLEEDING_RATIO: BLEEDING_RATIO
