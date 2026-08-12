@@ -1,6 +1,6 @@
 // ── SHARED HIGH-VALUE TARGET ROSTER ──────────────────────────────────────────
 // The one list of wallets both apps consider high-value. Before this file the
-// live wall watched 74 targets and the report console watched 166, and only
+// live wall watched 74 targets and the report console watched 168, and only
 // 45 addresses were on both — so a wallet could be a headline in the morning
 // brief and completely absent from the HVT board, or drain to nothing on the
 // board without the report ever looking at it.
@@ -20,14 +20,14 @@
 // Regenerate with scripts/build-hvt-roster.js after adding wallets to either
 // app. Do not hand-edit — the generator is the source of truth.
 //
-// 195 targets · 99 with a sourced identity · 32 carrying a size claim
+// 197 targets · 99 with a sourced identity · 32 carrying a size claim
 window.SW_HVT_ROSTER = {
  "version": 1,
  "generated": "2026-08-12",
  "stats": {
-  "total": 195,
+  "total": 197,
   "identified": 99,
-  "from_report_only": 121,
+  "from_report_only": 123,
   "from_wall_only": 29,
   "both": 45,
   "with_expected": 32,
@@ -1744,6 +1744,19 @@ window.SW_HVT_ROSTER = {
    ]
   },
   {
+   "address": "r9c6A65SmhhZALrkMTpqc9X3kGjv5gtNNk",
+   "label": "LARGE_RECV_r9c6A6",
+   "handle": "LARGE_RECV_r9c6A6",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
    "address": "r9onszrkdqcSWeL4ti7sHJDGcrYmMyFHmM",
    "label": "LARGE_RECV_r9onsz",
    "handle": "LARGE_RECV_r9onsz",
@@ -2605,6 +2618,19 @@ window.SW_HVT_ROSTER = {
    "address": "rUrYCcn3UkgC2ZXDWDvWT1D8VmM2X5Yiws",
    "label": "WHALE_RECV_rUrYCc",
    "handle": "WHALE_RECV_rUrYCc",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rUVtjZ5Kg4TJ4osZCJooq3hunjuACtNx4W",
+   "label": "WHALE_RECV_rUVtjZ",
+   "handle": "WHALE_RECV_rUVtjZ",
    "type": "HVT",
    "identified": false,
    "confidence": null,

@@ -272,6 +272,15 @@ const WATCHLIST = [
   // is how a watch list turns into a phone book.
   ['WHALE_RECV_rLwSuY', 'rLwSuYoPbDU3Y58tfXbuqFTq6Fmsx4f3KZ', 'discovered_whale'],
 
+  // ── 2026-08-12 20:55 scan SC-MSQKIXBO ──
+  // rUVtjZ: richlist #462, holding 19.05M, off receiving wallet rfah8j. Third
+  // richlist holder in three consecutive scans.
+  // r9c6A6: held back yesterday at MONITOR/50 on one sighting; the app has since
+  // promoted it twice (50 → 85) across three scans. One transaction, but 1.1M
+  // XRP into Gemini from an otherwise-unknown wallet is worth a baseline.
+  ['WHALE_RECV_rUVtjZ', 'rUVtjZ5Kg4TJ4osZCJooq3hunjuACtNx4W', 'discovered_whale'],
+  ['LARGE_RECV_r9c6A6', 'r9c6A65SmhhZALrkMTpqc9X3kGjv5gtNNk', 'discovered_receiver'],
+
   // ── Coreum bridge incident, 2026-08-09 ────────────────────────────────────
   // ~199,916 XRP left the Coreum bridge's XRPL operations account in 97 minutes,
   // in 94 payments the bridge's own 17-of-28 relayer quorum signed. Source:
