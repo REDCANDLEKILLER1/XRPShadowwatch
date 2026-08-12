@@ -13650,6 +13650,109 @@ function missionDebrief(buckets, p, netDelta, news) {
 }
 
 // ── INTEL BRIEF ───────────────────────────────────────────────
+// ── INTEL BRIEF VOICE ──────────────────────────────────────────
+// Sections 2, 6 and 7 used to be hardcoded strings — byte-identical in every
+// report ever produced, telling the operator to do the same four things whether
+// the scan had found a drained bridge or nothing at all. A brief that cannot
+// change is not intelligence, it is letterhead. These pools rotate by date the
+// same way the scripture and prayer pools do, and the two sections that should
+// respond to findings now do.
+const INTEL_SIGNAL_FRAMES = [
+  'Money moved and the board recorded it.',
+  'The ledger\u2019s own accounting for the window:',
+  'Here is the arithmetic, before anyone interprets it:',
+  'Raw movement first \u2014 interpretation comes after.',
+  'What the window actually contained:',
+  'Counted, not estimated:',
+  'The numbers as the ledger reports them:',
+  'Straight totals, no adjustment:'
+];
+const INTEL_BEHAVIOR_CAVEATS = [
+  'Archetypes are behavioural scoring, not identity proof.',
+  'These are patterns of use, not claims about who is behind them.',
+  'An archetype describes how a wallet acts, never who owns it.',
+  'Behaviour is observable; ownership is not. Only the first is claimed here.',
+  'Scored on what the wallets did, not on who they might be.',
+  'Read these as habits, not as names.',
+  'Classification here is descriptive. It confers nothing.',
+  'How a wallet behaves is evidence. Who holds it is not established.'
+];
+const INTEL_NO_ACTION = [
+  'Nothing this window demands follow-up. Keep the baseline warm.',
+  'No open threads. The value of a quiet scan is the comparison it gives the next loud one.',
+  'Nothing outstanding \u2014 which is itself worth recording.',
+  'No leads to chase. Re-run tomorrow and watch for change against today.',
+  'Clean window. The next anomaly will be measured against this.',
+  'No action required. A baseline day is not a wasted one.'
+];
+
+// What the operator should actually do next, derived from what this scan found.
+// Falls back to a rotating generic line ONLY when there is genuinely nothing.
+function _intelActions(p) {
+  const out = [];
+  const recv = state.receivers || [];
+  const fresh = recv.filter(r => r.fresh_account);
+  const fwd   = recv.filter(r => n(r.forwarded_large_count) > 0);
+  const held  = recv.filter(r => !r.fresh_account && !n(r.forwarded_large_count) && n(r.balance_xrp) >= 1e6);
+
+  fresh.slice(0, 2).forEach(r => out.push(
+    'Re-check ' + _swWho(r.address, r.label, { bare: true }) + ' \u2014 the account is ' +
+    _ageText(r.age_hours) + ' and took size on day one. Whether it holds or forwards is the tell.'));
+  fwd.slice(0, 2).forEach(r => out.push(
+    'Follow the next hop out of ' + _swWho(r.address, r.label, { bare: true }) + '; it forwarded ' +
+    n(r.forwarded_large_count) + ' large transfer' + (n(r.forwarded_large_count) === 1 ? '' : 's') +
+    ' rather than holding.'));
+  held.slice(0, 1).forEach(r => out.push(
+    _swWho(r.address, r.label, { bare: true }) + ' is sitting on ' + fmt(n(r.balance_xrp), 0) +
+    ' XRP with no forward. Watch whether that changes.'));
+
+  (state.sigChanges || []).slice(0, 2).forEach(c => out.push(
+    _swWho(c.address, (KNOWN[c.address] || {}).label, { bare: true }) + ' changed how it authorises payments (' +
+    (c.from === 'single' ? 'single key' : 'quorum') + ' \u2192 ' + (c.to === 'single' ? 'single key' : 'quorum') +
+    '). Confirm that was intended.'));
+
+  try {
+    (window.SW_HVT_HISTORY ? SW_HVT_HISTORY.alerts() : []).slice(0, 2).forEach(a => out.push(
+      _swWho(a.address, (KNOWN[a.address] || {}).label, { bare: true }) + ' is holding ' +
+      (a.ratio != null ? Math.round(a.ratio * 100) : 0) + '% of what it once held. Establish where the rest went.'));
+  } catch (_) {}
+
+  if ((state.frags || []).some(f => f.severity === 'FRAG_SUSPECT'))
+    out.push('A destination tag is collecting small payments from several senders. Check whether it is an exchange deposit tag before reading anything into it.');
+
+  const topCand = (state.discoveryInbox || []).filter(c => c && c.seen_this_scan)
+    .sort((a, b) => n(b.score) - n(a.score))[0];
+  if (topCand && n(topCand.score) >= 120)
+    out.push('Promote or dismiss ' + _swWho(topCand.address, null, { bare: true }) +
+             ' \u2014 it scored ' + n(topCand.score) + '/200 this scan and is still unreviewed.');
+
+  if (n(p.wallets_failed) > 0)
+    out.push(n(p.wallets_failed) + ' wallet' + (n(p.wallets_failed) === 1 ? '' : 's') +
+             ' failed to read this pass and are excluded from every total above. Re-run before treating the flow figure as complete.');
+
+  return out;
+}
+
+// Only state the limits that actually apply to THIS report. Listing a caveat
+// about failed wallets on a scan where none failed trains the reader to skip
+// the section entirely.
+function _intelLimits(p, health) {
+  const out = [];
+  if (health && health.newsMode !== 'LEDGER_ONLY')
+    out.push('Headlines are external context and prove nothing about the transfers above.');
+  if (n(p.wallets_failed) > 0)
+    out.push(n(p.wallets_failed) + ' wallet read failure' + (n(p.wallets_failed) === 1 ? '' : 's') + ' \u2014 totals are of what was reachable, not of the whole list.');
+  if ((state.frags || []).length)
+    out.push('Dust and destination-tag clusters are routing signals, not evidence of fragmentation or intent.');
+  if ((state.clusters || []).length)
+    out.push('Behavioural clusters link wallets by activity, never by ownership.');
+  if ((p.large_transfers || []).length)
+    out.push('Transfer classifications are heuristic. A large move is not a proven intention.');
+  if (!out.length)
+    out.push('Everything above is ledger-observed. Nothing here is an ownership claim.');
+  return out;
+}
+
 function buildIntelBrief(p) {
   const risk = publicRiskLabel(p);
   const cluster = (state.clusters || [])[0];
@@ -13673,17 +13776,47 @@ function buildIntelBrief(p) {
     newsLine = 'NEWS/MACRO CONTEXT — ' + health.headline_count + ' headlines across ' + health.source_group_count + ' source groups.';
   }
 
-  const brief = `FORENSIC INTELLIGENCE BRIEF — ${p.date || today()}
+  const dateStr = p.date || today();
+  const tw = getTxWindow();
+
+  // 1 — the arithmetic, with the window it covers. A weekend sweep and an
+  // overnight look identical in a bare total, so the window is stated.
+  const lt = (p.large_transfers || []).length;
+  const signal = [
+    pickDaily(INTEL_SIGNAL_FRAMES, dateStr, 3),
+    'Net ' + (n(p.total_balance_delta_xrp) < 0 ? 'outflow' : 'inflow') + ' of ' +
+      (p.total_balance_delta_xrp > 0 ? '+' : '') + fmt(p.total_balance_delta_xrp, 0) + ' XRP across ' +
+      n(p.wallets_checked) + ' watched wallets, window ' + tw.label + '.',
+    lt + ' transfer' + (lt === 1 ? '' : 's') + ' above threshold. Shadow volume: ' +
+      fmt(p.shadow_volume_xrp, 0) + ' XRP.'
+  ].join('\n');
+
+  // 2 — the actual archetype MIX, not just the top one.
+  const mix = Object.entries(dom).sort((a, b) => b[1] - a[1]).slice(0, 3)
+    .map(([k, v]) => k.toLowerCase().replace(/_/g, ' ') + ' \u00d7' + v);
+  const behavior = (mix.length
+      ? 'Dominant pattern: ' + primary.toLowerCase().replace(/_/g, ' ') +
+        (mix.length > 1 ? '. Board mix: ' + mix.join(', ') + '.' : '.')
+      : 'No wallet profiles built this pass.') +
+    ' ' + pickDaily(INTEL_BEHAVIOR_CAVEATS, dateStr, 5);
+
+  // 6 / 7 — only what applies, and what to actually do about it.
+  const limits = _intelLimits(p, health).map(x => '\u2022 ' + x).join('\n');
+  const acts = _intelActions(p);
+  const actions = acts.length
+    ? acts.map(x => '\u2022 ' + x).join('\n')
+    : '\u2022 ' + pickDaily(INTEL_NO_ACTION, dateStr, 11);
+
+  const brief = `FORENSIC INTELLIGENCE BRIEF — ${dateStr}
 
 1. LEDGER SIGNAL
-Net ${n(p.total_balance_delta_xrp) < 0 ? 'outflow' : 'inflow'} of ${p.total_balance_delta_xrp > 0 ? '+' : ''}${fmt(p.total_balance_delta_xrp, 0)} XRP.
-${(p.large_transfers || []).length} large transfers above threshold. Shadow volume: ${fmt(p.shadow_volume_xrp, 0)} XRP.
+${signal}
 
 2. WALLET BEHAVIOR
-Primary archetype: ${primary}. Exchange hot, escrow, whales, and quiet holders scored as behavioral context — not identity proof.
+${behavior}
 
 3. CLUSTER READ
-${cluster ? cluster.type + ' detected. ' + cluster.reason : 'No cluster detected.'}${rec ? ' Receiver follow-through suggests routing rather than long-term holding.' : ''}
+${cluster ? cluster.type + ' detected. ' + String(cluster.reason || '').replace(/\s*\.?\s*$/, '.') : 'No behavioural cluster crossed the threshold this window.'}${rec ? ' Receiver follow-through suggests routing rather than long-term holding.' : ''}
 
 4. NEWS / MACRO CONTEXT
 ${newsLine}
@@ -13692,10 +13825,10 @@ ${newsLine}
 ${risk}.
 
 6. EVIDENCE LIMITS
-News sources are external context. Failed wallets are internal only. Dust/tag flags are not proof of banking fragmentation.
+${limits}
 
 7. ACTIONABLE WATCHLIST
-Re-scan large unknown receivers. Monitor same-hour exchange outflows. Compare Native DEX vs EVM DEX volume. Confirm whether top clusters repeat across future scan memory.`;
+${actions}`;
   state.intelBrief = brief;
   if ($('intelBriefBox')) $('intelBriefBox').textContent = brief;
   return brief;
