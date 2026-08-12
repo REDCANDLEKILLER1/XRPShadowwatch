@@ -617,7 +617,36 @@ var _NV_BEATS=[
   'Watch the hands, not the mouth. Hands move the money.',
   'They call it noise. I call it evidence.',
   'The banks write the headlines. The Ledger writes the record.',
-  'Trust the receipts. Question everything else.'
+  'Trust the receipts. Question everything else.',
+  // ── v16.9: doubled. 24 beats over a daily report meant the same aside came
+  // round roughly every three weeks, which a regular reader hears. Same ethos —
+  // receipts, patience, no badges, tell on the banks.
+  'They\u2019ve got lawyers. I\u2019ve got timestamps.',
+  'Nobody subpoenas the Ledger. It just answers.',
+  'A quiet night is still a night on watch.',
+  'The money left a receipt. I just read it out loud.',
+  'They rehearse the statement. The Ledger doesn\u2019t rehearse anything.',
+  'I\u2019d rather report nothing than report a guess.',
+  'The ones who move quietly are the ones worth watching closely.',
+  'You can move a fortune in silence. You cannot move it in secret.',
+  'Every address is a witness that never changes its story.',
+  'I don\u2019t chase the pump. I chase the paperwork.',
+  'What looks like nothing tonight is usually the first page of something.',
+  'The Ledger has no press office and no reason to lie.',
+  'They count on you being tired. I count for you instead.',
+  'Big money leaves small tracks. That\u2019s the whole trick.',
+  'I\u2019m not calling anyone guilty. I\u2019m calling the transfer what it was.',
+  'Flagged is not convicted. I keep that line bright.',
+  'The tape forgets by lunchtime. The Ledger never does.',
+  'If it moved, it\u2019s written down. If it\u2019s written down, I found it.',
+  'They can decline to comment. The chain already commented.',
+  'Patience is a forensic tool. Most people skip it.',
+  'I watch the wallets that stopped moving too. Silence is data.',
+  'No thesis first. Evidence first, every morning, no exceptions.',
+  'The story that survives the receipts is the only one I\u2019ll tell you.',
+  'Somebody always knows before the rest of us. Tonight I\u2019m somebody.',
+  'I don\u2019t predict. I document. It ages better.',
+  'The whales are careful. The Ledger is more careful.'
 ];
 function _nvBeat(seed, salt){ return _NV_BEATS[((seed||0)+(salt||0))%_NV_BEATS.length]; }
 
@@ -637,22 +666,44 @@ function _buildExecutiveSummary(interps, pack){
     'I never blinked. Here’s what crossed the wire: ',
     'The Ledger doesn’t clock out, and neither do I. Overnight, ',
     'Let’s open the books on last night: ',
-    'Straight from the night watch: '
+    'Straight from the night watch: ',
+    'Kettle on, board up — here’s the overnight: ',
+    'Nothing got past me. Here’s the tape: ',
+    'Sat with the Ledger till the sun came up. Overnight, ',
+    'The wires ran all night. What they carried: ',
+    'Back from the watch, notebook full. Overnight, ',
+    'You slept. I counted. Here’s the count: ',
+    'Same seat, same screens, new night. Overnight, ',
+    'Doors were locked, money still moved. Here it is: ',
+    'I stayed up so this line could be short: ',
+    'Everything below crossed the Ledger while you were out: ',
+    'Long night on the board. Here’s what it gave up: ',
+    'Fresh receipts, still warm. Overnight, ',
+    'No one announced any of this. Overnight, ',
+    'Here’s the honest read from the night shift: ',
+    'Ledger’s open, coffee’s poured — overnight, ',
+    'Quiet hours, loud wallets. Overnight, '
   ];
   var quietOpen=[
     'the Ledger stayed quiet under my watch. No whale broke cover — and a still night on patrol is a good night.',
     'the rails ran quiet and honest. Nobody big blinked, and that’s worth saying out loud.',
     'it was a calm shift. No heavy hands, no cover blown — I still counted every ripple.',
-    'the board sat still. A quiet night isn’t a wasted one; it’s the baseline I measure the loud ones against.'
+    'the board sat still. A quiet night isn’t a wasted one; it’s the baseline I measure the loud ones against.',
+    'nothing crossed that was worth waking you for. I checked anyway, wallet by wallet.',
+    'the whales stayed under. No cover blown, no cover needed — I logged the quiet and kept the seat warm.',
+    'the wires carried ordinary traffic and nothing else. That is a finding too, and I am reporting it as one.',
+    'not one wallet did anything it had not done before. Boring is a result, and tonight it is the result.',
+    'the money stayed where it went to sleep. I watched it not move for hours, which is the job.',
+    'no heavy hands on the board. I would rather tell you that plainly than dress up a slow night.'
   ];
   var factRaw=(moves&&moves.has_signal)?(moves.headline||moves.summary):(best?best.summary:'');
   if(!factRaw) return _nvPick(openers,seed,0)+_nvPick(quietOpen,seed,7)+' '+_nvBeat(seed,0);
   var line=_nvPick(openers,seed,0)+_lc1(_firstSentence(factRaw));
   var score=_num(pack&&pack.risk_score&&pack.risk_score.score);
-  var posture=score>=75?_nvPick(['The signal flared red — this is a full-alert night on the Ledger.','Every alarm I’ve got lit up. Top of the dial.','This is a loud one — the board’s screaming and I’m all eyes.','Red across the board. When it’s this hot, somebody’s making a move.','Full alert. The heavy hands came out to play tonight.'],seed,1)
-             :score>=50?_nvPick(['My instincts are up — something’s moving out there.','The Ledger’s running warm tonight, and I’m watching close.','Not a siren yet, but the needle’s twitching. I’m leaning in.','Enough motion to keep me honest — I’m tracking it.','Warm, not hot. But warm is how the big ones start.'],seed,1)
-             :score>=25?_nvPick(['Nothing villainous, but I kept one eye open.','A quiet patrol — steady, nothing extreme.','Low hum on the board. I logged it and moved on.','Mostly calm, a little chatter. Nothing I’d wake you for.','Slow night — but slow is when you catch the sloppy ones.'],seed,1)
-             :_nvPick(['Otherwise the Ledger behaved itself.','The rest of the board stayed in line.','A still night — the rails were quiet and honest.','Nothing else tried to slip past. Good.','Calm water tonight — I still counted every ripple.'],seed,1);
+  var posture=score>=75?_nvPick(['The signal flared red — this is a full-alert night on the Ledger.','Every alarm I’ve got lit up. Top of the dial.','This is a loud one — the board’s screaming and I’m all eyes.','Red across the board. When it’s this hot, somebody’s making a move.','Full alert. The heavy hands came out to play tonight.','I have not seen the board light like this in a while. Eyes up.','This is the kind of night the receipts get printed for.','Everything I watch moved at once. That is not coincidence, that is coordination.','Loud, fast, and deliberate. Somebody wanted this done before morning.','If you read one report this week, make it this one.'],seed,1)
+             :score>=50?_nvPick(['My instincts are up — something’s moving out there.','The Ledger’s running warm tonight, and I’m watching close.','Not a siren yet, but the needle’s twitching. I’m leaning in.','Enough motion to keep me honest — I’m tracking it.','Warm, not hot. But warm is how the big ones start.','A few wallets stretched their legs. Worth a second look tomorrow.','Nothing alarming, but the shape of it has my attention.','More motion than usual and no obvious reason for it yet.','Middle of the dial. I am staying in the chair.'],seed,1)
+             :score>=25?_nvPick(['Nothing villainous, but I kept one eye open.','A quiet patrol — steady, nothing extreme.','Low hum on the board. I logged it and moved on.','Mostly calm, a little chatter. Nothing I’d wake you for.','Slow night — but slow is when you catch the sloppy ones.','Routine traffic, logged and filed. No drama to sell you.','A working night. Nothing that changes the picture.','Ordinary motion on an ordinary board. I still read every line.','Gentle night. The interesting ones usually follow these.'],seed,1)
+             :_nvPick(['Otherwise the Ledger behaved itself.','The rest of the board stayed in line.','A still night — the rails were quiet and honest.','Nothing else tried to slip past. Good.','Calm water tonight — I still counted every ripple.','Flat board, honest hours. Nothing to report is a report.','Everything sat exactly where it was left.','No movement worth your time — and I checked all of it.','Dead quiet, start to finish. I will take it.'],seed,1);
   // Close the open on one of XRPMan's signature beats — keeps the voice front
   // and center before we get into the facts.
   return line+(posture?' '+posture:'')+' '+_nvBeat(seed,0);
@@ -665,11 +716,16 @@ function _buildWhatMatteredMost(interps, pack){
     ' The chart plays catch-up; the Ledger already knew.',
     ' That’s the move under the move — the part the ticker never shows you.',
     ' Watch that thread; it usually unspools into something bigger.',
-    ' Small on the surface, loud if you know where the money sleeps.'
+    ' Small on the surface, loud if you know where the money sleeps.',
+    ' Keep that name in your head; it tends to come back.',
+    ' On its own it is nothing. Alongside the rest of the board it is something.',
+    ' That is the sort of move that only reads as odd in hindsight.',
+    ' The ticker will not mention it. That is rather the point.',
+    ' File it. Two weeks from now it may be the first line of a bigger story.'
   ];
   if(band&&band.has_signal&&absorber&&absorber.has_signal){
-    var alertLead=_nvPick(['Here’s the part that put me on alert.','This is the piece I circled twice.','Here’s where the night turned interesting.','This is the tell that earned a hard look.'],seed,2);
-    var closer=_nvPick(['The chart played dead; the Ledger told the truth.','The price sat still while the money quietly rearranged itself.','No fireworks on the ticker — all the action was underneath.'],seed,6);
+    var alertLead=_nvPick(['Here’s the part that put me on alert.','This is the piece I circled twice.','Here’s where the night turned interesting.','This is the tell that earned a hard look.','Here is the line I kept coming back to.','This is the one that made me re-run the numbers.','Out of everything on the board, this is what stuck.','Here is where I stopped scrolling.'],seed,2);
+    var closer=_nvPick(['The chart played dead; the Ledger told the truth.','The price sat still while the money quietly rearranged itself.','No fireworks on the ticker — all the action was underneath.','The price told you nothing. The transfers told you plenty.','Flat candles, busy wallets. That gap is the whole story.','Nobody announced any of it, and it all happened anyway.'],seed,6);
     return alertLead+' '+band.summary+' '+absorber.summary+' '+closer;
   }
   var best=_topInterp(interps);

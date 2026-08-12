@@ -775,16 +775,67 @@ function toLocalInput(d) {
     'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
 }
 function parseLocalInput(v) { if (!v) return null; const d = new Date(v); return isFinite(d.getTime()) ? d.getTime() : null; }
+// ── HOW FAR BACK A DEFAULT SCAN REACHES ────────────────────────
+// A flat 24 hours opens Monday blind. The ledger does not take weekends off,
+// but this report was only ever looking at the last day — so everything that
+// moved between Friday's scan and Monday's fell in a hole nobody could see,
+// and "a quiet weekend" and "we did not look" produced the same report.
+//
+// The floor is now set by the day it actually is, in UTC, the same clock the
+// ledger timestamps use:
+//   Monday    72h — back through Friday, the whole weekend in one sweep
+//   Sunday    60h — Friday evening onward
+//   Saturday  48h — Friday's session
+//   otherwise 24h — the usual overnight
+const _DAY_LOOKBACK_H = { 1: 72, 0: 60, 6: 48 };
+function defaultLookbackHours(nowMs) {
+  try { return _DAY_LOOKBACK_H[new Date(nowMs).getUTCDay()] || 24; }
+  catch (_) { return 24; }
+}
+// When did we last complete a scan? The balance snapshot carries a timestamp
+// per wallet, so the newest of those is the last time this app actually looked
+// — no new storage needed. Used to widen the window when a day was missed, so
+// a skipped run leaves no gap rather than a silent one.
+function lastScanMs() {
+  try {
+    const prev = JSON.parse(localStorage.getItem(STORE) || '{}');
+    let newest = 0;
+    for (const k in prev) {
+      const t = prev[k] && prev[k].ts ? Date.parse(prev[k].ts) : 0;
+      if (isFinite(t) && t > newest) newest = t;
+    }
+    return newest || 0;
+  } catch (_) { return 0; }
+}
+const MAX_LOOKBACK_H = 24 * 7;      // never reach further than the page depth supports
+
 function getTxWindow() {
   const now = Date.now();
   const sR = parseLocalInput($('txStart') && $('txStart').value);
   const eR = parseLocalInput($('txEnd') && $('txEnd').value);
-  let startMs = sR ?? (now - 86400000), endMs = eR ?? now;
+  const dayH = defaultLookbackHours(now);
+  // Cover whichever is longer: the day-of-week floor, or the gap since the last
+  // completed scan (plus an hour of overlap so nothing straddles the boundary).
+  const last = lastScanMs();
+  const gapH = last ? Math.min(MAX_LOOKBACK_H, (now - last) / 3600000 + 1) : 0;
+  const autoH = Math.max(dayH, gapH);
+  let startMs = sR ?? (now - autoH * 3600000), endMs = eR ?? now;
   if (endMs < startMs) { const t = startMs; startMs = endMs; endMs = t; }
-  const custom = !!(sR || eR);
+  // An auto-set window is still "ours" even though the inputs are filled.
+  const custom = !!(sR || eR) && !state._txWindowAuto;
   const hours = Math.max(1, (endMs - startMs) / 3600000);
-  return { startMs, endMs, custom, hours,
-    label: custom ? new Date(startMs).toLocaleString() + ' → ' + new Date(endMs).toLocaleString() : 'LAST 24H' };
+  const DAY = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date(now).getUTCDay()];
+  let label;
+  if (custom) {
+    label = new Date(startMs).toLocaleString() + ' → ' + new Date(endMs).toLocaleString();
+  } else {
+    label = 'LAST ' + Math.round(hours) + 'H';
+    // Say WHY it is wider than usual — a reader seeing "LAST 72H" deserves to
+    // know it is deliberate and not a misconfiguration.
+    if (gapH > dayH + 0.5) label += ' · GAP SINCE LAST SCAN';
+    else if (dayH > 24)    label += ' · ' + DAY.toUpperCase() + ' WEEKEND SWEEP';
+  }
+  return { startMs, endMs, custom, hours, label, autoHours: autoH, dayName: DAY };
 }
 
 // FIX: 5 pages for 24h (was 1 in v2.x — biggest data gap)
@@ -795,15 +846,27 @@ function txWindowMaxPages() {
   return 15;
 }
 
-function setTxWindowHours(h) {
+// auto = the app chose this window (day-aware default), not the operator. It
+// only affects how the window is LABELLED — an operator-chosen range prints as a
+// range, ours explains itself ("MONDAY WEEKEND SWEEP").
+function setTxWindowHours(h, auto) {
   const end = new Date(), start = new Date(end.getTime() - h * 3600000);
   if ($('txStart')) $('txStart').value = toLocalInput(start);
   if ($('txEnd')) $('txEnd').value = toLocalInput(end);
+  state._txWindowAuto = !!auto;
   updateScopeHud();
+}
+// Called on boot. Applies the day-aware lookback rather than a flat 24 hours.
+function applyAutoTxWindow() {
+  const now = Date.now();
+  const last = lastScanMs();
+  const gapH = last ? Math.min(MAX_LOOKBACK_H, (now - last) / 3600000 + 1) : 0;
+  setTxWindowHours(Math.max(defaultLookbackHours(now), gapH), true);
 }
 function clearTxWindow() {
   if ($('txStart')) $('txStart').value = '';
   if ($('txEnd')) $('txEnd').value = '';
+  state._txWindowAuto = false;
   updateScopeHud();
 }
 
@@ -994,12 +1057,25 @@ const SCAN_CHUNK_DELAY_MS = 0;    // v3.12: no inter-chunk delay needed
 // Per-group page depth for Phase 2.
 function pageDepthFor(label) {
   const grp = getWalletGroup(label);
+  let base;
   switch (grp) {
-    case 'dormant': case 'founder': case 'genesis_whale': return 1;
-    case 'whale': case 'institutional': case 'msig_cluster': case 'market_maker': return 2;
-    case 'exchange': case 'ripple_corp': return 3;
-    default: return 2;
+    case 'dormant': case 'founder': case 'genesis_whale': base = 1; break;
+    case 'whale': case 'institutional': case 'msig_cluster': case 'market_maker': base = 2; break;
+    case 'exchange': case 'ripple_corp': base = 3; break;
+    default: base = 2;
   }
+  // These page counts were tuned for a 24-hour window. Widening the window to
+  // cover a weekend without widening the depth would have been worse than not
+  // widening it at all: a busy exchange fills three pages inside a single day,
+  // so the extra 48 hours would come back empty and the report would call a
+  // weekend quiet on the strength of data it never fetched. Scale with the
+  // window. accountTxWindowDepth still stops the moment it reads past the
+  // window start, so a quiet wallet pays nothing for the higher ceiling.
+  try {
+    const h = getTxWindow().hours;
+    const factor = Math.max(1, Math.min(4, Math.ceil(h / 24)));
+    return Math.min(15, base * factor);
+  } catch (_) { return base; }
 }
 
 async function scanWallets(ws) {
@@ -13686,7 +13762,44 @@ const SCRIPTURE_POOL = [
   { ref: 'Proverbs 18:17 (KJV)',    text: 'He that is first in his own cause seemeth just; but his neighbour cometh and searcheth him.' },
   { ref: 'Psalm 91:5 (KJV)',        text: 'Thou shalt not be afraid for the terror by night; nor for the arrow that flieth by day.' },
   { ref: 'Proverbs 12:19 (KJV)',    text: 'The lip of truth shall be established for ever: but a lying tongue is but for a moment.' },
-  { ref: '1 Peter 5:8 (KJV)',       text: 'Be sober, be vigilant; because your adversary the devil, as a roaring lion, walketh about, seeking whom he may devour.' }
+  { ref: '1 Peter 5:8 (KJV)',       text: 'Be sober, be vigilant; because your adversary the devil, as a roaring lion, walketh about, seeking whom he may devour.' },
+  // ── v16.9: pool doubled. One verse a day exhausted 32 in a month, so the
+  // rotation was visibly repeating inside a single quarter. 64 gives two
+  // months before anything comes round again. Same themes throughout —
+  // watchfulness, honest weights, hidden things brought to light, patience
+  // under noise — because that is what this report is about.
+  { ref: 'Proverbs 3:5 (KJV)',      text: 'Trust in the Lord with all thine heart; and lean not unto thine own understanding.' },
+  { ref: 'Luke 8:17 (KJV)',         text: 'For nothing is secret, that shall not be made manifest; neither any thing hid, that shall not be known and come abroad.' },
+  { ref: 'Proverbs 10:9 (KJV)',     text: 'He that walketh uprightly walketh surely: but he that perverteth his ways shall be known.' },
+  { ref: 'Deuteronomy 25:15 (KJV)', text: 'But thou shalt have a perfect and just weight, a perfect and just measure shalt thou have.' },
+  { ref: 'Proverbs 20:23 (KJV)',    text: 'Divers weights are an abomination unto the Lord; and a false balance is not good.' },
+  { ref: 'Micah 6:11 (KJV)',        text: 'Shall I count them pure with the wicked balances, and with the bag of deceitful weights?' },
+  { ref: 'Psalm 121:4 (KJV)',       text: 'Behold, he that keepeth Israel shall neither slumber nor sleep.' },
+  { ref: 'Habakkuk 2:1 (KJV)',      text: 'I will stand upon my watch, and set me upon the tower, and will watch to see what he will say unto me.' },
+  { ref: 'Ezekiel 33:6 (KJV)',      text: 'But if the watchman see the sword come, and blow not the trumpet, and the people be not warned...' },
+  { ref: 'Mark 13:33 (KJV)',        text: 'Take ye heed, watch and pray: for ye know not when the time is.' },
+  { ref: 'Proverbs 12:22 (KJV)',    text: 'Lying lips are abomination to the Lord: but they that deal truly are his delight.' },
+  { ref: 'Proverbs 17:27 (KJV)',    text: 'He that hath knowledge spareth his words: and a man of understanding is of an excellent spirit.' },
+  { ref: 'Ecclesiastes 3:1 (KJV)',  text: 'To every thing there is a season, and a time to every purpose under the heaven.' },
+  { ref: 'Proverbs 23:4 (KJV)',     text: 'Labour not to be rich: cease from thine own wisdom.' },
+  { ref: 'Proverbs 30:8 (KJV)',     text: 'Remove far from me vanity and lies: give me neither poverty nor riches; feed me with food convenient for me.' },
+  { ref: '1 Timothy 6:10 (KJV)',    text: 'For the love of money is the root of all evil: which while some coveted after, they have erred from the faith.' },
+  { ref: 'Luke 16:10 (KJV)',        text: 'He that is faithful in that which is least is faithful also in much.' },
+  { ref: 'Psalm 24:1 (KJV)',        text: 'The earth is the Lord\u2019s, and the fulness thereof; the world, and they that dwell therein.' },
+  { ref: 'Job 12:22 (KJV)',         text: 'He discovereth deep things out of darkness, and bringeth out to light the shadow of death.' },
+  { ref: 'Jeremiah 17:10 (KJV)',    text: 'I the Lord search the heart, I try the reins, even to give every man according to his ways.' },
+  { ref: 'Proverbs 2:6 (KJV)',      text: 'For the Lord giveth wisdom: out of his mouth cometh knowledge and understanding.' },
+  { ref: 'Isaiah 32:17 (KJV)',      text: 'And the work of righteousness shall be peace; and the effect of righteousness quietness and assurance for ever.' },
+  { ref: 'Psalm 112:7 (KJV)',       text: 'He shall not be afraid of evil tidings: his heart is fixed, trusting in the Lord.' },
+  { ref: 'Proverbs 29:11 (KJV)',    text: 'A fool uttereth all his mind: but a wise man keepeth it in till afterwards.' },
+  { ref: 'Colossians 3:2 (KJV)',    text: 'Set your affection on things above, not on things on the earth.' },
+  { ref: 'Matthew 10:26 (KJV)',     text: 'Fear them not therefore: for there is nothing covered, that shall not be revealed.' },
+  { ref: 'Proverbs 6:6 (KJV)',      text: 'Go to the ant, thou sluggard; consider her ways, and be wise.' },
+  { ref: 'Psalm 19:14 (KJV)',       text: 'Let the words of my mouth, and the meditation of my heart, be acceptable in thy sight, O Lord.' },
+  { ref: 'Proverbs 31:9 (KJV)',     text: 'Open thy mouth, judge righteously, and plead the cause of the poor and needy.' },
+  { ref: 'Zechariah 8:16 (KJV)',    text: 'Speak ye every man the truth to his neighbour; execute the judgment of truth and peace in your gates.' },
+  { ref: 'Ephesians 5:11 (KJV)',    text: 'And have no fellowship with the unfruitful works of darkness, but rather reprove them.' },
+  { ref: 'Proverbs 15:3 (KJV)',     text: 'The eyes of the Lord are in every place, beholding the evil and the good.' }
 ];
 const PRAYER_POOL = [
   'Lord, give this community clear eyes, steady hands, and honest words. Help us follow the evidence, reject forced stories, and stay humble while hidden things come to light.',
@@ -13718,7 +13831,40 @@ const PRAYER_POOL = [
   'Father, you watch the sparrow and the spreadsheet. Watch over this work today and protect the operator from burnout, from doubt, and from praise that turns the head.',
   'Lord, where war or sanctions reshape liquidity, let us see the shift early and report it without political dressing.',
   'Father, let the truth in this report find the people who need it most and stay invisible to the people who would use it wrong.',
-  'God, on the day this work no longer serves, let us be the first to set it down. Until then, let us be faithful in the small things.'
+  'God, on the day this work no longer serves, let us be the first to set it down. Until then, let us be faithful in the small things.',
+  // ── v16.9: pool doubled, 30 \u2192 60. At one a day the old set came back
+  // round inside a month, which a daily reader notices. Same voice: plain,
+  // specific to the work, never asking God to move the price.
+  'Lord, the weekend does not stop the wires. Give us the diligence to look back as far as the money went, not just as far as the last night.',
+  'Father, make us slow to conclude and quick to check. The Ledger keeps; our patience is the only thing in short supply.',
+  'God, let us be honest about what we did not see. An empty finding reported plainly is worth more than a full one we invented.',
+  'Lord, some of these wallets belong to people having the worst week of their lives. Keep us from treating a balance like a scoreboard.',
+  'Father, when a number surprises us, check our first instinct before we publish it. The obvious read is often the wrong one.',
+  'God, guard us from the pride of the early call. Being first has ruined more watchmen than being wrong.',
+  'Lord, we work with public records and private consequences. Let us never forget there are people at the far end of these addresses.',
+  'Father, give us the discipline to say \u201cwe do not know\u201d as often as the evidence requires it.',
+  'God, when the tape is flat and there is nothing to report, let us report nothing rather than manufacture something.',
+  'Lord, the loudest voice is rarely the most informed. Keep us quiet enough to hear the ledger over the crowd.',
+  'Father, thank you for a clean scan and a quiet board. Not every gift arrives as excitement.',
+  'God, when we are tired, hold our standards up where our energy cannot. Let fatigue never become the reason a claim goes unchecked.',
+  'Lord, let this work outlast our interest in it. Build something that serves after the novelty is gone.',
+  'Father, the market rewards confidence and punishes doubt. Give us the courage to doubt anyway when doubt is honest.',
+  'God, keep this report free of the two easy lies \u2014 that we know more than we do, and that it matters more than it does.',
+  'Lord, bless the people who read this before they trade, and protect the ones who read it after.',
+  'Father, we track money that never sleeps. Remind us that we are not built the same way, and that rest is obedience.',
+  'God, when the same wallets appear night after night, keep our attention fresh. Familiarity is how a watchman goes blind.',
+  'Lord, let us hold our own past reports to the standard we hold everyone else to. Correct us publicly when we were wrong.',
+  'Father, in a business full of people selling certainty, let our restraint be the thing that earns trust.',
+  'God, the chain remembers everything and forgives nothing. Thank you that you are not the chain.',
+  'Lord, give us eyes for the small transfer that means something and the patience to ignore the large one that does not.',
+  'Father, when we find something real, steady our hands. When we find nothing, steady our pride.',
+  'God, let the watching be worship \u2014 careful, unhurried, done as well as we know how.',
+  'Lord, protect this community from anyone who would use our work to hurt someone. Including us.',
+  'Father, the money moves in the dark because the dark is convenient. Make us patient enough to wait for the light.',
+  'God, keep our numbers right. A misplaced decimal in a forensic report is not a typo; it is a false witness.',
+  'Lord, let us finish what we start today \u2014 the scan, the check, the correction we would rather leave for tomorrow.',
+  'Father, some things on this ledger will never be explained. Give us peace with the ones that stay dark.',
+  'God, make this report boring on the days it should be boring, and unmistakable on the day it should not.'
 ];
 
 // Deterministic date-based seed. Same date = same hash. Different dates = different hash.
@@ -13728,8 +13874,35 @@ function dateSeed(dateStr) {
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
   return Math.abs(h);
 }
+// ── DAILY ROTATION ─────────────────────────────────────────────
+// dateSeed is a djb2 hash, and djb2 on consecutive date strings moves in tiny
+// steps — the low bits of 2026-01-01..08 land on 21,20,19,18,17,16,15,14. So a
+// verse pool indexed by (seed % length) walks backwards one slot a day and then
+// collides hard at every month boundary. Measured over a year against the
+// 64-verse pool: only 37 verses ever appeared and 147 days repeated one that had
+// been used inside the previous 20. Doubling the pool did nothing for that,
+// because the pool was never the problem.
+//
+// A stride coprime to the pool length steps through EVERY entry exactly once
+// before any of them comes round again — a guaranteed full cycle, still purely
+// a function of the date, so the same day always yields the same verse.
+function _dayIndex(dateStr) {
+  const t = Date.parse((dateStr || today()) + 'T00:00:00Z');
+  return isFinite(t) ? Math.floor(t / 86400000) : 0;
+}
+const _strideCache = {};
+function _coprimeStride(n) {
+  if (_strideCache[n]) return _strideCache[n];
+  const gcd = (a, b) => b ? gcd(b, a % b) : a;
+  let s = Math.max(2, Math.floor(n * 0.618));   // start near the golden ratio: well spread
+  while (s > 1 && gcd(s, n) !== 1) s--;
+  return (_strideCache[n] = s > 1 ? s : 1);
+}
 function pickDaily(pool, dateStr, offset) {
-  return pool[(dateSeed(dateStr) + (offset || 0)) % pool.length];
+  const len = pool.length;
+  if (!len) return null;
+  const i = ((_dayIndex(dateStr) * _coprimeStride(len) + (offset || 0)) % len + len) % len;
+  return pool[i];
 }
 
 function buildDailyTone(p) {
@@ -16806,7 +16979,12 @@ function setDefaults() {
   loadIntelSettings(true);
   updateScopeHud();
   renderHudWaiting();
-  setTxWindowHours(24);
+  // v16.9: was setTxWindowHours(24), which pre-filled the window inputs on every
+  // boot — so the day-aware default computed in getTxWindow() could never fire,
+  // because an explicitly-filled input always counts as a custom range. The
+  // whole weekend sweep would have been dead on arrival. Set the inputs FROM
+  // the day-aware value instead.
+  applyAutoTxWindow();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -29292,8 +29470,9 @@ document.addEventListener('DOMContentLoaded', () => {
   $('btn24h').onclick     = () => setTxWindowHours(24);
   $('btn7d').onclick      = () => setTxWindowHours(24 * 7);
   $('btnLive').onclick    = clearTxWindow;
-  $('txStart').onchange   = updateScopeHud;
-  $('txEnd').onchange     = updateScopeHud;
+  // An operator edit is an operator choice — stop calling it ours.
+  $('txStart').onchange   = () => { state._txWindowAuto = false; updateScopeHud(); };
+  $('txEnd').onchange     = () => { state._txWindowAuto = false; updateScopeHud(); };
   $('xrplServer').onchange = () => log('XRPL server set to: ' + $('xrplServer').value);
 
   // Report buttons
