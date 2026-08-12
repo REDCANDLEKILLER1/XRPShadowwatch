@@ -13215,10 +13215,19 @@ function buildExecutiveSummary(p, netDelta, news) {
     // sections of one report naming different top stories reads like an error,
     // because it is one. Strength still comes first; XRP-relevance breaks ties.
     const xrpRe = /(XRP|Ripple|XRPL|RLUSD|Clarity Act|ETF|SBI|Japan|Korea|Hidden Road|Standard Custody|Bullish|Uphold|Upbit|Bithumb)/i;
-    const pick = (strength) =>
-      matched.find(a => a.match_strength === strength && xrpRe.test(a.title || '')) ||
-      matched.find(a => a.match_strength === strength);
-    const strongOrMedium = pick('STRONG') || pick('MEDIUM');
+    const rel = (strength) => matched.find(a => a.match_strength === strength && xrpRe.test(a.title || ''));
+    const any = (strength) => matched.find(a => a.match_strength === strength);
+    // The router RANKS candidates; it must not FILTER them. On 2026-08-12 19:08
+    // its only MEDIUM match was a Bitcoin chart story — the Ripple/CLARITY Act
+    // headline never entered matched_articles at all — so both this line and
+    // GLOBAL SYNC printed a Bitcoin piece as XRP news context while a directly
+    // relevant headline sat unused in the pool. An XRP-relevant headline now
+    // wins over an off-topic router match wherever one exists, at any strength;
+    // only when nothing in the whole pool mentions XRP do we fall back to the
+    // router's own top pick.
+    const strongOrMedium = rel('STRONG') || rel('MEDIUM') ||
+                           (news || []).find(h => xrpRe.test(h.title || '')) ||
+                           any('STRONG') || any('MEDIUM');
     if (strongOrMedium && strongOrMedium.title) {
       newsLine = ` Active news context (not causation proof): ${strongOrMedium.title.replace(/\s*[-—–|]\s*[^-—–|]+$/, '')}.`;
     } else {
@@ -13440,11 +13449,14 @@ function globalSyncSection(news, p) {
   // Pick top banking/institutional/regulatory headline for the "Bank/Institutional Headline" slot
   const bankRe = /(bank|institution|prime|brokerage|custody|swift|payment|partnership|ETF|ruling|Clarity|stablecoin|RLUSD|Bullish|Hidden Road|Standard Custody|SBI|Bitwise)/i;
   let bankHl;
-  if (strongOrMedium.length) {
-    bankHl = strongOrMedium.find(a => bankRe.test(a.title || '')) || strongOrMedium[0];
-  } else {
-    bankHl = news.find(h => bankRe.test(h.title || '')) || news[0];
-  }
+  // Same rule as the executive summary: a router match that is not actually
+  // banking/institutional loses to a pool headline that is. Without this step
+  // the slot printed "Bitcoin Chart Mimics Exact Pattern That Sparked 2023
+  // Rally" under the label "Bank/Institutional Headline", with a Theme Read
+  // about ETF approvals underneath it.
+  bankHl = strongOrMedium.find(a => bankRe.test(a.title || '')) ||
+           news.find(h => bankRe.test(h.title || '')) ||
+           strongOrMedium[0] || news[0];
   const bankTitle = (bankHl.title || '').replace(/\s*[-—–|]\s*[^-—–|]+$/, '');
   // For Theme Read, look at the cluster of themes — count news themes
   const themes = { etf: 0, japan: 0, korea: 0, regulation: 0, custody: 0, partnership: 0, stablecoin: 0 };
