@@ -19432,8 +19432,14 @@ function _swBuildCockpit() {
   var runBtn = _swEl('button', { type:'button', 'class':'sw-runbtn', id:'swRunBtn' },
     _swIcon('power') + '<span id="swRunLbl">RUN SCAN</span>');
   runBtn.addEventListener('click', function () { if (!_swScanning()) _swClickCmd('run-scan'); });
-  rRight.appendChild(runBtn);
-  reactor.appendChild(rLeft); reactor.appendChild(rRight);
+  // v16.9: stacked, in the order the operator reads them — progress, then the
+  // one control, then the instruments. The button used to sit beside the
+  // progress bar in a narrow right-hand column with the gauges above it; on a
+  // phone that column collapsed underneath and the button landed BELOW the
+  // gauges, so the primary action was the last thing you reached.
+  reactor.appendChild(rLeft);
+  reactor.appendChild(runBtn);
+  reactor.appendChild(rRight);
   reactorPanel.appendChild(reactor);
   rowReactor.appendChild(reactorPanel);
 
@@ -19448,7 +19454,6 @@ function _swBuildCockpit() {
     '<div class="sw-panel-title"><span class="sw-t"><span class="sw-dot"></span>LIVE SCAN LOG</span>' +
     '<span class="sw-tag" id="swLogTag">IDLE</span></div>' +
     '<pre class="sw-scroll sw-logbody" id="swLogBody"></pre>');
-  rowReactor.appendChild(logPanel);
   main.appendChild(rowReactor);
 
   // Built here, appended lower down in the mid column.
@@ -19475,20 +19480,25 @@ function _swBuildCockpit() {
   });
   // See the note on swMiniHelpers: kept live and audited, no longer given a slot.
   strip.appendChild(_swEl('b', { id:'swCellHelpers', hidden:'hidden', style:'display:none' }, ''));
-  main.appendChild(strip);
 
-  // Row 3 — three columns
+  // Row 3 — two columns now (instruments moved out to its own full-width row)
   var cols = _swEl('div', { 'class':'sw-row-cols' });
+
+  // MARKET & NETWORK is its own panel now, directly under the reactor, rather
+  // than a subheading buried at the bottom of the instruments panel — it reads
+  // at a glance and deserves the height. #swMktTtl is kept (hidden) because the
+  // live renderer writes to it.
+  var marketPanel = _swEl('section', { 'class':'sw-panel', id:'swMarketPanel' },
+    '<div class="sw-panel-title"><span class="sw-t"><span class="sw-dot"></span>MARKET &amp; NETWORK</span></div>' +
+    '<span id="swMktTtl" hidden style="display:none">MARKET &amp; NETWORK</span>' +
+    '<div class="sw-mktrow" id="swMarket"></div>');
 
   var instruments = _swEl('section', { 'class':'sw-panel', id:'swInstruments' },
     '<div class="sw-panel-title"><span class="sw-t"><span class="sw-dot"></span>LIVE SCAN INSTRUMENTS</span></div>' +
-    // #swGauges now lives in the reactor row — see the note there. This panel
-    // keeps the net-flow meter, the tiles and MARKET & NETWORK.
+    // #swGauges lives in the reactor, MARKET & NETWORK in its own panel above.
+    // This one keeps the net-flow meter and the tiles.
     '<div id="swMeter"></div>' +
-    '<div class="sw-tilerow" id="swTiles"></div>' +
-    '<div class="sw-subttl" id="swMktTtl">MARKET &amp; NETWORK</div>' +
-    '<div class="sw-mktrow" id="swMarket"></div>');
-  cols.appendChild(instruments);
+    '<div class="sw-tilerow" id="swTiles"></div>');
 
   // Middle column: activity feed on top, live scan log beneath. The log is what
   // the operator watches to see what Shadow Watch is doing right now; the
@@ -19533,6 +19543,21 @@ function _swBuildCockpit() {
   col3b.appendChild(downloads);
   col3.appendChild(col3b);
   cols.appendChild(col3);
+
+  // ── ORDER ON THE SCREEN ──────────────────────────────────────────────────
+  // Below 900px this grid collapses to a single column, so DOM order IS what a
+  // phone shows. Assembled top to bottom the way the operator asked for it:
+  //
+  //   reactor   progress bar → RUN SCAN → the three gauges
+  //   market    MARKET & NETWORK
+  //   instr.    LIVE SCAN INSTRUMENTS (net flow meter + tiles)
+  //   strip     Wallets · Queue · Flagged Moves · Errors · Risk · Coverage
+  //   log       LIVE SCAN LOG — back down where it was, and now following
+  //   cols      activity feed / read-report / network overview
+  main.appendChild(marketPanel);
+  main.appendChild(instruments);
+  main.appendChild(strip);
+  main.appendChild(logPanel);
   main.appendChild(cols);
   dash.appendChild(main);
 
@@ -19806,8 +19831,14 @@ function _swRenderLog() {
     _swLogLast = txt;
     var lines = txt.split('\n');
     if (lines.length > 200) lines = lines.slice(-200);      // bounded
+    // Measure BEFORE replacing the text. Reading scrollHeight afterwards reads
+    // the NEW, taller content against the OLD scrollTop, so the gap looks larger
+    // than 40px the moment more than 40px of log arrives — and the follow
+    // silently switches itself off. During a scan the lines come in bursts, so
+    // it stopped following almost immediately. That is why the log had to be
+    // dragged by hand.
+    var atBottom = (out.scrollHeight - out.scrollTop - out.clientHeight) < 40;
     out.textContent = lines.join('\n');
-    var atBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 40;
     if (atBottom) out.scrollTop = out.scrollHeight;          // follow unless scrolled up
   }
   var tag = document.getElementById('swLogTag');

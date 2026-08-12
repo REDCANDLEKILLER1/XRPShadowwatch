@@ -132,9 +132,9 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
 /* ════════ main grid ════════ */
 .sw-dash-v1 #swDashMain{grid-area:main;display:grid;gap:var(--sw-gap);min-width:0;min-height:0;
   grid-template-rows:auto auto minmax(0,1fr);overflow:hidden;}
-.sw-dash-v1 .sw-row-reactor{display:grid;gap:var(--sw-gap);grid-template-columns:minmax(0,1fr) 320px;min-width:0;}
+.sw-dash-v1 .sw-row-reactor{display:grid;gap:var(--sw-gap);grid-template-columns:minmax(0,1fr);min-width:0;}
 .sw-dash-v1 .sw-row-cols{display:grid;gap:var(--sw-gap);min-width:0;min-height:0;
-  grid-template-columns:minmax(0,1.12fr) minmax(0,0.82fr) minmax(0,1.26fr);}
+  grid-template-columns:minmax(0,0.9fr) minmax(0,1.3fr);}
 .sw-dash-v1 .sw-col3{display:grid;gap:var(--sw-gap);min-width:0;min-height:0;grid-template-rows:minmax(0,1fr) auto;}
 /* middle column: activity feed over the live scan log */
 .sw-dash-v1 .sw-col-mid{display:grid;gap:var(--sw-gap);min-width:0;min-height:0;
@@ -143,7 +143,11 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
   word-break:break-word;font:400 9.5px/1.45 'Share Tech Mono',monospace;color:var(--sw-text-muted);}
 .sw-dash-v1 .sw-col3-bottom{display:grid;gap:var(--sw-gap);grid-template-columns:minmax(0,1fr) minmax(0,1fr);min-width:0;}
 /* ════════ reactor core ════════ */
-.sw-dash-v1 .sw-reactor{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:14px;}
+/* Stacked at every width: progress bar, then the one control, then the gauges.
+   The button is full-width under the bar so it is the obvious next thing to
+   press, and the gauges spread across the panel instead of being squeezed into
+   a 250px rail. */
+.sw-dash-v1 .sw-reactor{display:flex;flex-direction:column;gap:12px;}
 .sw-dash-v1 .sw-reactor-left{min-width:0;display:flex;flex-direction:column;}
 .sw-dash-v1 .sw-reactor-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
 .sw-dash-v1 .sw-reactor-ttl{font:700 12px 'Rajdhani',sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--sw-text);}
@@ -157,9 +161,9 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
    that repeated the status strip. It is a narrow column (320px on desktop, full
    width when the row stacks on a phone), so the gauges are capped tighter here
    than they were in the wide instruments panel. */
-.sw-dash-v1 .sw-reactor-gauges{display:flex;flex-direction:column;justify-content:center;min-width:0;}
-.sw-dash-v1 .sw-reactor-gauges .sw-gaugerow{gap:4px;}
-.sw-dash-v1 .sw-reactor-gauges .sw-gauge svg{max-width:96px;}
+.sw-dash-v1 .sw-reactor-gauges{display:block;min-width:0;}
+.sw-dash-v1 .sw-reactor-gauges .sw-gaugerow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+.sw-dash-v1 .sw-reactor-gauges .sw-gauge svg{max-width:112px;}
 .sw-dash-v1 .sw-reactor-gauges .sw-gauge-val{font-size:14px;}
 .sw-dash-v1 .sw-reactor-gauges .sw-gauge-cap{font-size:7.5px;letter-spacing:.08em;}
 .sw-dash-v1 .sw-reactor-gauges .sw-gauge-sub{font-size:7px;}
@@ -169,8 +173,10 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
 .sw-dash-v1 .sw-mini b{display:block;font:700 14px/1.15 'Share Tech Mono',monospace;color:var(--sw-green);}
 /* RUN SCAN — the primary action on the cockpit; spans the stat grid so it is
    immediately findable on a desktop screen instead of hiding in a stat cell. */
-.sw-dash-v1 .sw-runbtn{grid-column:span 2;display:flex;align-items:center;justify-content:center;gap:9px;
-  padding:12px 14px;margin-top:2px;cursor:pointer;border-radius:var(--sw-radius);
+/* grid-column:span 2 was a leftover from the old two-column stat grid; the
+   reactor is a flex column now, so it just needs to be full width. */
+.sw-dash-v1 .sw-runbtn{width:100%;display:flex;align-items:center;justify-content:center;gap:9px;
+  padding:14px;cursor:pointer;border-radius:var(--sw-radius);
   border:1px solid var(--sw-green);background:rgba(0,255,0,.12);color:var(--sw-green);
   font:800 14px 'Rajdhani',sans-serif;letter-spacing:.16em;text-transform:uppercase;
   box-shadow:0 0 16px rgba(0,255,0,.18);}
@@ -187,7 +193,9 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
 /* LIVE SCAN LOG promoted into row 1. It must have a real height of its own —
    row 1 is auto-height, so without this the <pre> collapses and the panel that
    is supposed to be watched during a scan shows one line. */
-.sw-dash-v1 .sw-logpanel-top{display:flex;flex-direction:column;min-height:210px;max-height:260px;}
+/* Named -top from when it sat in row 1; it is the bottom panel now. Taller,
+   because it is the thing you actually read while a scan runs. */
+.sw-dash-v1 .sw-logpanel-top{display:flex;flex-direction:column;min-height:240px;max-height:340px;}
 .sw-dash-v1 .sw-logpanel-top .sw-logbody{flex:1 1 auto;min-height:0;}
 /* Voice moved into the header: compact, still obviously a switch. */
 .sw-dash-v1 .sw-hvoice{gap:6px;}
@@ -329,8 +337,7 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
 }
 @media (max-width:1280px){
   :root{--sw-rail-w:150px;}
-  .sw-dash-v1 .sw-row-reactor{grid-template-columns:minmax(0,1fr) 260px;}
-  .sw-dash-v1 .sw-reactor{grid-template-columns:minmax(0,1fr) 210px;}
+  /* reactor is a single stacked column at every width now */
 }
 /* ════════ MOBILE — compact hierarchy per the phone reference ════════ */
 @media (max-width:900px){
@@ -368,9 +375,9 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
   .sw-dash-v1 .sw-hbtn{padding:6px 9px;font-size:9.5px;}
   .sw-dash-v1 .sw-hbtn .sw-hbtn-t{display:none;}
   .sw-dash-v1 .sw-hbtn.sw-exit .sw-hbtn-t{display:inline;}
-  .sw-dash-v1 .sw-row-reactor{grid-template-columns:minmax(0,1fr);}
+  /* .sw-row-reactor is already single-column */
   .sw-dash-v1 .sw-logpanel-top{min-height:190px;max-height:230px;}
-  .sw-dash-v1 .sw-reactor{grid-template-columns:minmax(0,1fr);gap:10px;}
+  .sw-dash-v1 .sw-reactor{gap:10px;}
   .sw-dash-v1 .sw-minigrid{grid-template-columns:repeat(3,minmax(0,1fr));}
   .sw-dash-v1 .sw-scanstatus{grid-column:span 3;}
   .sw-dash-v1 .sw-actionpanel{flex-direction:row;}
