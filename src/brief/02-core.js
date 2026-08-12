@@ -263,6 +263,15 @@ const WATCHLIST = [
   ['WHALE_RECV_rKZxyr', 'rKZxyrN6QG8zHigceKinzgrq9jVMHv6uGf', 'discovered_whale'],
   ['SPLITTER_r3uGtW',   'r3uGtWNmJ1UNp6PWWxrb3DW6zWfBFaaRCk', 'next_hop_splitter'],
 
+  // ── 2026-08-12 evening scan SC-MSQG6I8T ──
+  // Richlist #147 holding 112.53M XRP — the SECOND top-150 holder surfaced in
+  // consecutive scans (rKZxyr was #149). Both arrived the same way: an unknown
+  // receiver of a large transfer from a wallet we already watch, then matched
+  // against the imported richlist. Not added: r9c6A6… (MONITOR, one transaction,
+  // dormant) — that tier exists to wait, and promoting it on a single sighting
+  // is how a watch list turns into a phone book.
+  ['WHALE_RECV_rLwSuY', 'rLwSuYoPbDU3Y58tfXbuqFTq6Fmsx4f3KZ', 'discovered_whale'],
+
   // ── Coreum bridge incident, 2026-08-09 ────────────────────────────────────
   // ~199,916 XRP left the Coreum bridge's XRPL operations account in 97 minutes,
   // in 94 payments the bridge's own 17-of-28 relayer quorum signed. Source:
@@ -13197,13 +13206,23 @@ function buildExecutiveSummary(p, netDelta, news) {
   if (typeof isNewsUsableForNarrative === 'function' && isNewsUsableForNarrative(p)) {
     // First try router matched_articles filtered to STRONG/MEDIUM
     const matched = (p.news_intelligence_router && p.news_intelligence_router.matched_articles) || [];
-    const strongOrMedium = matched.find(a => a.match_strength === 'STRONG') ||
-                           matched.find(a => a.match_strength === 'MEDIUM');
+    // v16.9: prefer a headline that actually mentions XRP over one that merely
+    // matched a trigger keyword. On 2026-08-12 the router's first MEDIUM match
+    // was "Bitcoin Chart Mimics Exact Pattern That Sparked 2023 Rally" — it hit
+    // on a macro keyword — so the executive summary offered a Bitcoin chart
+    // story as XRP news context while a Ripple/CLARITY Act headline sat second
+    // in the same list AND was what GLOBAL SYNC printed four lines later. Two
+    // sections of one report naming different top stories reads like an error,
+    // because it is one. Strength still comes first; XRP-relevance breaks ties.
+    const xrpRe = /(XRP|Ripple|XRPL|RLUSD|Clarity Act|ETF|SBI|Japan|Korea|Hidden Road|Standard Custody|Bullish|Uphold|Upbit|Bithumb)/i;
+    const pick = (strength) =>
+      matched.find(a => a.match_strength === strength && xrpRe.test(a.title || '')) ||
+      matched.find(a => a.match_strength === strength);
+    const strongOrMedium = pick('STRONG') || pick('MEDIUM');
     if (strongOrMedium && strongOrMedium.title) {
       newsLine = ` Active news context (not causation proof): ${strongOrMedium.title.replace(/\s*[-—–|]\s*[^-—–|]+$/, '')}.`;
     } else {
       // Fall back to top XRP-tagged headline if no STRONG/MEDIUM router match
-      const xrpRe = /(XRP|Ripple|XRPL|RLUSD|Clarity Act|ETF|SBI|Japan|Korea|Hidden Road|Standard Custody|Bullish|Uphold|Upbit|Bithumb)/i;
       const topXrp = news.find(h => xrpRe.test(h.title || ''));
       if (topXrp) {
         newsLine = ` Active news context (not causation proof): ${topXrp.title.replace(/\s*[-—–|]\s*[^-—–|]+$/, '')}.`;
