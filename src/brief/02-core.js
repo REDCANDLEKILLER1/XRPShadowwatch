@@ -255,6 +255,14 @@ const WATCHLIST = [
   ['LARGE_RECV_rhuPtM', 'rhuPtM6TGnYRf8tgoWJvLBTnrazRQXYcFE', 'discovered_receiver'],
   ['LARGE_RECV_rwnYLU', 'rwnYLUsoBQX3ECa1A5bSKLdbPoHKnqf63J', 'discovered_receiver'],
 
+  // ── 2026-08-12 scan SC-MSQEGARP — both recommended by the app itself ──
+  // rKZxyr is the biggest catch so far: richlist rank #149 holding 70.5M XRP,
+  // and it was not on our list. It received from rHBXf4, added yesterday, which
+  // itself came off rhuqpD the day before — three links of the same chain, each
+  // one surfacing the next.
+  ['WHALE_RECV_rKZxyr', 'rKZxyrN6QG8zHigceKinzgrq9jVMHv6uGf', 'discovered_whale'],
+  ['SPLITTER_r3uGtW',   'r3uGtWNmJ1UNp6PWWxrb3DW6zWfBFaaRCk', 'next_hop_splitter'],
+
   // ── Coreum bridge incident, 2026-08-09 ────────────────────────────────────
   // ~199,916 XRP left the Coreum bridge's XRPL operations account in 97 minutes,
   // in 94 payments the bridge's own 17-of-28 relayer quorum signed. Source:
