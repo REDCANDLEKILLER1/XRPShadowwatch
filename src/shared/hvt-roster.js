@@ -1,6 +1,6 @@
 // ── SHARED HIGH-VALUE TARGET ROSTER ──────────────────────────────────────────
 // The one list of wallets both apps consider high-value. Before this file the
-// live wall watched 74 targets and the report console watched 158, and only
+// live wall watched 74 targets and the report console watched 163, and only
 // 45 addresses were on both — so a wallet could be a headline in the morning
 // brief and completely absent from the HVT board, or drain to nothing on the
 // board without the report ever looking at it.
@@ -20,14 +20,14 @@
 // Regenerate with scripts/build-hvt-roster.js after adding wallets to either
 // app. Do not hand-edit — the generator is the source of truth.
 //
-// 187 targets · 99 with a sourced identity · 32 carrying a size claim
+// 192 targets · 99 with a sourced identity · 32 carrying a size claim
 window.SW_HVT_ROSTER = {
  "version": 1,
- "generated": "2026-08-11",
+ "generated": "2026-08-12",
  "stats": {
-  "total": 187,
+  "total": 192,
   "identified": 99,
-  "from_report_only": 113,
+  "from_report_only": 118,
   "from_wall_only": 29,
   "both": 45,
   "with_expected": 32,
@@ -1146,7 +1146,7 @@ window.SW_HVT_ROSTER = {
   },
   {
    "address": "r38a3PtqW3M7LRESgaR4dyHjg3AxAmiZCt",
-   "label": "UPbit",
+   "label": "Upbit",
    "handle": "RIPPLE_500M_C",
    "type": "EXCH",
    "identified": true,
@@ -1160,7 +1160,7 @@ window.SW_HVT_ROSTER = {
   },
   {
    "address": "r4G689g4KePYLKkyyumM1iUppTP4nhZwVC",
-   "label": "UPbit",
+   "label": "Upbit",
    "handle": "UPBIT_500M_A",
    "type": "EXCH",
    "identified": true,
@@ -1174,7 +1174,7 @@ window.SW_HVT_ROSTER = {
   },
   {
    "address": "rDxJNbV23mu9xsWoQHoBqZQvc77YcbJXwb",
-   "label": "UPbit",
+   "label": "Upbit",
    "handle": "UPBIT_1.2B",
    "type": "EXCH",
    "identified": true,
@@ -1188,7 +1188,7 @@ window.SW_HVT_ROSTER = {
   },
   {
    "address": "rfL1mn4VTCoHdhHhHMwqpShCFUaDBRk6Z5",
-   "label": "UPbit",
+   "label": "Upbit",
    "handle": "UPBIT_500M_C",
    "type": "EXCH",
    "identified": true,
@@ -1202,7 +1202,7 @@ window.SW_HVT_ROSTER = {
   },
   {
    "address": "rH5wodHpZzeXBAWE36nMoRXGqeEjSdbzWU",
-   "label": "UPbit",
+   "label": "Upbit",
    "handle": "UPBIT_COLD",
    "type": "EXCH",
    "identified": true,
@@ -1215,7 +1215,7 @@ window.SW_HVT_ROSTER = {
   },
   {
    "address": "rJo4m69u9Wd1F8fN2RbgAsJEF6a4hW1nSi",
-   "label": "UPbit",
+   "label": "Upbit",
    "handle": "UPBIT_500M_F",
    "type": "EXCH",
    "identified": true,
@@ -1229,7 +1229,7 @@ window.SW_HVT_ROSTER = {
   },
   {
    "address": "rJWbw1u3oDDRcYLFqiWFjhGWRKVcBAWdgp",
-   "label": "UPbit",
+   "label": "Upbit",
    "handle": "UPBIT_500M_I",
    "type": "EXCH",
    "identified": true,
@@ -1243,7 +1243,7 @@ window.SW_HVT_ROSTER = {
   },
   {
    "address": "rLgn612WAgRoZ285YmsQ4t7kb8Ui3csdoU",
-   "label": "UPbit",
+   "label": "Upbit",
    "handle": "UPBIT_500M_G",
    "type": "EXCH",
    "identified": true,
@@ -1257,7 +1257,7 @@ window.SW_HVT_ROSTER = {
   },
   {
    "address": "rMNUAfSz2spLEbaBwPnGtxTzZCajJifnzH",
-   "label": "UPbit",
+   "label": "Upbit",
    "handle": "UPBIT_500M_B",
    "type": "EXCH",
    "identified": true,
@@ -1271,7 +1271,7 @@ window.SW_HVT_ROSTER = {
   },
   {
    "address": "rNcAdhSLXBrJ3aZUq22HaNtNEPpB5fR8Ri",
-   "label": "UPbit",
+   "label": "Upbit",
    "handle": "UPBIT_500M_E",
    "type": "EXCH",
    "identified": true,
@@ -1285,7 +1285,7 @@ window.SW_HVT_ROSTER = {
   },
   {
    "address": "rs48xReB6gjKtTnTfii93iwUhjhTJsW78B",
-   "label": "UPbit",
+   "label": "Upbit",
    "handle": "UPBIT_500M_H",
    "type": "EXCH",
    "identified": true,
@@ -1299,7 +1299,7 @@ window.SW_HVT_ROSTER = {
   },
   {
    "address": "rwa7YXssGVAL9yPKw6QJtCen2UqZbRQqpM",
-   "label": "UPbit",
+   "label": "Upbit",
    "handle": "UPBIT_500M_D",
    "type": "EXCH",
    "identified": true,
@@ -1757,6 +1757,19 @@ window.SW_HVT_ROSTER = {
    ]
   },
   {
+   "address": "r9xzLk4bd2zWfeKnWsr49rVq2nK7yDkC8L",
+   "label": "LARGE_RECV_r9xzLk",
+   "handle": "LARGE_RECV_r9xzLk",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
    "address": "ra8xqX4QhcogFfxpMxMByvFnXyxw9E8rzY",
    "label": "LARGE_RECV_ra8xqX",
    "handle": "LARGE_RECV_ra8xqX",
@@ -1822,9 +1835,35 @@ window.SW_HVT_ROSTER = {
    ]
   },
   {
+   "address": "rHBXf41ccuT38r54gMUwtmqm9EtsJ5aLm1",
+   "label": "LARGE_RECV_rHBXf4",
+   "handle": "LARGE_RECV_rHBXf4",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
    "address": "rHfwtjakCgMA7z9AbugfNYV3UvdyugZMr2",
    "label": "LARGE_RECV_rHfwtj",
    "handle": "LARGE_RECV_rHfwtj",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rhuPtM6TGnYRf8tgoWJvLBTnrazRQXYcFE",
+   "label": "LARGE_RECV_rhuPtM",
+   "handle": "LARGE_RECV_rhuPtM",
    "type": "HVT",
    "identified": false,
    "confidence": null,
@@ -1994,6 +2033,19 @@ window.SW_HVT_ROSTER = {
    "address": "rUjfTQpvBr6wsGGxMw6sRmRQGG76nvp8Ln",
    "label": "LARGE_RECV_rUjfTQ",
    "handle": "LARGE_RECV_rUjfTQ",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rwnYLUsoBQX3ECa1A5bSKLdbPoHKnqf63J",
+   "label": "LARGE_RECV_rwnYLU",
+   "handle": "LARGE_RECV_rwnYLU",
    "type": "HVT",
    "identified": false,
    "confidence": null,
@@ -2384,6 +2436,19 @@ window.SW_HVT_ROSTER = {
    "address": "raLybBkX8HMsFG4EJGnTsBiNhnJS1Lqwmn",
    "label": "WHALE_PRIV_C",
    "handle": "WHALE_PRIV_C",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rHecLk1MZPnTXGUeog3aSaGZ9fEDCo4bRv",
+   "label": "WHALE_RECV_rHecLk",
+   "handle": "WHALE_RECV_rHecLk",
    "type": "HVT",
    "identified": false,
    "confidence": null,

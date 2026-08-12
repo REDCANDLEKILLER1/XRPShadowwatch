@@ -245,6 +245,16 @@ const WATCHLIST = [
   ['HIGHVAL_rwXnv8',    'rwXnv8BfEHi7WmkLXZ6ChcWX9hMnSsTMNK', 'discovered_unknown_highval'],
   ['LARGE_RECV_rHfwtj', 'rHfwtjakCgMA7z9AbugfNYV3UvdyugZMr2', 'discovered_receiver'],
 
+  // ── 2026-08-12 scan SC-KP653 — checksum-verified ──
+  // rHecLk / r9xzLk / rhuPtM are all receivers OF rhuqpD, the whale added
+  // yesterday: a chain forming out of one wallet, which is why three REVIEW-tier
+  // candidates are going on together rather than waiting for each to promote.
+  ['LARGE_RECV_rHBXf4', 'rHBXf41ccuT38r54gMUwtmqm9EtsJ5aLm1', 'discovered_receiver'],
+  ['WHALE_RECV_rHecLk', 'rHecLk1MZPnTXGUeog3aSaGZ9fEDCo4bRv', 'discovered_whale'],
+  ['LARGE_RECV_r9xzLk', 'r9xzLk4bd2zWfeKnWsr49rVq2nK7yDkC8L', 'discovered_receiver'],
+  ['LARGE_RECV_rhuPtM', 'rhuPtM6TGnYRf8tgoWJvLBTnrazRQXYcFE', 'discovered_receiver'],
+  ['LARGE_RECV_rwnYLU', 'rwnYLUsoBQX3ECa1A5bSKLdbPoHKnqf63J', 'discovered_receiver'],
+
   // ── Coreum bridge incident, 2026-08-09 ────────────────────────────────────
   // ~199,916 XRP left the Coreum bridge's XRPL operations account in 97 minutes,
   // in 94 payments the bridge's own 17-of-28 relayer quorum signed. Source:
@@ -853,6 +863,13 @@ async function connectXRPL() {
 // The socket now lives on state so a reconnect can be swapped in underneath every
 // in-flight call without touching a single call site.
 function _sockOpen(w) { try { return !!w && w.readyState === 1; } catch (_) { return false; } }
+
+// Have we given up on the connection? Used by the batch passes so they stop
+// instead of walking their whole list producing one identical error per wallet.
+function _linkDown() {
+  if (_sockOpen(state._sock)) return false;
+  return n(state._reconnectFails) >= 1 && !state._reconnecting;
+}
 
 async function _ensureSock(ws) {
   if (_sockOpen(ws)) return ws;
@@ -16808,15 +16825,32 @@ async function scanOffers(ws) {
       if (added) log('✓ OFFERS ' + w.label + ': ' + added);
       return added;
     } catch (e) {
+      // v16.8.1: one line, not 187. When the link is confirmed down every
+      // remaining wallet produces the identical error — the 2026-08-12 scan
+      // logged 217 copies of "XRPL link down" and buried everything else in the
+      // error log. The fail-fast added yesterday is what makes them arrive
+      // instantly; this is what stops them arriving at all.
+      if (/link down|link closed/i.test(e && e.message || '')) throw e;
       elog('scanOffers ' + w.label, e);
       return 0;
     }
   }
-  let totalOffers = 0;
+  let totalOffers = 0, scanned = 0;
   const CHUNK = 8;
   for (let i = 0; i < wallets.length; i += CHUNK) {
+    if (_linkDown()) {
+      log('OFFERS: stopped after ' + scanned + '/' + wallets.length + ' — XRPL link down.');
+      return;
+    }
     const chunk = wallets.slice(i, i + CHUNK);
-    const counts = await Promise.all(chunk.map(scanOne));
+    let counts;
+    try {
+      counts = await Promise.all(chunk.map(scanOne));
+    } catch (e) {
+      log('OFFERS: stopped after ' + scanned + '/' + wallets.length + ' — ' + (e && e.message || 'link down') + '.');
+      return;
+    }
+    scanned += chunk.length;
     totalOffers += counts.reduce((s, x) => s + x, 0);
   }
   log('OFFERS total: ' + totalOffers + ' active across ' + wallets.length + ' wallets');
@@ -17654,16 +17688,22 @@ async function runRelatedOfferScan(ws) {
   const offersByAddr = {};
   let attempts = 0;
   for (let i = 0; i < ranked.length; i += RELATED_OFFERS_CONFIG.PARALLEL_FETCH) {
+    // Same reason as the offer scan: once the link is confirmed down, every
+    // remaining candidate reports the identical failure. Say it once and stop.
+    if (_linkDown()) { log('RELATED OFFERS: stopped after ' + attempts + '/' + ranked.length + ' — XRPL link down.'); break; }
     const chunk = ranked.slice(i, i + RELATED_OFFERS_CONFIG.PARALLEL_FETCH);
+    let linkGone = false;
     await Promise.all(chunk.map(async c => {
       attempts++;
       try {
         const offers = await fetchOffersFor(ws, c.address);
         if (offers.length) offersByAddr[c.address] = offers;
       } catch (e) {
+        if (/link down|link closed/i.test(e && e.message || '')) { linkGone = true; return; }
         elog('related-offer fetch ' + c.address.slice(0, 10), e);
       }
     }));
+    if (linkGone) { log('RELATED OFFERS: stopped after ' + attempts + '/' + ranked.length + ' — XRPL link down.'); break; }
   }
   state.relatedOffers.account_objects_attempts = attempts;
 

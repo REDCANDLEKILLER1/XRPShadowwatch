@@ -61,7 +61,7 @@ window.SW_WALLET_IDENTITIES = {
   "confidence": "CONFIRMED"
  },
  "rDxJNbV23mu9xsWoQHoBqZQvc77YcbJXwb": {
-  "name": "UPbit",
+  "name": "Upbit",
   "type": "EXCH",
   "confidence": "PUBLIC_SOURCE"
  },
@@ -101,52 +101,52 @@ window.SW_WALLET_IDENTITIES = {
   "confidence": "PUBLIC_SOURCE"
  },
  "rfL1mn4VTCoHdhHhHMwqpShCFUaDBRk6Z5": {
-  "name": "UPbit",
+  "name": "Upbit",
   "type": "EXCH",
   "confidence": "PUBLIC_SOURCE"
  },
  "rwa7YXssGVAL9yPKw6QJtCen2UqZbRQqpM": {
-  "name": "UPbit",
+  "name": "Upbit",
   "type": "EXCH",
   "confidence": "PUBLIC_SOURCE"
  },
  "rNcAdhSLXBrJ3aZUq22HaNtNEPpB5fR8Ri": {
-  "name": "UPbit",
+  "name": "Upbit",
   "type": "EXCH",
   "confidence": "PUBLIC_SOURCE"
  },
  "r4G689g4KePYLKkyyumM1iUppTP4nhZwVC": {
-  "name": "UPbit",
+  "name": "Upbit",
   "type": "EXCH",
   "confidence": "PUBLIC_SOURCE"
  },
  "rJo4m69u9Wd1F8fN2RbgAsJEF6a4hW1nSi": {
-  "name": "UPbit",
+  "name": "Upbit",
   "type": "EXCH",
   "confidence": "PUBLIC_SOURCE"
  },
  "rLgn612WAgRoZ285YmsQ4t7kb8Ui3csdoU": {
-  "name": "UPbit",
+  "name": "Upbit",
   "type": "EXCH",
   "confidence": "PUBLIC_SOURCE"
  },
  "rs48xReB6gjKtTnTfii93iwUhjhTJsW78B": {
-  "name": "UPbit",
+  "name": "Upbit",
   "type": "EXCH",
   "confidence": "PUBLIC_SOURCE"
  },
  "rJWbw1u3oDDRcYLFqiWFjhGWRKVcBAWdgp": {
-  "name": "UPbit",
+  "name": "Upbit",
   "type": "EXCH",
   "confidence": "PUBLIC_SOURCE"
  },
  "rMNUAfSz2spLEbaBwPnGtxTzZCajJifnzH": {
-  "name": "UPbit",
+  "name": "Upbit",
   "type": "EXCH",
   "confidence": "PUBLIC_SOURCE"
  },
  "r38a3PtqW3M7LRESgaR4dyHjg3AxAmiZCt": {
-  "name": "UPbit",
+  "name": "Upbit",
   "type": "EXCH",
   "confidence": "PUBLIC_SOURCE"
  },
@@ -642,7 +642,7 @@ window.SW_WALLET_IDENTITIES = {
   "source": "watchlist_label:HUOBI_MAIN"
  },
  "rH5wodHpZzeXBAWE36nMoRXGqeEjSdbzWU": {
-  "name": "UPbit",
+  "name": "Upbit",
   "type": "EXCH",
   "confidence": "OPERATOR_ASSERTED",
   "source": "watchlist_label:UPBIT_COLD"
