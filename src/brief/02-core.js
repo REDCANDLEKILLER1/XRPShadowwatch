@@ -15509,11 +15509,39 @@ function attachNewsIntentToPack(pack) {
       priority: it._priority, ledger_score: it._ledger_score,
       source_rank: typeof classifyNewsSourceRank === 'function' ? classifyNewsSourceRank(it) : 'C'
     })),
-    source_limits: ['google_news: CORS/proxy required for in-browser production reliability']
+    // v16.9: state the limits that BIT this run, not a permanent footnote. The
+    // Google News CORS caveat was printed on every report including the ones
+    // where Google News was the source of the winning headline — a limit that
+    // never applies reads as boilerplate and gets skipped along with the real
+    // ones underneath it.
+    source_limits: _routerSourceLimits()
   };
 
   // v3.26: also attach centralized news health to pack
   if (typeof attachNewsHealthToPack === 'function') attachNewsHealthToPack(pack);
+}
+
+function _routerSourceLimits() {
+  const out = [];
+  try {
+    const hist = (typeof getNewsDoctorHistory === 'function' ? getNewsDoctorHistory() : null) || {};
+    Object.keys(hist).forEach(k => {
+      const h = hist[k] || {};
+      if (n(h.consecutive_failures) >= 3)
+        out.push(k + ': unavailable this run and the ' + n(h.consecutive_failures) +
+                 ' before it — its coverage is missing from the pool above.');
+    });
+  } catch (_) {}
+  try {
+    // Only mention the browser-CORS limit when it actually cost us something.
+    // Provider status lives on state.newsDiagnostics, the same object
+    // buildNewsSourceStrategy reads.
+    const gn = ((state.newsDiagnostics || {}).providers || {})['Google News'];
+    if (gn && gn.overall_status && !/CONTENT_OK/.test(gn.overall_status))
+      out.push('google_news: in-browser CORS blocked this fetch; a backend proxy is needed for it to be reliable.');
+  } catch (_) {}
+  if (!out.length) out.push('None hit this run — every configured source answered.');
+  return out;
 }
 
 // Expose Module B
@@ -15671,13 +15699,43 @@ function buildNewsSourceStrategy() {
     working_publishers: working_publishers.sort(),
     failed_publishers: failed_publishers.sort(),
     providers,
-    recommendations: [
-      'GDELT: keep queries under 6 words; encode URI components.',
-      'RSS via proxy: test codetabs, allorigins, thingproxy in cascade.',
-      'Google News: requires backend proxy for production reliability.',
-      'Disabled sources: mark them in news_doctor_history and skip on retry.'
-    ]
+    // v16.9: derived from what is ACTUALLY wrong, not a fixed block. This list
+    // used to print the same four lines in every report — including advice about
+    // providers that were at 100% reliability, and a mild "retry later" for
+    // GDELT on its twenty-second consecutive failure. Advice that never changes
+    // is advice nobody reads.
+    recommendations: _newsRecommendations(providers)
   };
+}
+
+// One line per provider that needs something done about it, escalating with the
+// failure count, plus a closing line about the ones that are fine.
+function _newsRecommendations(providers) {
+  const out = [], healthy = [];
+  Object.keys(providers || {}).forEach(k => {
+    const pv = providers[k] || {};
+    const name = pv.provider || k;
+    const fails = n(pv.consecutive_failures);
+    const rel = n(pv.reliability_score);
+    const ok = /CONTENT_OK/.test(pv.overall_status || '') && fails === 0;
+    if (ok) { healthy.push(name); return; }
+
+    if (fails >= 10) {
+      out.push(name + ': ' + fails + ' consecutive failures at ' + rel + '% reliability. This is not a blip — ' +
+               'suppress it or replace the feed. Every report until then carries a line that says nothing new.');
+    } else if (fails >= 3) {
+      out.push(name + ': failing ' + fails + ' runs in a row. Switch route or drop it from the rotation before it ' +
+               'starts shaping the headline pool by absence.');
+    } else if (/EMPTY/.test(pv.failure_class || '') || /EMPTY/.test(pv.overall_status || '')) {
+      out.push(name + ': responding but returning nothing. Quiet source or broken query — worth one check, not a fix.');
+    } else if (fails > 0) {
+      out.push(name + ': ' + fails + ' recent failure' + (fails === 1 ? '' : 's') + '. Watch it; no action yet.');
+    }
+  });
+  if (healthy.length)
+    out.push(healthy.join(', ') + (healthy.length === 1 ? ' is' : ' are') + ' healthy — no action needed.');
+  if (!out.length) out.push('Every configured source responded cleanly. Nothing to do.');
+  return out;
 }
 
 function _newsSourceStrategyToText(strategy) {
@@ -15718,20 +15776,41 @@ function _newsSourceStrategyToText(strategy) {
     lines.push('Failed publishers: ' + strategy.failed_publishers.join(', '));
   }
   lines.push('');
-  Object.keys(strategy.providers || {}).forEach(p => {
-    const pv = strategy.providers[p];
-    lines.push('PROVIDER: ' + pv.provider);
-    lines.push('  Status:              ' + pv.overall_status);
-    lines.push('  Failure class:       ' + (pv.failure_class || '—'));
-    lines.push('  Consecutive fails:   ' + pv.consecutive_failures);
-    lines.push('  Reliability:         ' + pv.reliability_score + '%');
-    if (pv.last_error_excerpt) lines.push('  Last error:          ' + pv.last_error_excerpt);
-    lines.push('  Suggested fix:       ' + (pv.suggested_fix || '—'));
-    lines.push('  Recommended route:   ' + pv.recommended_route);
-    lines.push('');
+  // v16.9: a provider that is working gets one line. It used to get the full
+  // five-line block including "Suggested fix" and a "Recommended route" telling
+  // the operator to try an alternate proxy — printed against sources sitting at
+  // 100% reliability with zero failures. Repair instructions for healthy
+  // equipment are how a diagnostics page teaches people to stop reading it.
+  const healthy = [], sick = [];
+  Object.keys(strategy.providers || {}).forEach(k => {
+    const pv = strategy.providers[k];
+    ((/CONTENT_OK/.test(pv.overall_status || '') && n(pv.consecutive_failures) === 0) ? healthy : sick).push(pv);
   });
-  lines.push('GENERAL RECOMMENDATIONS');
-  (strategy.recommendations || []).forEach(r => lines.push('• ' + r));
+  if (healthy.length) {
+    lines.push('HEALTHY');
+    healthy.forEach(pv => lines.push('  \u2022 ' + pv.provider + ' \u2014 ' + pv.overall_status +
+      ', ' + pv.reliability_score + '% reliability, no consecutive failures.'));
+    lines.push('');
+  }
+  if (sick.length) {
+    lines.push('NEEDS ATTENTION');
+    lines.push('');
+    sick.forEach(pv => {
+      const fails = n(pv.consecutive_failures);
+      lines.push('PROVIDER: ' + pv.provider);
+      lines.push('  Status:              ' + pv.overall_status);
+      lines.push('  Failure class:       ' + (pv.failure_class || '—'));
+      lines.push('  Consecutive fails:   ' + fails +
+        (fails >= 10 ? '   \u2190 sustained; this is a dead source, not a flaky one' : ''));
+      lines.push('  Reliability:         ' + pv.reliability_score + '%');
+      if (pv.last_error_excerpt) lines.push('  Last error:          ' + pv.last_error_excerpt);
+      if (pv.suggested_fix)     lines.push('  Suggested fix:       ' + pv.suggested_fix);
+      if (pv.recommended_route) lines.push('  Recommended route:   ' + pv.recommended_route);
+      lines.push('');
+    });
+  }
+  lines.push('WHAT TO DO');
+  (strategy.recommendations || []).forEach(r => lines.push('\u2022 ' + r));
   return lines.join('\n');
 }
 
