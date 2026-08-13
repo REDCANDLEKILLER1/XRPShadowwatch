@@ -3144,7 +3144,10 @@ function buildXRPMainReport(p) {
   // into ChatGPT / agents. Ranked headlines from getNewsSources().
   try {
     if (typeof rankNewsItems === 'function' && typeof getNewsSources === 'function') {
-      const ranked = rankNewsItems(getNewsSources(p)).slice(0, 8);
+      // v16.19: filtered, not just ranked — see filterSourcesForReport.
+      const ranked = (typeof filterSourcesForReport === 'function')
+        ? filterSourcesForReport(getNewsSources(p))
+        : rankNewsItems(getNewsSources(p)).slice(0, 8);
       if (ranked.length && typeof renderPlainTextSources === 'function') {
         const srcBlock = renderPlainTextSources(ranked);
         if (srcBlock) {
@@ -3256,6 +3259,48 @@ function rankNewsItems(items) {
     // Stable sort: preserve original order within a priority tier
     return { ...item, _priority: priority, _origIdx: idx, _is_price_hype: isPriceHype };
   }).sort((a, b) => a._priority - b._priority || a._origIdx - b._origIdx);
+}
+
+// ── SOURCES RELEVANCE FILTER ──────────────────────────────────
+// v16.19: rankNewsItems SORTS but has never FILTERED, and both callers just took
+// .slice(0, 8) off the top. On a quiet XRP news day that fills the footer of an
+// XRP forensic report with whatever else was in the pool — SW-20260813-2EZ7P
+// cited Zcash's institutional playbook, a Pump.fun price rally, a Solar/SXP 2030
+// price prediction, Circle stock ahead of jobless claims, and a story about how
+// often Google's AI cites crypto news sites. Two of the eight were about XRP.
+//
+// A citation block is a claim that these sources informed the report. Padding it
+// with unrelated coins is not neutral: it makes the relevant two harder to find
+// and it implies a basis the report does not have.
+//
+// Tiers come from rankNewsItems: 1 = XRP/Ripple/RLUSD/regulatory/exchange,
+// 2 = crypto-wide macro, 3 = BTC/ETH/SOL, 4 = altcoin/memecoin, 5 = price hype.
+// Keep 1 and 2. Allow 3 only as backfill, and only up to a floor, so a genuinely
+// quiet day yields a short block rather than a padded one. 4 and 5 never appear.
+const SOURCES_KEEP_MAX_PRIORITY = 2;   // always publishable
+const SOURCES_BACKFILL_PRIORITY = 3;   // BTC/ETH context, only if we are short
+const SOURCES_MIN_ITEMS         = 3;   // below this, backfill is allowed
+const SOURCES_CAP               = 8;
+function filterSourcesForReport(items, opts) {
+  opts = opts || {};
+  const ranked = (typeof rankNewsItems === 'function') ? rankNewsItems(items) : (items || []);
+  if (!Array.isArray(ranked) || !ranked.length) return [];
+  const maxP  = opts.maxPriority != null ? opts.maxPriority : SOURCES_KEEP_MAX_PRIORITY;
+  const backP = opts.backfillPriority != null ? opts.backfillPriority : SOURCES_BACKFILL_PRIORITY;
+  const floor = opts.min != null ? opts.min : SOURCES_MIN_ITEMS;
+  const cap   = opts.cap != null ? opts.cap : SOURCES_CAP;
+  const pri   = it => (it && it._priority != null) ? it._priority : 5;
+
+  const keep = ranked.filter(it => pri(it) <= maxP);
+  if (keep.length < floor) {
+    ranked.forEach(it => {
+      if (keep.length >= floor) return;
+      if (pri(it) > maxP && pri(it) <= backP && keep.indexOf(it) < 0) keep.push(it);
+    });
+  }
+  // ranked is already priority-sorted and stable within a tier; the backfill is
+  // appended after, which is the order we want to print anyway.
+  return keep.slice(0, cap);
 }
 
 // Render a Sources block as clickable HTML (for on-screen report)
@@ -13468,6 +13513,7 @@ function buildDynamicDailyReport(pack, mode) {
 if (typeof window !== 'undefined') {
   window.getNewsSources = getNewsSources;
   window.rankNewsItems = rankNewsItems;
+  window.filterSourcesForReport = filterSourcesForReport;
   window.renderClickableSources = renderClickableSources;
   window.renderPlainTextSources = renderPlainTextSources;
   window.getSourceHealth = getSourceHealth;
@@ -15547,9 +15593,13 @@ function buildMorningStoryText(pack) {
   // Sources block with raw URLs (required for TXT mode)
   try {
     if (typeof renderPlainTextSources === 'function') {
-      const ranked = typeof rankNewsItems === 'function'
-        ? rankNewsItems(i.topItems.length ? i.topItems : getNewsSources(pack)).slice(0, 8)
-        : [];
+      // v16.19: same relevance filter as the structured report — an XRP report
+      // must not cite a Solar/SXP price prediction just to fill the block.
+      const ranked = typeof filterSourcesForReport === 'function'
+        ? filterSourcesForReport(i.topItems.length ? i.topItems : getNewsSources(pack))
+        : (typeof rankNewsItems === 'function'
+            ? rankNewsItems(i.topItems.length ? i.topItems : getNewsSources(pack)).slice(0, 8)
+            : []);
       if (ranked.length) {
         const src = renderPlainTextSources(ranked);
         if (src) { r.push(''); r.push(src); }
