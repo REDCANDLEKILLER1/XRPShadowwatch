@@ -2477,6 +2477,25 @@ function scanCoverage(pack) {
   return cov;
 }
 
+// v16.22: headlines are quoted into sentences in three places, and each one
+// appended its own full stop. A headline that already ends in one — "Nearly 1
+// billion XRP locked in ETFs, driven by investor demand, not Ripple itself." —
+// therefore printed as "...not Ripple itself.." in the executive summary AND in
+// GLOBAL SYNC of the same report. Trim the terminator off the quoted title and
+// let the sentence supply it.
+function _asSentence(s) {
+  var t = String(s == null ? '' : s).replace(/\s*[.,;]+\s*$/, '').trim();
+  // A headline that asks a question stays a question — appending a period to
+  // "...After the ETF Lock-Up?" would read as a typo out loud.
+  return !t ? t : (/[?!]$/.test(t) ? t : t + '.');
+}
+// Strip a trailing " — Publisher" / " | Publisher" suffix. The dash MUST have
+// whitespace in front of it: the old pattern allowed none, so it also ate
+// hyphenated final words and printed "Can XRP Reclaim $1 After the ETF Lock-Up?"
+// as "...After the ETF Lock". A hyphen inside a word is part of the word.
+function _stripPublisherSuffix(s) {
+  return String(s == null ? '' : s).replace(/\s+[-—–|]\s*[^-—–|]+$/, '');
+}
 // ── DELTA BASELINE ────────────────────────────────────────────
 // v16.21: a balance delta needs a PREVIOUS balance. On a device that has never
 // run a scan there isn't one — prev_balance_xrp is null for every wallet, every
@@ -13566,12 +13585,12 @@ function buildExecutiveSummary(p, netDelta, news) {
                            (news || []).find(h => xrpRe.test(h.title || '')) ||
                            any('STRONG') || any('MEDIUM');
     if (strongOrMedium && strongOrMedium.title) {
-      newsLine = ` Active news context (not causation proof): ${strongOrMedium.title.replace(/\s*[-—–|]\s*[^-—–|]+$/, '')}.`;
+      newsLine = ` Active news context (not causation proof): ${_asSentence(_stripPublisherSuffix(strongOrMedium.title))}`;
     } else {
       // Fall back to top XRP-tagged headline if no STRONG/MEDIUM router match
       const topXrp = news.find(h => xrpRe.test(h.title || ''));
       if (topXrp) {
-        newsLine = ` Active news context (not causation proof): ${topXrp.title.replace(/\s*[-—–|]\s*[^-—–|]+$/, '')}.`;
+        newsLine = ` Active news context (not causation proof): ${_asSentence(_stripPublisherSuffix(topXrp.title))}`;
       }
     }
   }
@@ -13833,7 +13852,7 @@ function globalSyncSection(news, p) {
     hidden = 'No dominant theme this window. Wallet movement stands on its own.';
   }
   return [
-    `• Bank/Institutional Headline: ${bankTitle}.`,
+    `• Bank/Institutional Headline: ${_asSentence(bankTitle)}`,
     `• Theme Read: ${hidden}`
   ];
 }
