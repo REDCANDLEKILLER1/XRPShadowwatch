@@ -2477,6 +2477,45 @@ function scanCoverage(pack) {
   return cov;
 }
 
+// ── DELTA BASELINE ────────────────────────────────────────────
+// v16.21: a balance delta needs a PREVIOUS balance. On a device that has never
+// run a scan there isn't one — prev_balance_xrp is null for every wallet, every
+// delta_xrp stays null, and totalDeltaXRP() coerces null to 0. The sum is
+// therefore 0, and nothing downstream could tell "nothing moved" from "we have
+// nothing to compare against".
+//
+// SW-20260813-WS4WU, run from a private tab, said "the tracked wallet board
+// remained flat at 0 XRP net" and "Net inflow of 0 XRP across 228 watched
+// wallets" on a night with 36 transfers over threshold and 145M XRP of shadow
+// volume. The board was not flat. It was unmeasured.
+//
+// This is the same failure as the coverage bug: absence of data reported as a
+// finding of zero. And it only happens on a fresh profile — which is every
+// stranger handed the /report link, and never the operator's own machine.
+function deltaBaseline(pack) {
+  const p = pack || {};
+  const ws = (Array.isArray(p.wallets) && p.wallets.length) ? p.wallets
+           : (Array.isArray(p.wallet_results) ? p.wallet_results : []);
+  const checked  = ws.filter(w => w && (w.status === 'CHECKED' || w.status == null));
+  const measured = checked.filter(w => w.prev_balance_xrp !== null && w.prev_balance_xrp !== undefined);
+  const total = checked.length;
+  const have  = measured.length;
+  const pct   = total > 0 ? have / total : 1;
+  return {
+    measured: have, checked: total,
+    pct: pct, percent: Math.round(pct * 100),
+    // No prior reading anywhere — the delta is meaningless, not zero.
+    none:    total > 0 && have === 0,
+    // Some wallets are new to this device; the total is real but incomplete.
+    partial: total > 0 && have > 0 && have < total,
+    line: have === 0
+      ? 'No previous balances stored on this device, so net flow cannot be measured yet — this is the first scan here.'
+      : (have < total
+          ? (total - have) + ' of ' + total + ' wallets are new to this device and have no prior balance, so they contribute nothing to the net figure.'
+          : '')
+  };
+}
+
 // ── EVIDENCE QUALITY ──────────────────────────────────────────
 function evidenceQuality(p) {
   let score = 0;
@@ -13490,7 +13529,13 @@ function buildExecutiveSummary(p, netDelta, news) {
       }
     }
   }
-  return `Today's scan shows institutional-style rotation under ${tape}: XRP sits near ${priceStr}, while the tracked wallet board ${dir} ${absStr} XRP net versus the local snapshot.${newsLine}`;
+  // v16.21: with no stored baseline, "remained flat at 0 XRP net" is a claim we
+  // cannot make. Say what is actually true — there is nothing to compare to yet.
+  const _db = deltaBaseline(p);
+  const boardClause = _db.none
+    ? `the tracked wallet board has no prior balances on this device yet, so net flow is not measurable on this run`
+    : `the tracked wallet board ${dir} ${absStr} XRP net versus the local snapshot`;
+  return `Today's scan shows institutional-style rotation under ${tape}: XRP sits near ${priceStr}, while ${boardClause}.${_db.partial ? ' ' + _db.line : ''}${newsLine}`;
 }
 
 // Build per-group Shadow Watch bullets with 🟢🟡🔴 indicator
@@ -13949,15 +13994,16 @@ function buildIntelBrief(p) {
   } else if (health.newsMode === 'PARTIAL_CONTEXT') {
     newsLine = 'NEWS/MACRO CONTEXT — partial coverage (' + health.headline_count + ' headlines from ' + health.source_group_count + ' source group). Ledger evidence remains primary.';
   } else if (health.newsMode === 'EVIDENCE_LED_CONTEXT') {
-    newsLine = 'NEWS/MACRO CONTEXT — ' + health.headline_count + ' headlines across ' + health.source_group_count + ' source groups, ' + health.ledger_relevant_count + ' ledger-relevant.';
+    newsLine = 'NEWS/MACRO CONTEXT — ' + health.headline_count + ' headlines across ' + health.source_group_count + ' source group' + (health.source_group_count === 1 ? '' : 's') + ', ' + health.ledger_relevant_count + ' ledger-relevant.';
   } else {
-    newsLine = 'NEWS/MACRO CONTEXT — ' + health.headline_count + ' headlines across ' + health.source_group_count + ' source groups.';
+    newsLine = 'NEWS/MACRO CONTEXT — ' + health.headline_count + ' headlines across ' + health.source_group_count + ' source group' + (health.source_group_count === 1 ? '' : 's') + '.';
   }
 
   const dateStr = p.date || today();
   // The brief's phrasing rotates per RUN, not per day — the verse and the prayer
   // stay daily on purpose, but XRPMan does not repeat himself inside one day.
   const runSeed = swRunSeed(p);
+  const _db = deltaBaseline(p);
   const tw = getTxWindow();
 
   // 1 — the arithmetic, with the window it covers. A weekend sweep and an
@@ -13965,9 +14011,15 @@ function buildIntelBrief(p) {
   const lt = (p.large_transfers || []).length;
   const signal = [
     swVoicePick(INTEL_SIGNAL_FRAMES, 'intel-frame', runSeed),
-    'Net ' + (n(p.total_balance_delta_xrp) < 0 ? 'outflow' : 'inflow') + ' of ' +
-      (p.total_balance_delta_xrp > 0 ? '+' : '') + fmt(p.total_balance_delta_xrp, 0) + ' XRP across ' +
-      n(p.wallets_checked) + ' watched wallets, window ' + tw.label + '.',
+    // v16.21: "Net inflow of 0 XRP" on a device with no stored baseline is not a
+    // reading, it is the absence of one. Say which it is.
+    (_db.none
+      ? 'Net flow not measurable this run — no previous balances stored on this device. ' +
+        n(p.wallets_checked) + ' wallets read, window ' + tw.label + '.'
+      : 'Net ' + (n(p.total_balance_delta_xrp) < 0 ? 'outflow' : 'inflow') + ' of ' +
+        (p.total_balance_delta_xrp > 0 ? '+' : '') + fmt(p.total_balance_delta_xrp, 0) + ' XRP across ' +
+        n(p.wallets_checked) + ' watched wallets, window ' + tw.label + '.' +
+        (_db.partial ? ' ' + _db.line : '')),
     lt + ' transfer' + (lt === 1 ? '' : 's') + ' above threshold. Shadow volume: ' +
       fmt(p.shadow_volume_xrp, 0) + ' XRP.',
     // Coverage sits with the arithmetic, not in a footnote. A total across 35 of
