@@ -63,7 +63,7 @@
         "Unknown stays unknown until the evidence is real, Commander. No guesses.",
         "Receipts beat memory, Commander. Lock what matters before the stream moves on.",
         "I don't sign and I don't move funds, Commander. I watch and I report.",
-        "Daily Brief is your readout, Commander — story, sources, and flow in one place.",
+        "The ShadowWatch Report is your readout, Commander — story, sources, and flow in one place.",
         "Whales leave wakes, Commander. Big bubble, big move."
       ];
 
@@ -73,7 +73,7 @@
                     "Sensors live, Commander. Watching for size and anomalies."],
         trace:     ["Tracing connections, Commander. Links are relationships, not proof.",
                     "Following the trail, Commander. I map it — you call it."],
-        brief:     ["Daily Brief loaded, Commander. Read it top to bottom for the full picture.",
+        brief:     ["ShadowWatch Report loaded, Commander. Read it top to bottom for the full picture.",
                     "Clean intelligence readout up, Commander. Story, sources, movement."],
         session:   ["Session export open, Commander. The raw scanner metrics, no spin.",
                     "Black-box readout, Commander. Straight data for the record."],
@@ -89,8 +89,8 @@
                     "Control board up, Commander. Pick a module."],
         'screen-home':   ["Mission Control, Commander. Every scanner branches from here.",
                           "Home base, Commander. Choose a tool and I'll brief you."],
-        'screen-brief':  ["Daily Brief, Commander — the public-facing readout. Solid place to start.",
-                          "Brief's up, Commander. The clean story for Coffee and Crypto."],
+        'screen-brief':  ["The ShadowWatch Report, Commander — the public-facing readout. Solid place to start.",
+                          "Report's up, Commander. The clean story for Coffee and Crypto."],
         'screen-live':   ["Live ledger stream, Commander. Green flows, gold demands a look.",
                           "Raw transactions, real time, Commander. Watch the gold."],
         'screen-map':    ["Bubble map, Commander. Bigger bubble, bigger move.",

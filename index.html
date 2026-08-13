@@ -163,8 +163,14 @@
     <div id="hud-top">
         <div class="header-section">
             <div class="hdr-row">
+                <!-- v16.14: the logo mark was a circled ✕. Sitting alone in the
+                     top-left corner of a full-screen app, that is not a logo to
+                     anyone — it is a close button, and people read it as one.
+                     SHADOWWATCH is already spelled out underneath it in 40px
+                     letters, so the mark was carrying no information and one
+                     misleading instruction. Removed; the row keeps its balance
+                     through the ::before spacer in styles.css. -->
                 <div class="hdr-toprow">
-                    <div class="hdr-logo"><svg viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="20" stroke="#00ff00" stroke-width="2"></circle><circle cx="24" cy="24" r="20" stroke="#00ff00" stroke-width="5" stroke-opacity="0.10"></circle><path d="M16 16 L32 32 M32 16 L16 32" stroke="#00ff00" stroke-width="2.6" stroke-linecap="round"></path></svg></div>
                     <div class="hdr-brand">XRPMAN PRESENTS</div>
                     <div class="hdr-ctrls">
                         <button class="hdr-bell" onclick="toggleAlerts()" title="Toggle alerts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg><span class="hdr-bell-dot"></span></button>
@@ -214,8 +220,8 @@
                 <button id="home-mc-btn" class="tac-btn" onclick="switchView('home')" title="Mission Control">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
                 </button>
-                <button id="report-btn" class="tac-btn" onclick="switchView('brief'); loadBriefConsole();" title="Daily Brief — Coffee &amp; Crypto">
-                    DAILY BRIEF
+                <button id="report-btn" class="tac-btn" onclick="switchView('brief'); loadBriefConsole();" title="ShadowWatch Report">
+                    REPORT
                 </button>
                 <button id="session-btn" class="tac-btn" onclick="openIntelDashboard()" title="Session Report — Raw Scanner Export">
                     SESSION
@@ -292,7 +298,7 @@
                   <div class="mc-card mc-card-featured" onclick="switchView('brief'); loadBriefConsole();">
                     <div class="mc-hero-icon"><svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"></path><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"></path><line x1="6" y1="1" x2="6" y2="4"></line><line x1="10" y1="1" x2="10" y2="4"></line><line x1="14" y1="1" x2="14" y2="4"></line></svg></div>
                     <div class="mc-hero-text">
-                      <div class="mc-hero-title">COFFEE &amp; CRYPTO DAILY BRIEF</div>
+                      <div class="mc-hero-title">SHADOWWATCH REPORT</div>
                       <div class="mc-hero-sub">MARKET INTEL &middot; WALLET MOVEMENT &middot; EVIDENCE</div>
                     </div>
                     <span class="mc-hero-arrow">&#8250;</span>
@@ -989,7 +995,7 @@
         var grid = el('div', { 'class':'wall-tools' });
         // Only wire actions that exist; each is the app's own function.
         var CARDS = [
-          ['DAILY BRIEF',      'Coffee & Crypto report',  'green', function(){ switchView('brief'); try{ loadBriefConsole(); }catch(_){} }],
+          ['SHADOWWATCH REPORT','Daily forensic brief',    'green', function(){ switchView('brief'); try{ loadBriefConsole(); }catch(_){} }],
           ['SESSION REPORT',   'Raw scanner export',      'blue',  function(){ openIntelDashboard(); }],
           ['EVIDENCE LOCKER',  'Saved anomalies',         'gold',  function(){ switchView('case'); }],
           ['WALLET ID',        'Resolve a wallet label',  'blue',  function(){ openWalletResolver(); }],

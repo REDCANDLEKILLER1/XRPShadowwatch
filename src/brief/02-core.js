@@ -13926,13 +13926,16 @@ function buildIntelBrief(p) {
   }
 
   const dateStr = p.date || today();
+  // The brief's phrasing rotates per RUN, not per day — the verse and the prayer
+  // stay daily on purpose, but XRPMan does not repeat himself inside one day.
+  const runSeed = swRunSeed(p);
   const tw = getTxWindow();
 
   // 1 — the arithmetic, with the window it covers. A weekend sweep and an
   // overnight look identical in a bare total, so the window is stated.
   const lt = (p.large_transfers || []).length;
   const signal = [
-    pickDaily(INTEL_SIGNAL_FRAMES, dateStr, 3),
+    swVoicePick(INTEL_SIGNAL_FRAMES, 'intel-frame', runSeed),
     'Net ' + (n(p.total_balance_delta_xrp) < 0 ? 'outflow' : 'inflow') + ' of ' +
       (p.total_balance_delta_xrp > 0 ? '+' : '') + fmt(p.total_balance_delta_xrp, 0) + ' XRP across ' +
       n(p.wallets_checked) + ' watched wallets, window ' + tw.label + '.',
@@ -13956,14 +13959,14 @@ function buildIntelBrief(p) {
           ? 'No wallet profiles built — ' + cov.failed + ' of ' + cov.total +
             ' wallets failed to read, so there is no behaviour to describe.'
           : 'No wallet profiles built this pass.')) +
-    ' ' + pickDaily(INTEL_BEHAVIOR_CAVEATS, dateStr, 5);
+    ' ' + swVoicePick(INTEL_BEHAVIOR_CAVEATS, 'intel-caveat', runSeed);
 
   // 6 / 7 — only what applies, and what to actually do about it.
   const limits = _intelLimits(p, health).map(x => '\u2022 ' + x).join('\n');
   const acts = _intelActions(p);
   const actions = acts.length
     ? acts.map(x => '\u2022 ' + x).join('\n')
-    : '\u2022 ' + pickDaily(INTEL_NO_ACTION, dateStr, 11);
+    : '\u2022 ' + swVoicePick(INTEL_NO_ACTION, 'intel-noaction', runSeed);
 
   const brief = `FORENSIC INTELLIGENCE BRIEF — ${dateStr}
 
@@ -14194,6 +14197,104 @@ function pickDaily(pool, dateStr, offset) {
   if (!len) return null;
   const i = ((_dayIndex(dateStr) * _coprimeStride(len) + (offset || 0)) % len + len) % len;
   return pool[i];
+}
+
+// ── PER-RUN ROTATION ───────────────────────────────────────────
+// pickDaily is right for the verse and the prayer: one a day, the same one all
+// day, on purpose. It is wrong for XRPMan's VOICE. Three reports run on
+// 2026-08-13 (JKEMP, RNM64, CEHHB) opened with the identical sentence — "I never
+// blinked. Here's what crossed the wire:" — carried the identical posture line
+// and closed on the identical beat. Only the numbers moved. Every one of those
+// picks was a pure function of the date, so a second run the same day could not
+// have said anything different.
+//
+// Two things were wrong and both had to go:
+//
+//   1. The seed was the date whenever the pack had no scan id — which is the
+//      normal case, because the scan id lives on state.seal, not on the pack.
+//   2. Even given a different seed, the picks were `(seed + salt) % len`. Pools
+//      of the same length then moved in lockstep: change the seed and the
+//      opener and the closing beat shifted by exactly the same amount, so the
+//      report had far fewer real combinations than the pool sizes suggest.
+//
+// This picker fixes both, and adds the guarantee that actually matters: a line
+// is not eligible again until the rest of its pool has been used. Not "unlikely
+// to repeat" — cannot repeat.
+const _SW_VOICE_MEM_KEY = 'sw_voice_recent_v1';
+function _swVoiceMem() {
+  try { return JSON.parse(localStorage.getItem(_SW_VOICE_MEM_KEY) || '{}') || {}; }
+  catch (_) { return {}; }
+}
+function _swVoiceSaveMem(m) {
+  try { localStorage.setItem(_SW_VOICE_MEM_KEY, JSON.stringify(m)); } catch (_) {}
+}
+// Murmur-style finalizer. The point is avalanche: one bit of difference in the
+// seed must scatter every bucket independently, which `seed + salt` never did.
+function _swVoiceHash(seed, bucket, len) {
+  let h = (n(seed) ^ 0x9e3779b9) >>> 0;
+  const b = String(bucket || '');
+  for (let i = 0; i < b.length; i++) h = Math.imul(h ^ b.charCodeAt(i), 0x01000193) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0;
+  h = (h ^ (h >>> 16)) >>> 0;
+  return len > 0 ? h % len : 0;
+}
+// Same (bucket, seed) inside one report always returns the same line — the
+// pipeline assembles twice on its fallback path, and the memory must not be
+// charged twice for one report.
+const _swVoiceTurn = { seed: null, picks: {} };
+function swVoicePick(pool, bucket, seed) {
+  if (!Array.isArray(pool) || !pool.length) return '';
+  const len = pool.length;
+  if (_swVoiceTurn.seed !== seed) { _swVoiceTurn.seed = seed; _swVoiceTurn.picks = {}; }
+  if (Object.prototype.hasOwnProperty.call(_swVoiceTurn.picks, bucket)) return _swVoiceTurn.picks[bucket];
+
+  const mem = _swVoiceMem();
+  const key = bucket + ':' + len;              // pool resized → memory starts clean
+  let used = Array.isArray(mem[key]) ? mem[key] : [];
+  // A SLIDING window of the last len-1 picks, not a cycle that refills. Refilling
+  // let a line come back two reports later at the cycle boundary — the sequence
+  // a,g,f,b,i,j,d,c,e,h | g,j,f,e,d,b,i,a,c | a … repeats "a" after two. With a
+  // window this size, every other entry in the pool must be spent before any one
+  // of them is eligible again, and free is never empty because the window can
+  // hold at most len-1 distinct indices.
+  //
+  // Size matters. A window of len-1 leaves exactly one legal move, which makes
+  // the pool a FIXED loop — and two pools of the same length then re-sync, which
+  // is the lockstep problem in a new costume: twelve runs produced only four
+  // distinct verdicts because its lead-in and its verbal pool both held four.
+  // Holding ~65% back keeps a long gap AND leaves at least two live candidates
+  // every time, so the order itself varies from cycle to cycle.
+  let windowLen = Math.max(1, Math.min(len - 1, Math.round(len * 0.65)));
+  if (len >= 3) windowLen = Math.min(windowLen, len - 2);
+  const recent = used.slice(-windowLen);
+  const free = [];
+  for (let i = 0; i < len; i++) if (recent.indexOf(i) < 0) free.push(i);
+  const idx = (free.length ? free : [0])[_swVoiceHash(seed, key, free.length || 1)];
+  used = recent.concat([idx]);
+  while (used.length > windowLen) used.shift();
+  mem[key] = used;
+  _swVoiceSaveMem(mem);
+  _swVoiceTurn.picks[bucket] = pool[idx];
+  return pool[idx];
+}
+// A seed that is different on every run. scan_id / report_id when the caller has
+// one, the run timestamp otherwise — never the bare date, which is what made
+// three reports in one day identical.
+function swRunSeed(pack) {
+  const p = pack || {};
+  let s = String(p.scan_id || p.report_id || p.data_as_of_utc || '');
+  if (!s) {
+    try { s = (state && state.seal && (state.seal.scan_id || state.seal.report_id)) || ''; } catch (_) {}
+  }
+  if (!s) s = 'run-' + Date.now() + '-' + Math.floor(Math.random() * 1e9);
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619) >>> 0;
+  return h >>> 0;
+}
+if (typeof window !== 'undefined') {
+  window.swVoicePick = swVoicePick;
+  window.swRunSeed   = swRunSeed;
 }
 
 function buildDailyTone(p) {

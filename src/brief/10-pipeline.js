@@ -542,12 +542,31 @@ function _topInterp(interps){
 // Turns the ledger facts into a warm Coffee & Crypto morning read instead of a
 // robotic data dump. No external AI — deterministic per scan (seeded by scan id)
 // so the phrasing varies day to day but stays stable within a single report.
+// v16.15: the seed fell back to TODAY'S DATE whenever the pack had no scan id —
+// and the pack normally has none, because the scan id lives on state.seal. So
+// every report run on the same day drew the identical opener, the identical
+// posture line and the identical closing beat; the three 2026-08-13 reports all
+// begin "I never blinked. Here's what crossed the wire:" and end on "Watch the
+// hands, not the mouth." Only the numbers moved.
 function _nvSeed(pack){
-  var s=String((pack&&(pack.scan_id||pack.report_id))||(typeof _today==='function'?_today():'')||'seed');
+  if(typeof swRunSeed==='function'){ try{ return swRunSeed(pack); }catch(_){} }
+  var s=String((pack&&(pack.scan_id||pack.report_id||pack.data_as_of_utc))||('run-'+Date.now()));
   var h=0; for(var i=0;i<s.length;i++){ h=(h*31 + s.charCodeAt(i))|0; }
   return Math.abs(h);
 }
-function _nvPick(arr, seed, salt){ if(!arr||!arr.length) return ''; return arr[(seed+(salt||0))%arr.length]; }
+// ...and `(seed + salt) % len` made every same-length pool move in lockstep, so
+// changing the seed shifted the opener and the beat by exactly the same amount.
+// swVoicePick hashes the bucket separately AND refuses to reuse a line until the
+// rest of its pool has been spent, which is the guarantee that was actually
+// being asked for. The old arithmetic stays as the fallback so this file still
+// renders on its own if 02-core has not loaded.
+function _nvPick(arr, seed, salt){
+  if(!arr||!arr.length) return '';
+  if(typeof swVoicePick==='function'){
+    try{ return swVoicePick(arr, 'nv'+(salt||0), seed); }catch(_){}
+  }
+  return arr[(seed+(salt||0))%arr.length];
+}
 function _lc1(s){
   s=String(s||''); if(!s) return s;
   // Don't de-capitalize acronyms / brand names when the first word already
@@ -648,7 +667,10 @@ var _NV_BEATS=[
   'I don\u2019t predict. I document. It ages better.',
   'The whales are careful. The Ledger is more careful.'
 ];
-function _nvBeat(seed, salt){ return _NV_BEATS[((seed||0)+(salt||0))%_NV_BEATS.length]; }
+// Routed through _nvPick so the signature beats rotate and de-repeat on the same
+// terms as everything else — this was its own additive index, which is why
+// "Watch the hands, not the mouth" closed all three reports on 2026-08-13.
+function _nvBeat(seed, salt){ return _nvPick(_NV_BEATS, seed, 900+(salt||0)); }
 
 // v16.10: coverage gate for every narrative path that can say "quiet".
 // SW-20260813-VAGPU read 35 of 197 wallets while the device had no network at
@@ -842,7 +864,22 @@ function _buildEvidence(interps, pack){
       // to which variant the day's seed picked — and the smoke assertion that
       // looks for /DISCOVERY/i passed or failed with it.
       var netLead=_nvPick(['The discovery queue is holding ','On the discovery pile I have ','The discovery queue is carrying ','In the discovery queue right now: '],seed,12);
-      var netTail=_nvPick([' — flagged, not trusted; behavioral evidence only, nobody gets a badge automatically.',' — every one flagged on behavior, not identity; nobody gets a badge for free.',' — suspects, not the convicted; the Ledger earns the flag, I don’t hand it out.'],seed,13);
+      // Every variant here must carry the ownership disclaimer, not just the
+      // first one. Two of the old three said only "nobody gets a badge for free"
+      // and "suspects, not the convicted" — good voice, no disclaimer — so which
+      // report carried the required line came down to the day's pick. Now that
+      // the picker rotates per RUN that would have been a coin flip on every
+      // scan, so the rule is: vary the wording, never vary the claim.
+      var netTail=_nvPick([
+        ' — flagged, not trusted; behavioral evidence only, nobody gets a badge automatically.',
+        ' — every one flagged on behavior, not identity; behavioral evidence only, and nobody gets a badge for free.',
+        ' — suspects, not the convicted; behavioral evidence only, the Ledger earns the flag and I don’t hand it out.',
+        ' — behavioral evidence only, not ownership proof; a wallet gets on that pile by what it did, never by whose name is on it.',
+        ' — queued on behavior alone. Behavioral evidence only, so not one of them is named until the receipts say so.',
+        ' — all of them flagged, none of them accused; behavioral evidence only, and not ownership proof.',
+        ' — that pile is behavioral evidence only. It says what moved, never who owns it, and I keep that line hard.',
+        ' — behavior put them there and behavior alone. Not ownership proof, and I won’t dress it up as any.'
+      ],seed,13);
       var watchedClause=watched?(', separate from the '+watched+' wallets on the permanent watch list'):'';
       parts.push(netLead+fresh.length+' flagged candidate'+(fresh.length===1?'':'s')+
                  watchedClause+netTail);
