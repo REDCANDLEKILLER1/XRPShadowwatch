@@ -2154,11 +2154,20 @@ async function fetchNewsIntel(forceRefresh) {
   log('News FAST tier complete: ' + fastIntel.items.length + ' items from RSS+CryptoCompare.');
 
   // ── SLOW TIER ──
+  // Automatic suppression, guarded by redundancy — see newsSuppression().
+  const gdSup = (typeof newsSuppression === 'function') ? newsSuppression('GDELT') : { suppressed: false };
+  state.newsSuppression = { GDELT: gdSup };
+  if (gdSup.suppressed) {
+    log('GDELT skipped this run — ' + gdSup.reason + '. Next probe in ' + gdSup.nextRetryMin + ' min.');
+  } else if (gdSup.probe) {
+    log('GDELT probe — ' + gdSup.reason + '.');
+  }
   const slow = await Promise.allSettled([
-    useGdelt ? fetchGdelt(settings) : Promise.resolve([]),
+    (useGdelt && !gdSup.suppressed) ? fetchGdelt(settings) : Promise.resolve([]),
     fetchGoogleNews()
   ]);
-  if (slow[0].status === 'fulfilled') { allItems = allItems.concat(slow[0].value); tierStatus.gdelt       = 'OK'; }
+  if (gdSup.suppressed)                { tierStatus.gdelt       = 'SUPPRESSED'; }
+  else if (slow[0].status === 'fulfilled') { allItems = allItems.concat(slow[0].value); tierStatus.gdelt = 'OK'; }
   else                                 { tierStatus.gdelt       = 'FAILED'; }
   if (slow[1].status === 'fulfilled') { allItems = allItems.concat(slow[1].value); tierStatus.google_news = 'OK'; }
   else                                 { tierStatus.google_news = 'FAILED'; }
@@ -2170,7 +2179,7 @@ async function fetchNewsIntel(forceRefresh) {
   const dbgLines = [
     `${tierStatus.cryptocompare === 'OK' ? '✓' : '✗'} CryptoCompare: ${tierStatus.cryptocompare}`,
     `${tierStatus.rss_feeds     === 'OK' ? '✓' : '✗'} RSS feeds: ${tierStatus.rss_feeds}`,
-    `${tierStatus.gdelt         === 'OK' ? '✓' : '✗'} GDELT: ${tierStatus.gdelt}`,
+    `${tierStatus.gdelt === 'OK' ? '✓' : tierStatus.gdelt === 'SUPPRESSED' ? '⏸' : '✗'} GDELT: ${tierStatus.gdelt}`,
     `${tierStatus.google_news   === 'OK' ? '✓' : '✗'} Google News: ${tierStatus.google_news}`
   ];
   if ($('newsDebugBox')) $('newsDebugBox').textContent = dbgLines.join('\n');
@@ -14475,6 +14484,68 @@ function getNewsDoctorHistory() {
   return {};
 }
 
+// ── AUTOMATIC SOURCE SUPPRESSION, WITH A REDUNDANCY GUARD ──────
+// A provider that has failed on every run for a week is not a flaky source, it
+// is a dead one, and re-attempting it every scan costs a request, a timeout and
+// a line in the error log that never changes.
+//
+// The guard is the important half: a source is NEVER suppressed if doing so
+// would leave too few working ones behind. A noisy log is a nuisance; a report
+// that quietly lost its news coverage because the app tidied itself into a
+// corner is a failure. So suppression requires redundancy to still exist after
+// it — and if the healthy count later drops, a suppressed source is
+// automatically brought back into rotation rather than staying off.
+//
+// Suppression is also never permanent. Every SUPPRESS_RETRY_HOURS one probe is
+// allowed through, because a source that is off can never be observed to have
+// recovered, and a rule with no way back is a rule that eventually lies.
+const SUPPRESS_AFTER_FAILS   = 10;   // consecutive failures before it qualifies
+const MIN_HEALTHY_TO_SUPPRESS = 2;   // working sources that must remain afterwards
+const SUPPRESS_RETRY_HOURS   = 12;   // probation probe interval
+
+function _newsHealthyCount(hist) {
+  hist = hist || getNewsDoctorHistory();
+  let ok = 0;
+  Object.keys(hist).forEach(k => {
+    const h = hist[k] || {};
+    if (n(h.consecutive_failures) === 0 && n(h.success_count) > 0) ok++;
+  });
+  return ok;
+}
+
+// Should this provider be skipped on this run? Returns the reasoning too, so the
+// report can explain itself rather than silently dropping a source.
+function newsSuppression(provName) {
+  const hist = getNewsDoctorHistory();
+  const rec  = hist[provName];
+  if (!rec) return { suppressed: false, reason: 'no history' };
+  const fails = n(rec.consecutive_failures);
+  if (fails < SUPPRESS_AFTER_FAILS)
+    return { suppressed: false, fails: fails, reason: 'below the ' + SUPPRESS_AFTER_FAILS + '-failure threshold' };
+
+  // The redundancy guard. Count the healthy sources EXCLUDING this one.
+  const healthy = _newsHealthyCount(hist);
+  if (healthy < MIN_HEALTHY_TO_SUPPRESS) {
+    return { suppressed: false, fails: fails, healthy: healthy,
+             reason: 'kept in rotation — only ' + healthy + ' healthy source' +
+                     (healthy === 1 ? ' remains' : 's remain') +
+                     ', and a failing source still beats no source' };
+  }
+
+  // Probation: let one probe through every SUPPRESS_RETRY_HOURS.
+  const last = rec.last_probe ? Date.parse(rec.last_probe) : 0;
+  const dueMs = (isFinite(last) ? last : 0) + SUPPRESS_RETRY_HOURS * 3600000;
+  if (Date.now() >= dueMs) {
+    rec.last_probe = new Date().toISOString();
+    saveNewsDoctorHistory(hist);
+    return { suppressed: false, fails: fails, healthy: healthy, probe: true,
+             reason: 'suppressed, but a ' + SUPPRESS_RETRY_HOURS + '-hourly probe is due — checking whether it recovered' };
+  }
+  return { suppressed: true, fails: fails, healthy: healthy,
+           nextRetryMin: Math.max(1, Math.round((dueMs - Date.now()) / 60000)),
+           reason: fails + ' consecutive failures with ' + healthy + ' healthy sources still up' };
+}
+
 // Save news doctor history
 function saveNewsDoctorHistory(hist) {
   try { localStorage.setItem(NEWS_DOCTOR_HISTORY_KEY, JSON.stringify(hist)); } catch (_) {}
@@ -15786,6 +15857,28 @@ function _newsSourceStrategyToText(strategy) {
     const pv = strategy.providers[k];
     ((/CONTENT_OK/.test(pv.overall_status || '') && n(pv.consecutive_failures) === 0) ? healthy : sick).push(pv);
   });
+  const sup = (state.newsSuppression || {});
+  const supNames = Object.keys(sup).filter(k => sup[k] && sup[k].suppressed);
+  if (supNames.length) {
+    lines.push('SUPPRESSED THIS RUN');
+    supNames.forEach(k => {
+      const x = sup[k];
+      lines.push('  \u2022 ' + k + ' \u2014 ' + x.reason + '. Not fetched. Next probe in ' + x.nextRetryMin + ' min.');
+    });
+    lines.push('  Suppression requires ' + MIN_HEALTHY_TO_SUPPRESS + '+ healthy sources to remain; if that stops being ' +
+               'true, these come straight back into rotation.');
+    lines.push('');
+  }
+  // A source that qualified for suppression but was KEPT because dropping it
+  // would have left too little coverage. Worth saying out loud — it is the guard
+  // doing its job, and silence would look like the rule failing.
+  const held = Object.keys(sup).filter(k => sup[k] && !sup[k].suppressed && !sup[k].probe &&
+                                            n(sup[k].fails) >= SUPPRESS_AFTER_FAILS);
+  if (held.length) {
+    lines.push('KEPT DESPITE FAILING');
+    held.forEach(k => lines.push('  \u2022 ' + k + ' \u2014 ' + sup[k].reason + '.'));
+    lines.push('');
+  }
   if (healthy.length) {
     lines.push('HEALTHY');
     healthy.forEach(pv => lines.push('  \u2022 ' + pv.provider + ' \u2014 ' + pv.overall_status +
