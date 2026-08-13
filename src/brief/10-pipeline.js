@@ -504,7 +504,22 @@ function summarizeAbsorberActivity(pack){
       });
     });
     var totalAmt=absorbers.reduce(function(s,a){return s+a.amount;},0);
-    var names=absorbers.slice(0,2).map(function(a){return a.name;});
+    // v16.18: this was a bare slice(0,2).join(' and '), so two Binance wallets
+    // absorbing supply printed "Binance and Binance absorbed 20.99M XRP this
+    // scan." — which reads as a mistake and hides the actual finding, that ONE
+    // exchange took it across two wallets. 02-core already solves this:
+    // _swWhoList collapses repeats into "Binance ×2" and caps the list. Reuse it
+    // rather than keeping a second, worse version here.
+    var names;
+    if(typeof _swWhoList==='function'){
+      names=_safe(function(){ return _swWhoList(absorbers.map(function(a){return a.address;}),{max:2}); }, null);
+    }
+    if(!names||!names.length){
+      // fallback: collapse by name the same way, without the address lookup
+      var seen={},ord=[];
+      absorbers.forEach(function(a){ if(seen[a.name]==null){seen[a.name]=0;ord.push(a.name);} seen[a.name]++; });
+      names=ord.slice(0,2).map(function(nm){ return seen[nm]>1?nm+' ×'+seen[nm]:nm; });
+    }
     var headline=absorbers.length?
       names.join(' and ')+' absorbed '+_xrpFmt(totalAmt)+' XRP this scan.' :
       'Repeat exchange absorber activity detected across scans.';
@@ -817,8 +832,14 @@ function _buildWhatMatteredMost(interps, pack){
     'Cut through the noise, here’s the signal: '
   ];
   if(others.length){
-    return _nvPick(leads,seed,2)+others.slice(0,2).map(function(i){ return _lc1(i.headline||_firstSentence(i.summary)); }).join(', and ')+
-      '.'+_nvPick(tails,seed,6);
+    // v16.18: the clauses were joined raw, but a headline already ends in a full
+    // stop — so the section read "…absorbed 20.99M XRP this scan., and XRP Price
+    // Outlook…" with the period stranded mid-sentence. Strip the terminator off
+    // each clause before joining, and let the join supply the punctuation.
+    var clauses=others.slice(0,2).map(function(i){
+      return _lc1(String(i.headline||_firstSentence(i.summary)||'').replace(/\s*[.;,]+\s*$/,''));
+    }).filter(Boolean);
+    return _nvPick(leads,seed,2)+clauses.join(', and ')+'.'+_nvPick(tails,seed,6);
   }
   if(best) return _nvPick([
     'One move carried the whole night — a single, deliberate transfer, not a busy board. When it’s that concentrated, the quiet around it is the tell, and I noticed.',
