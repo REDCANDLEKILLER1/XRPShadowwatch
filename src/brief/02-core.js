@@ -238,6 +238,20 @@ const WATCHLIST = [
   ['LARGE_RECV_r44AzN',   'r44AzNe4LSHQkB95qm6pQCauJ3Vz7Yx3iU', 'discovered_receiver'],         // review · exchange-adjacent · COINCHECK_COLD/COINBASE_HOT · seen 4x · score 85/200
   ['LARGE_RECV_raN2ev',   'raN2ev7xZCJei22Y6rJshVVmWCQKgpp9Jg', 'discovered_receiver'],         // review · exchange-adjacent · COINBASE_HOT · seen 4x · score 85/200
   ['LARGE_RECV_rhzZYH',   'rhzZYHFopep75YksYPtb8KAJKoooqMZtV3', 'discovered_receiver'],         // monitor · exchange-adjacent · COINBASE_HOT · seen 1x · score 50/200
+  // ── 2026-08-13 scan SW20260813FVZAO: the queue produced top-tier again ──
+  // Four scans in a row found nothing new, because every large move was
+  // watchlist-internal. This one broke that: 3 fresh candidates, and for the
+  // first time since 08-05 the board returned a CRITICAL_ADD_REVIEW. Standard
+  // rule applies — CRITICAL_ADD_REVIEW and RECOMMEND_FOR_WATCH are promoted, the
+  // REVIEW and MONITOR tiers stay in the queue.
+  //
+  // Worth recording: rMLNvZ was surfaced BY a wallet added yesterday. Flare Core
+  // Vault was one of the 29 registry identities nothing had ever scanned; less
+  // than a day on the list it moved 10M XRP to an unnamed whale. That is the
+  // registry-as-target change paying for itself, and the reason rs96VS (REVIEW,
+  // fed by Ceffu — also added yesterday) is now in the queue behind it.
+  ['SPLITTER_rnPpiy',     'rnPpiykzCFkievFjCdx7xLKb2KGA1is3ew', 'next_hop_splitter'],           // CRITICAL_ADD_REVIEW · routing-node · fed by LARGE_RECV_rQDQgw, forwarded onward · richlist 64.85M XRP · 74.1M total / 71.1M max single · seen 1x · score 165/200
+  ['WHALE_RECV_rMLNvZ',   'rMLNvZR9dascY5jtCfCv3whAp8HdUSZAQ',  'discovered_whale'],            // RECOMMEND_FOR_WATCH · watch-net · 10.00M XRP direct from Flare Core Vault · richlist 5.00M XRP · lifecycle SELL_PRESSURE · seen 2x · score 125/200
   ['LARGE_RECV_rfah8j',   'rfah8jhiJwPhcWEn2eQZehWqKKqAWGjxp1', 'discovered_receiver'],         // monitor · watch-net · seen 1x · score 35/200
   // ── 2026-08-11 scan SC-MSOO837V — surfaced this scan, checksum-verified ──
   ['WHALE_RECV_rhuqpD', 'rhuqpDZ2XNjWzvZ16wJhmJF5JDaU3NdvE7', 'discovered_whale'],
@@ -2985,6 +2999,21 @@ function buildXRPMainReport(p) {
     r.push('• Classification + confidence are heuristic — large move ≠ proven intent.');
     r.push('');
   }
+
+  // ═══ v16.16: 9b. EXCHANGE PRESSURE — the only section that asks whether the
+  // money moving has anything to do with the price. Reads the Black Box history
+  // that was already being written and, until now, only ever read for pair
+  // co-occurrence. See src/brief/15-flow-analysis.js. ═══
+  try {
+    if (typeof flowAnalysisToText === 'function') {
+      const flowLines = flowAnalysisToText();
+      if (flowLines && flowLines.length) {
+        r.push('9b. EXCHANGE PRESSURE');
+        flowLines.forEach(l => r.push(l));
+        r.push('');
+      }
+    }
+  } catch (_) { /* the report must never fail on an analysis section */ }
 
   // ═══ v3.18: 10. RECEIVER FOLLOWTHROUGH ═══
   const recLines = renderReceiverFollowthrough(p.receiver_followthrough, 5);

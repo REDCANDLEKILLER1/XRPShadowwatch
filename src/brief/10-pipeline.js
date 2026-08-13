@@ -154,7 +154,22 @@ function _plain(name, provenance){
   if(n.includes('bitstamp'))  return 'Bitstamp';
   if(n.includes('bitso'))     return 'Bitso';
   if(n.includes('sbi'))       return 'SBI VC Trade';
-  if(n.includes('ripple')&&!n.includes('xrpl')) return 'Ripple Labs';
+  // v16.17: this used to return 'Ripple Labs'. That is an UPGRADE, not a
+  // normalisation — the registry sources the name "Ripple", and rewriting it as
+  // the company asserts corporate ownership nobody sourced. It also broke the
+  // report outright: assertLabelProvenance then went looking for provenance for
+  // "Ripple Labs", the source ref said "Ripple", the two could never match, and
+  // the whole public narrative was discarded in favour of the KGMT fallback
+  // (SW-20260813-FVZAO). Two registry wallets named "Ripple" went onto the scan
+  // list the day before; the first time one of them moved 50M XRP, the report
+  // blanked itself.
+  //
+  // A sourced name passes through as it was sourced. An internal handle
+  // (RIPPLE_1.3B, RIPPLE_ESCROW_*) is a description of what the wallet does and
+  // must never become a company either — it gets the neutral phrase.
+  if(n.includes('ripple')&&!n.includes('xrpl')){
+    return /^ripple$/i.test(String(name).trim()) ? 'Ripple' : 'a Ripple escrow wallet';
+  }
   if(n.includes('exchange')||n.includes('hot')) return 'an exchange wallet';
   if(n.includes('whale'))     return 'a large XRP holder';
   if(n.includes('escrow'))    return 'an escrow wallet';
@@ -1456,7 +1471,7 @@ function assertLabelProvenance(report, interpretations){
   // Named entities CLAIMED BY US must have operator_reviewed or richlist_seed
   // provenance. Quoted headlines are excluded — see _stripQuotedJournalism.
   var exchanges=['Bithumb','Binance','Coinbase','Kraken','Upbit',
-    'Crypto.com','Bitstamp','Bitso','SBI VC Trade','Ripple Labs'];
+    'Crypto.com','Bitstamp','Bitso','SBI VC Trade','Ripple'];
   var scanned=_stripQuotedJournalism(report, interpretations);
   var allRefs=[];
   _arr(interpretations).forEach(function(i){
@@ -1468,8 +1483,16 @@ function assertLabelProvenance(report, interpretations){
   for(var i=0;i<exchanges.length;i++){
     var ex=exchanges[i];
     if(scanned.indexOf(ex)>-1){
+      // v16.17: the match was one-directional — the REF had to contain the
+      // entity. A ref sourced as "Ripple" therefore failed to satisfy a mention
+      // of "Ripple Labs", and a ref sourced as "Binance Hot 3" would fail
+      // "Binance" the moment anything shortened it. Either string containing the
+      // other is the same claim about the same entity, and the consequence of
+      // getting this wrong is the entire report being thrown away.
       var found=allRefs.some(function(l){
-        return l&&l.toLowerCase().indexOf(ex.toLowerCase())>-1;
+        if(!l) return false;
+        var a=String(l).toLowerCase(), b=ex.toLowerCase();
+        return a.indexOf(b)>-1 || b.indexOf(a)>-1;
       });
       if(!found)
         return _fail('assertLabelProvenance',
@@ -1477,6 +1500,31 @@ function assertLabelProvenance(report, interpretations){
     }
   }
   return null;
+}
+
+// Replace an entity we cannot prove provenance for with the neutral description
+// of what it is. Keeps every finding, every number and every sentence — drops
+// only the identity claim we could not stand behind, which is the one thing that
+// actually had to go.
+var _NEUTRAL_FOR={
+  'Ripple':'a Ripple escrow wallet', 'Ripple Labs':'a Ripple escrow wallet',
+  'SBI VC Trade':'an exchange wallet'
+};
+function _repairProvenance(text, failures){
+  var out=String(text||''), count=0, notes=[];
+  _arr(failures).forEach(function(f){
+    if(!f || f.assertion!=='assertLabelProvenance') return;
+    var ent=String(f.excerpt||'').trim();
+    if(!ent) return;
+    var neutral=_NEUTRAL_FOR[ent]||'an exchange wallet';
+    // Whole-word only: "Bitso" must not eat the "Bitso" inside a longer name,
+    // and a replacement must never run two words together.
+    var re=new RegExp('(^|[^A-Za-z0-9.])'+ent.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?![A-Za-z0-9])','g');
+    var before=out;
+    out=out.replace(re, function(m,p1){ return p1+neutral; });
+    if(out!==before){ count++; notes.push('"'+ent+'" → "'+neutral+'"'); }
+  });
+  return { text:out, changed:count>0, count:count, notes:notes };
 }
 
 function assertNoArrayDumps(report){
@@ -1539,10 +1587,19 @@ function auditPublicReport(reportText, violations, interpretations, isFallback){
 /* ═════════════════════════════════════════════════════════════════════
    KNOWN-GOOD MINIMAL TEMPLATE (KGMT) — §7.1
    ═════════════════════════════════════════════════════════════════════ */
+// v16.17: the fallback's banner was hand-typed Unicode and both names were
+// wrong \u2014 it rendered "\u211C\u1D07\u1D05\u1D04\u1D00\u1D21\u1D05\u029C\u1D0F\u029C\u1D1B\u1D07\u0280" instead of RedCandleKiller, and
+// "\uD835\uDCC2\uD835\uDD3B\uD835\uDD46\uFF2E\uD835\uDCC2" instead of STONE. The one template that only ever appears on the
+// app's worst day was misspelling the operator's own name and his co-host's,
+// which is exactly when it is least affordable. Use the real branded header
+// (02-core.js buildBrandedHeader) and keep the garbled literal only as the
+// last-ditch value if that function has not loaded.
+var _KGMT_BANNER=(function(){
+  try{ if(typeof buildBrandedHeader==='function') return buildBrandedHeader()+'\n\n'; }catch(_){}
+  return '\uD83E\uDE78 RedCandleKiller \uD83E\uDE78\nSHADOW WATCH\n\u2615 COFFEE & CRYPTO with STONE\n\n';
+})();
 var KGMT_TEXT=
-'\uD83E\uDE78 \u211C\u1D07\u1D05\u1D04\u1D00\u1D21\u1D05\u029C\u1D0F\u029C\u1D1B\u1D07\u0280 \uD83E\uDE78\n'+
-'\uFF33\uFF28\uFF21\uFF24\uFF2F\uFF37\u3000\uFF37\uFF21\uFF34\uFF23\uFF28\n'+
-'\u2615 COFFEE & CRYPTO with \uD835\uDCC2\uD835\uDD3B\uD835\uDD46\uFF2E\uD835\uDCC2\n\n'+
+_KGMT_BANNER+
 'EXECUTIVE SUMMARY\n'+'\u2500'.repeat(17)+'\n'+
 'Today\'s scan completed. The public narrative engine could not assemble a publishable report from the available evidence. Raw evidence is intact in the dev panel and the GPT/Agent package.\n\n'+
 'WHAT MATTERED MOST\n'+'\u2500'.repeat(18)+'\n'+
@@ -1627,7 +1684,32 @@ function renderPublicReport(pack){
       return sanitized.text;
     }
 
-    // Audit failed — fallback
+    // v16.17: audit failure used to go straight to KGMT — the whole night's
+    // narrative thrown away and replaced with "the public narrative engine could
+    // not assemble a publishable report". On SW-20260813-FVZAO that happened
+    // because one wallet was called "Ripple Labs" instead of "Ripple". A naming
+    // nit cost the entire report, on a scan that had found 3 new candidates, a
+    // 50M XRP escrow move and live news.
+    //
+    // A name we cannot source is a name we should not print — but the fix for
+    // that is to stop printing THE NAME, not to stop printing the report. Try the
+    // proportionate repair first, re-audit it honestly, and only fall back if the
+    // report still cannot pass.
+    var repair=_repairProvenance(sanitized.text, audit.failures);
+    if(repair.changed){
+      var reAudit=auditPublicReport(repair.text, sanitized.violations, interps, false);
+      if(reAudit.pass){
+        _lastAudit=reAudit;
+        _setFallbackBanner(0);
+        try{ window._SW_REPORT_MODE='CLEAN report (V1 pipeline, '+repair.count+' unsourced name(s) neutralised)'; }catch(_){}
+        _logToDevPanel('Audit repaired: '+repair.notes.join('; ')+'. Report published with the name(s) removed rather than the report.');
+        return repair.text;
+      }
+      _logToDevPanel('Audit repair attempted but still failing: '+
+        (reAudit.failures||[]).map(function(f){return f.assertion;}).join(', '));
+    }
+
+    // Repair impossible or insufficient — fallback
     _fallbackCount++;
     var failDetail=audit.failures.map(function(f){
       return f.assertion+': '+f.detail;
