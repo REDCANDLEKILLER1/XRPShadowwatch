@@ -8450,19 +8450,72 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     }
 
     var _RADDR=/\br[a-zA-Z0-9]{24,33}\b/g;
-    function _getWallets(text){
-      if (!text) return [];
-      var m=text.match(_RADDR)||[], seen=Object.create(null), out=[];
-      m.forEach(function(a){
-        if (seen[a]) return; seen[a]=1;
-        var name='UNKNOWN', conf='UNKNOWN', itype='Unknown';
-        if (_S.wLabels && _S.wLabels[a]){
-          var i=_S.wLabels[a]; name=i.name||i.label||'UNKNOWN'; conf='HIGH';
-          itype=i.type==='EXCH'?'Exchange':i.type==='HVT'?'Whale':'Known Wallet';
-        }
-        out.push({address:a,display_name:name,confidence:conf,identity_type:itype});
+
+    // v16.12: this tab said "No wallet addresses detected in this report" on
+    // every run, including runs that scanned 197 wallets and flagged 31 large
+    // transfers. It only ever scraped full r-addresses out of the finished
+    // report TEXT — and the public report prints wallets the way a human reads
+    // them ("Binance", "rfRms8…F8n8"), never as a full address. The regex could
+    // not match by construction, so the panel was empty the day it shipped.
+    //
+    // The wallets are in the scan pack sitting right here. Read them from there,
+    // and keep the text scrape as an extra source rather than the only one.
+    function _walletsFromPack(){
+      var p=_livePack(); if (!p) return [];
+      var seen=Object.create(null), out=[];
+      function add(addr, why){
+        if (!addr || typeof addr!=='string') return;
+        if (!/^r[a-zA-Z0-9]{24,33}$/.test(addr) || seen[addr]) return;
+        seen[addr]=1; out.push({ address:addr, why:why });
+      }
+      // The wallets the report actually talks about, in the order it talks
+      // about them: the big moves first, then who received them.
+      (p.large_transfers||[]).forEach(function(t){
+        add(t.from||t.sender||t.source||t.Account, 'sent a flagged transfer');
+        add(t.to||t.destination||t.dest||t.Destination, 'received a flagged transfer');
       });
+      (p.receiver_followthrough||[]).forEach(function(rr){ add(rr.address, 'receiver follow-through'); });
+      (p.fragmentation_flags||[]).forEach(function(f){ add(f.to||f.address, 'dust / tag cluster'); });
+      try { (state.clusters||[]).forEach(function(c){ (c.members||c.addresses||[]).forEach(function(a){ add(a, 'behavioural cluster'); }); }); } catch(_){}
+      // Then the watched wallets that actually moved this pass, biggest first.
+      var moved=(p.wallet_results||p.wallets||[]).map(function(w){
+        return { a:w.address, d:Math.abs(_num(w.balance_xrp)-_num(w.prev_balance_xrp)) };
+      }).filter(function(x){ return x.a && x.d>=1000; }).sort(function(a,b){ return b.d-a.d; });
+      moved.slice(0,40).forEach(function(x){ add(x.a, 'balance moved this scan'); });
       return out;
+    }
+
+    function _getWallets(text){
+      var out=_walletsFromPack(), seen=Object.create(null);
+      out.forEach(function(w){ seen[w.address]=1; });
+      // Anything printed in full in the text that the pack did not already have.
+      ((text||'').match(_RADDR)||[]).forEach(function(a){
+        if (seen[a]) return; seen[a]=1; out.push({ address:a, why:'named in the report' });
+      });
+      return out.map(function(w){
+        var a=w.address, name='UNKNOWN', conf='UNKNOWN', itype='Unknown';
+        // The identity registry and the watch list are both in this document —
+        // no postMessage bridge required. The bridge payload still wins if the
+        // outer app ever sends one.
+        var bridged=_S.wLabels && _S.wLabels[a];
+        if (bridged){
+          name=bridged.name||bridged.label||'UNKNOWN'; conf='HIGH';
+          itype=bridged.type==='EXCH'?'Exchange':bridged.type==='HVT'?'Whale':'Known Wallet';
+        } else {
+          try {
+            var id=(typeof _swIdentity==='function')?_swIdentity(a):null;
+            if (id&&id.name){ name=id.name; conf='HIGH'; itype=id.type||'Known Wallet'; }
+            else {
+              var wl=(typeof _swWatched==='function')?_swWatched(a):null;
+              if (wl){
+                name=(typeof _swWho==='function')?_swWho(a,wl.label,{bare:true}):(wl.label||'UNKNOWN');
+                conf='MEDIUM'; itype='Watched';
+              }
+            }
+          } catch(_){}
+        }
+        return { address:a, display_name:name, confidence:conf, identity_type:itype, why:w.why };
+      });
     }
 
     function _pSources(srcs){
@@ -8480,7 +8533,9 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     }
 
     function _pWallets(wallets){
-      if (!wallets.length) return '<div class="mbt-empty">No wallet addresses detected in this report.</div>';
+      if (!wallets.length) return '<div class="mbt-empty">' +
+        (_livePack() ? 'This scan flagged no wallet activity — no transfers, no receivers, no balance moves above 1,000 XRP.'
+                     : 'Run a scan to populate the wallets in this report.') + '</div>';
       var h='';
       wallets.forEach(function(w){
         h+='<div class="mbt-wallet-row">';
@@ -8488,6 +8543,9 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         if (w.display_name&&w.display_name!=='UNKNOWN') h+='<span class="mbt-wname"> &mdash; '+_esc(w.display_name)+'</span>';
         h+='<span class="mbt-conf '+_cc(w.confidence)+'">'+_esc(w.confidence)+'</span>';
         if (w.identity_type&&w.identity_type!=='Unknown') h+='<span class="mbt-src-meta">'+_esc(w.identity_type)+'</span>';
+        // Why it is on this list. Without it the panel is a bare address dump
+        // and there is no way to tell a whale mover from a dust receiver.
+        if (w.why) h+='<span class="mbt-src-meta">'+_esc(w.why)+'</span>';
         h+='<br>';
         var a=_esc(w.address);
         h+='<button class="mbt-btn" data-addr="'+a+'" onclick="window._mbtCopyOne(this.dataset.addr)">COPY</button>';

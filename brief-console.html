@@ -375,6 +375,17 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
   .sw-dash-v1 .sw-hbtn{padding:6px 9px;font-size:9.5px;}
   .sw-dash-v1 .sw-hbtn .sw-hbtn-t{display:none;}
   .sw-dash-v1 .sw-hbtn.sw-exit .sw-hbtn-t{display:inline;}
+  /* The header is a flex row in which EVERY child was flex:0 0 auto with
+     white-space:nowrap, so nothing could give. Below about 412px the brand,
+     the XRPMAN chip, the voice button and EXIT added up to more than the row,
+     and since the overflow had nowhere to go, EXIT hung out past the header's
+     right border — the ✕ sitting outside its own frame on every common phone
+     (375 / 390 / 393). The controls are now pinned inside the frame and the
+     brand is the part that yields. */
+  .sw-dash-v1 #swDashHeader{overflow:hidden;}
+  .sw-dash-v1 .sw-brandwrap{flex:0 1 auto;min-width:0;overflow:hidden;}
+  .sw-dash-v1 .sw-brand{min-width:0;overflow:hidden;text-overflow:ellipsis;}
+  .sw-dash-v1 #swDashHeader .sw-hbtn{flex:0 0 auto;}
   /* .sw-row-reactor is already single-column */
   .sw-dash-v1 .sw-logpanel-top{min-height:190px;max-height:230px;}
   .sw-dash-v1 .sw-reactor{gap:10px;}
@@ -406,6 +417,11 @@ body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100
   .sw-dash-v1 .sw-gauge svg{max-width:96px;}
   .sw-dash-v1 .sw-tilerow{grid-template-columns:repeat(2,minmax(0,1fr));}
   .sw-dash-v1 .sw-reactor-pct{font-size:34px;}
+  /* Something in the header has to give below 420px, and the XRPMAN chip is the
+     right thing to lose: it is the only item whose text the brand beside it
+     already carries. Dropping it keeps SHADOWWATCH whole and EXIT inside its
+     frame down to 320px, instead of truncating the brand to fit a duplicate. */
+  .sw-dash-v1 #swDashHeader .sw-chip{display:none;}
 }
 @media (prefers-reduced-motion:reduce){
   .sw-dash-v1 *{animation:none !important;transition:none !important;}
