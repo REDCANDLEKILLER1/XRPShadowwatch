@@ -650,8 +650,45 @@ var _NV_BEATS=[
 ];
 function _nvBeat(seed, salt){ return _NV_BEATS[((seed||0)+(salt||0))%_NV_BEATS.length]; }
 
+// v16.10: coverage gate for every narrative path that can say "quiet".
+// SW-20260813-VAGPU read 35 of 197 wallets while the device had no network at
+// all, and opened with "not one wallet did anything it had not done before."
+// XRPMan does not get to sound certain about a board he could not read.
+function _cov(pack){
+  if(typeof scanCoverage==='function'){ try{ return scanCoverage(pack); }catch(_){} }
+  return { checked:0, failed:0, total:0, pct:1, percent:100,
+           degraded:false, severe:false, line:'', caveat:'' };
+}
+// The blunt version, for the top of the story.
+function _covLead(cov, seed){
+  return _nvPick([
+    'I have to open with a problem instead of a finding: ',
+    'Before anything else — this scan did not finish. ',
+    'Straight up, because burying it would be worse: ',
+    'This one comes with a warning label on the front. ',
+    'I would rather hand you a short report than a confident wrong one. ',
+    'Read this part first, because it changes how you read the rest: '
+  ], seed, 9) +
+  'only ' + cov.checked + ' of ' + cov.total + ' watched wallets answered tonight (' +
+  cov.percent + '%). ' + cov.failed + ' never came back. ' +
+  _nvPick([
+    'The link to the Ledger went down mid-scan and most of the board went dark with it.',
+    'Most of the board was unreachable when I ran it — that is a connection problem, not a market one.',
+    'The servers stopped answering partway through and took the rest of the list with them.',
+    'I lost the wire before I got through the list.'
+  ], seed, 10) +
+  ' So I am not calling this a quiet night. I could not see most of it, and an unread wallet is not a still one. ' +
+  'Re-run the scan before you trust a single total below.';
+}
+
 function _buildExecutiveSummary(interps, pack){
   var seed=_nvSeed(pack), best=_topInterp(interps), moves=interps[0];
+  var cov=_cov(pack);
+  // A scan that lost most of the board reports the outage, not the calm.
+  if(cov.severe) return _covLead(cov, seed)+' '+_nvBeat(seed,0);
+  var covNote=cov.degraded
+    ? ' Coverage note: '+cov.checked+' of '+cov.total+' wallets answered — the numbers below are of what was reachable, not the whole list.'
+    : '';
   var openers=[
     'I kept watch over the Ledger while you slept. ',
     'Another night on patrol, and the Ledger tipped its hand: ',
@@ -697,7 +734,7 @@ function _buildExecutiveSummary(interps, pack){
     'no heavy hands on the board. I would rather tell you that plainly than dress up a slow night.'
   ];
   var factRaw=(moves&&moves.has_signal)?(moves.headline||moves.summary):(best?best.summary:'');
-  if(!factRaw) return _nvPick(openers,seed,0)+_nvPick(quietOpen,seed,7)+' '+_nvBeat(seed,0);
+  if(!factRaw) return _nvPick(openers,seed,0)+_nvPick(quietOpen,seed,7)+covNote+' '+_nvBeat(seed,0);
   var line=_nvPick(openers,seed,0)+_lc1(_firstSentence(factRaw));
   var score=_num(pack&&pack.risk_score&&pack.risk_score.score);
   var posture=score>=75?_nvPick(['The signal flared red — this is a full-alert night on the Ledger.','Every alarm I’ve got lit up. Top of the dial.','This is a loud one — the board’s screaming and I’m all eyes.','Red across the board. When it’s this hot, somebody’s making a move.','Full alert. The heavy hands came out to play tonight.','I have not seen the board light like this in a while. Eyes up.','This is the kind of night the receipts get printed for.','Everything I watch moved at once. That is not coincidence, that is coordination.','Loud, fast, and deliberate. Somebody wanted this done before morning.','If you read one report this week, make it this one.'],seed,1)
@@ -706,7 +743,7 @@ function _buildExecutiveSummary(interps, pack){
              :_nvPick(['Otherwise the Ledger behaved itself.','The rest of the board stayed in line.','A still night — the rails were quiet and honest.','Nothing else tried to slip past. Good.','Calm water tonight — I still counted every ripple.','Flat board, honest hours. Nothing to report is a report.','Everything sat exactly where it was left.','No movement worth your time — and I checked all of it.','Dead quiet, start to finish. I will take it.'],seed,1);
   // Close the open on one of XRPMan's signature beats — keeps the voice front
   // and center before we get into the facts.
-  return line+(posture?' '+posture:'')+' '+_nvBeat(seed,0);
+  return line+(posture?' '+posture:'')+covNote+' '+_nvBeat(seed,0);
 }
 
 function _buildWhatMatteredMost(interps, pack){
@@ -751,6 +788,16 @@ function _buildWhatMatteredMost(interps, pack){
     'It came down to one move. One deliberate transfer, no crowd around it — and concentration like that is its own kind of loud.',
     'The whole night hinged on a single hand. Not a busy board, just one purposeful move — the sort I don’t let slide.',
     'One transfer did the talking tonight. Clean, deliberate, alone on the board — exactly the kind that rewards a closer look.'
+  ],seed,2);
+  // "Nothing forced my hand" is a claim about the board. It is only true if the
+  // board was read. With most of the list dark, the honest answer is that we do
+  // not know — say that instead of dressing an outage up as a calm night.
+  var cov=_cov(pack);
+  if(cov.severe) return _nvPick([
+    'What mattered most is what I could not see. '+cov.failed+' of '+cov.total+' wallets never reported in, so anything I tell you about "no moves" tonight is about the '+cov.checked+' that answered, and nothing else.',
+    'The thing that mattered tonight was the blackout, not the board. Only '+cov.checked+' wallets came back. I will not dress that up as a quiet shift.',
+    'I cannot tell you what mattered most, because '+cov.failed+' of the '+cov.total+' wallets I watch never answered. That is the finding: the read failed, not the market went still.',
+    'The headline tonight is the gap in my own coverage. '+cov.percent+'% of the board reported in. The rest is unknown, and unknown is not the same as quiet.'
   ],seed,2);
   return _nvPick([
     'A steady patrol tonight. The rails stayed calm and nothing tried to slip past me.',
@@ -802,6 +849,15 @@ function _buildEvidence(interps, pack){
     }
   } catch(_){}
   if(news&&news.has_signal)   parts.push(newsLead+' '+_lc1(news.summary));
+  // Same rule as WHAT MATTERED MOST: "no move crossed the line" is a finding
+  // about a board that was read. With the list mostly dark it is not available.
+  var covE=_cov(pack);
+  if(!parts.length && covE.severe)
+    return _nvPick([
+      'The evidence tonight is the read itself: '+covE.checked+' of '+covE.total+' wallets answered, '+covE.failed+' did not.',
+      'There is no tape to hand you. '+covE.failed+' of '+covE.total+' wallets never responded, so there is nothing to put on the record.',
+      'What I have is a partial ledger — '+covE.checked+' wallets out of '+covE.total+'. I am not going to build a case on that.'
+    ],seed,4)+' Nothing crossed my threshold in the part I could read, and I am reporting that as a limit, not a result. '+_nvBeat(seed,3);
   if(!parts.length) return _nvPick(['No move crossed the line big enough to book tonight. I stayed on watch anyway.','Nothing hit the threshold worth booking — but a clean night is still a logged night.','The board gave me nothing to charge tonight. I kept the watch regardless.'],seed,4)+' '+_nvBeat(seed,3);
   parts.push(_nvBeat(seed,3));
   return parts.join(' ');
@@ -810,6 +866,12 @@ function _buildEvidence(interps, pack){
 function _buildWatchNext(interps, pack){
   var seed=_nvSeed(pack), bullets=[];
   var recv=interps[3], band=interps[4], absorber=interps[5], moves=interps[0];
+  // The first thing to do about an unread board is read it. Nothing else on this
+  // list matters until that happens, so it goes at the top.
+  var cov=_cov(pack);
+  if(cov.degraded)
+    bullets.push('Re-run the scan — '+cov.failed+' of '+cov.total+' wallets never answered this pass'+
+                 (cov.severe?', and nothing below is settled until they do.':'.'));
   if(recv&&recv.has_signal){
     if(recv.summary.indexOf('forwarded')>-1)
       bullets.push('Follow the forwarded funds — where they land tells me who’s really behind it.');
@@ -848,6 +910,24 @@ function _buildVerdict(interps, pack){
   var risk=_num(_rs.score!=null?_rs.score:(pack&&pack.score));
   var _drivers=_arr(_rs.drivers).slice(0,3).filter(Boolean);
   var seed=_nvSeed(pack);
+  // v16.10: a low score off an unread board is not a verdict. Say what the
+  // number actually measures before anyone reads it on air as an all-clear.
+  var cov=_cov(pack);
+  if(cov.severe){
+    return _nvPick(['Today’s forensic read: ','The read, straight up: ','Bottom line off the Ledger: ','My call this morning: '],seed,32)+
+      _nvPick([
+        'no verdict tonight — I could not read the board',
+        'I am withholding the call; the scan came back mostly blind',
+        'no call from me on this one — most of the list never answered',
+        'the honest verdict is that there is no verdict yet'
+      ],seed,30)+
+      '. The score reads '+risk+'/100, but it was calculated across only '+cov.checked+' of '+
+      cov.total+' wallets ('+cov.percent+'%). '+
+      'A low number off '+cov.percent+'% coverage means unread, not clear — do not report it as a quiet night. '+
+      'Re-run the scan when the connection is back and take that read instead. '+_nvBeat(seed,5)+
+      ' Not financial advice. XRP-only forensic watch.\n\n'+
+      'I’m XRPMan, and I tell on the banks.';
+  }
   var verbal=risk>=75?_nvPick(['the Ledger is on high alert — heavy hands moving all night','this was a loud night — big money didn’t even try to hide','the board ran hot; the whales were busy','full-alert night — the heavy hands showed themselves'],seed,30):
              risk>=50?_nvPick(['the Ledger is restless, and I’m watching close','a stirring night — motion working under the surface','the board’s warm; something’s in play','an unsettled night — I’m leaning in on it'],seed,30):
              risk>=25?_nvPick(['a moderate night — routine patrol holds','a steady night — nothing broke the pattern','ordinary motion, nothing that raised the hair on my neck','a middling night — logged and watched'],seed,30):
@@ -857,6 +937,8 @@ function _buildVerdict(interps, pack){
   var delta=_num(pack&&(pack.total_balance_delta_xrp!=null?pack.total_balance_delta_xrp:pack.balance_delta));
   if(delta>500000) dir+=' Watched wallets are net accumulating — about '+_xrpFmt(delta)+' XRP moved inward.';
   else if(delta<-500000) dir+=' Watched wallets are net distributing — about '+_xrpFmt(Math.abs(delta))+' XRP moved outward.';
+  if(cov.degraded) dir+=' Scored across '+cov.checked+' of '+cov.total+' wallets ('+cov.percent+'%) — '+
+                        cov.failed+' failed to read, so treat this as a partial read.';
   return _nvPick(['Today\u2019s forensic read: ','The read, straight up: ','Bottom line off the Ledger: ','My call this morning: '],seed,32)+verbal+'.'+dir+' '+_nvBeat(seed,5)+
          ' Not financial advice. XRP-only forensic watch.\n\n'+
          'I\u2019m XRPMan, and I tell on the banks.';
@@ -903,7 +985,13 @@ function _buildLedgerDiagnostics(pack){
   var scanned=_num(p.wallets_checked);
   if(watched>0||scanned>0){
     var wc='\u2022 Watched wallets: '+(watched||scanned);
-    if(scanned>0&&watched>0&&scanned!==watched) wc+=' ('+scanned+' scanned this pass)';
+    if(scanned>0&&watched>0&&scanned!==watched){
+      // "(35 scanned this pass)" read like a sampling choice. It was a failure.
+      var _c=_cov(p);
+      wc+=_c.degraded
+        ? ' \u2014 only '+scanned+' answered this pass ('+_c.percent+'%); '+_c.failed+' failed to read'
+        : ' ('+scanned+' scanned this pass)';
+    }
     L.push(wc);
   }
   // Wide shot: ALL on-Ledger activity across the watched wallets, every size.

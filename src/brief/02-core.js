@@ -2423,15 +2423,62 @@ function buildClusters(pack) {
   return clusters;
 }
 
+// ── SCAN COVERAGE ─────────────────────────────────────────────
+// v16.10: report SW-20260813-VAGPU read 35 of 197 wallets during a total
+// network outage — every XRPL server and every news feed failed inside the same
+// forty seconds — and then narrated the result as "calm water, nobody made a
+// move worth booking" at 5/100. That is the worst failure this app can have: a
+// board nobody could read is not a quiet board, and a low score off 18% coverage
+// is an absence of evidence, not evidence of absence.
+//
+// Every narrative path that can say "quiet" now asks this first.
+const COVERAGE_DEGRADED_PCT = 0.95;   // below this, the report must say so
+const COVERAGE_SEVERE_PCT   = 0.60;   // below this, "quiet" is unreadable, not observed
+function scanCoverage(pack) {
+  const p = pack || {};
+  const checked = n(p.wallets_checked);
+  const failed  = n(p.wallets_failed) + n(p.wallets_invalid);
+  const total   = n(p.watchlist_total) || (checked + failed) || 0;
+  const pct     = total > 0 ? checked / total : 1;
+  const percent = Math.round(pct * 100);
+  const degraded = total > 0 && checked < total && pct < COVERAGE_DEGRADED_PCT;
+  const severe   = total > 0 && pct < COVERAGE_SEVERE_PCT;
+  const cov = {
+    checked: checked, failed: failed, total: total,
+    pct: pct, percent: percent,
+    degraded: degraded, severe: severe,
+    // "35 of 197 watched wallets answered (18%); 162 did not."
+    line: checked + ' of ' + total + ' watched wallet' + (total === 1 ? '' : 's') +
+          ' answered (' + percent + '%)' +
+          (failed > 0 ? '; ' + failed + ' did not' : '') + '.',
+    caveat: ''
+  };
+  if (severe) {
+    cov.caveat = 'Most of the board never answered, so a low reading here is unread, not clear. ' +
+                 'Nothing below can be treated as an all-clear until the scan is re-run.';
+  } else if (degraded) {
+    cov.caveat = 'Part of the board never answered. Every total below is of what was reachable, ' +
+                 'not of the whole list.';
+  }
+  return cov;
+}
+
 // ── EVIDENCE QUALITY ──────────────────────────────────────────
 function evidenceQuality(p) {
   let score = 0;
   const inc = [], miss = [], internal = [];
   if (p.xrp_price)      { score += 15; inc.push('market price loaded'); } else miss.push('market price missing');
   if (p.xrp_volume_24h) { score += 10; inc.push('market volume loaded'); } else miss.push('market volume missing');
-  if (p.wallets_checked >= 17) { score += 20; inc.push('17+ wallets scored'); }
-  else if (p.wallets_checked > 0) { score += 15; inc.push(p.wallets_checked + ' wallets scored'); miss.push('some wallets failed'); }
-  else miss.push('no wallets scored');
+  // v16.10: this used to be an absolute "17+ wallets scored" — a threshold from
+  // when the watchlist was 17 long. On a 197-wallet list it awarded full marks
+  // for reading 35 of them. Coverage is a ratio or it means nothing.
+  const _cov = scanCoverage(p);
+  if (_cov.checked === 0) miss.push('no wallets scored');
+  else if (!_cov.degraded) { score += 20; inc.push(_cov.checked + '/' + _cov.total + ' wallets scored'); }
+  else if (!_cov.severe)   { score += 12; inc.push(_cov.checked + '/' + _cov.total + ' wallets scored');
+                             miss.push(_cov.failed + ' wallets unreadable (' + _cov.percent + '% coverage)'); }
+  else                     { score += 4;  inc.push(_cov.checked + '/' + _cov.total + ' wallets scored');
+                             miss.push('only ' + _cov.percent + '% of the watchlist was reachable'); }
   if (p.tx_24h_count >= 300) { score += 15; inc.push('high tx sample'); }
   else if (p.tx_24h_count > 0) { score += 8; inc.push('partial tx sample'); miss.push('low tx sample'); }
   else miss.push('zero tx rows');
@@ -2768,6 +2815,14 @@ function buildXRPMainReport(p) {
   // in the daily report (was previously buried in Intel Brief / 4K only).
   if (p && p.risk_score && n(p.risk_score.score) > 0) {
     r.push('• Risk: ' + publicRiskLabel(p));
+  }
+  // v16.10: the coverage the score was computed over, immediately under it.
+  // A 5/100 across 35 of 197 wallets is not the same statement as 5/100 across
+  // all 197, and the report used to print them identically.
+  {
+    const _c = scanCoverage(p);
+    if (_c.severe)        r.push('• ⚠️ COVERAGE: ' + _c.line + ' ' + _c.caveat);
+    else if (_c.degraded) r.push('• 🟡 Coverage: ' + _c.line + ' ' + _c.caveat);
   }
   r.push('');
 
@@ -13477,7 +13532,13 @@ function shadowWatchSection(buckets, p) {
   if (failed > 0 || invalid > 0) {
     const failedNames = ((p.wallet_results || []).filter(w => w.status === 'failed' || w.status === 'invalid') || [])
       .map(w => w.label).slice(0, 4).join(', ');
-    lines.push(`• 🟡 Failed/Invalid: ${failed} failed, ${invalid} invalid${failedNames ? ' (' + failedNames + ')' : ''}. Excluded from scoring.`);
+    // v16.10: 162 of 197 unreadable is not a yellow footnote. Escalate with the
+    // share of the board that went dark, and say what it costs the report.
+    const _c = scanCoverage(p);
+    lines.push(_c.severe
+      ? `• 🔴 Failed/Invalid: ${failed} failed, ${invalid} invalid${failedNames ? ' (' + failedNames + ')' : ''}. ` +
+        `Only ${_c.percent}% of the board was readable — every figure in this report is a partial read, and no "quiet" finding is confirmed.`
+      : `• 🟡 Failed/Invalid: ${failed} failed, ${invalid} invalid${failedNames ? ' (' + failedNames + ')' : ''}. Excluded from scoring.`);
   }
   // 10. The Ghosts — dust noise / receiver activity
   const ghosts = (p.dust_noise_count || 0) + ((p.receiver_followthrough || []).filter(r => r.forwarded_large_count > 0).length);
@@ -13766,9 +13827,14 @@ function buildIntelBrief(p) {
   const risk = publicRiskLabel(p);
   const cluster = (state.clusters || [])[0];
   const rec = (p.receiver_followthrough || []).find(r => r.forwarded_large_count > 0);
-  const profiles = state.walletProfiles || [];
+  // v16.10: FAILED_SCAN is a scan OUTCOME, not a behaviour. Leaving it in the
+  // tally produced "Dominant pattern: failed scan. Board mix: failed scan ×162"
+  // — reporting the outage as the board's behaviour. Coverage belongs in the
+  // coverage line; the mix describes wallets we actually read.
+  const profiles = (state.walletProfiles || []).filter(x => x && x.archetype !== 'FAILED_SCAN');
   const dom = profiles.reduce((m, x) => { m[x.archetype] = (m[x.archetype] || 0) + 1; return m; }, {});
   const primary = Object.entries(dom).sort((a, b) => b[1] - a[1])[0]?.[0] || 'NO_PROFILE';
+  const cov = scanCoverage(p);
 
   // v3.26: news context derived from shared newsMode — same authority
   // DailyReport / MorningStory use. Eliminates the old contradiction
@@ -13797,7 +13863,10 @@ function buildIntelBrief(p) {
       (p.total_balance_delta_xrp > 0 ? '+' : '') + fmt(p.total_balance_delta_xrp, 0) + ' XRP across ' +
       n(p.wallets_checked) + ' watched wallets, window ' + tw.label + '.',
     lt + ' transfer' + (lt === 1 ? '' : 's') + ' above threshold. Shadow volume: ' +
-      fmt(p.shadow_volume_xrp, 0) + ' XRP.'
+      fmt(p.shadow_volume_xrp, 0) + ' XRP.',
+    // Coverage sits with the arithmetic, not in a footnote. A total across 35 of
+    // 197 wallets and a total across all 197 read identically otherwise.
+    'Coverage: ' + cov.line + (cov.degraded ? ' ' + cov.caveat : '')
   ].join('\n');
 
   // 2 — the actual archetype MIX, not just the top one.
@@ -13805,8 +13874,14 @@ function buildIntelBrief(p) {
     .map(([k, v]) => k.toLowerCase().replace(/_/g, ' ') + ' \u00d7' + v);
   const behavior = (mix.length
       ? 'Dominant pattern: ' + primary.toLowerCase().replace(/_/g, ' ') +
-        (mix.length > 1 ? '. Board mix: ' + mix.join(', ') + '.' : '.')
-      : 'No wallet profiles built this pass.') +
+        (mix.length > 1 ? '. Board mix: ' + mix.join(', ') + '.' : '.') +
+        (cov.degraded ? ' Profiled from ' + profiles.length + ' readable wallet' +
+                        (profiles.length === 1 ? '' : 's') + ' — ' + cov.failed +
+                        ' never answered and have no behaviour on record this pass.' : '')
+      : (cov.degraded && cov.failed > 0
+          ? 'No wallet profiles built — ' + cov.failed + ' of ' + cov.total +
+            ' wallets failed to read, so there is no behaviour to describe.'
+          : 'No wallet profiles built this pass.')) +
     ' ' + pickDaily(INTEL_BEHAVIOR_CAVEATS, dateStr, 5);
 
   // 6 / 7 — only what applies, and what to actually do about it.
@@ -15788,8 +15863,19 @@ function _newsRecommendations(providers) {
     const name = pv.provider || k;
     const fails = n(pv.consecutive_failures);
     const rel = n(pv.reliability_score);
-    const ok = /CONTENT_OK/.test(pv.overall_status || '') && fails === 0;
+    const st = pv.overall_status || '';
+    const ok = /CONTENT_OK/.test(st) && fails === 0;
     if (ok) { healthy.push(name); return; }
+
+    // v16.10: never contacted, so there is nothing to diagnose from this run.
+    // Report the standing record if it is bad, and otherwise say nothing —
+    // advice about a fetch that did not happen is noise.
+    if (/NOT_ATTEMPTED|DISABLED_SESSION/.test(st)) {
+      if (fails >= SUPPRESS_AFTER_FAILS)
+        out.push(name + ': not contacted this run, and carrying ' + fails + ' consecutive failures from before. ' +
+                 'Suppress it or replace the feed — it has not worked in ' + fails + ' attempts.');
+      return;
+    }
 
     if (fails >= 10) {
       out.push(name + ': ' + fails + ' consecutive failures at ' + rel + '% reliability. This is not a blip — ' +
@@ -15852,10 +15938,23 @@ function _newsSourceStrategyToText(strategy) {
   // the operator to try an alternate proxy — printed against sources sitting at
   // 100% reliability with zero failures. Repair instructions for healthy
   // equipment are how a diagnostics page teaches people to stop reading it.
-  const healthy = [], sick = [];
+  //
+  // v16.10: the split keyed on CONTENT_OK alone, so two things landed in the
+  // sick bucket that had nothing wrong with them. A provider at TRANSPORT_OK_EMPTY
+  // with 0 failures and 100% reliability answered fine and had nothing to say —
+  // it got a full repair block telling the operator to try an alternate proxy.
+  // A provider at NOT_ATTEMPTED was never contacted at all, and got told
+  // "Unclassified failure. Inspect raw error and route logs" for a fetch that
+  // never happened. Neither is broken. They get their own honest buckets.
+  const healthy = [], empty = [], skipped = [], sick = [];
   Object.keys(strategy.providers || {}).forEach(k => {
     const pv = strategy.providers[k];
-    ((/CONTENT_OK/.test(pv.overall_status || '') && n(pv.consecutive_failures) === 0) ? healthy : sick).push(pv);
+    const st = pv.overall_status || '';
+    const fails = n(pv.consecutive_failures);
+    if (/CONTENT_OK/.test(st) && fails === 0)           healthy.push(pv);
+    else if (/TRANSPORT_OK_EMPTY/.test(st) && fails === 0) empty.push(pv);
+    else if (/NOT_ATTEMPTED|DISABLED_SESSION/.test(st))  skipped.push(pv);
+    else                                                  sick.push(pv);
   });
   const sup = (state.newsSuppression || {});
   const supNames = Object.keys(sup).filter(k => sup[k] && sup[k].suppressed);
@@ -15883,6 +15982,28 @@ function _newsSourceStrategyToText(strategy) {
     lines.push('HEALTHY');
     healthy.forEach(pv => lines.push('  \u2022 ' + pv.provider + ' \u2014 ' + pv.overall_status +
       ', ' + pv.reliability_score + '% reliability, no consecutive failures.'));
+    lines.push('');
+  }
+  if (empty.length) {
+    lines.push('RESPONDING, NOTHING TO REPORT');
+    empty.forEach(pv => lines.push('  \u2022 ' + pv.provider + ' \u2014 answered cleanly at ' +
+      pv.reliability_score + '% reliability and returned no items. Quiet feed, not a fault.'));
+    lines.push('  Nothing to repair here. If a source stays empty for days, check the query \u2014 not the route.');
+    lines.push('');
+  }
+  if (skipped.length) {
+    lines.push('NOT CONTACTED THIS RUN');
+    skipped.forEach(pv => {
+      const f = n(pv.consecutive_failures);
+      const why = /DISABLED_SESSION/.test(pv.overall_status || '')
+        ? 'disabled for this session'
+        : (sup[pv.provider] && sup[pv.provider].suppressed)
+          ? 'held back by suppression \u2014 ' + sup[pv.provider].reason
+          : 'the run ended before this tier was reached (news fetch ceiling, or the scan aborted)';
+      lines.push('  \u2022 ' + pv.provider + ' \u2014 ' + why + '. No fetch was attempted, so nothing about ' +
+        'this run tells you whether it works.' +
+        (f >= SUPPRESS_AFTER_FAILS ? ' Standing record: ' + f + ' consecutive failures before this run.' : ''));
+    });
     lines.push('');
   }
   if (sick.length) {
