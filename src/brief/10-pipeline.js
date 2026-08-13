@@ -787,7 +787,17 @@ function _buildExecutiveSummary(interps, pack){
   ];
   var factRaw=(moves&&moves.has_signal)?(moves.headline||moves.summary):(best?best.summary:'');
   if(!factRaw) return _nvPick(openers,seed,0)+_nvPick(quietOpen,seed,7)+covNote+' '+_nvBeat(seed,0);
-  var line=_nvPick(openers,seed,0)+_lc1(_firstSentence(factRaw));
+  // v16.23: several openers end in "Overnight, " and the large-move headline
+  // ends in "overnight." — so the summary read "Fresh receipts, still warm.
+  // Overnight, 50M XRP moved from Ripple to a large XRP holder overnight."
+  // Fine on the page, a stumble when it is read out. Drop the fact's trailing
+  // "overnight" when the opener already established the window.
+  var _open = _nvPick(openers,seed,0);
+  var _fact = _lc1(_firstSentence(factRaw));
+  // Anywhere in the opener counts, not just the end: "I ran the whole board
+  // overnight, and here's the read: …moved from Binance to Coinbase overnight."
+  if(/overnight/i.test(_open)) _fact = _fact.replace(/\s+overnight(?=[.!?]?$)/i, '');
+  var line=_open+_fact;
   var score=_num(pack&&pack.risk_score&&pack.risk_score.score);
   var posture=score>=75?_nvPick(['The signal flared red — this is a full-alert night on the Ledger.','Every alarm I’ve got lit up. Top of the dial.','This is a loud one — the board’s screaming and I’m all eyes.','Red across the board. When it’s this hot, somebody’s making a move.','Full alert. The heavy hands came out to play tonight.','I have not seen the board light like this in a while. Eyes up.','This is the kind of night the receipts get printed for.','Everything I watch moved at once. That is not coincidence, that is coordination.','Loud, fast, and deliberate. Somebody wanted this done before morning.','If you read one report this week, make it this one.'],seed,1)
              :score>=50?_nvPick(['My instincts are up — something’s moving out there.','The Ledger’s running warm tonight, and I’m watching close.','Not a siren yet, but the needle’s twitching. I’m leaning in.','Enough motion to keep me honest — I’m tracking it.','Warm, not hot. But warm is how the big ones start.','A few wallets stretched their legs. Worth a second look tomorrow.','Nothing alarming, but the shape of it has my attention.','More motion than usual and no obvious reason for it yet.','Middle of the dial. I am staying in the chair.'],seed,1)

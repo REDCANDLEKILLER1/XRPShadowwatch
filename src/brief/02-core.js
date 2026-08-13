@@ -251,7 +251,16 @@ const WATCHLIST = [
   // registry-as-target change paying for itself, and the reason rs96VS (REVIEW,
   // fed by Ceffu — also added yesterday) is now in the queue behind it.
   ['SPLITTER_rnPpiy',     'rnPpiykzCFkievFjCdx7xLKb2KGA1is3ew', 'next_hop_splitter'],           // CRITICAL_ADD_REVIEW · routing-node · fed by LARGE_RECV_rQDQgw, forwarded onward · richlist 64.85M XRP · 74.1M total / 71.1M max single · seen 1x · score 165/200
-  ['WHALE_RECV_rMLNvZ',   'rMLNvZR9dascY5jtCfCv3whAp8HdUSZAQ',  'discovered_whale'],            // RECOMMEND_FOR_WATCH · watch-net · 10.00M XRP direct from Flare Core Vault · richlist 5.00M XRP · lifecycle SELL_PRESSURE · seen 2x · score 125/200
+  ['WHALE_RECV_rMLNvZ',   'rMLNvZR9dascY5jtCfCv3whAp8HdUSZAQ',  'discovered_whale'],
+  // ── 2026-08-13 later scans: promoted on a STANDING recommendation ──
+  // rwV8eL has come back RECOMMEND_FOR_WATCH at 140/200 in four consecutive
+  // reports (11:17 → 13:03) without ever being "found this scan" again, so the
+  // usual found-this-scan promotion never fired for it. The tier is the rule,
+  // not the sighting: it is richlist #191 holding 47.7M XRP, took 77.15M in a
+  // single transfer and forwarded none of it, and it was fed by SPLITTER_rnPpiy
+  // — the CRITICAL_ADD_REVIEW added earlier today. That is the second hop of a
+  // routing chain, which is the thing this app exists to follow.
+  ['WHALE_RECV_rwV8eL',   'rwV8eLBadfRLpWep1MVkqaSKmmXyK7iDzm', 'discovered_whale'],            // RECOMMEND_FOR_WATCH · watch-net · 77.15M XRP received and held, no forward · richlist #191 (47.70M) · fed by SPLITTER_rnPpiy · seen 4 reports · score 140/200            // RECOMMEND_FOR_WATCH · watch-net · 10.00M XRP direct from Flare Core Vault · richlist 5.00M XRP · lifecycle SELL_PRESSURE · seen 2x · score 125/200
   ['LARGE_RECV_rfah8j',   'rfah8jhiJwPhcWEn2eQZehWqKKqAWGjxp1', 'discovered_receiver'],         // monitor · watch-net · seen 1x · score 35/200
   // ── 2026-08-11 scan SC-MSOO837V — surfaced this scan, checksum-verified ──
   ['WHALE_RECV_rhuqpD', 'rhuqpDZ2XNjWzvZ16wJhmJF5JDaU3NdvE7', 'discovered_whale'],
@@ -991,6 +1000,18 @@ async function _ensureSock(ws) {
       return nw;
     } catch (e) {
       state._reconnectFails = n(state._reconnectFails) + 1;
+      // v16.23: record that the link went down DURING the scan. Until now this
+      // only reached the error log. The balance pass had usually finished, so
+      // coverage still read 228/228 honestly — but the later phases (offers,
+      // next-hop) never ran, their sections simply did not print, and the report
+      // gave no sign anything was missing.
+      //
+      // SW-20260813-Q20LA lost sections 7 and 10 this way. The run before it
+      // lost the same two, and with them the top actionable finding — "rwV8eL is
+      // sitting on 77.15M XRP with no forward". A reader would conclude the
+      // finding had gone away. It had not; we stopped looking.
+      state.linkLostDuringScan = true;
+      state.linkLostAt = new Date().toISOString();
       elog('mid-scan reconnect', e);
       return null;
     } finally {
@@ -2496,6 +2517,41 @@ function _asSentence(s) {
 function _stripPublisherSuffix(s) {
   return String(s == null ? '' : s).replace(/\s+[-—–|]\s*[^-—–|]+$/, '');
 }
+// ── INCOMPLETE SCAN ───────────────────────────────────────────
+// v16.23: when the XRPL link dies mid-scan the balance pass has usually already
+// finished, so coverage honestly reports 228/228 — but the later phases never
+// run. Their sections then simply do not print, and the report reads as though
+// there was nothing to say. SW-20260813-Q20LA and 7I250 both lost LIMIT ORDER /
+// OFFER WATCH and RECEIVER FOLLOWTHROUGH exactly this way, and 7I250 lost the
+// standing top finding with them ("rwV8eL is sitting on 77.15M XRP with no
+// forward"). A reader would conclude the finding had gone away. It had not — we
+// stopped looking, and said nothing.
+//
+// Fourth member of the same family as the coverage and baseline guards: a
+// failure that leaves no trace in the narrative.
+function scanIntegrity(pack) {
+  const p = pack || {};
+  let lost = !!p.scan_link_lost;
+  try { if (!lost && typeof state !== 'undefined') lost = !!state.linkLostDuringScan; } catch (_) {}
+  // Which late-phase sections had no chance to run. Reported as "not run", never
+  // as "nothing found" — the distinction is the whole point.
+  const missing = [];
+  if (lost) {
+    if (!((p.offers_scanned_count != null) || (state && (state.offers || []).length))) missing.push('Limit order / offer watch');
+    if (!((p.receiver_followthrough || []).length)) missing.push('Receiver follow-through (next-hop)');
+  }
+  return {
+    linkLost: lost,
+    at: p.scan_link_lost_at || (typeof state !== 'undefined' ? state.linkLostAt : null) || null,
+    missing: missing,
+    line: lost
+      ? ('The XRPL link dropped mid-scan and could not be rebuilt. Balances were already read, so the coverage figure stands — but the later phases stopped where they were'
+         + (missing.length ? ': ' + missing.join(' and ') + ' did not run' : '')
+         + '. Sections missing below are NOT findings of nothing; they were not reached. Re-run for a complete pass.')
+      : ''
+  };
+}
+
 // ── DELTA BASELINE ────────────────────────────────────────────
 // v16.21: a balance delta needs a PREVIOUS balance. On a device that has never
 // run a scan there isn't one — prev_balance_xrp is null for every wallet, every
@@ -2576,6 +2632,10 @@ function buildPack(v) {
     escrowed_xrp: n($('inEscrowed')?.value),
     support: n($('inSupport')?.value) || price * 0.94, resistance: n($('inResistance')?.value) || price * 1.06,
     watchlist_total: WATCHLIST.length,
+    // v16.23: carried on the pack so every renderer can say so, not just the
+    // error log. True when the XRPL link died mid-scan and could not be rebuilt.
+    scan_link_lost: !!state.linkLostDuringScan,
+    scan_link_lost_at: state.linkLostAt || null,
     wallets_checked: checked.length, wallets_failed: failed.length, wallets_invalid: invalid.length,
     wallets: state.wallets, tx_24h_count: state.txs.length,
     total_tx_xrp: totalTxXRP(), active_wallets: activeWalletCount(),
@@ -2895,6 +2955,8 @@ function buildXRPMainReport(p) {
     const _c = scanCoverage(p);
     if (_c.severe)        r.push('• ⚠️ COVERAGE: ' + _c.line + ' ' + _c.caveat);
     else if (_c.degraded) r.push('• 🟡 Coverage: ' + _c.line + ' ' + _c.caveat);
+    const _si = scanIntegrity(p);
+    if (_si.linkLost) r.push('• ⚠️ INCOMPLETE SCAN: ' + _si.line);
   }
   r.push('');
 
@@ -14023,6 +14085,12 @@ function _intelLimits(p, health) {
   const out = [];
   if (health && health.newsMode !== 'LEDGER_ONLY')
     out.push('Headlines are external context and prove nothing about the transfers above.');
+  // v16.23: an incomplete pass outranks every other caveat — it says the report
+  // stopped early, so put it first.
+  try {
+    const _si = scanIntegrity(p);
+    if (_si.linkLost) out.unshift(_si.line);
+  } catch (_) {}
   if (n(p.wallets_failed) > 0)
     out.push(n(p.wallets_failed) + ' wallet read failure' + (n(p.wallets_failed) === 1 ? '' : 's') + ' \u2014 totals are of what was reachable, not of the whole list.');
   if ((state.frags || []).length)
@@ -19348,6 +19416,9 @@ async function run() {
     state._sock = ws;
     state._reconnectFails = 0;
     state._reconnecting = null;
+    // Fresh run, fresh verdict on whether the link held.
+    state.linkLostDuringScan = false;
+    state.linkLostAt = null;
     shadowSay('Reading watched wallets…', 'WALLETS', 30);
     log('Scanning ' + getActiveWatchlist().length + ' wallets (parallel x' + SCAN_PARALLEL + ', tier-based pages, smart skip)...');
     await scanWallets(ws);

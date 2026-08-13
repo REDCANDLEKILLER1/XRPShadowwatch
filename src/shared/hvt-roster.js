@@ -1,6 +1,6 @@
 // ── SHARED HIGH-VALUE TARGET ROSTER ──────────────────────────────────────────
 // The one list of wallets both apps consider high-value. Before this file the
-// live wall watched 74 targets and the report console watched 170, and only
+// live wall watched 74 targets and the report console watched 171, and only
 // 45 addresses were on both — so a wallet could be a headline in the morning
 // brief and completely absent from the HVT board, or drain to nothing on the
 // board without the report ever looking at it.
@@ -20,14 +20,14 @@
 // Regenerate with scripts/build-hvt-roster.js after adding wallets to either
 // app. Do not hand-edit — the generator is the source of truth.
 //
-// 228 targets · 128 with a sourced identity · 32 carrying a size claim
+// 229 targets · 128 with a sourced identity · 32 carrying a size claim
 window.SW_HVT_ROSTER = {
  "version": 1,
  "generated": "2026-08-13",
  "stats": {
-  "total": 228,
+  "total": 229,
   "identified": 128,
-  "from_report_only": 94,
+  "from_report_only": 95,
   "from_wall_only": 5,
   "from_registry_only": 29,
   "both": 45,
@@ -3134,6 +3134,19 @@ window.SW_HVT_ROSTER = {
    "address": "rUVtjZ5Kg4TJ4osZCJooq3hunjuACtNx4W",
    "label": "WHALE_RECV_rUVtjZ",
    "handle": "WHALE_RECV_rUVtjZ",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rwV8eLBadfRLpWep1MVkqaSKmmXyK7iDzm",
+   "label": "WHALE_RECV_rwV8eL",
+   "handle": "WHALE_RECV_rwV8eL",
    "type": "HVT",
    "identified": false,
    "confidence": null,
