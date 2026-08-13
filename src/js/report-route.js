@@ -51,10 +51,51 @@
       // visit the same day replays the sealed report instead of re-scanning, and
       // the scan is the visitor's own browser talking to the ledger — a hundred
       // readers is a hundred independent page loads, not a hundred hits on us.
+      // Is the visitor still at the door? The splash carries the biometric scan
+      // and the first-run tour sits on top of the app — while either is up the
+      // console has not begun loading, so a tick spent here is a tick spent on
+      // nothing.
+      function _gateUp() {
+        try {
+          var sp = document.getElementById('splash-screen');
+          if (sp && sp.dataset.done !== '1' && sp.style.display !== 'none') return true;
+          var tut = document.getElementById('tutorial-overlay');
+          if (tut && tut.offsetParent !== null &&
+              getComputedStyle(tut).display !== 'none') return true;
+        } catch (_) {}
+        return false;
+      }
+
+      // v16.20: this budget was a flat 60 ticks — 15 seconds from the moment the
+      // brief was opened — and it was being spent while the visitor was still on
+      // the lock screen. A stranger handed this link has to hold the scanner and
+      // clear the first-run tour before the console even starts loading, and
+      // brief-console.html plus a 28k-line engine is not a 15-second download on
+      // mobile data. The timer expired, the scan never fired, and they were left
+      // looking at an idle console with a RUN SCAN button they had no reason to
+      // know to press. From the outside that is "/report doesn't work".
+      //
+      // Two changes: the gate no longer costs anything, and the budget for the
+      // part that actually needs waiting on — the iframe and its engine — is
+      // long enough for a phone on a bad connection.
       function runScanWhenReady() {
-        var fired = false, tries = 0;
+        var fired = false, tries = 0, startedAt = Date.now();
+        var MAX_TRIES   = 360;             // 90s of ACTIVE waiting on the console…
+        var MAX_WALL_MS = 5 * 60 * 1000;   // …under a hard ceiling, so never forever
         var t = setInterval(function () {
-          if (fired || ++tries > 60) { clearInterval(t); return; }
+          if (fired) { clearInterval(t); return; }
+          if (Date.now() - startedAt > MAX_WALL_MS) {
+            clearInterval(t);
+            try { console.warn('[report-route] gave up waiting for the console after 5 minutes.'); } catch (_) {}
+            return;
+          }
+          // Still at the lock screen or the tour — wait, do not charge for it.
+          if (_gateUp()) return;
+          if (++tries > MAX_TRIES) {
+            clearInterval(t);
+            try { console.warn('[report-route] console did not bind a scan handler in 90s; leaving it idle for the operator.'); } catch (_) {}
+            return;
+          }
           try {
             var frame = document.getElementById('brief-frame');
             var doc = frame && frame.contentDocument;
