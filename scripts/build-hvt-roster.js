@@ -82,6 +82,14 @@ function put(addr, patch, source) {
 }
 report.forEach(r => put(r.address, { handle: r.handle, type: CAT_TYPE[r.cat] || 'HVT', cat: r.cat }, 'report'));
 wall.forEach(w => put(w.address, { wall_label: w.label, type: w.type }, 'wall'));
+// The registry used to be consulted only for NAMES, never as a source of
+// targets — so 29 wallets we had positively identified (Bitget Global, SBI VC
+// Trade, Revolut, Bitkub, Luno, Ceffu, both Evernorth treasury wallets, the
+// Flare Core Vault) were named in every report and scanned by neither app. A
+// wallet worth naming is a wallet worth watching; that is what the registry is
+// for. Adding it here means the gap closes itself whenever an identity lands,
+// instead of waiting for someone to notice and hand-copy the address.
+Object.keys(REG).forEach(a => put(a, { type: REG[a].type || 'HVT' }, 'registry'));
 
 const targets = [...byAddr.values()].filter(t => {
   if (isXrplAddress(t.address)) return true;
@@ -112,7 +120,10 @@ const stats = {
   identified: targets.filter(t => t.identified).length,
   from_report_only: targets.filter(t => t.sources.length === 1 && t.sources[0] === 'report').length,
   from_wall_only: targets.filter(t => t.sources.length === 1 && t.sources[0] === 'wall').length,
-  both: targets.filter(t => t.sources.length === 2).length,
+  // Named by the registry and targeted by neither app until this file picked
+  // them up — the gap that made the registry a third source.
+  from_registry_only: targets.filter(t => t.sources.length === 1 && t.sources[0] === 'registry').length,
+  both: targets.filter(t => t.sources.indexOf('report') >= 0 && t.sources.indexOf('wall') >= 0).length,
   with_expected: targets.filter(t => t.expected_xrp).length,
   rejected_invalid: 0            // filled in below — the generator drops these
 };

@@ -20,15 +20,16 @@
 // Regenerate with scripts/build-hvt-roster.js after adding wallets to either
 // app. Do not hand-edit — the generator is the source of truth.
 //
-// 197 targets · 99 with a sourced identity · 32 carrying a size claim
+// 226 targets · 128 with a sourced identity · 32 carrying a size claim
 window.SW_HVT_ROSTER = {
  "version": 1,
- "generated": "2026-08-12",
+ "generated": "2026-08-13",
  "stats": {
-  "total": 197,
-  "identified": 99,
-  "from_report_only": 123,
-  "from_wall_only": 29,
+  "total": 226,
+  "identified": 128,
+  "from_report_only": 92,
+  "from_wall_only": 5,
+  "from_registry_only": 29,
   "both": 45,
   "with_expected": 32,
   "rejected_invalid": 0
@@ -44,7 +45,21 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
+   ]
+  },
+  {
+   "address": "rEbKBkgKSQgm5x8PycZc5VjdCVTmqYfcY1",
+   "label": "ahbritto",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
    ]
   },
   {
@@ -57,6 +72,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -70,6 +86,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -83,6 +100,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -96,6 +114,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -109,6 +128,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -122,6 +142,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -135,6 +156,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -149,6 +171,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -163,6 +186,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -177,6 +201,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -191,6 +216,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -204,6 +230,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -217,6 +244,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -231,6 +259,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -244,6 +273,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -258,6 +288,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -272,6 +303,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 325000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -286,6 +318,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -299,6 +332,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -313,6 +347,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -327,6 +362,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -340,6 +376,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -353,6 +390,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -367,6 +405,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 1700000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -381,6 +420,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -394,6 +434,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -407,6 +448,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -420,6 +462,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -433,6 +476,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -447,6 +491,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -460,6 +505,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -473,7 +519,21 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
+   ]
+  },
+  {
+   "address": "rwTTsHVUDF8Ub2nzV2oAeWxfJzUvobXLEf",
+   "label": "Bitget Global",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
    ]
   },
   {
@@ -486,6 +546,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 1800000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -500,7 +561,34 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
+   ]
+  },
+  {
+   "address": "rE3Cc3i6163Qzo7oc6avFQAxQE4gyCWhGP",
+   "label": "Bitkub",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
+   ]
+  },
+  {
+   "address": "rfmMjAXq65hpAxEf1RLNQq6RgYTSVkQUW5",
+   "label": "BITPoint",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
    ]
   },
   {
@@ -513,6 +601,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -526,6 +615,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -539,6 +629,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -553,8 +644,22 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
+   ]
+  },
+  {
+   "address": "rpQATJWPPdNMxVCTQDYcnRNwtFDnanT3nk",
+   "label": "Bitunix",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
    ]
   },
   {
@@ -567,7 +672,21 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
+   ]
+  },
+  {
+   "address": "rZ6XrB8if1qB3hEW6KKVzvGH2cLtUeEcd",
+   "label": "BTC Markets",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
    ]
   },
   {
@@ -580,6 +699,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -593,6 +713,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -607,6 +728,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -621,7 +743,21 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
+   ]
+  },
+  {
+   "address": "rQUp2PKzH3vCtKs5H9tsPPE1rTsN6fhjqn",
+   "label": "Ceffu",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
    ]
   },
   {
@@ -634,6 +770,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -647,6 +784,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 500000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -660,6 +798,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 500000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -673,6 +812,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 500000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -686,6 +826,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -699,6 +840,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -712,6 +854,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -725,6 +868,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -739,6 +883,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -752,6 +897,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -765,7 +911,47 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
+   ]
+  },
+  {
+   "address": "rLUpiBeLhUyEzVtBkYE4S9t4zhdybSSARw",
+   "label": "CoinDCX",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
+   ]
+  },
+  {
+   "address": "rQUmgHMWTXGpFqcVEo2qtHY7xvhk4V4Bua",
+   "label": "CoinDCX",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
+   ]
+  },
+  {
+   "address": "rPvKH3CoiKnne5wAYphhsWgqAEMf1tRAE7",
+   "label": "CoinJar",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "CONFIRMED",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
    ]
   },
   {
@@ -778,6 +964,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -792,8 +979,22 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
+   ]
+  },
+  {
+   "address": "rCoinaUERUrXb1aA7dJu8qRcmvPNiKS3d",
+   "label": "CoinPayments",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "CONFIRMED",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
    ]
   },
   {
@@ -806,6 +1007,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 200410,
    "expected_source": "published_source",
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -819,6 +1021,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -832,6 +1035,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -845,6 +1049,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -858,6 +1063,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -871,6 +1077,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -885,8 +1092,22 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
+   ]
+  },
+  {
+   "address": "rprFy94qJB5riJpMmnPDp3ttmVKfcrFiuq",
+   "label": "Doppler Finance",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "CONFIRMED",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
    ]
   },
   {
@@ -899,7 +1120,60 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
+   ]
+  },
+  {
+   "address": "rKXXrAgpkHQN8m4HxAQCYmDCPPUByc9mVq",
+   "label": "Evernorth",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
+   ]
+  },
+  {
+   "address": "rsT3yYMkuicxW1hYsy787mg5XHhkz2uQRk",
+   "label": "Evernorth",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
+   ]
+  },
+  {
+   "address": "raJHqa1o57DwjtrLCZjdkMKRtfHnbrwSse",
+   "label": "Firi",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
+   ]
+  },
+  {
+   "address": "rfkXSaCZKTg1EZzec2rLDyrWHxRVJdtVXj",
+   "label": "Flare Core Vault",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "CONFIRMED",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
    ]
   },
   {
@@ -912,6 +1186,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -925,6 +1200,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -938,6 +1214,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -951,6 +1228,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -964,7 +1242,21 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
+   ]
+  },
+  {
+   "address": "rUYHZ71yXAS54ZQNvvooLX7rFtZydXjnP",
+   "label": "Hata",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
    ]
   },
   {
@@ -977,6 +1269,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -991,6 +1284,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -1004,7 +1298,47 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
+   ]
+  },
+  {
+   "address": "r4eEexVBREc4bbYh7dEfQNMe86sDmhKSph",
+   "label": "LBank",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
+   ]
+  },
+  {
+   "address": "rsbfd5ZYWqy6XXf6hndPbRjDAzfmWc1CeQ",
+   "label": "Luno",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "CONFIRMED",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
+   ]
+  },
+  {
+   "address": "rPEPYN8sHU3cytBwVm69qPbVztaoj7wNf",
+   "label": "Mercado Bitcoin",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
    ]
   },
   {
@@ -1017,7 +1351,47 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
+   ]
+  },
+  {
+   "address": "rLMAAuqJowC5yMccaPnappeLM8vDfdiDTg",
+   "label": "Phemex",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "CONFIRMED",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
+   ]
+  },
+  {
+   "address": "rLwTB2mgf7jzj7yBfddxN5DdTzRpnho42W",
+   "label": "PulseX Sacrifice",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
+   ]
+  },
+  {
+   "address": "rEiq1iAcpzP8WLjezP9MzAQEJ7jqKMLFSA",
+   "label": "Revolut",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
    ]
   },
   {
@@ -1030,6 +1404,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -1043,6 +1418,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 500000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1057,6 +1433,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 300000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1071,6 +1448,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1085,6 +1463,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -1098,6 +1477,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 305000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1112,6 +1492,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 845000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1126,6 +1507,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 500000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1140,8 +1522,61 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 1300000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
+   ]
+  },
+  {
+   "address": "rNRc2S2GSefSkTkAiyjE6LDzMonpeHp6jS",
+   "label": "SBI VC Trade",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
+   ]
+  },
+  {
+   "address": "razaE6HTEMUc9ogMYwmBT5GQk2b9qtbTnC",
+   "label": "Stake",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
+   ]
+  },
+  {
+   "address": "razLtrbzXVXYvViLqUKLh8YenGLJid9ZTW",
+   "label": "Stake",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "CONFIRMED",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
+   ]
+  },
+  {
+   "address": "rBndy89HdamJ3UHNekAS6ALjW9WoCE2W5s",
+   "label": "Stake",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
    ]
   },
   {
@@ -1154,6 +1589,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 500000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1168,6 +1604,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 500000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1182,6 +1619,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 1200000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1196,6 +1634,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 500000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1210,6 +1649,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -1223,6 +1663,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 500000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1237,6 +1678,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 500000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1251,6 +1693,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 500000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1265,6 +1708,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 500000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1279,6 +1723,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 500000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1293,6 +1738,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 500000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1307,6 +1753,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 500000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1321,6 +1768,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report",
     "wall"
    ]
@@ -1335,6 +1783,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "wall"
    ]
   },
@@ -1348,6 +1797,7 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": null,
    "expected_source": null,
    "sources": [
+    "registry",
     "report"
    ]
   },
@@ -1361,8 +1811,35 @@ window.SW_HVT_ROSTER = {
    "expected_xrp": 1500000000,
    "expected_source": "label_claim",
    "sources": [
+    "registry",
     "report",
     "wall"
+   ]
+  },
+  {
+   "address": "rPBMDP7CGiKzMvPx6SsCGgeDsrsUyv1K1b",
+   "label": "Yobit",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "CONFIRMED",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
+   ]
+  },
+  {
+   "address": "r9FNc9txxrB98DizMkhQBj3hgKQCbF1bGA",
+   "label": "ZebPay",
+   "handle": null,
+   "type": "HVT",
+   "identified": true,
+   "confidence": "PUBLIC_SOURCE",
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "registry"
    ]
   },
   {

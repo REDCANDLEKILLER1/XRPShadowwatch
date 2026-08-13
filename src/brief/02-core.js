@@ -4858,12 +4858,28 @@ function buildDiscoverySummaryLines() {
         (typeof state !== 'undefined' ? (state.discoveryInbox || []) : [])).fresh
         .map(c => c.address);
       const richlistMatches = inboxAddrs.filter(a => universe[a]).length;
-      const highBal = Object.values(universe)
-        .filter(r => (r.balance_xrp_normalized || 0) >= 1_000_000_000).length;
-      lines.push('• Richlist crosscheck: ' + richlistMatches +
-                 ' discovered wallet' + (richlistMatches === 1 ? '' : 's') +
-                 ' matched imported richlist; ' + highBal +
-                 ' new high-balance candidate' + (highBal === 1 ? '' : 's') + ' queued for review.');
+      // v16.13: this used to read "N new high-balance candidates queued for
+      // review", where N was simply the number of rows in the imported richlist
+      // holding 1B+ XRP. Nothing about it was new, nothing was queued, and it
+      // had no connection to the scan — it printed the same 7 every single day
+      // and pointed the operator at a review list that did not exist.
+      //
+      // What is actually worth saying: how many of those giants we are NOT
+      // already watching. That number is a real gap and it moves when the watch
+      // list grows.
+      const giants = Object.keys(universe)
+        .filter(a => n((universe[a] || {}).balance_xrp_normalized) >= 1_000_000_000);
+      const unwatchedGiants = giants.filter(a => !(typeof KNOWN !== 'undefined' && KNOWN[a]));
+      let rl = '• Richlist crosscheck: ' + richlistMatches +
+               ' discovered wallet' + (richlistMatches === 1 ? '' : 's') + ' matched the imported richlist';
+      if (giants.length) {
+        rl += '; ' + giants.length + ' richlist wallet' + (giants.length === 1 ? '' : 's') +
+              ' hold 1B+ XRP, ' +
+              (unwatchedGiants.length
+                ? unwatchedGiants.length + ' of them not on the watch list'
+                : 'all of them already watched');
+      }
+      lines.push(rl + '.');
     }
   } catch (_) {}
   lines.push('• Behavioral evidence only — not ownership proof.');
