@@ -1,26 +1,27 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    2026-08-14 REPORT CORRECTNESS HOTFIX
 
-   Narrow final-layer repairs from SW-20260814-FCZVX:
-   1) Section 19 must never recommend a wallet already on the shared roster.
-   2) Generic XRPL escrow activity must not be labelled as Ripple activity.
-   3) Preserve proper-noun capitalization for Morgan Stanley.
-   4) A known GDELT recovery/probe failure belongs in news diagnostics, not the
-      application ERROR LOG, and raw source_status must not say OK after failure.
+   Repairs from SW-20260814-FCZVX and verification run SW-20260814-FEUHP:
+   1) Section 19 never recommends a wallet already on the shared roster.
+   2) Generic XRPL escrow activity is not labelled as Ripple activity.
+   3) Public proper nouns and list joins remain readable.
+   4) GDELT transport failure is a news-source diagnostic, not an app ERROR,
+      and cannot leave source_status.gdelt='OK'.
+   5) A first-device scan never prints a zero wallet delta when no baseline exists.
+   6) Source footers use the full news pool so XRP headlines are not displaced by
+      unrelated BTC/ETH backfill merely because top_headlines was capped early.
 
-   Read-only. No auto-add. No XRPL mutation. Loaded last by brief-console.html.
+   Read-only. No auto-add. No XRPL mutation.
    ═══════════════════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
 
-  var PATCH_VERSION = '2026.08.14.1';
-  var GDELT_SUPPRESS_THRESHOLD = 10;
+  var PATCH_VERSION = '2026.08.14.2';
+  var gdeltTransportFailed = false;
 
   function watched(addr) {
     if (!addr) return false;
-    try {
-      if (typeof KNOWN !== 'undefined' && KNOWN && KNOWN[addr]) return true;
-    } catch (_) {}
+    try { if (typeof KNOWN !== 'undefined' && KNOWN && KNOWN[addr]) return true; } catch (_) {}
     try {
       var R = window.SW_HVT_ROSTER;
       if (R && Array.isArray(R.targets)) {
@@ -38,22 +39,63 @@
     });
   }
 
+  function baseline(pack) {
+    try { if (typeof deltaBaseline === 'function') return deltaBaseline(pack || {}); } catch (_) {}
+    var p = pack || {};
+    var ws = Array.isArray(p.wallets) && p.wallets.length ? p.wallets : (Array.isArray(p.wallet_results) ? p.wallet_results : []);
+    var checked = ws.filter(function (w) { return w && (w.status === 'CHECKED' || w.status == null); });
+    var measured = checked.filter(function (w) { return w.prev_balance_xrp !== null && w.prev_balance_xrp !== undefined; });
+    return { none: checked.length > 0 && measured.length === 0, partial: measured.length > 0 && measured.length < checked.length,
+             measured: measured.length, checked: checked.length };
+  }
+
+  function cleanText(text) {
+    return String(text == null ? '' : text)
+      .replace(/\bmorgan Stanley\b/g, 'Morgan Stanley')
+      .replace(/\+\s+\+(\d+\s+more)/g, '+$1');
+  }
+
+  function repairBaselineText(text, pack) {
+    var out = cleanText(text);
+    var db = baseline(pack);
+    if (!db.none) return out;
+    out = out.replace(/Net watchlist balance delta:\s*[^\n]+/g,
+      'Net watchlist balance delta: NOT MEASURABLE — no prior balance baseline on this device');
+    out = out.replace(/NET_WATCHLIST_DELTA_XRP=[^\n]+/g,
+      'NET_WATCHLIST_DELTA_XRP=NOT_MEASURABLE');
+    out = out.replace(/Price is soft, but wallet deltas are not dead\. The next tell is whether inflows continue or reverse into exchange-side sell pressure\./g,
+      'Price is soft; wallet balance direction is not measurable on this first scan. The next tell is whether the next pass establishes a directional balance change.');
+    out = out.replace(/and the wallet board was relatively quiet\./g,
+      'and wallet balance direction is not measurable on this device yet.');
+    return out;
+  }
+
+  function gdeltHistory() {
+    try {
+      if (typeof getNewsDoctorHistory !== 'function') return null;
+      var h = getNewsDoctorHistory() || {};
+      return h.GDELT || h.gdelt || null;
+    } catch (_) { return null; }
+  }
+
+  function gdeltFailedNow() {
+    if (gdeltTransportFailed) return true;
+    try {
+      var d = (typeof state !== 'undefined' && state.newsDiagnostics && state.newsDiagnostics.providers) ? state.newsDiagnostics.providers.GDELT : null;
+      if (d && (d.transport_ok === false || /FAILED|HTTP_ERROR|TRANSPORT_FAILED/i.test(String(d.overall_status || d.status || d.failure_class || '')))) return true;
+    } catch (_) {}
+    var h = gdeltHistory();
+    return !!(h && Number(h.consecutive_failures || 0) > 0);
+  }
+
   // ── 1. SECTION 19 / BUILDER RECOMMENDATIONS ───────────────────────────────
-  // Keep evidence cards and discovery memory intact. Only the builder ACTION
-  // lane is deduped against what the two apps already watch.
   try {
     var BR = window.SHADOW_BUILDER_RECS;
     if (BR && !BR._sw20260814Deduped) {
       var origAdd = typeof BR.add === 'function' ? BR.add.bind(BR) : null;
       var origGetAll = typeof BR.getAll === 'function' ? BR.getAll.bind(BR) : null;
       var origExport = typeof BR.exportJSON === 'function' ? BR.exportJSON.bind(BR) : null;
-
-      if (origAdd) {
-        BR.add = function (rec) {
-          if (rec && watched(rec.address)) return false;
-          return origAdd(rec);
-        };
-      }
+      if (origAdd) BR.add = function (rec) { return (rec && watched(rec.address)) ? false : origAdd(rec); };
       if (origGetAll) {
         BR.getAll = function () { return filterRecommendations(origGetAll()); };
         BR.size = function () { return BR.getAll().length; };
@@ -72,8 +114,6 @@
     }
   } catch (_) {}
 
-  // V2 Section 19 reads helper evidence cards directly. Filter only while it
-  // renders so known-wallet evidence remains available to every other subsystem.
   try {
     var BR2 = window.SHADOW_BUILDER_RECS_V2;
     if (BR2 && typeof BR2.buildSection19Text === 'function' && !BR2._sw20260814Deduped) {
@@ -85,31 +125,24 @@
         try {
           EC.cards = all.filter(function (c) { return c && c.address && !watched(c.address); });
           return origBuild19(pack);
-        } finally {
-          EC.cards = all;
-        }
+        } finally { EC.cards = all; }
       };
       BR2._sw20260814Deduped = true;
     }
   } catch (_) {}
 
   // ── 2. ESCROW ATTRIBUTION ────────────────────────────────────────────────
-  // EscrowCreate/EscrowFinish are XRPL transaction types. They are not Ripple
-  // events unless provenance separately establishes a Ripple-owned participant.
   function neutralizeEscrowText(text) {
-    return String(text == null ? '' : text)
+    return cleanText(text)
       .replace(/Ripple escrow movement detected\. This is treasury \/ supply movement, not a buy, sell, or trade signal\./g,
         'XRPL escrow activity detected. Escrow creation or release is on-ledger movement, not by itself a buy, sell, or trade signal.')
-      .replace(/No Ripple escrow unlocks or locks detected/g,
-        'No XRPL escrow unlocks or locks detected');
+      .replace(/No Ripple escrow unlocks or locks detected/g, 'No XRPL escrow unlocks or locks detected');
   }
 
   try {
     if (typeof buildEscrowWatchSection === 'function' && !buildEscrowWatchSection._sw20260814Wrapped) {
       var origEscrowSection = buildEscrowWatchSection;
-      buildEscrowWatchSection = function () {
-        return neutralizeEscrowText(origEscrowSection.apply(this, arguments));
-      };
+      buildEscrowWatchSection = function () { return neutralizeEscrowText(origEscrowSection.apply(this, arguments)); };
       buildEscrowWatchSection._sw20260814Wrapped = true;
     }
   } catch (_) {}
@@ -117,106 +150,173 @@
   try {
     if (typeof buildEscrowNarrative === 'function' && !buildEscrowNarrative._sw20260814Wrapped) {
       var origEscrowNarrative = buildEscrowNarrative;
-      buildEscrowNarrative = function () {
-        return neutralizeEscrowText(origEscrowNarrative.apply(this, arguments));
-      };
+      buildEscrowNarrative = function () { return neutralizeEscrowText(origEscrowNarrative.apply(this, arguments)); };
       buildEscrowNarrative._sw20260814Wrapped = true;
     }
   } catch (_) {}
 
-  // ── 3. PUBLIC PROPER-NOUN CLEANUP ────────────────────────────────────────
-  function fixProperNouns(text) {
-    return String(text == null ? '' : text).replace(/\bmorgan Stanley\b/g, 'Morgan Stanley');
-  }
-
+  // ── 3. PUBLIC TEXT CLEANUP ────────────────────────────────────────────────
   try {
     if (typeof window._humanizePublicText === 'function' && !window._humanizePublicText._sw20260814Wrapped) {
       var origHumanize = window._humanizePublicText;
-      window._humanizePublicText = function (text) {
-        return fixProperNouns(origHumanize.apply(this, arguments));
-      };
+      window._humanizePublicText = function () { return cleanText(origHumanize.apply(this, arguments)); };
       window._humanizePublicText._sw20260814Wrapped = true;
     }
   } catch (_) {}
 
-  // Some morning-story wrappers hold their own reference to the prior final
-  // pass, so fix the final returned story as well.
   try {
-    if (typeof buildMorningStoryText === 'function' && !buildMorningStoryText._sw20260814ProperNounWrapped) {
+    if (typeof buildMorningStoryText === 'function' && !buildMorningStoryText._sw20260814Wrapped) {
       var origMorningStory = buildMorningStoryText;
-      buildMorningStoryText = function () {
-        return fixProperNouns(origMorningStory.apply(this, arguments));
-      };
-      buildMorningStoryText._sw20260814ProperNounWrapped = true;
+      buildMorningStoryText = function (pack) { return repairBaselineText(origMorningStory.apply(this, arguments), pack); };
+      buildMorningStoryText._sw20260814Wrapped = true;
     }
   } catch (_) {}
 
-  // ── 4. GDELT: DIAGNOSTIC DEGRADATION, NOT APP FAILURE ────────────────────
-  function gdeltHistory() {
-    try {
-      if (typeof getNewsDoctorHistory !== 'function') return null;
-      var h = getNewsDoctorHistory() || {};
-      return h.GDELT || h.gdelt || null;
-    } catch (_) { return null; }
-  }
-
-  function gdeltKnownBad() {
-    var r = gdeltHistory();
-    return !!(r && Number(r.consecutive_failures || 0) >= GDELT_SUPPRESS_THRESHOLD);
-  }
-
+  // ── 4. GDELT: NEWS DIAGNOSTIC, NOT APPLICATION ERROR ─────────────────────
+  // A failed optional news provider does not mean the Shadow Watch app failed.
+  // Keep the failure in News Source Strategy/News Doctor, but out of ERROR LOG.
   try {
-    if (typeof elog === 'function' && !elog._sw20260814Wrapped) {
+    if (typeof elog === 'function' && !elog._sw20260814GdeltWrapped) {
       var origElog = elog;
       elog = function (label, err) {
         var s = String(label || '');
-        if (/^GDELT failed:/i.test(s) && gdeltKnownBad()) {
-          try {
-            if (typeof log === 'function') {
-              log('NEWS SOURCE DEGRADED: ' + s + (err ? ': ' + (err.message || err) : ''));
-            }
-          } catch (_) {}
+        if (/^GDELT failed:/i.test(s)) {
+          gdeltTransportFailed = true;
+          try { if (typeof log === 'function') log('NEWS SOURCE DEGRADED: ' + s + (err ? ': ' + (err.message || err) : '')); } catch (_) {}
           return;
         }
         return origElog.apply(this, arguments);
       };
-      elog._sw20260814Wrapped = true;
+      elog._sw20260814GdeltWrapped = true;
     }
   } catch (_) {}
 
-  // fetchGdelt catches its own error and returns [], which makes Promise.allSettled
-  // look fulfilled and historically allowed source_status.gdelt='OK'. Correct the
-  // exported status from the News Doctor's actual transport history.
+  // The core GDELT helper catches transport errors and returns [], so
+  // Promise.allSettled sees a fulfilled promise and marks source_status as OK.
+  // Re-throw only when an actual transport error was observed by the elog hook.
   try {
-    if (typeof fetchNewsIntel === 'function' && !fetchNewsIntel._sw20260814Wrapped) {
-      var origFetchNewsIntel = fetchNewsIntel;
-      fetchNewsIntel = async function () {
-        var out = await origFetchNewsIntel.apply(this, arguments);
+    if (typeof fetchGdelt === 'function' && !fetchGdelt._sw20260814Wrapped) {
+      var origFetchGdelt = fetchGdelt;
+      fetchGdelt = async function () {
+        gdeltTransportFailed = false;
+        var out = await origFetchGdelt.apply(this, arguments);
+        if (gdeltTransportFailed) throw new Error('GDELT transport failed; see News Source Strategy');
+        return out;
+      };
+      fetchGdelt._sw20260814Wrapped = true;
+    }
+  } catch (_) {}
+
+  // Make the router's SOURCE LIMITS tell the truth even on a fresh preview
+  // origin where the failure history starts at one.
+  try {
+    if (typeof _routerSourceLimits === 'function' && !_routerSourceLimits._sw20260814Wrapped) {
+      var origRouterLimits = _routerSourceLimits;
+      _routerSourceLimits = function () {
+        var out = origRouterLimits.apply(this, arguments) || [];
+        if (gdeltFailedNow() && out.length === 1 && /every configured source answered/i.test(String(out[0]))) {
+          return ['GDELT: unavailable this run; external news coverage is partial, while RSS/Google News remain usable.'];
+        }
+        return out;
+      };
+      _routerSourceLimits._sw20260814Wrapped = true;
+    }
+  } catch (_) {}
+
+  try {
+    if (typeof buildNewsRouteDiagnostics === 'function' && !buildNewsRouteDiagnostics._sw20260814Wrapped) {
+      var origNewsDiag = buildNewsRouteDiagnostics;
+      buildNewsRouteDiagnostics = function () {
+        var out = origNewsDiag.apply(this, arguments);
         try {
-          var intel = out || (typeof state !== 'undefined' && state.newsIntel) || null;
-          var rec = gdeltHistory();
-          var fails = rec ? Number(rec.consecutive_failures || 0) : 0;
-          var hasGdeltItems = !!(intel && Array.isArray(intel.items) && intel.items.some(function (it) {
-            var src = String((it && (it.source || it.domain)) || '').toLowerCase();
-            return src.indexOf('gdelt') >= 0;
-          }));
-          if (intel && intel.source_status && !hasGdeltItems && fails > 0 &&
-              String(intel.source_status.gdelt || '').toUpperCase() === 'OK') {
-            intel.source_status.gdelt = 'FAILED';
-            intel.source_status_correction = intel.source_status_correction || {};
-            intel.source_status_correction.gdelt = 'News Doctor records ' + fails + ' consecutive transport failure(s); empty fulfilled promise is not success.';
-          }
-          if (typeof state !== 'undefined' && state.newsIntel && intel) state.newsIntel = intel;
+          var ps = out && out.providers ? out.providers : {};
+          var g = ps.GDELT || ps.gdelt;
+          if (g && g.transport_ok === false) out.degraded = true;
         } catch (_) {}
         return out;
       };
-      fetchNewsIntel._sw20260814Wrapped = true;
+      buildNewsRouteDiagnostics._sw20260814Wrapped = true;
     }
   } catch (_) {}
 
-  // The shared roster has these four as HVT to remain app-neutral. Give the
-  // Report's in-memory rows their more specific behavioral category after core
-  // has built KNOWN, without making any identity claim.
+  // ── 5. FIRST-SCAN DELTA INTEGRITY ────────────────────────────────────────
+  try {
+    if (typeof buildPublicReport === 'function' && !buildPublicReport._sw20260814Wrapped) {
+      var origPublic = buildPublicReport;
+      buildPublicReport = function (pack) { return repairBaselineText(origPublic.apply(this, arguments), pack); };
+      buildPublicReport._sw20260814Wrapped = true;
+    }
+  } catch (_) {}
+
+  try {
+    if (typeof buildMasterPaste === 'function' && !buildMasterPaste._sw20260814Wrapped) {
+      var origMaster = buildMasterPaste;
+      buildMasterPaste = function (pack) { return repairBaselineText(origMaster.apply(this, arguments), pack); };
+      buildMasterPaste._sw20260814Wrapped = true;
+    }
+  } catch (_) {}
+
+  try {
+    if (typeof verdictSection === 'function' && !verdictSection._sw20260814Wrapped) {
+      var origVerdict = verdictSection;
+      verdictSection = function (pack) {
+        var out = origVerdict.apply(this, arguments);
+        if (baseline(pack).none && Array.isArray(out) && out.length > 1) {
+          out[1] = String(out[1]).replace(/\.\s+.*$/,
+            '. Price direction is measured; wallet balance direction is not measurable on this first scan. The next pass establishes the balance baseline.');
+        }
+        return out;
+      };
+      verdictSection._sw20260814Wrapped = true;
+    }
+  } catch (_) {}
+
+  try {
+    if (typeof missionDebrief === 'function' && !missionDebrief._sw20260814Wrapped) {
+      var origDebrief = missionDebrief;
+      missionDebrief = function (buckets, pack) {
+        if (!baseline(pack).none) return cleanText(origDebrief.apply(this, arguments));
+        var p = pack || {};
+        var d = p.xrp_delta_24h_pct;
+        var pq = d == null ? 'unmeasured' : d < -1 ? 'soft' : d > 1 ? 'firm' : 'flat';
+        var lt = Array.isArray(p.large_transfers) ? p.large_transfers.length : 0;
+        var sv = Number(p.shadow_volume_xrp || 0);
+        var s = 'Plain talk: XRP price is ' + pq + '. Wallet balance direction is not measurable on this device yet.';
+        if (lt > 0) s += ' Activity was not quiet: ' + lt + ' transfers above threshold moved ' + (typeof fmt === 'function' ? fmt(sv, 0) : Math.round(sv).toLocaleString()) + ' XRP.';
+        s += Number(p.xrpl_evm_dex_volume_24h_usd || 0) > 100000 ? ' The EVM bridge saw active flow.' : ' The EVM bridge stayed quiet.';
+        return cleanText(s);
+      };
+      missionDebrief._sw20260814Wrapped = true;
+    }
+  } catch (_) {}
+
+  try {
+    if (typeof buildXRPMainReport === 'function' && !buildXRPMainReport._sw20260814Wrapped) {
+      var origMainReport = buildXRPMainReport;
+      buildXRPMainReport = function (pack) { return repairBaselineText(origMainReport.apply(this, arguments), pack); };
+      buildXRPMainReport._sw20260814Wrapped = true;
+    }
+  } catch (_) {}
+
+  // ── 6. SOURCE FOOTER: USE THE FULL POOL BEFORE RELEVANCE FILTERING ────────
+  try {
+    if (typeof getNewsSources === 'function' && !getNewsSources._sw20260814Wrapped) {
+      var origGetNewsSources = getNewsSources;
+      getNewsSources = function (pack) {
+        try {
+          var p = pack || (typeof state !== 'undefined' ? state.pack : null) || {};
+          var ni = p.news_intel || (typeof state !== 'undefined' ? state.newsIntel : null) || {};
+          if (Array.isArray(ni.items) && ni.items.length) return ni.items;
+        } catch (_) {}
+        return origGetNewsSources.apply(this, arguments);
+      };
+      getNewsSources._sw20260814Wrapped = true;
+      try { window.getNewsSources = getNewsSources; } catch (_) {}
+    }
+  } catch (_) {}
+
+  // Report-specific category labels for the four promoted wallets. These are
+  // behavioural categories, not identity claims.
   try {
     var cats = {
       'rpY7bZBkA98P8zds5LdBktAKj9ifekPdkE': 'discovered_whale',
@@ -228,9 +328,7 @@
       try {
         if (typeof KNOWN !== 'undefined' && KNOWN && KNOWN[addr]) KNOWN[addr].cat = cats[addr];
         if (typeof WATCHLIST !== 'undefined' && Array.isArray(WATCHLIST)) {
-          for (var i = 0; i < WATCHLIST.length; i++) {
-            if (WATCHLIST[i] && WATCHLIST[i].address === addr) WATCHLIST[i].cat = cats[addr];
-          }
+          for (var i = 0; i < WATCHLIST.length; i++) if (WATCHLIST[i] && WATCHLIST[i].address === addr) WATCHLIST[i].cat = cats[addr];
         }
       } catch (_) {}
     });
@@ -243,6 +341,9 @@
     escrow_attribution_guard: true,
     proper_noun_guard: true,
     gdelt_error_lane_guard: true,
+    gdelt_status_guard: true,
+    first_scan_delta_guard: true,
+    source_pool_guard: true,
     expected_effective_watch_count: (function () {
       try { return window.SW_HVT_ROSTER && window.SW_HVT_ROSTER.targets ? window.SW_HVT_ROSTER.targets.length : null; }
       catch (_) { return null; }
