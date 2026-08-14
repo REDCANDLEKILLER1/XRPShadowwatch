@@ -1,8 +1,9 @@
 /* ════════════════════════════════════════════════════════════════════
    ESCROW WATCH  (main app — read-only)
-   Persistent dashboard of XRPL escrow LOCK/UNLOCK events (Ripple's monthly
-   treasury movements). Live events come from handleTx; recent history is
-   backfilled read-only via account_tx for known Ripple/escrow wallets.
+   Persistent dashboard of XRPL escrow LOCK/UNLOCK events. Events are grouped into
+   Ripple Escrow and Other XRPL Escrows. Live events come from handleTx; recent
+   Ripple history is backfilled read-only via account_tx while other XRPL escrow
+   events are retained whenever they appear in watched-ledger activity.
    Storage: localStorage XRPMAN_ESCROW_HISTORY_V1 (dedupe by hash, 30-day).
    Watchdog only — never trades/signs/submits. Entry: window.openEscrowWatch()
    ════════════════════════════════════════════════════════════════════ */
@@ -17,6 +18,38 @@
   function esc(s) { return (window.SW && SW.escapeHtml) ? SW.escapeHtml(s) : String(s == null ? '' : s); }
   function xshort(n) { n = Number(n) || 0; if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B'; if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M'; if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K'; return Math.floor(n).toLocaleString(); }
   function xrpscanTx(h) { return 'https://xrpscan.com/tx/' + encodeURIComponent(h); }
+
+  var RIPPLE_ESCROW_ACCOUNTS = {
+    'r9NpyVfLfUG8hatuCCHKzosyDtKnBdsEN3': 1,
+    'rMhkqz3DeU7GUUJKGZofusbrTwZe6bDyb1': 1,
+    'rMQ98K56yXJbDGv49ZSmW51sLn94Xe1mu1': 1,
+    'rKveEyR1SrkWbJX214xcfH43ZsoGMb3PEv': 1
+  };
+
+  function isRippleOwner(addr) {
+    if (!addr) return false;
+    if (RIPPLE_ESCROW_ACCOUNTS[addr]) return true;
+    try {
+      if (typeof KNOWN !== 'undefined' && KNOWN && KNOWN[addr]) {
+        var k = KNOWN[addr] || {};
+        if (k.cat === 'escrow' || k.type === 'RIPPLE' || /ripple/i.test(String(k.label || k.name || k.handle || ''))) return true;
+      }
+    } catch (e) {}
+    try {
+      var reg = window.SW_WALLET_IDENTITIES && window.SW_WALLET_IDENTITIES[addr];
+      if (reg && (reg.type === 'RIPPLE' || /ripple/i.test(String(reg.name || reg.label || '')))) return true;
+    } catch (e) {}
+    try {
+      var rows = (typeof PRELOADED_HVTS !== 'undefined' ? PRELOADED_HVTS : []);
+      for (var i = 0; i < rows.length; i++) {
+        var w = rows[i];
+        if (w && w.address === addr && (w.type === 'RIPPLE' || /ripple/i.test(String(w.label || '')))) return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function escrowCategory(evt) { return evt && isRippleOwner(evt.owner) ? 'RIPPLE' : 'OTHER_XRPL'; }
 
   function load() { try { var a = JSON.parse(localStorage.getItem(KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
   function persist() { try { localStorage.setItem(KEY, JSON.stringify(history)); } catch (e) {} }
@@ -60,14 +93,24 @@
     return true;
   }
 
-  function summary() {
-    var win = history.filter(inWindow);
-    var unlocks = win.filter(function (e) { return e.type === 'UNLOCK'; });
-    var locks = win.filter(function (e) { return e.type === 'LOCK'; });
+  function laneSummary(rows) {
+    var unlocks = rows.filter(function (e) { return e.type === 'UNLOCK'; });
+    var locks = rows.filter(function (e) { return e.type === 'LOCK'; });
     var totUnlock = unlocks.reduce(function (a, e) { return a + (e.xrp || 0); }, 0);
     var totLock = locks.reduce(function (a, e) { return a + (e.xrp || 0); }, 0);
-    var largest = win.slice().sort(function (a, b) { return (b.xrp || 0) - (a.xrp || 0); })[0] || null;
-    return { win: win, unlocks: unlocks.length, locks: locks.length, totUnlock: totUnlock, totLock: totLock, largest: largest, lookbackH: lookbackMs() / HOUR };
+    var largest = rows.slice().sort(function (a, b) { return (b.xrp || 0) - (a.xrp || 0); })[0] || null;
+    return { win: rows, unlocks: unlocks.length, locks: locks.length, totUnlock: totUnlock, totLock: totLock, largest: largest };
+  }
+
+  function summary() {
+    var win = history.filter(inWindow);
+    var all = laneSummary(win);
+    var ripple = laneSummary(win.filter(function (e) { return escrowCategory(e) === 'RIPPLE'; }));
+    var other = laneSummary(win.filter(function (e) { return escrowCategory(e) === 'OTHER_XRPL'; }));
+    all.lookbackH = lookbackMs() / HOUR;
+    all.ripple = ripple;
+    all.other = other;
+    return all;
   }
   // exposed so the Brief Console / report generators can reuse the same summary
   function computeSummary() { prune(); return summary(); }
@@ -133,6 +176,11 @@
       '.esc-stat .v{font-size:15px;font-weight:bold;color:#00ff88;margin-top:3px;}',
       '.esc-stat.lock .v{color:#ffaa00;}',
       '.esc-note{font-size:9px;color:#ccaa33;border:1px solid #443300;background:rgba(40,30,0,0.4);border-radius:6px;padding:7px;margin-bottom:12px;}',
+      '.esc-lane{margin:14px 0 7px;padding:7px 9px;border-left:3px solid #00ff00;background:rgba(0,35,0,0.45);}',
+      '.esc-lane.other{border-left-color:#66ccff;background:rgba(0,20,35,0.45);}',
+      '.esc-lane .name{font-size:11px;font-weight:bold;letter-spacing:1.5px;color:#00ff88;}',
+      '.esc-lane.other .name{color:#66ccff;}',
+      '.esc-lane .sub{font-size:9px;color:#668866;margin-top:3px;}',
       '.esc-row{border:1px solid #112211;border-radius:8px;padding:9px;margin-bottom:8px;background:rgba(0,12,0,0.8);}',
       '.esc-row .top{display:flex;justify-content:space-between;align-items:center;}',
       '.esc-badge{font-size:9px;font-weight:bold;padding:2px 7px;border-radius:4px;letter-spacing:1px;}',
@@ -153,33 +201,48 @@
     if (document.getElementById('escrow-modal')) return;
     injectStyles();
     var m = document.createElement('div'); m.id = 'escrow-modal';
-    m.innerHTML = '<div id="escrow-head"><span class="t">⛓ ESCROW WATCH</span><button id="escrow-close">[ CLOSE ]</button></div><div id="escrow-body"></div>';
+    m.innerHTML = '<div id="escrow-head"><span class="t">⛓ ESCROWS</span><button id="escrow-close">[ CLOSE ]</button></div><div id="escrow-body"></div>';
     document.body.appendChild(m);
     document.getElementById('escrow-close').addEventListener('click', close);
   }
 
-  function renderPanel() {
-    var body = document.getElementById('escrow-body'); if (!body) return;
-    var s = computeSummary();
+  function renderRows(rows, lane) {
     var h = '';
-    h += '<div class="esc-note">Treasury / supply movement. <b>Not a trade signal.</b> Lookback window: last ' + s.lookbackH + 'h · history kept 30 days (permanent only if saved to Evidence).</div>';
-    h += '<div class="esc-sum">' +
-      '<div class="esc-stat"><div class="k">UNLOCKED (' + s.lookbackH + 'h)</div><div class="v">' + xshort(s.totUnlock) + ' XRP</div></div>' +
-      '<div class="esc-stat lock"><div class="k">LOCKED (' + s.lookbackH + 'h)</div><div class="v">' + xshort(s.totLock) + ' XRP</div></div>' +
-      '<div class="esc-stat"><div class="k">EVENTS IN WINDOW</div><div class="v">' + (s.unlocks + s.locks) + '</div></div>' +
-      '<div class="esc-stat"><div class="k">LARGEST EVENT</div><div class="v">' + (s.largest ? xshort(s.largest.xrp) + ' XRP' : '—') + '</div></div>' +
-      '</div>';
-    if (!history.length) { body.innerHTML = h + '<div class="esc-empty">No escrow unlocks or locks recorded yet.<br>Backfilling recent Ripple escrow activity…</div>'; return; }
-    h += '<div style="font-size:9px;letter-spacing:1px;color:#55aa55;margin:6px 0;">RECENT ESCROW HISTORY (30D)</div>';
-    history.slice(0, 100).forEach(function (e) {
+    rows.forEach(function (e) {
       var t = e.type === 'UNLOCK' ? 'unlock' : 'lock';
-      h += '<div class="esc-row"><div class="top"><span class="esc-badge ' + t + '">ESCROW ' + e.type + '</span><span class="esc-amt">' + Math.floor(e.xrp).toLocaleString() + ' XRP</span></div>' +
+      h += '<div class="esc-row"><div class="top"><span class="esc-badge ' + t + '">' + lane + ' · ' + e.type + '</span><span class="esc-amt">' + Math.floor(e.xrp).toLocaleString() + ' XRP</span></div>' +
         '<div class="esc-meta">owner: ' + esc(e.owner || '?') + (e.dest ? ('<br>dest: ' + esc(e.dest)) : '') +
         '<br>' + (e.ts ? new Date(e.ts).toLocaleString() : '?') + (e.ledger ? (' · ledger ' + e.ledger) : '') +
         '<br>tx: <a href="' + xrpscanTx(e.hash) + '" target="_blank" rel="noopener">' + esc((e.hash || '').slice(0, 24)) + '…</a></div>' +
         '<div class="esc-actions"><a class="esc-btn" href="' + xrpscanTx(e.hash) + '" target="_blank" rel="noopener">XRPSCAN</a>' +
         '<button class="esc-btn" onclick="SW_ESCROW.saveEvidence(\'' + esc(e.hash) + '\')">SAVE TO EVIDENCE</button></div></div>';
     });
+    return h;
+  }
+
+  function renderPanel() {
+    var body = document.getElementById('escrow-body'); if (!body) return;
+    var s = computeSummary();
+    var rippleHistory = history.filter(function (e) { return escrowCategory(e) === 'RIPPLE'; });
+    var otherHistory = history.filter(function (e) { return escrowCategory(e) === 'OTHER_XRPL'; });
+    var h = '';
+    h += '<div class="esc-note"><b>ESCROWS</b> groups every observed XRPL escrow event into Ripple Escrow or Other XRPL Escrows. Escrow creation/release is on-ledger movement, <b>not by itself a trade signal.</b> Lookback: ' + s.lookbackH + 'h · history kept 30 days.</div>';
+    h += '<div class="esc-sum">' +
+      '<div class="esc-stat"><div class="k">ALL UNLOCKED (' + s.lookbackH + 'h)</div><div class="v">' + xshort(s.totUnlock) + ' XRP</div></div>' +
+      '<div class="esc-stat lock"><div class="k">ALL LOCKED (' + s.lookbackH + 'h)</div><div class="v">' + xshort(s.totLock) + ' XRP</div></div>' +
+      '<div class="esc-stat"><div class="k">RIPPLE EVENTS</div><div class="v">' + (s.ripple.unlocks + s.ripple.locks) + '</div></div>' +
+      '<div class="esc-stat"><div class="k">OTHER XRPL EVENTS</div><div class="v">' + (s.other.unlocks + s.other.locks) + '</div></div>' +
+      '</div>';
+    if (!history.length) {
+      body.innerHTML = h + '<div class="esc-empty">No escrow unlocks or locks recorded yet.<br>Ripple history backfills automatically; other XRPL escrows appear whenever watched-ledger activity exposes them.</div>';
+      return;
+    }
+
+    h += '<div class="esc-lane"><div class="name">RIPPLE ESCROW</div><div class="sub">' + (s.ripple.unlocks + s.ripple.locks) + ' event(s) in current window · ' + xshort(s.ripple.totUnlock) + ' XRP unlocked · ' + xshort(s.ripple.totLock) + ' XRP locked</div></div>';
+    h += rippleHistory.length ? renderRows(rippleHistory.slice(0, 50), 'RIPPLE ESCROW') : '<div class="esc-empty" style="margin:12px 0 20px">No Ripple escrow events recorded in retained history.</div>';
+
+    h += '<div class="esc-lane other"><div class="name">OTHER XRPL ESCROWS</div><div class="sub">' + (s.other.unlocks + s.other.locks) + ' event(s) in current window · ' + xshort(s.other.totUnlock) + ' XRP unlocked · ' + xshort(s.other.totLock) + ' XRP locked</div></div>';
+    h += otherHistory.length ? renderRows(otherHistory.slice(0, 50), 'OTHER XRPL') : '<div class="esc-empty" style="margin:12px 0">No non-Ripple XRPL escrow events recorded in retained history.</div>';
     body.innerHTML = h;
   }
 
@@ -191,12 +254,26 @@
   function open() { build(); document.getElementById('escrow-modal').classList.add('active'); renderPanel(); backfill(); }
   function close() { var m = document.getElementById('escrow-modal'); if (m) m.classList.remove('active'); }
 
+  function syncMenuLabel() {
+    try {
+      var items = document.querySelectorAll('.menu-item');
+      for (var i = 0; i < items.length; i++) {
+        var b = items[i].querySelector('b');
+        if (!b || b.textContent.trim() !== 'ESCROW WATCH') continue;
+        b.textContent = 'ESCROWS';
+        var sub = items[i].querySelector('i');
+        if (sub) sub.textContent = 'Ripple Escrow + Other XRPL Escrows (read-only)';
+        break;
+      }
+    } catch (e) {}
+  }
+
   // Kick a backfill shortly after load so history is populated without the panel open.
-  function _init() { setTimeout(function () { try { backfill(); } catch (e) {} }, 4000); }
+  function _init() { syncMenuLabel(); setTimeout(function () { try { backfill(); } catch (e) {} }, 4000); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _init); else _init();
 
   window.SW_ESCROW = { record: record, parseEscrow: parseEscrow, backfill: backfill, handleResp: handleResp,
-    computeSummary: computeSummary, escrowWallets: escrowWallets, saveEvidence: saveEvidence, history: function () { return history; } };
+    computeSummary: computeSummary, escrowWallets: escrowWallets, classify: escrowCategory, saveEvidence: saveEvidence, history: function () { return history; } };
   window.openEscrowWatch = open;
   window.closeEscrowWatch = close;
 })();
