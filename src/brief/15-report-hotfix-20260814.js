@@ -88,7 +88,6 @@
     return !!(h && Number(h.consecutive_failures || 0) > 0);
   }
 
-  // ── 1. SECTION 19 / BUILDER RECOMMENDATIONS ───────────────────────────────
   try {
     var BR = window.SHADOW_BUILDER_RECS;
     if (BR && !BR._sw20260814Deduped) {
@@ -131,7 +130,6 @@
     }
   } catch (_) {}
 
-  // ── 2. ESCROW ATTRIBUTION ────────────────────────────────────────────────
   function neutralizeEscrowText(text) {
     return cleanText(text)
       .replace(/Ripple escrow movement detected\. This is treasury \/ supply movement, not a buy, sell, or trade signal\./g,
@@ -155,7 +153,6 @@
     }
   } catch (_) {}
 
-  // ── 3. PUBLIC TEXT CLEANUP ────────────────────────────────────────────────
   try {
     if (typeof window._humanizePublicText === 'function' && !window._humanizePublicText._sw20260814Wrapped) {
       var origHumanize = window._humanizePublicText;
@@ -172,9 +169,6 @@
     }
   } catch (_) {}
 
-  // ── 4. GDELT: NEWS DIAGNOSTIC, NOT APPLICATION ERROR ─────────────────────
-  // A failed optional news provider does not mean the Shadow Watch app failed.
-  // Keep the failure in News Source Strategy/News Doctor, but out of ERROR LOG.
   try {
     if (typeof elog === 'function' && !elog._sw20260814GdeltWrapped) {
       var origElog = elog;
@@ -191,9 +185,6 @@
     }
   } catch (_) {}
 
-  // The core GDELT helper catches transport errors and returns [], so
-  // Promise.allSettled sees a fulfilled promise and marks source_status as OK.
-  // Re-throw only when an actual transport error was observed by the elog hook.
   try {
     if (typeof fetchGdelt === 'function' && !fetchGdelt._sw20260814Wrapped) {
       var origFetchGdelt = fetchGdelt;
@@ -207,8 +198,6 @@
     }
   } catch (_) {}
 
-  // Make the router's SOURCE LIMITS tell the truth even on a fresh preview
-  // origin where the failure history starts at one.
   try {
     if (typeof _routerSourceLimits === 'function' && !_routerSourceLimits._sw20260814Wrapped) {
       var origRouterLimits = _routerSourceLimits;
@@ -239,7 +228,6 @@
     }
   } catch (_) {}
 
-  // ── 5. FIRST-SCAN DELTA INTEGRITY ────────────────────────────────────────
   try {
     if (typeof buildPublicReport === 'function' && !buildPublicReport._sw20260814Wrapped) {
       var origPublic = buildPublicReport;
@@ -298,7 +286,6 @@
     }
   } catch (_) {}
 
-  // ── 6. SOURCE FOOTER: USE THE FULL POOL BEFORE RELEVANCE FILTERING ────────
   try {
     if (typeof getNewsSources === 'function' && !getNewsSources._sw20260814Wrapped) {
       var origGetNewsSources = getNewsSources;
@@ -315,8 +302,6 @@
     }
   } catch (_) {}
 
-  // Report-specific category labels for the four promoted wallets. These are
-  // behavioural categories, not identity claims.
   try {
     var cats = {
       'rpY7bZBkA98P8zds5LdBktAKj9ifekPdkE': 'discovered_whale',
