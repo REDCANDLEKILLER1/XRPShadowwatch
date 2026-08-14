@@ -30,9 +30,9 @@
   'use strict';
 
   var STORE   = 'SW_IDENTITY_LOOKUP_V1';
-  var TTL_MS  = 7 * 24 * 60 * 60 * 1000;   // re-ask about a wallet weekly at most
-  var BATCH   = 6;                          // concurrent per-address requests
-  var GAP_MS  = 350;                        // pause between batches — be a good citizen
+  var TTL_MS  = 7 * 24 * 60 * 60 * 1000;
+  var BATCH   = 6;
+  var GAP_MS  = 350;
   var TIMEOUT = 9000;
 
   var _state = { resolved: {}, misses: {}, conflicts: [], lastRun: 0, running: false };
@@ -59,13 +59,11 @@
     } catch (_) {}
   }
 
-  // Registry access — the shared file defines window.SW_WALLET_IDENTITIES.
   function _registry() {
     try { return (typeof window !== 'undefined' && window.SW_WALLET_IDENTITIES) || null; }
     catch (_) { return null; }
   }
 
-  // Every watched address, from the watchlist the scanner actually uses.
   function _watchedAddresses() {
     try {
       if (typeof KNOWN !== 'undefined' && KNOWN) return Object.keys(KNOWN);
@@ -74,9 +72,6 @@
     return [];
   }
 
-  // XRPScan account payloads have carried the name under several shapes over the
-  // years. Read them all, and accept ONLY a real name string — never a domain or
-  // a bare address, which would look like an identity without being one.
   function _extractName(j) {
     if (!j || typeof j !== 'object') return null;
     var cands = [
@@ -90,7 +85,7 @@
       if (typeof nm !== 'string') continue;
       nm = nm.trim();
       if (!nm) continue;
-      if (/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(nm)) continue;   // an address is not a name
+      if (/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(nm)) continue;
       if (nm.length > 60) continue;
       var verified = !!(c && (c.verified === true || c.twitter));
       var domain   = (c && (c.domain || c.desc)) || null;
@@ -113,9 +108,6 @@
     return _extractName(j);
   }
 
-  /* Resolve identities for watched wallets that do not have one.
-     opts.force  — ignore the TTL and re-ask about everything
-     opts.limit  — cap how many addresses to try in this run          */
   async function run(opts) {
     opts = opts || {};
     if (_state.running) { _log('already running'); return _summary(); }
@@ -130,8 +122,8 @@
       var now = _now();
       var todo = _watchedAddresses().filter(function (a) {
         if (!a) return false;
-        if (R[a]) return false;                                     // rule 1: empty slots only
-        if (_state.resolved[a]) return false;                       // already have an answer
+        if (R[a]) return false;
+        if (_state.resolved[a]) return false;
         if (!opts.force && _state.misses[a] && (now - _state.misses[a]) < TTL_MS) return false;
         return true;
       });
@@ -148,7 +140,7 @@
                              .catch(function (e) { return { a: a, err: e }; });
         }));
         results.forEach(function (x) {
-          if (x.err) { failed++; return; }                          // transient — do not cache a failure as a miss
+          if (x.err) { failed++; return; }
           if (x.r && x.r.name) {
             _state.resolved[x.a] = {
               name: x.r.name,
@@ -160,7 +152,7 @@
             };
             found++;
           } else {
-            _state.misses[x.a] = _now();                            // no published name — remember, retry after TTL
+            _state.misses[x.a] = _now();
             missed++;
           }
         });
@@ -175,9 +167,6 @@
         if (window.SHADOW_EVENT_BUS && window.SHADOW_EVENT_BUS.emit)
           window.SHADOW_EVENT_BUS.emit('shadow.identity.resolved', { found: found, missed: missed, failed: failed });
       } catch (_) {}
-      // Clear BEFORE snapshotting: _summary() is evaluated while computing the
-      // return value, i.e. before finally runs, so a summary taken here would
-      // report running:true on a run that has finished.
       _state.running = false;
       return _summary();
     } catch (e) {
@@ -187,9 +176,6 @@
     } finally { _state.running = false; }
   }
 
-  /* Merge resolved names into the in-memory registry. Empty slots only; a
-     disagreement with a committed entry becomes a conflict record, never an
-     overwrite. */
   function apply() {
     var R = _registry(); if (!R) return 0;
     var n = 0;
@@ -215,9 +201,6 @@
     };
   }
 
-  /* Operator hand-off: everything the lookup found, in the exact shape of the
-     committed registry, ready to paste into src/shared/wallet-identities.js.
-     Conflicts are listed separately for the operator to settle. */
   function exportResolvedIdentities() {
     var out = {
       generated_at: new Date().toISOString(),
@@ -240,19 +223,14 @@
   }
 
   _load();
-  // Re-apply anything already cached as soon as the page loads, so a wallet
-  // resolved yesterday is named in today's report without waiting for a lookup.
   try { apply(); } catch (_) {}
 
-  // Run after the report seals — same reasoning as the helper pool: enrichment
-  // must not be able to influence the report it is enriching. Guarded so a
-  // missing bus, a test-runner event or a failed request changes nothing.
   try {
     if (window.SHADOW_EVENT_BUS && typeof window.SHADOW_EVENT_BUS.on === 'function') {
       window.SHADOW_EVENT_BUS.on('shadow.report.sealed', function (data) {
         try {
           var d = (data && data.payload) ? data.payload : data;
-          if (!d || (!d.scan_id && !d.report_id && !d.date)) return;   // ignore test emissions
+          if (!d || (!d.scan_id && !d.report_id && !d.date)) return;
           setTimeout(function () { try { run({ limit: 40 }); } catch (_) {} }, 4000);
         } catch (_) {}
       });
@@ -268,4 +246,16 @@
     _clearCache: function () { try { localStorage.removeItem(STORE); } catch (_) {}
                                _state = { resolved: {}, misses: {}, conflicts: [], lastRun: 0, running: false }; }
   };
+})();
+
+// Final report-only repair layer. Kept separate so it can be reverted independently
+// of identity lookup and the core scan engine.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/15-report-hotfix-20260814.js';
+    s.async = false;
+    s.setAttribute('data-sw-hotfix', '2026-08-14.1');
+    document.body.appendChild(s);
+  } catch (_) {}
 })();
