@@ -35,6 +35,17 @@ const SOURCED_EXPECTED = {
   'rxXXXeMX8Gy5YvibvGLnQJ1XKKD7UswM1': 200410
 };
 
+// Report-approved promotions that have not yet been written into 02-core's
+// legacy WATCHLIST array. Keeping them here prevents a later roster regeneration
+// from deleting a wallet the Report itself already promoted. These are behavioral
+// handles only — no identity claim is made here.
+const REPORT_PROMOTIONS = [
+  { handle: 'WHALE_RECV_rpY7bZ', address: 'rpY7bZBkA98P8zds5LdBktAKj9ifekPdkE', cat: 'discovered_whale' },
+  { handle: 'WHALE_RECV_rU5NDV', address: 'rU5NDVnQ6nHBvD33en6HjWipY67PJ7hcXG', cat: 'discovered_whale' },
+  { handle: 'EXOUT_RECV_rsnXj9', address: 'rsnXj9TDwt49XxCM64YrTEnSzwcY4awZnn', cat: 'discovered_receiver' },
+  { handle: 'LARGE_RECV_rw1xqK', address: 'rw1xqK3TvKCZcdTcHGp6b2Q8dELnCCGFvT', cat: 'discovered_receiver' }
+];
+
 // "20M Split 1" / "RIPPLE_1.3B" / "Main 300M Reserve" → the size the label claims.
 // This is what makes a drained target detectable: a wallet labelled 100M holding
 // 50 XRP is not a rounding error, it is an event.
@@ -46,7 +57,11 @@ function expectedFromLabel(s) {
   return (v >= 1e6 && v <= 1e11) ? v : null;
 }
 
-const CAT_TYPE = { exchange: 'EXCH', escrow: 'RIPPLE', whale: 'HVT' };
+const CAT_TYPE = {
+  exchange: 'EXCH', escrow: 'RIPPLE', whale: 'HVT',
+  discovered_whale: 'HVT', discovered_receiver: 'HVT',
+  discovered_unknown_highval: 'HVT', next_hop_splitter: 'HVT'
+};
 
 // An address the ledger will never answer for is a dead row on the board and a
 // wasted scan slot every sweep. The alphabet check alone is not enough — it
@@ -81,6 +96,7 @@ function put(addr, patch, source) {
   byAddr.set(addr, cur);
 }
 report.forEach(r => put(r.address, { handle: r.handle, type: CAT_TYPE[r.cat] || 'HVT', cat: r.cat }, 'report'));
+REPORT_PROMOTIONS.forEach(r => put(r.address, { handle: r.handle, type: CAT_TYPE[r.cat] || 'HVT', cat: r.cat }, 'report'));
 wall.forEach(w => put(w.address, { wall_label: w.label, type: w.type }, 'wall'));
 // The registry used to be consulted only for NAMES, never as a source of
 // targets — so 29 wallets we had positively identified (Bitget Global, SBI VC
