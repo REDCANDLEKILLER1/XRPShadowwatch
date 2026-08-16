@@ -89,3 +89,17 @@
   }
 
 })();
+
+/* Genesis Master capture is loaded here, deliberately early in the numbered
+   Report chain. It snapshots local/persistent state before the normal auto-run
+   begins, then waits for SHADOW_EVENT_BUS to capture the sealed AFTER state. */
+(function () {
+  try {
+    if (window.SW_GENESIS_MASTER_20260816) return;
+    var g = document.createElement('script');
+    g.src = '/src/brief/24-genesis-master-capture-20260816.js?v=20260816.1';
+    g.async = false;
+    g.setAttribute('data-sw-genesis-master', '2026-08-16.1');
+    (document.head || document.documentElement).appendChild(g);
+  } catch (_) {}
+})();
