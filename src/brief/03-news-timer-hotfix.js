@@ -231,3 +231,37 @@
     }, 500);
   } catch (_) {}
 })();
+
+/* Early report-integrity loader.
+   03 runs immediately after 02-core and before the numbered Report pipeline.
+   Start the current-position/public-story/probe layers here instead of waiting
+   for the much later dynamic hotfix chain. Later duplicate loaders are safe
+   because each layer has its own installation guard. */
+(function () {
+  'use strict';
+  try {
+    var queue = [
+      { src:'/src/shared/ripple-escrow-registry.js?v=20260816.2', key:'data-sw-early-ripple-registry' },
+      { src:'/src/brief/25-ripple-escrow-position-20260816.js?v=20260816.2', key:'data-sw-early-ripple-position' },
+      { src:'/src/brief/23-public-report-layers-20260816.js?v=20260816.2', key:'data-sw-early-public-layers' },
+      { src:'/src/brief/26-public-escrow-story-20260816.js?v=20260816.1', key:'data-sw-early-public-escrow' },
+      { src:'/src/brief/27-tx-count-integrity-20260816.js?v=20260816.1', key:'data-sw-early-tx-integrity' }
+    ];
+    var i = 0;
+    function next() {
+      if (i >= queue.length) return;
+      var item = queue[i++];
+      if (document.querySelector('script[' + item.key + ']')) { next(); return; }
+      var s = document.createElement('script');
+      s.src = item.src;
+      s.async = false;
+      s.setAttribute(item.key, '1');
+      s.onload = next;
+      s.onerror = function () { try { console.warn('[SW] early integrity layer failed:', item.src); } catch (_) {} next(); };
+      (document.head || document.documentElement).appendChild(s);
+    }
+    next();
+  } catch (e) {
+    try { console.warn('[SW] early report-integrity loader failed:', e); } catch (_) {}
+  }
+})();
