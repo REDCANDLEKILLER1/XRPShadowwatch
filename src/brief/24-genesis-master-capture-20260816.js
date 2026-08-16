@@ -1,23 +1,26 @@
 /* Shadow Watch Genesis Master Capture — 2026-08-16.
-   Read-only forensic export layer. Captures persistent/report state before and
-   after one normal Report run and produces one master TXT handoff file.
+   Read-only forensic export layer. Captures lightweight persistence/state
+   checkpoints before and after one normal Report run, then builds the heavy
+   master handoff only when the operator taps DOWNLOAD GENESIS MASTER.
    No XRPL calls, pagination, concurrency, lookback, scoring, wallet mutation,
    signing, submit, trading, or remote writes are introduced here. */
 (function () {
   'use strict';
 
-  var VERSION = '2026.08.16.1';
+  var VERSION = '2026.08.16.2';
   if (window.SW_GENESIS_MASTER_20260816 && window.SW_GENESIS_MASTER_20260816.installed) return;
 
   var ctl = {
     installed: true,
     version: VERSION,
     armed: false,
-    before: null,
-    after: null,
+    before_page: null,
+    before_scan: null,
+    after_seal: null,
     last_document: null,
     bus_hooked: false,
-    before_quality: 'UNSET'
+    before_quality: 'UNSET',
+    building: false
   };
 
   function iso() { return new Date().toISOString(); }
@@ -33,6 +36,7 @@
   }
   function countOf(v) {
     if (Array.isArray(v) || typeof v === 'string') return v.length;
+    if (v instanceof Map || v instanceof Set) return v.size;
     if (v && typeof v === 'object') {
       try { return Object.keys(v).length; } catch (_) { return null; }
     }
@@ -49,6 +53,12 @@
   function secretName(k) {
     return /^(seed|secret|private_?key|privatekey|mnemonic|passphrase|password|access_?token|auth_?token|bearer)$/i.test(String(k || ''));
   }
+  function fnvString(str) {
+    str = String(str == null ? '' : str);
+    var h = 2166136261;
+    for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return ('00000000' + (h >>> 0).toString(16)).slice(-8) + ':' + str.length;
+  }
 
   function safeCopy(value, depth, seen, keyName) {
     depth = depth || 0;
@@ -59,9 +69,7 @@
     if (typeof value === 'function') return '[FUNCTION ' + (value.name || 'anonymous') + ']';
     if (typeof value === 'symbol') return String(value);
     if (depth > 16) return '[MAX_DEPTH]';
-    try {
-      if (typeof Node !== 'undefined' && value instanceof Node) return '[DOM_NODE]';
-    } catch (_) {}
+    try { if (typeof Node !== 'undefined' && value instanceof Node) return '[DOM_NODE]'; } catch (_) {}
     try {
       if (value instanceof Date) return value.toISOString();
       if (value instanceof Error) return { name: value.name, message: value.message, stack: value.stack || null };
@@ -78,9 +86,7 @@
         if (seen.has(value)) return '[CIRCULAR]';
         seen.add(value);
       } catch (_) {}
-      if (Array.isArray(value)) {
-        return value.map(function (v) { return safeCopy(v, depth + 1, seen, 'array_item'); });
-      }
+      if (Array.isArray(value)) return value.map(function (v) { return safeCopy(v, depth + 1, seen, 'array_item'); });
       var out = {};
       try {
         Object.keys(value).forEach(function (k) {
@@ -102,7 +108,7 @@
     catch (_) { return raw; }
   }
 
-  function readStorage(store) {
+  function storageSnapshot(store, includeValues) {
     var rows = [];
     if (!store) return rows;
     try {
@@ -111,11 +117,13 @@
       keys.filter(Boolean).sort().forEach(function (key) {
         var raw = null;
         try { raw = store.getItem(key); } catch (_) {}
-        rows.push({
+        var row = {
           key: key,
           bytes_utf16_approx: raw == null ? 0 : raw.length * 2,
-          value: parseStored(raw, key)
-        });
+          fingerprint: fnvString(raw || '')
+        };
+        if (includeValues) row.value = parseStored(raw, key);
+        rows.push(row);
       });
     } catch (e) {
       rows.push({ key: '[STORAGE_READ_FAILED]', error: String(e && e.message || e) });
@@ -137,7 +145,20 @@
   }
 
   var PERSIST_RE = /(memory|history|journal|bloom|decision|coordination|pattern|snapshot|discovery|follow|escrow|offer|watch|hvt|roster|baseline|intel|candidate|black.?box|health|timing|perf)/i;
-  function persistentState(s) {
+  function persistentStateInventory(s) {
+    var out = [];
+    if (!s || typeof s !== 'object') return out;
+    try {
+      Object.keys(s).sort().forEach(function (k) {
+        if (!PERSIST_RE.test(k)) return;
+        var v = null;
+        try { v = s[k]; } catch (_) {}
+        out.push({ key: k, type: typeOf(v), count: countOf(v) });
+      });
+    } catch (_) {}
+    return out;
+  }
+  function persistentStateFull(s) {
     var out = {};
     if (!s || typeof s !== 'object') return out;
     try {
@@ -149,19 +170,30 @@
     return out;
   }
 
-  function customGlobals() {
+  function customGlobalInventory() {
+    var out = [];
+    var re = /^(SW_|SHADOW_|XAI_|HVT_|XRPL_|MORNING_|PUBLIC_|REPORT_|NEWS_)/;
+    try {
+      Object.keys(window).sort().forEach(function (k) {
+        if (k === 'SW_GENESIS_MASTER_20260816') return;
+        if (!re.test(k) && !PERSIST_RE.test(k)) return;
+        var v;
+        try { v = window[k]; } catch (_) { return; }
+        out.push({ key: k, type: typeOf(v), count: countOf(v), function: typeof v === 'function' });
+      });
+    } catch (_) {}
+    return out;
+  }
+  function persistentGlobalsFull() {
     var out = {};
     var re = /^(SW_|SHADOW_|XAI_|HVT_|XRPL_|MORNING_|PUBLIC_|REPORT_|NEWS_)/;
     try {
       Object.keys(window).sort().forEach(function (k) {
+        if (k === 'SW_GENESIS_MASTER_20260816') return;
         if (!re.test(k) && !PERSIST_RE.test(k)) return;
-        if (['localStorage','sessionStorage'].indexOf(k) >= 0) return;
         var v;
         try { v = window[k]; } catch (_) { return; }
-        if (typeof v === 'function') {
-          out[k] = '[FUNCTION ' + (v.name || k) + ']';
-          return;
-        }
+        if (typeof v === 'function') { out[k] = '[FUNCTION ' + (v.name || k) + ']'; return; }
         try { out[k] = safeCopy(v, 0, new WeakSet(), k); } catch (_) {}
       });
     } catch (_) {}
@@ -180,33 +212,59 @@
     };
   }
 
-  function snapshot(kind, includeFullState) {
+  function lightSnapshot(kind) {
     var s = stateRef();
-    var snap = {
+    return {
       kind: kind,
       captured_at: iso(),
       page_visibility: (function(){ try { return document.visibilityState || 'unknown'; } catch (_) { return 'unknown'; } })(),
       scanning: !!(s && s.scanning),
-      location: (function(){ try { return String(location.href); } catch (_) { return null; } })(),
       state_meta: metaFromState(s),
       state_inventory: stateInventory(s),
-      persistent_state: persistentState(s),
-      local_storage: readStorage((function(){ try { return localStorage; } catch (_) { return null; } })()),
-      session_storage: readStorage((function(){ try { return sessionStorage; } catch (_) { return null; } })()),
-      custom_globals: customGlobals()
+      persistent_state_inventory: persistentStateInventory(s),
+      custom_global_inventory: customGlobalInventory(),
+      local_storage: storageSnapshot((function(){ try { return localStorage; } catch (_) { return null; } })(), false),
+      session_storage: storageSnapshot((function(){ try { return sessionStorage; } catch (_) { return null; } })(), false)
     };
-    if (includeFullState) {
-      try { snap.state_full = safeCopy(s, 0, new WeakSet(), 'state'); }
-      catch (e) { snap.state_full = { capture_error: String(e && e.message || e) }; }
-      try {
-        if (typeof window.buildShadowWatchDebugFile === 'function') {
-          snap.existing_total_debug = String(window.buildShadowWatchDebugFile() || '');
-        }
-      } catch (e) {
-        snap.existing_total_debug = '[BUILD FAILED: ' + String(e && e.message || e) + ']';
-      }
+  }
+
+  function compactStateFull(s) {
+    var out = {};
+    if (!s || typeof s !== 'object') return out;
+    try {
+      Object.keys(s).sort().forEach(function (k) {
+        if (k === 'txs') { out[k] = '[OMITTED HERE — RAW SCAN IS INCLUDED IN existing_total_debug]'; return; }
+        if (k === 'pack') { out[k] = '[OMITTED HERE — FULL PACK IS INCLUDED IN existing_total_debug]'; return; }
+        var v;
+        try { v = s[k]; } catch (_) { return; }
+        try { out[k] = safeCopy(v, 0, new WeakSet(), k); } catch (_) {}
+      });
+    } catch (_) {}
+    return out;
+  }
+
+  function fullExportSnapshot() {
+    var s = stateRef();
+    var debug = null;
+    try {
+      if (typeof window.buildShadowWatchDebugFile === 'function') debug = String(window.buildShadowWatchDebugFile() || '');
+    } catch (e) {
+      debug = '[BUILD FAILED: ' + String(e && e.message || e) + ']';
     }
-    return snap;
+    return {
+      kind: 'EXPORT_FULL_STATE',
+      captured_at: iso(),
+      state_meta: metaFromState(s),
+      state_inventory: stateInventory(s),
+      state_full_compact: compactStateFull(s),
+      persistent_state_full: persistentStateFull(s),
+      persistent_globals_full: persistentGlobalsFull(),
+      local_storage_full: storageSnapshot((function(){ try { return localStorage; } catch (_) { return null; } })(), true),
+      session_storage_full: storageSnapshot((function(){ try { return sessionStorage; } catch (_) { return null; } })(), true),
+      existing_total_debug: debug,
+      existing_total_debug_chars: debug ? debug.length : 0,
+      raw_scan_note: 'The current raw scan/full pack remains in existing_total_debug Section 14; it is not duplicated in state_full_compact.'
+    };
   }
 
   function storageMap(rows) {
@@ -214,23 +272,14 @@
     (rows || []).forEach(function (r) { if (r && r.key) m[r.key] = r; });
     return m;
   }
-  function simpleFingerprint(v) {
-    var str;
-    try { str = JSON.stringify(v); } catch (_) { str = String(v); }
-    var h = 2166136261;
-    for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
-    return ('00000000' + (h >>> 0).toString(16)).slice(-8) + ':' + str.length;
-  }
   function storageDiff(aRows, bRows) {
     var a = storageMap(aRows), b = storageMap(bRows), keys = {};
     Object.keys(a).forEach(function (k) { keys[k] = 1; });
     Object.keys(b).forEach(function (k) { keys[k] = 1; });
     var out = [];
     Object.keys(keys).sort().forEach(function (k) {
-      var av = a[k] ? a[k].value : undefined;
-      var bv = b[k] ? b[k].value : undefined;
-      var af = a[k] ? simpleFingerprint(av) : null;
-      var bf = b[k] ? simpleFingerprint(bv) : null;
+      var af = a[k] ? a[k].fingerprint : null;
+      var bf = b[k] ? b[k].fingerprint : null;
       if (af === bf) return;
       out.push({ key: k, change: !a[k] ? 'ADDED' : !b[k] ? 'REMOVED' : 'CHANGED', before: af, after: bf });
     });
@@ -254,33 +303,23 @@
     ['watchlist_roster', /(watchlist|hvt|roster)/i]
   ];
 
-  function storeManifest(snap) {
+  function manifestNames(light, full) {
     var names = [];
-    (snap.local_storage || []).forEach(function (r) { names.push('localStorage.' + r.key); });
-    (snap.session_storage || []).forEach(function (r) { names.push('sessionStorage.' + r.key); });
-    Object.keys(snap.persistent_state || {}).forEach(function (k) { names.push('state.' + k); });
-    Object.keys(snap.custom_globals || {}).forEach(function (k) { names.push('window.' + k); });
+    (light && light.local_storage || []).forEach(function (r) { names.push('localStorage.' + r.key); });
+    (light && light.session_storage || []).forEach(function (r) { names.push('sessionStorage.' + r.key); });
+    (light && light.persistent_state_inventory || []).forEach(function (r) { names.push('state.' + r.key); });
+    (light && light.custom_global_inventory || []).forEach(function (r) { names.push('window.' + r.key); });
+    if (full) {
+      Object.keys(full.persistent_state_full || {}).forEach(function (k) { names.push('state.' + k); });
+      Object.keys(full.persistent_globals_full || {}).forEach(function (k) { names.push('window.' + k); });
+    }
+    return Array.from(new Set(names));
+  }
+  function storeManifest(light, full) {
+    var names = manifestNames(light, full);
     return STORE_PROBES.map(function (p) {
-      var hits = names.filter(function (n) { return p[1].test(n); });
-      var nonEmpty = hits.filter(function (name) {
-        var bits = name.split('.'), root = bits.shift(), key = bits.join('.'), v;
-        try {
-          if (root === 'state') v = snap.persistent_state[key];
-          else if (root === 'window') v = snap.custom_globals[key];
-          else {
-            var rows = root === 'localStorage' ? snap.local_storage : snap.session_storage;
-            var row = rows.find(function (r) { return r.key === key; });
-            v = row && row.value;
-          }
-        } catch (_) {}
-        var c = countOf(v);
-        return v != null && v !== '' && c !== 0;
-      });
-      return {
-        store: p[0],
-        status: hits.length ? (nonEmpty.length ? 'FOUND' : 'EMPTY') : 'NOT_EXPOSED',
-        sources: hits
-      };
+      var hits = names.filter(function (name) { return p[1].test(name); });
+      return { store: p[0], status: hits.length ? 'FOUND_OR_EXPOSED' : 'NOT_EXPOSED', sources: hits };
     });
   }
 
@@ -300,44 +339,41 @@
       tx_hashes: uniqHashes(Array.isArray(s.txs) ? s.txs : []),
       large_transfer_hashes: uniqHashes(Array.isArray(s.large) ? s.large : []),
       discovery_addresses: uniqAddresses(Array.isArray(s.discoveryInbox) ? s.discoveryInbox : []),
-      note: 'Use these fingerprints to prevent overlapping reports from becoming duplicate historical evidence.'
+      note: 'These fingerprints are for future Genesis/shared-memory deduplication; repeated reports must not become repeated ledger events.'
     };
   }
 
   function arm(reason) {
-    if (scanning()) {
-      ctl.before = snapshot('BEFORE_PARTIAL_ACTIVE_SCAN', false);
-      ctl.before_quality = 'PARTIAL_ACTIVE_SCAN';
-    } else {
-      ctl.before = snapshot('BEFORE', false);
-      ctl.before_quality = 'CLEAN_PRE_SCAN';
-    }
-    ctl.after = null;
+    ctl.before_page = lightSnapshot(scanning() ? 'BEFORE_PAGE_PARTIAL_ACTIVE_SCAN' : 'BEFORE_PAGE');
+    ctl.before_scan = null;
+    ctl.after_seal = null;
     ctl.last_document = null;
+    ctl.before_quality = scanning() ? 'PARTIAL_ACTIVE_SCAN' : 'CLEAN_PRE_SCAN';
     ctl.armed = true;
     ctl.armed_at = iso();
     ctl.arm_reason = reason || 'manual_or_page_load';
     renderStatus();
   }
 
-  function captureAfter(reason) {
-    ctl.after = snapshot('AFTER', true);
+  function captureAfterSeal(reason) {
+    ctl.after_seal = lightSnapshot('AFTER_SEAL');
     ctl.captured_after_at = iso();
     ctl.after_reason = reason || 'report_sealed';
     ctl.armed = false;
-    ctl.last_document = buildDocument();
+    ctl.last_document = null;
     renderStatus();
-    return ctl.after;
+    return ctl.after_seal;
   }
 
   function buildDocument() {
     var s = stateRef();
-    var before = ctl.before || snapshot('BEFORE_MISSING', false);
-    var after = ctl.after || snapshot('AFTER_ON_DEMAND', true);
+    var full = fullExportSnapshot();
+    var before = ctl.before_scan || ctl.before_page || lightSnapshot('BEFORE_MISSING');
+    var after = ctl.after_seal || lightSnapshot('AFTER_ON_DEMAND');
     var meta = metaFromState(s);
     return {
       shadow_watch_genesis_master: {
-        schema: 'SW_GENESIS_MASTER_V1',
+        schema: 'SW_GENESIS_MASTER_V2',
         capture_version: VERSION,
         generated_at: iso(),
         purpose: 'Seed a future shared Shadow Watch intelligence/history repository from one fresh, provenance-preserving Report capture.',
@@ -354,17 +390,20 @@
         provenance: meta,
         before_snapshot_quality: ctl.before_quality,
         arm_reason: ctl.arm_reason || null,
-        after_reason: ctl.after_reason || null
+        after_reason: ctl.after_reason || null,
+        heavy_capture_deferred_until_download: true
       },
-      store_manifest_before: storeManifest(before),
-      store_manifest_after: storeManifest(after),
+      store_manifest_before: storeManifest(before, null),
+      store_manifest_after: storeManifest(after, full),
       persistence_diff: {
         local_storage: storageDiff(before.local_storage, after.local_storage),
         session_storage: storageDiff(before.session_storage, after.session_storage)
       },
       dedupe_index: dedupeIndex(s),
-      before_snapshot: before,
-      after_snapshot: after
+      before_page_snapshot: ctl.before_page,
+      before_scan_snapshot: ctl.before_scan,
+      after_seal_snapshot: ctl.after_seal,
+      full_export_snapshot: full
     };
   }
 
@@ -376,15 +415,16 @@
       'XRPMAN // SHADOW WATCH — GENESIS MASTER CAPTURE',
       'Powered by XMΣMΣ',
       '============================================================',
-      'Schema:      ' + (meta.schema || 'SW_GENESIS_MASTER_V1'),
+      'Schema:      ' + (meta.schema || 'SW_GENESIS_MASTER_V2'),
       'Generated:   ' + (meta.generated_at || iso()),
       'Report ID:   ' + (p.report_id || 'unknown'),
       'Scan ID:     ' + (p.scan_id || 'unknown'),
       'Before:      ' + (meta.before_snapshot_quality || 'unknown'),
       '',
-      'This is a read-only forensic state capture for building Shadow Memory.',
-      'It contains BEFORE/AFTER persistence, state inventory, hidden memory lanes,',
-      'current scan state, store status, provenance, and dedupe fingerprints.',
+      'Read-only Genesis handoff for Shadow Memory design.',
+      'Includes page-load + scan-start + sealed checkpoints, persistence diffs,',
+      'hidden-memory inventories, full persistent values, the existing Total Debug,',
+      'current scan provenance, and transaction/wallet dedupe fingerprints.',
       '============================================================',
       '',
       'GENESIS MASTER JSON',
@@ -394,37 +434,45 @@
     return head + JSON.stringify(doc, null, 2) + '\n';
   }
 
-  function download() {
-    if (!ctl.after) {
-      if (scanning()) return;
-      captureAfter('manual_download_capture');
-    }
-    var doc = ctl.last_document || buildDocument();
-    ctl.last_document = doc;
-    var text = fileText(doc);
-    var p = doc.shadow_watch_genesis_master.provenance || {};
-    var day = iso().slice(0, 10);
-    var id = String(p.scan_id || p.report_id || 'UNSEALED').replace(/[^A-Za-z0-9_-]/g, '');
-    var name = 'ShadowWatch_GENESIS_MASTER_' + id + '_' + day + '.txt';
-    try {
-      var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = name;
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(function () { try { URL.revokeObjectURL(url); a.remove(); } catch (_) {} }, 1000);
-    } catch (e) {
-      try { console.error('[SW-GENESIS] download failed', e); } catch (_) {}
-    }
+  function performDownload() {
+    if (scanning()) return;
+    ctl.building = true;
+    renderStatus();
+    setTimeout(function () {
+      try {
+        if (!ctl.after_seal) captureAfterSeal('manual_download_capture');
+        var doc = buildDocument();
+        ctl.last_document = doc;
+        var text = fileText(doc);
+        var p = doc.shadow_watch_genesis_master.provenance || {};
+        var day = iso().slice(0, 10);
+        var id = String(p.scan_id || p.report_id || 'UNSEALED').replace(/[^A-Za-z0-9_-]/g, '');
+        var name = 'ShadowWatch_GENESIS_MASTER_' + id + '_' + day + '.txt';
+        var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = name; a.style.display = 'none';
+        document.body.appendChild(a); a.click();
+        setTimeout(function () { try { URL.revokeObjectURL(url); a.remove(); } catch (_) {} }, 1200);
+      } catch (e) {
+        try { console.error('[SW-GENESIS] export failed', e); } catch (_) {}
+      } finally {
+        ctl.building = false;
+        renderStatus();
+      }
+    }, 40);
   }
 
   var ui = { wrap: null, btn: null, status: null };
   function renderStatus() {
     if (!ui.btn || !ui.status) return;
-    if (ctl.after) {
+    if (ctl.building) {
+      ui.status.textContent = 'BUILDING · MASTER HANDOFF';
+      ui.btn.textContent = 'BUILDING GENESIS…';
+      ui.btn.disabled = true;
+      return;
+    }
+    if (ctl.after_seal) {
       ui.status.textContent = 'READY · BEFORE + AFTER CAPTURED';
       ui.btn.textContent = 'DOWNLOAD GENESIS MASTER';
       ui.btn.disabled = false;
@@ -452,12 +500,10 @@
     btn.type = 'button';
     btn.style.cssText = 'width:100%;border:1px solid #00ff00;background:#07120b;color:#00ff00;border-radius:6px;padding:8px 10px;font-weight:800;font-size:10px;letter-spacing:.08em;cursor:pointer';
     btn.addEventListener('click', function () {
-      if (ctl.after) return download();
+      if (ctl.after_seal) return performDownload();
       if (!scanning()) arm('manual_rearm');
     });
-    wrap.appendChild(status);
-    wrap.appendChild(btn);
-    document.body.appendChild(wrap);
+    wrap.appendChild(status); wrap.appendChild(btn); document.body.appendChild(wrap);
     ui.wrap = wrap; ui.btn = btn; ui.status = status;
     renderStatus();
   }
@@ -470,20 +516,21 @@
     ctl.bus_hooked = true;
     try {
       bus.on('shadow.scan.started', function () {
-        if (ctl.after || !ctl.before || ctl.before_quality !== 'CLEAN_PRE_SCAN') arm('scan_started_auto_arm');
+        if (!ctl.before_page || ctl.before_quality !== 'CLEAN_PRE_SCAN') arm('scan_started_auto_arm');
+        ctl.before_scan = lightSnapshot('BEFORE_SCAN_START');
+        ctl.after_seal = null;
+        ctl.last_document = null;
         renderStatus();
       });
-      bus.on('shadow.report.sealed', function () { setTimeout(function () { captureAfter('shadow.report.sealed'); }, 0); });
+      bus.on('shadow.report.sealed', function () { setTimeout(function () { captureAfterSeal('shadow.report.sealed'); }, 0); });
       bus.on('shadow.error.scan_failed', function () { renderStatus(); });
     } catch (_) {}
     return true;
   }
 
-  // Capture as early as this layer is loaded. 03-news-timer-hotfix loads this
-  // before the later helper/hotfix chain so normal fresh-page runs get a clean
-  // pre-scan persistence snapshot rather than a mid-run reconstruction.
+  // Capture very early in the numbered Report chain. Only lightweight metadata
+  // is taken during scan lifecycle events; large data is serialized on demand.
   arm('early_page_load');
-
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountUI);
   else mountUI();
 
@@ -495,8 +542,8 @@
 
   window.SW_GENESIS_MASTER_20260816 = ctl;
   ctl.arm = arm;
-  ctl.captureAfter = captureAfter;
+  ctl.captureAfter = captureAfterSeal;
   ctl.buildDocument = buildDocument;
-  ctl.download = download;
-  ctl.snapshotNow = function () { return snapshot('MANUAL', true); };
+  ctl.download = performDownload;
+  ctl.snapshotNow = lightSnapshot;
 })();
