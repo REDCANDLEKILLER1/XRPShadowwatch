@@ -37,6 +37,17 @@
       'Track whether today’s elevated transfer activity develops into a clearer repositioning pattern.'
     );
 
+    // Exact phrases surfaced by SW-20260816-BQ8D7. These are presentation-only
+    // repairs; 44/100 remains 44/100 and the underlying evidence is untouched.
+    out = out.replace(
+      /Slow night — but slow is when you catch the sloppy ones\./g,
+      'Busy transfer window — the risk score stayed moderate, but the Ledger was not quiet.'
+    );
+    out = out.replace(
+      /Today[’']s forensic read: ordinary motion, nothing that raised the hair on my neck\. \((\d+)\/100\)\./g,
+      'Today’s forensic read: elevated transfer activity without a broader pattern break. ($1/100).'
+    );
+
     return out;
   }
 
@@ -51,11 +62,23 @@
   } catch (_) {}
 
   window.SW_MORNING_TONE_GUARD_20260816 = {
-    version: '2026.08.16.1',
+    version: '2026.08.16.2',
     large_transfer_floor: 20,
     shadow_volume_floor_xrp: 100000000,
     presentation_only: true,
     scanner_untouched: true,
     risk_score_untouched: true
   };
+})();
+
+// Scan-time visual throttling is isolated in its own reversible layer. It only
+// coalesces wallet-table/dashboard redraws and records Chromium long tasks.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/20-ui-responsiveness-20260816.js';
+    s.async = false;
+    s.setAttribute('data-sw-ui-responsiveness', '2026-08-16.1');
+    document.body.appendChild(s);
+  } catch (_) {}
 })();
