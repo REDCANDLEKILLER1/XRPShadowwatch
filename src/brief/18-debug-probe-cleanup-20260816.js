@@ -66,3 +66,15 @@
     scanner_untouched: true
   };
 })();
+
+// Presentation-only guard for the Morning Report. Loaded after the debug probe
+// cleanup so it remains the last wrapper around buildMorningStoryText.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/19-morning-tone-guard-20260816.js';
+    s.async = false;
+    s.setAttribute('data-sw-morning-tone-guard', '2026-08-16.1');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();
