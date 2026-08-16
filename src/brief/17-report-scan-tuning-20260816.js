@@ -12,7 +12,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026.08.16.1';
+  var VERSION = '2026.08.16.2';
   var PROMOTION = {
     address: 'rJP1s6gaopZxXbpGegkxBspUgm5HjLUjBH',
     label: 'LARGE_RECV_rJP1s6',
@@ -74,16 +74,19 @@
         var input = null;
         var oldValue = null;
         var boosted = false;
+        var tw = null;
         var hours = 0;
 
         try {
-          hours = (typeof getTxWindow === 'function' && getTxWindow()) ? Number(getTxWindow().hours || 0) : 0;
+          tw = (typeof getTxWindow === 'function') ? getTxWindow() : null;
+          hours = tw ? Number(tw.hours || 0) : 0;
           input = document.getElementById('inTxLimit');
           oldValue = input ? input.value : null;
 
-          // Only lift the stock/default 200-row setting. A user-selected custom
-          // value is never overridden. The scan's x8 concurrency is untouched.
-          if (input && hours >= 48 && Number(input.value || 0) === 200) {
+          // Only lift the stock/default 200-row setting on the scanner's own
+          // automatic window. A manually selected date/time range or a custom
+          // page-size value is never overridden. Concurrency stays at x8.
+          if (input && tw && !tw.custom && hours >= 48 && Number(input.value || 0) === 200) {
             input.value = '400';
             boosted = true;
             try {
@@ -112,6 +115,7 @@
     long_window_min_hours: 48,
     default_page_size: 200,
     tuned_page_size: 400,
+    automatic_windows_only: true,
     concurrency_changed: false,
     lookback_changed: false
   };
