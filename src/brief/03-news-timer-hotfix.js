@@ -95,11 +95,32 @@
    normal run, then defers the heavy master serialization until download. */
 (function () {
   try {
-    if (window.SW_GENESIS_MASTER_20260816) return;
-    var g = document.createElement('script');
-    g.src = '/src/brief/24-genesis-master-capture-20260816.js?v=20260816.2';
-    g.async = false;
-    g.setAttribute('data-sw-genesis-master', '2026-08-16.2');
-    (document.head || document.documentElement).appendChild(g);
+    if (!window.SW_GENESIS_MASTER_20260816) {
+      var g = document.createElement('script');
+      g.src = '/src/brief/24-genesis-master-capture-20260816.js?v=20260816.2';
+      g.async = false;
+      g.setAttribute('data-sw-genesis-master', '2026-08-16.2');
+      (document.head || document.documentElement).appendChild(g);
+    }
+
+    // Lifecycle fallback: if a very fast run finishes before the Genesis layer
+    // hears shadow.report.sealed, observe scanning true→false and capture the
+    // same lightweight AFTER checkpoint. This does not touch the scan itself.
+    var sawGenesisScan = false;
+    var genesisFallbackTicks = 0;
+    var genesisFallback = setInterval(function () {
+      genesisFallbackTicks++;
+      var api = window.SW_GENESIS_MASTER_20260816;
+      var s = null;
+      try { if (typeof state !== 'undefined' && state) s = state; } catch (_) {}
+      try { if (!s && window.__SHADOWWATCH_STATE__) s = window.__SHADOWWATCH_STATE__; } catch (_) {}
+      if (s && s.scanning === true) sawGenesisScan = true;
+      if (api && sawGenesisScan && s && s.scanning !== true && !api.after_seal && typeof api.captureAfter === 'function') {
+        try { api.captureAfter('scan_end_poll_fallback'); } catch (_) {}
+        clearInterval(genesisFallback);
+        return;
+      }
+      if (genesisFallbackTicks > 3600) clearInterval(genesisFallback);
+    }, 500);
   } catch (_) {}
 })();
