@@ -158,3 +158,16 @@
     read_only: true
   };
 })();
+
+// Load the small 2026-08-16 report-only promotion/performance layer after the
+// escrow category repair. Kept separate so the scanner tuning is one-file
+// reversible if field testing shows no benefit.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/17-report-scan-tuning-20260816.js';
+    s.async = false;
+    s.setAttribute('data-sw-report-scan-tuning', '2026-08-16.1');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();
