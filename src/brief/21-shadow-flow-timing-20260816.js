@@ -5,13 +5,13 @@
    Goals:
    1) Keep Shadow Volume historically stable as individual XRP moves >=1M.
    2) Quantify the established 100K-<1M "mid-size" band separately.
-   3) Surface repeated same-route mid-size clusters without claiming intent.
+   3) Surface repeated-route, fan-out, and fan-in mid-size clusters without claiming intent.
    4) Record exact run + phase timings in TOTAL DEBUG only.
 */
 (function () {
   'use strict';
 
-  var VERSION = '2026.08.16.1';
+  var VERSION = '2026.08.16.2';
   var MID_MIN_XRP = 100000;
   var MID_MAX_XRP = 1000000;
   var ROUTE_MIN_TX = 3;
@@ -70,45 +70,96 @@
       mid.push({ key: key, from: String(t.from), to: String(t.to), amount: amount, date: t.date || '' });
     });
 
+    function ensure(map, key, seed) {
+      if (!map.has(key)) map.set(key, Object.assign({ count: 0, total_xrp: 0, keys: [], counterparties: new Set() }, seed || {}));
+      return map.get(key);
+    }
+
     var routes = new Map();
+    var senders = new Map();
+    var receivers = new Map();
     mid.forEach(function (t) {
-      var k = t.from + '>' + t.to;
-      if (!routes.has(k)) routes.set(k, { from: t.from, to: t.to, count: 0, total_xrp: 0, keys: [] });
-      var r = routes.get(k);
-      r.count += 1;
-      r.total_xrp += t.amount;
-      r.keys.push(t.key);
+      var r = ensure(routes, t.from + '>' + t.to, { type: 'REPEATED_ROUTE', from: t.from, to: t.to });
+      r.count += 1; r.total_xrp += t.amount; r.keys.push(t.key);
+
+      var so = ensure(senders, t.from, { type: 'FAN_OUT', wallet: t.from });
+      so.count += 1; so.total_xrp += t.amount; so.keys.push(t.key); so.counterparties.add(t.to);
+
+      var si = ensure(receivers, t.to, { type: 'FAN_IN', wallet: t.to });
+      si.count += 1; si.total_xrp += t.amount; si.keys.push(t.key); si.counterparties.add(t.from);
     });
 
-    var clusteredRoutes = [];
+    var patterns = [];
     var clusteredKeys = new Set();
+    function qualify(v, requireMultipleCounterparties) {
+      if (v.count < ROUTE_MIN_TX || v.total_xrp < ROUTE_MIN_XRP) return false;
+      if (requireMultipleCounterparties && v.counterparties.size < 2) return false;
+      return true;
+    }
     routes.forEach(function (r) {
-      if (r.count >= ROUTE_MIN_TX && r.total_xrp >= ROUTE_MIN_XRP) {
-        clusteredRoutes.push(r);
-        r.keys.forEach(function (k) { clusteredKeys.add(k); });
-      }
+      if (!qualify(r, false)) return;
+      patterns.push({ type: r.type, from: r.from, to: r.to, count: r.count, total_xrp: r.total_xrp, counterparties: 1 });
+      r.keys.forEach(function (k) { clusteredKeys.add(k); });
+    });
+    senders.forEach(function (r) {
+      if (!qualify(r, true)) return;
+      patterns.push({ type: r.type, wallet: r.wallet, count: r.count, total_xrp: r.total_xrp, counterparties: r.counterparties.size });
+      r.keys.forEach(function (k) { clusteredKeys.add(k); });
+    });
+    receivers.forEach(function (r) {
+      if (!qualify(r, true)) return;
+      patterns.push({ type: r.type, wallet: r.wallet, count: r.count, total_xrp: r.total_xrp, counterparties: r.counterparties.size });
+      r.keys.forEach(function (k) { clusteredKeys.add(k); });
     });
 
+    patterns.sort(function (a, b) { return b.total_xrp - a.total_xrp; });
     var midTotal = mid.reduce(function (sum, t) { return sum + t.amount; }, 0);
     var clusteredTotal = mid.reduce(function (sum, t) {
       return sum + (clusteredKeys.has(t.key) ? t.amount : 0);
     }, 0);
-    clusteredRoutes.sort(function (a, b) { return b.total_xrp - a.total_xrp; });
 
     return {
       band_min_xrp: MID_MIN_XRP,
       band_max_exclusive_xrp: MID_MAX_XRP,
       transfer_count: mid.length,
       total_xrp: midTotal,
-      repeated_route_count: clusteredRoutes.length,
-      repeated_route_transfer_count: clusteredKeys.size,
-      repeated_route_xrp: clusteredTotal,
-      route_rule: ROUTE_MIN_TX + '+ same-route transfers totaling >= ' + ROUTE_MIN_XRP + ' XRP',
-      top_routes: clusteredRoutes.slice(0, 10).map(function (r) {
-        return { from: r.from, to: r.to, count: r.count, total_xrp: r.total_xrp };
-      }),
+      cluster_pattern_count: patterns.length,
+      clustered_transfer_count: clusteredKeys.size,
+      clustered_flow_xrp: clusteredTotal,
+      repeated_route_count: patterns.filter(function (p) { return p.type === 'REPEATED_ROUTE'; }).length,
+      fan_out_count: patterns.filter(function (p) { return p.type === 'FAN_OUT'; }).length,
+      fan_in_count: patterns.filter(function (p) { return p.type === 'FAN_IN'; }).length,
+      cluster_rule: ROUTE_MIN_TX + '+ mid-size transfers totaling >= ' + ROUTE_MIN_XRP + ' XRP via repeat-route, fan-out, or fan-in behavior',
+      top_patterns: patterns.slice(0, 12),
       hash_deduped: true,
       intent_claimed: false
+    };
+  }
+
+  function uniqueShadowMetrics() {
+    var st = stateRef();
+    var rows = st && Array.isArray(st.large) ? st.large : [];
+    var seen = new Set();
+    var unique = [];
+    var rawXrp = 0;
+    rows.forEach(function (t, idx) {
+      var amount = num(t && t.amount);
+      if (!(amount >= MID_MAX_XRP)) return;
+      rawXrp += amount;
+      var key = String((t && t.hash) || '').trim();
+      if (!key) key = [t && t.date || '', t && t.from || '', t && t.to || '', amount, idx].join('|');
+      if (seen.has(key)) return;
+      seen.add(key);
+      unique.push({ key: key, amount: amount });
+    });
+    return {
+      raw_record_count: rows.length,
+      raw_xrp: rawXrp,
+      unique_transfer_count: unique.length,
+      unique_xrp: unique.reduce(function (sum, t) { return sum + t.amount; }, 0),
+      duplicate_observation_count: Math.max(0, rows.length - unique.length),
+      hash_deduped: true,
+      public_definition_changed: false
     };
   }
 
@@ -117,10 +168,11 @@
     if (pack && typeof pack === 'object') {
       pack.mid_size_flow_xrp = m.total_xrp;
       pack.mid_size_transfer_count = m.transfer_count;
-      pack.sub_1m_clustered_flow_xrp = m.repeated_route_xrp;
-      pack.sub_1m_clustered_route_count = m.repeated_route_count;
-      pack.sub_1m_clustered_transfer_count = m.repeated_route_transfer_count;
+      pack.sub_1m_clustered_flow_xrp = m.clustered_flow_xrp;
+      pack.sub_1m_cluster_pattern_count = m.cluster_pattern_count;
+      pack.sub_1m_clustered_transfer_count = m.clustered_transfer_count;
       pack.mid_size_flow_diagnostic = m;
+      pack.shadow_volume_unique_diagnostic = uniqueShadowMetrics();
     }
     return m;
   }
@@ -132,17 +184,17 @@
     // Make the long-standing metric self-defining without changing its value.
     out = out.replace(
       /• Shadow volume \(whale moves ≥1M\):/g,
-      '• Shadow volume (individual observed XRP moves ≥1M):'
+      '• Shadow volume (≥1M XRP move spotlight):'
     );
 
     if (!m.transfer_count) return out;
     var midLine = '• Mid-size flow (100K–<1M): ' + fmtXrp(m.total_xrp) + ' XRP · ' + m.transfer_count + ' transfers';
-    var clusterLine = m.repeated_route_count
-      ? '• Sub-1M clustered flow: ' + fmtXrp(m.repeated_route_xrp) + ' XRP · ' + m.repeated_route_count + ' repeated route' + (m.repeated_route_count === 1 ? '' : 's') + ' (pattern signal, not proof of intent)'
-      : '• Sub-1M clustered flow: none met the 3+ same-route / ≥1M aggregate rule';
+    var clusterLine = m.cluster_pattern_count
+      ? '• Sub-1M clustered flow: ' + fmtXrp(m.clustered_flow_xrp) + ' XRP · ' + m.clustered_transfer_count + ' transfers matched repeat/fan-in/fan-out patterns (signal only)'
+      : '• Sub-1M clustered flow: none met the 3+ transfer / ≥1M aggregate pattern rule';
 
     if (/• Mid-size flow \(100K–<1M\):/.test(out)) return out;
-    var shadowLine = /(• Shadow volume \(individual observed XRP moves ≥1M\):[^\n]*\n?)/;
+    var shadowLine = /(• Shadow volume \(≥1M XRP move spotlight\):[^\n]*\n?)/;
     if (shadowLine.test(out)) return out.replace(shadowLine, '$1' + midLine + '\n' + clusterLine + '\n');
 
     var activityLine = /(• Watched activity \(all sizes\):[^\n]*\n?)/;
@@ -280,6 +332,7 @@
     var st = stateRef();
     if (!r && st && st.internal_run_timing) r = st.internal_run_timing;
     var m = attachMetrics(st && st.pack ? st.pack : null);
+    var sh = uniqueShadowMetrics();
     var lines = [];
     lines.push('INTERNAL RUN TIMING / FLOW DIAGNOSTICS');
     lines.push('version: ' + VERSION);
@@ -304,15 +357,22 @@
       });
     }
     lines.push('');
+    lines.push('SHADOW VOLUME AUDIT');
+    lines.push('public metric unchanged: observed >=1M XRP transfer records');
+    lines.push('legacy/raw shadow: ' + fmtXrp(sh.raw_xrp) + ' XRP across ' + sh.raw_record_count + ' records');
+    lines.push('unique-hash shadow check: ' + fmtXrp(sh.unique_xrp) + ' XRP across ' + sh.unique_transfer_count + ' unique transfers · duplicate observations=' + sh.duplicate_observation_count);
+    lines.push('note: this audit does not silently rewrite the historical Shadow Volume series.');
+    lines.push('');
     lines.push('MID-SIZE / SUB-1M FLOW');
     lines.push('mid-size band: 100K–<1M XRP per unique Payment');
     lines.push('mid-size total: ' + fmtXrp(m.total_xrp) + ' XRP across ' + m.transfer_count + ' hash-deduped transfers');
-    lines.push('cluster rule: 3+ same-route mid-size transfers totaling >=1M XRP');
-    lines.push('clustered flow: ' + fmtXrp(m.repeated_route_xrp) + ' XRP across ' + m.repeated_route_count + ' repeated routes / ' + m.repeated_route_transfer_count + ' transfers');
-    if (m.top_routes && m.top_routes.length) {
-      lines.push('top repeated routes:');
-      m.top_routes.slice(0, 5).forEach(function (r, i) {
-        lines.push('  ' + (i + 1) + '. ' + r.from + ' -> ' + r.to + ' · ' + r.count + ' tx · ' + fmtXrp(r.total_xrp) + ' XRP');
+    lines.push('cluster rule: 3+ mid-size transfers totaling >=1M XRP via repeated route, sender fan-out, or receiver fan-in');
+    lines.push('clustered flow: ' + fmtXrp(m.clustered_flow_xrp) + ' XRP across ' + m.clustered_transfer_count + ' unique transfers · patterns=' + m.cluster_pattern_count + ' (route=' + m.repeated_route_count + ', fan-out=' + m.fan_out_count + ', fan-in=' + m.fan_in_count + ')');
+    if (m.top_patterns && m.top_patterns.length) {
+      lines.push('top qualifying patterns:');
+      m.top_patterns.slice(0, 6).forEach(function (r, i) {
+        var who = r.type === 'REPEATED_ROUTE' ? (r.from + ' -> ' + r.to) : (r.wallet + ' · counterparties=' + r.counterparties);
+        lines.push('  ' + (i + 1) + '. ' + r.type + ' · ' + who + ' · ' + r.count + ' tx · ' + fmtXrp(r.total_xrp) + ' XRP');
       });
     }
     lines.push('interpretation: clustered flow is a routing/fragmentation signal only; it does not prove concealment, ownership, or intent.');
@@ -349,9 +409,11 @@
     shadow_volume_definition_changed: false,
     mid_size_min_xrp: MID_MIN_XRP,
     mid_size_max_exclusive_xrp: MID_MAX_XRP,
-    repeated_route_min_tx: ROUTE_MIN_TX,
-    repeated_route_min_xrp: ROUTE_MIN_XRP,
+    cluster_min_tx: ROUTE_MIN_TX,
+    cluster_min_xrp: ROUTE_MIN_XRP,
+    cluster_modes: ['REPEATED_ROUTE', 'FAN_OUT', 'FAN_IN'],
     metrics: midSizeMetrics,
+    uniqueShadowMetrics: uniqueShadowMetrics,
     timing: timingState,
     timingBlock: timingBlock
   };
