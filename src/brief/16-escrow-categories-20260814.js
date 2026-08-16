@@ -167,7 +167,7 @@
     var s = document.createElement('script');
     s.src = '/src/brief/17-report-scan-tuning-20260816.js';
     s.async = false;
-    s.setAttribute('data-sw-report-scan-tuning', '2026-08-16.1');
+    s.setAttribute('data-sw-report-scan-tuning', '2026-08-16.2');
     document.body.appendChild(s);
   } catch (_) {}
 })();
