@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    REPORT SCAN TUNING — 2026-08-16
 
-   Two deliberately small changes:
-   1) Promote the one wallet SW-20260816-FJCJQ explicitly marked ADD.
+   Deliberately small changes:
+   1) Promote only wallets the exported Report explicitly marks ADD.
    2) On 48h+ automatic/default scans, request 400 account_tx rows per page
       instead of the default 200. Concurrency remains unchanged at x8 and the
       existing marker pagination / weekend lookback remain authoritative.
@@ -12,45 +12,84 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026.08.16.2';
-  var PROMOTION = {
-    address: 'rJP1s6gaopZxXbpGegkxBspUgm5HjLUjBH',
-    label: 'LARGE_RECV_rJP1s6',
-    cat: 'discovered_receiver',
-    balance_xrp_observed: 14382993,
-    source_report: 'SW-20260816-FJCJQ'
-  };
+  var VERSION = '2026.08.16.3';
+  var PROMOTIONS = [
+    {
+      address: 'rJP1s6gaopZxXbpGegkxBspUgm5HjLUjBH',
+      label: 'LARGE_RECV_rJP1s6',
+      cat: 'discovered_receiver',
+      balance_xrp_observed: 14382993,
+      source_report: 'SW-20260816-FJCJQ'
+    },
+    {
+      address: 'rUwXPwnRjXwrxHQ6e49iy9ZxwFumHporQe',
+      label: 'LARGE_RECV_rUwXPw',
+      cat: 'discovered_receiver',
+      balance_xrp_observed: 2000001,
+      source_report: 'SW-20260816-EILRG'
+    },
+    {
+      address: 'rF6ZjrrRekxJJ6b9EtD6FTskbGKNHLo4E',
+      label: 'LARGE_RECV_rF6Zjr',
+      cat: 'discovered_receiver',
+      balance_xrp_observed: 2000001,
+      source_report: 'SW-20260816-EILRG'
+    },
+    {
+      address: 'rnMf2652PqzCrnweGratdUHpRdyJpgk8KT',
+      label: 'LARGE_RECV_rnMf26',
+      cat: 'discovered_receiver',
+      balance_xrp_observed: 2000001,
+      source_report: 'SW-20260816-EILRG'
+    },
+    {
+      address: 'rUh7XnUtaZKgm4MCXtDb9hgoQFopvVS54N',
+      label: 'LARGE_RECV_rUh7Xn',
+      cat: 'discovered_receiver',
+      balance_xrp_observed: 2000001,
+      source_report: 'SW-20260816-EILRG'
+    },
+    {
+      address: 'raMu8SXhKgcZua5Dnpjv5vNxPLRDcgB3Ug',
+      label: 'LARGE_RECV_raMu8S',
+      cat: 'discovered_receiver',
+      balance_xrp_observed: 2000001,
+      source_report: 'SW-20260816-EILRG'
+    },
+    {
+      address: 'raNQWPpXPKpm9VEKQEeHM6bgdTLMcYWptc',
+      label: 'LARGE_RECV_raNQWP',
+      cat: 'discovered_receiver',
+      balance_xrp_observed: 2000001,
+      source_report: 'SW-20260816-EILRG'
+    }
+  ];
 
-  function promoteReportWallet() {
-    var a = PROMOTION.address;
-
-    // Use the Report engine's own reviewed-add path when available so the
-    // existing local persistence format stays canonical.
+  function promoteOne(p) {
+    var a = p.address;
     try {
       var already = (typeof WATCHLIST !== 'undefined' && Array.isArray(WATCHLIST))
         ? WATCHLIST.some(function (w) { return w && w.address === a; }) : false;
       if (!already && typeof addDiscoveredWallet === 'function') {
-        addDiscoveredWallet(a, PROMOTION.label, PROMOTION.balance_xrp_observed, PROMOTION.cat);
+        addDiscoveredWallet(a, p.label, p.balance_xrp_observed, p.cat);
       } else if (!already && typeof WATCHLIST !== 'undefined' && Array.isArray(WATCHLIST)) {
-        WATCHLIST.push({ label: PROMOTION.label, address: a, cat: PROMOTION.cat });
+        WATCHLIST.push({ label: p.label, address: a, cat: p.cat });
       }
       if (typeof KNOWN !== 'undefined' && KNOWN) {
-        if (!KNOWN[a]) KNOWN[a] = { label: PROMOTION.label, address: a, cat: PROMOTION.cat };
-        else KNOWN[a].cat = PROMOTION.cat;
+        if (!KNOWN[a]) KNOWN[a] = { label: p.label, address: a, cat: p.cat };
+        else KNOWN[a].cat = p.cat;
       }
     } catch (_) {}
 
-    // Keep the shared roster used by this Report page aligned immediately.
-    // A later roster regeneration can make this an ordinary generated target.
     try {
       var R = window.SW_HVT_ROSTER;
       if (R && Array.isArray(R.targets) && !R.targets.some(function (t) { return t && t.address === a; })) {
         R.targets.push({
           address: a,
-          label: PROMOTION.label,
-          handle: PROMOTION.label,
+          label: p.label,
+          handle: p.label,
           type: 'HVT',
-          cat: PROMOTION.cat,
+          cat: p.cat,
           identified: false,
           confidence: null,
           expected_xrp: null,
@@ -63,6 +102,10 @@
         }
       }
     } catch (_) {}
+  }
+
+  function promoteReportWallets() {
+    PROMOTIONS.forEach(promoteOne);
   }
 
   function installLongWindowPageTuning() {
@@ -104,14 +147,14 @@
     } catch (_) {}
   }
 
-  promoteReportWallet();
+  promoteReportWallets();
   installLongWindowPageTuning();
 
   window.SW_REPORT_SCAN_TUNING_20260816 = {
     version: VERSION,
     read_only: true,
-    promoted_address: PROMOTION.address,
-    promoted_from_report: PROMOTION.source_report,
+    promoted_addresses: PROMOTIONS.map(function (p) { return p.address; }),
+    promoted_from_reports: PROMOTIONS.map(function (p) { return p.source_report; }),
     long_window_min_hours: 48,
     default_page_size: 200,
     tuned_page_size: 400,
