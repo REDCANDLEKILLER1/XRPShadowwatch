@@ -10,7 +10,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026.08.16.1';
+  var VERSION = '2026.08.16.2';
   if (window.SW_EVENT_RUN_TIMING_20260816 && window.SW_EVENT_RUN_TIMING_20260816.installed) return;
 
   function perfNow() {
@@ -76,7 +76,8 @@
         scan_speed_tuning: window.SW_REPORT_SCAN_TUNING_20260816 || null
       },
       scan_id: s && s.scanId ? s.scanId : null,
-      ui_lag_events: []
+      ui_lag_events: [],
+      ui_long_tasks: []
     };
     return clock.current;
   }
@@ -108,6 +109,26 @@
       var b = s && Array.isArray(s.ui_perf_long_tasks) ? s.ui_perf_long_tasks : [];
       r.ui_lag_events = a.slice(-16);
       r.ui_long_tasks = b.slice(-12);
+
+      // The existing Total Debug timing renderer already prints r.phases. Add
+      // diagnostic pseudo-phases so browser/webview stalls appear in the export
+      // without changing the export format or polluting the ERROR LOG.
+      r.ui_lag_events.forEach(function (e) {
+        r.phases.push({
+          phase: 'UI_STALL',
+          duration_ms: Number(e.lag_ms || 0),
+          status: 'event-loop lag during ' + String(e.phase || 'UNKNOWN') +
+            (e.progress_pct == null ? '' : ' at ~' + Math.round(e.progress_pct) + '%')
+        });
+      });
+      r.ui_long_tasks.forEach(function (e) {
+        r.phases.push({
+          phase: 'UI_LONGTASK',
+          duration_ms: Number(e.duration_ms || 0),
+          status: 'Long Tasks API during ' + String(e.phase || 'UNKNOWN') +
+            (e.progress_pct == null ? '' : ' at ~' + Math.round(e.progress_pct) + '%')
+        });
+      });
     } catch (_) {}
   }
 
@@ -158,9 +179,9 @@
     }
   } catch (_) {}
 
-  // If this late diagnostic layer arrives after a scan has already started,
-  // capture the remainder rather than returning another empty timing block. A
-  // fresh next run will start at the real scan.started event and be exact.
+  // If this diagnostic layer arrives after a scan has already started, capture
+  // the remainder rather than returning another empty timing block. A fresh next
+  // run will begin at the actual shadow.scan.started event and be exact.
   try {
     var s0 = st();
     if (s0 && s0.scanning && !clock.current) {
