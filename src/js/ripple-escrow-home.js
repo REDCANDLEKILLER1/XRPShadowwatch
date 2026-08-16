@@ -2,6 +2,31 @@
    Presentation only. Reads SW_ESCROW's read-only validated-ledger state. */
 (function () {
   'use strict';
+
+  // XRPL account_objects can include Escrow objects linked to an account merely
+  // because it is the destination. CURRENT RIPPLE ESCROW must count only objects
+  // actually owned by the queried Ripple account (Escrow.Account === result.account).
+  // Wrap the public response router without changing socket/scanner behavior.
+  try {
+    var escrowApi = window.SW_ESCROW;
+    if (escrowApi && typeof escrowApi.handleResp === 'function' && !escrowApi._ownerOnlyObjectFilter) {
+      var originalEscrowResp = escrowApi.handleResp;
+      escrowApi.handleResp = function (d) {
+        try {
+          var id = String(d && d.id || '');
+          var res = d && d.result;
+          if (id.indexOf('esc_obj_') === 0 && res && res.account && Array.isArray(res.account_objects)) {
+            res.account_objects = res.account_objects.filter(function (o) {
+              return !!(o && o.Account && String(o.Account) === String(res.account));
+            });
+          }
+        } catch (_) {}
+        return originalEscrowResp.call(escrowApi, d);
+      };
+      escrowApi._ownerOnlyObjectFilter = true;
+    }
+  } catch (_) {}
+
   if (document.getElementById('sw-ripple-escrow-home')) return;
   var grid = document.getElementById('mc-grid');
   if (!grid) return;
