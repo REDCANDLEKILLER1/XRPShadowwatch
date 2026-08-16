@@ -10,7 +10,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026.08.16.2';
+  var VERSION = '2026.08.16.3';
   var WALLET_MIN_MS = 450;
   var DASH_MIN_MS = 140;
   var EVENT_LOOP_SAMPLE_MS = 500;
@@ -36,6 +36,11 @@
       var n = el ? parseFloat(String(el.style.width || '0').replace('%', '')) : NaN;
       return Number.isFinite(n) ? n : null;
     } catch (_) { return null; }
+  }
+
+  function visibilityState() {
+    try { return document.visibilityState || 'unknown'; }
+    catch (_) { return 'unknown'; }
   }
 
   function makeThrottle(original, minMs) {
@@ -178,7 +183,8 @@
     }
   } catch (_) {}
 
-  // Diagnostic lane 1: Chromium Long Tasks API where available.
+  // Diagnostic lane 1: Chromium Long Tasks API where available. Visibility is
+  // captured so a background-tab throttle is not mistaken for a foreground UI freeze.
   var longTaskCount = 0;
   var lastLongTaskAt = 0;
   try {
@@ -192,16 +198,18 @@
           lastLongTaskAt = t;
           longTaskCount++;
           try {
-            var st = (typeof state !== 'undefined' && state) ? state : null;
-            if (st) {
-              st.ui_perf_long_tasks = st.ui_perf_long_tasks || [];
-              st.ui_perf_long_tasks.push({
+            var s1 = (typeof state !== 'undefined' && state) ? state : null;
+            if (s1) {
+              s1.ui_perf_long_tasks = s1.ui_perf_long_tasks || [];
+              s1.ui_perf_long_tasks.push({
                 at: new Date().toISOString(),
                 duration_ms: Math.round(entry.duration),
                 phase: currentPhase(),
-                progress_pct: currentPct()
+                progress_pct: currentPct(),
+                visibility: visibilityState(),
+                backgrounded: visibilityState() !== 'visible'
               });
-              if (st.ui_perf_long_tasks.length > 12) st.ui_perf_long_tasks = st.ui_perf_long_tasks.slice(-12);
+              if (s1.ui_perf_long_tasks.length > 12) s1.ui_perf_long_tasks = s1.ui_perf_long_tasks.slice(-12);
             }
           } catch (_) {}
         });
@@ -211,8 +219,8 @@
   } catch (_) {}
 
   // Diagnostic lane 2: broad browser/webview event-loop lag detector. This also
-  // works where the Long Tasks API is unavailable (common in embedded Android
-  // webviews). It stores breadcrumbs only; it does not render or add log spam.
+  // works where the Long Tasks API is unavailable. A hidden/backgrounded page is
+  // explicitly tagged so Android power/tab throttling is separated from a real freeze.
   var lagEvents = [];
   try {
     var expected = nowMs() + EVENT_LOOP_SAMPLE_MS;
@@ -221,17 +229,20 @@
       var lag = now - expected;
       expected = now + EVENT_LOOP_SAMPLE_MS;
       if (!scanningNow() || lag < EVENT_LOOP_LAG_MIN_MS) return;
+      var vis = visibilityState();
       var evt = {
         at: new Date().toISOString(),
         lag_ms: Math.round(lag),
         phase: currentPhase(),
-        progress_pct: currentPct()
+        progress_pct: currentPct(),
+        visibility: vis,
+        backgrounded: vis !== 'visible'
       };
       lagEvents.push(evt);
       if (lagEvents.length > 16) lagEvents = lagEvents.slice(-16);
       try {
-        var st = (typeof state !== 'undefined' && state) ? state : null;
-        if (st) st.ui_perf_lag_events = lagEvents.slice();
+        var s2 = (typeof state !== 'undefined' && state) ? state : null;
+        if (s2) s2.ui_perf_lag_events = lagEvents.slice();
       } catch (_) {}
     }, EVENT_LOOP_SAMPLE_MS);
   } catch (_) {}
@@ -247,6 +258,7 @@
     event_loop_sample_ms: EVENT_LOOP_SAMPLE_MS,
     event_loop_lag_threshold_ms: EVENT_LOOP_LAG_MIN_MS,
     event_loop_lag_events: lagEvents,
+    visibility_aware: true,
     long_task_logging: true,
     scanner_untouched: true,
     concurrency_untouched: true,
@@ -254,22 +266,28 @@
   };
 })();
 
-// Internal timing + mid-size/sub-1M flow context. This layer consumes the
-// transactions already fetched by the Report; it does not add XRPL requests.
+// Internal timing + mid-size/sub-1M flow context. These layers consume data the
+// Report already fetched; none adds an XRPL request.
 (function () {
   try {
     var s = document.createElement('script');
-    s.src = '/src/brief/21-shadow-flow-timing-20260816.js';
+    s.src = '/src/brief/21-shadow-flow-timing-20260816.js?v=20260816.2';
     s.async = false;
     s.setAttribute('data-sw-shadow-flow-timing', '2026-08-16.2');
     document.body.appendChild(s);
 
-    // Reliable event-bus timing patch. Kept separate from the first timer so it
-    // can be removed independently after field verification.
     var t = document.createElement('script');
-    t.src = '/src/brief/22-run-timing-fix-20260816.js';
+    t.src = '/src/brief/22-run-timing-fix-20260816.js?v=20260816.3';
     t.async = false;
-    t.setAttribute('data-sw-run-timing-fix', '2026-08-16.1');
+    t.setAttribute('data-sw-run-timing-fix', '2026-08-16.3');
     document.body.appendChild(t);
+
+    // New path on purpose: guarantees the layered public narrative cannot be
+    // hidden behind a stale cached copy of the earlier tone-guard script.
+    var p = document.createElement('script');
+    p.src = '/src/brief/23-public-report-layers-20260816.js?v=20260816.1';
+    p.async = false;
+    p.setAttribute('data-sw-public-report-layers', '2026-08-16.1');
+    document.body.appendChild(p);
   } catch (_) {}
 })();
