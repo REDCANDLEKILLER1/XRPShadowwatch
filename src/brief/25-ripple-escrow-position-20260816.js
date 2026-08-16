@@ -11,7 +11,7 @@
    ═══════════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
-  var VERSION = '2026.08.16.1';
+  var VERSION = '2026.08.16.2';
   var REGISTRY_SRC = '/src/shared/ripple-escrow-registry.js?v=20260816.1';
 
   function registry() { return window.SW_RIPPLE_ESCROW_REGISTRY || null; }
@@ -60,6 +60,10 @@
         if (res && res.ledger_index) ledger = res.ledger_index;
         (res && res.account_objects || []).forEach(function (o, i) {
           if (!o || (o.LedgerEntryType && o.LedgerEntryType !== 'Escrow')) return;
+          // account_objects also returns escrow entries linked to this address as
+          // destination. Current Ripple escrow position counts only objects whose
+          // Escrow.Account is the queried published Ripple escrow owner.
+          if (!o.Account || String(o.Account) !== String(address)) return;
           var key = o.index || o.LedgerIndex || o.Index || [address,o.Sequence,o.Amount,o.FinishAfter,i].join(':');
           objectMap[key] = o;
         });
@@ -100,7 +104,7 @@
       var complete = answered === addresses.length && objectFailures.length === 0;
       lastPosition = {
         version: VERSION,
-        source: 'validated XRPL account_objects over Ripple public escrow owner registry',
+        source: 'validated XRPL account_objects over Ripple public escrow owner registry; owner-only Escrow.Account filter',
         registry_version: reg.version || null,
         expected_owners: addresses.length,
         answered_owners: answered,
@@ -134,7 +138,7 @@
           var pos = await scanRippleEscrow(ws, byHash);
           log('Ripple escrow position: ' + (pos.complete ? (pos.locked_xrp.toLocaleString(undefined,{maximumFractionDigits:0}) + ' XRP · ' + pos.active_objects + ' active object(s) · 20/20 owners') : ('PARTIAL · ' + pos.answered_owners + '/' + pos.expected_owners + ' owners'));
         } catch (e) {
-          lastPosition = { version:VERSION, source:'validated XRPL account_objects', expected_owners:addresses.length, answered_owners:0, failed_owners:addresses.length, failed_addresses:addresses.slice(), active_objects:0, locked_xrp:null, observed_locked_xrp_partial:0, complete:false, status:'FAILED', ledger_index:null, checked_at:new Date().toISOString(), error:String(e && e.message || e) };
+          lastPosition = { version:VERSION, source:'validated XRPL account_objects; owner-only Escrow.Account filter', expected_owners:addresses.length, answered_owners:0, failed_owners:addresses.length, failed_addresses:addresses.slice(), active_objects:0, locked_xrp:null, observed_locked_xrp_partial:0, complete:false, status:'FAILED', ledger_index:null, checked_at:new Date().toISOString(), error:String(e && e.message || e) };
           try { state.rippleEscrowPosition = lastPosition; } catch (_) {}
           log('Ripple escrow current-position check failed: ' + String(e && e.message || e));
         }
