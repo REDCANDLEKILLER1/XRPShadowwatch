@@ -30,9 +30,7 @@
     ['rMhkqz3DeU7GUUJKGZofusbrTwZe6bDyb1', 'Ripple Escrow Wallet #20']
   ];
 
-  var accounts = rows.map(function (r, i) {
-    return { index: i + 1, address: r[0], label: r[1], owner: 'Ripple' };
-  });
+  var accounts = rows.map(function (r, i) { return { index:i+1, address:r[0], label:r[1], owner:'Ripple' }; });
   var byAddress = {};
   accounts.forEach(function (r) { byAddress[r.address] = r; });
 
@@ -46,4 +44,16 @@
     by_address: Object.freeze(byAddress),
     is_public_escrow_owner: function (address) { return !!byAddress[address]; }
   });
+
+  // Live App only: Mission Control has #mc-grid. Keep the registry itself shared,
+  // but load the dedicated presentation layer only when that live-app host exists.
+  try {
+    if (document.getElementById('mc-grid') && !document.querySelector('script[data-sw-ripple-escrow-home]')) {
+      var ui = document.createElement('script');
+      ui.src = '/src/js/ripple-escrow-home.js?v=20260816.1';
+      ui.async = false;
+      ui.setAttribute('data-sw-ripple-escrow-home','2026-08-16.1');
+      (document.body || document.documentElement).appendChild(ui);
+    }
+  } catch (_) {}
 })();
