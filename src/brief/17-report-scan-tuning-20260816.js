@@ -126,9 +126,6 @@
           input = document.getElementById('inTxLimit');
           oldValue = input ? input.value : null;
 
-          // Only lift the stock/default 200-row setting on the scanner's own
-          // automatic window. A manually selected date/time range or a custom
-          // page-size value is never overridden. Concurrency stays at x8.
           if (input && tw && !tw.custom && hours >= 48 && Number(input.value || 0) === 200) {
             input.value = '400';
             boosted = true;
@@ -139,7 +136,6 @@
 
           return await original.apply(this, arguments);
         } finally {
-          // Restore the visible control exactly as the operator had it.
           if (boosted && input) input.value = oldValue;
         }
       };
@@ -162,4 +158,14 @@
     concurrency_changed: false,
     lookback_changed: false
   };
+
+  // Debug-only cleanup. This script intercepts only the SOURCE PROBE button;
+  // it does not participate in the scanner or report evidence path.
+  try {
+    var d = document.createElement('script');
+    d.src = '/src/brief/18-debug-probe-cleanup-20260816.js';
+    d.async = false;
+    d.setAttribute('data-sw-debug-probe-cleanup', '2026-08-16.1');
+    document.body.appendChild(d);
+  } catch (_) {}
 })();
