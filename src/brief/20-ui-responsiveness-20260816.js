@@ -135,3 +135,15 @@
     lookback_untouched: true
   };
 })();
+
+// Internal timing + mid-size/sub-1M flow context. This layer consumes the
+// transactions already fetched by the Report; it does not add XRPL requests.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/21-shadow-flow-timing-20260816.js';
+    s.async = false;
+    s.setAttribute('data-sw-shadow-flow-timing', '2026-08-16.1');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();
