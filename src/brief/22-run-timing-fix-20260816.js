@@ -10,7 +10,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026.08.16.2';
+  var VERSION = '2026.08.16.3';
   if (window.SW_EVENT_RUN_TIMING_20260816 && window.SW_EVENT_RUN_TIMING_20260816.installed) return;
 
   function perfNow() {
@@ -110,23 +110,29 @@
       r.ui_lag_events = a.slice(-16);
       r.ui_long_tasks = b.slice(-12);
 
-      // The existing Total Debug timing renderer already prints r.phases. Add
-      // diagnostic pseudo-phases so browser/webview stalls appear in the export
-      // without changing the export format or polluting the ERROR LOG.
+      // Export lag as a pseudo-phase, but distinguish a hidden/background page
+      // from a real foreground UI stall. Android/browser throttling is expected
+      // when the user switches away from the Report and must not trigger a scanner fix.
       r.ui_lag_events.forEach(function (e) {
+        var bg = e && (e.backgrounded === true || String(e.visibility || '') === 'hidden');
         r.phases.push({
-          phase: 'UI_STALL',
+          phase: bg ? 'BG_THROTTLE' : 'UI_STALL',
           duration_ms: Number(e.lag_ms || 0),
-          status: 'event-loop lag during ' + String(e.phase || 'UNKNOWN') +
-            (e.progress_pct == null ? '' : ' at ~' + Math.round(e.progress_pct) + '%')
+          status: (bg ? 'background-page throttle' : 'foreground event-loop lag') + ' during ' +
+            String(e.phase || 'UNKNOWN') +
+            (e.progress_pct == null ? '' : ' at ~' + Math.round(e.progress_pct) + '%') +
+            (e.visibility ? ' · visibility=' + e.visibility : '')
         });
       });
       r.ui_long_tasks.forEach(function (e) {
+        var bg = e && (e.backgrounded === true || String(e.visibility || '') === 'hidden');
         r.phases.push({
-          phase: 'UI_LONGTASK',
+          phase: bg ? 'BG_LONGTASK' : 'UI_LONGTASK',
           duration_ms: Number(e.duration_ms || 0),
-          status: 'Long Tasks API during ' + String(e.phase || 'UNKNOWN') +
-            (e.progress_pct == null ? '' : ' at ~' + Math.round(e.progress_pct) + '%')
+          status: (bg ? 'background-page Long Task' : 'foreground Long Tasks API') + ' during ' +
+            String(e.phase || 'UNKNOWN') +
+            (e.progress_pct == null ? '' : ' at ~' + Math.round(e.progress_pct) + '%') +
+            (e.visibility ? ' · visibility=' + e.visibility : '')
         });
       });
     } catch (_) {}
