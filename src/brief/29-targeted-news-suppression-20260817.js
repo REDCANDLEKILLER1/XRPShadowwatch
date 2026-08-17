@@ -86,3 +86,15 @@
     }, 100);
   }
 })();
+
+// P5N3V evidence-backed runtime repair. Loaded last from the active report
+// chain so it can normalize GO2/debug behavior without changing the scanner.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/30-p5n3v-runtime-fix-20260817.js?v=20260817.2';
+    s.async = false;
+    s.setAttribute('data-sw-p5n3v-runtime-fix', '2026-08-17.2');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();
