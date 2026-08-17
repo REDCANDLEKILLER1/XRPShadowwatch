@@ -98,3 +98,15 @@
     document.body.appendChild(s);
   } catch (_) {}
 })();
+
+// Public Morning Report publishing governor. The full forensic exports remain
+// unrestricted; only the public Morning Story is held below a 4,000-char field.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/31-public-morning-4k-20260817.js?v=20260817.1';
+    s.async = false;
+    s.setAttribute('data-sw-public-morning-4k', '2026-08-17.1');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();
