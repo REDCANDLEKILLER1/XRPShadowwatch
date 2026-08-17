@@ -12,11 +12,12 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026.08.17.1';
+  var VERSION = '2026.08.17.2';
   var REGISTRY_SRC = '/src/shared/ripple-escrow-registry.js?v=20260816.2';
   var SERVERS = ['wss://xrplcluster.com', 'wss://s1.ripple.com', 'wss://s2.ripple.com'];
   var CONNECT_TIMEOUT_MS = 6500;
   var RPC_TIMEOUT_MS = 8500;
+  var POSITION_BUDGET_MS = 12000; // Never let current-position enrichment hold the Report open indefinitely.
   var CONCURRENCY = 5;
 
   function registry() { return window.SW_RIPPLE_ESCROW_REGISTRY || null; }
@@ -55,16 +56,17 @@
     await Promise.all(jobs);
   }
 
-  function connect(server) {
+  function connect(server, timeoutMs) {
     return new Promise(function (resolve, reject) {
       var settled = false;
       var ws;
+      var wait = Math.max(250, Math.min(CONNECT_TIMEOUT_MS, Number(timeoutMs) || CONNECT_TIMEOUT_MS));
       var timer = setTimeout(function () {
         if (settled) return;
         settled = true;
         try { if (ws) ws.close(); } catch (_) {}
         reject(new Error('connect timeout'));
-      }, CONNECT_TIMEOUT_MS);
+      }, wait);
       try {
         ws = new WebSocket(server);
       } catch (e) {
@@ -93,11 +95,12 @@
     });
   }
 
-  function rpc(ws, command) {
+  function rpc(ws, command, timeoutMs) {
     return new Promise(function (resolve, reject) {
       var id = 'swrep_pos_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2);
       var done = false;
-      var timer = setTimeout(function () { finish(new Error('timeout ' + command.command)); }, RPC_TIMEOUT_MS);
+      var wait = Math.max(250, Math.min(RPC_TIMEOUT_MS, Number(timeoutMs) || RPC_TIMEOUT_MS));
+      var timer = setTimeout(function () { finish(new Error('timeout ' + command.command)); }, wait);
 
       function cleanup() {
         clearTimeout(timer);
@@ -142,13 +145,19 @@
     var originalEscrowBackfill = null;
     try { originalEscrowBackfill = escrowBackfill; } catch (_) {}
 
-    async function fetchObjectsFor(ws, address, objectMap) {
+    function remaining(deadline) {
+      return Math.max(0, Number(deadline || 0) - Date.now());
+    }
+
+    async function fetchObjectsFor(ws, address, objectMap, deadline) {
       var marker = null;
       var ledger = null;
       do {
+        var left = remaining(deadline);
+        if (left <= 0) throw new Error('position budget exceeded');
         var req = { command:'account_objects', account:address, type:'escrow', ledger_index:'validated', limit:400 };
         if (marker) req.marker = marker;
-        var res = await rpc(ws, req);
+        var res = await rpc(ws, req, left);
         if (res && res.ledger_index) ledger = res.ledger_index;
         (res && res.account_objects || []).forEach(function (o, i) {
           if (!o || (o.LedgerEntryType && o.LedgerEntryType !== 'Escrow')) return;
@@ -164,7 +173,7 @@
       return ledger;
     }
 
-    async function attemptServer(server) {
+    async function attemptServer(server, deadline) {
       var ws = null;
       var objectMap = {};
       var ownerDone = {};
@@ -172,10 +181,16 @@
       var validatedLedger = null;
       var started = Date.now();
       try {
-        ws = await connect(server);
+        var left = remaining(deadline);
+        if (left <= 0) throw new Error('position budget exceeded');
+        ws = await connect(server, left);
         await mapPool(addresses, CONCURRENCY, async function (address) {
+          if (remaining(deadline) <= 0) {
+            failures.push({ address:address, error:'position budget exceeded' });
+            return;
+          }
           try {
-            var ledger = await fetchObjectsFor(ws, address, objectMap);
+            var ledger = await fetchObjectsFor(ws, address, objectMap, deadline);
             ownerDone[address] = true;
             if (ledger) validatedLedger = ledger;
           } catch (e) {
@@ -211,12 +226,14 @@
       if (currentJob) return currentJob;
       currentJob = (async function () {
         var started = Date.now();
+        var deadline = started + POSITION_BUDGET_MS;
         var attempts = [];
         var best = null;
 
         for (var i = 0; i < SERVERS.length; i++) {
+          if (remaining(deadline) <= 0) break;
           try {
-            var result = await attemptServer(SERVERS[i]);
+            var result = await attemptServer(SERVERS[i], deadline);
             attempts.push({ server:result.server, answered_owners:result.answered, failed_owners:result.failures.length, duration_ms:result.duration_ms });
             if (!best || result.answered > best.answered) best = result;
             if (result.complete) { best = result; break; }
@@ -225,7 +242,7 @@
           }
         }
 
-        if (!best) best = { server:null, answered:0, failures:addresses.map(function (a) { return { address:a, error:'no server completed' }; }), locked:0, active:0, nonXrp:0, ledger:null, complete:false };
+        if (!best) best = { server:null, answered:0, failures:addresses.map(function (a) { return { address:a, error:'position budget expired before completion' }; }), locked:0, active:0, nonXrp:0, ledger:null, complete:false };
         var complete = !!best.complete;
         lastPosition = {
           version:VERSION,
@@ -244,6 +261,8 @@
           ledger_index:best.ledger,
           transport:best.server,
           attempts:attempts,
+          budget_ms:POSITION_BUDGET_MS,
+          budget_exhausted:Date.now() >= deadline && !complete,
           duration_ms:Date.now() - started,
           checked_at:new Date().toISOString()
         };
@@ -251,7 +270,7 @@
         try {
           log('Ripple escrow current position: ' + (complete
             ? (lastPosition.locked_xrp.toLocaleString(undefined,{maximumFractionDigits:0}) + ' XRP · ' + lastPosition.active_objects + ' active object(s) · 20/20 owners · isolated XRPL')
-            : (lastPosition.status + ' · ' + lastPosition.answered_owners + '/' + lastPosition.expected_owners + ' owners · amount withheld')));
+            : (lastPosition.status + ' · ' + lastPosition.answered_owners + '/' + lastPosition.expected_owners + ' owners · amount withheld · ' + lastPosition.duration_ms + 'ms ceiling')));
         } catch (_) {}
         return lastPosition;
       })();
@@ -259,10 +278,11 @@
       finally { currentJob = null; }
     }
 
-    // Preserve the normal Report escrow-event backfill exactly as-is, then make
-    // CURRENT POSITION an explicit awaited barrier before FLOW/report building.
-    // The current-position work uses its own socket, so a busy scan socket cannot
-    // starve the 20 account_objects reads.
+    // Preserve the normal Report escrow-event backfill exactly as-is. CURRENT
+    // POSITION is still awaited, but it now has a strict total budget so it can
+    // never hold the report at ~78–80% for minutes. If the 20-owner inventory
+    // cannot be fully verified inside the budget, the amount is withheld and
+    // the report continues with recent escrow activity intact.
     try {
       escrowWallets = function () { return addresses.slice(); };
       escrowBackfill = async function (ws) {
@@ -286,6 +306,7 @@
       registry_count:addresses.length,
       read_only:true,
       isolated_transport:true,
+      position_budget_ms:POSITION_BUDGET_MS,
       get:function () {
         try { return state.rippleEscrowPosition || lastPosition; } catch (_) { return lastPosition; }
       },
