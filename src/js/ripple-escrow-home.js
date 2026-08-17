@@ -1,11 +1,14 @@
-/* Live App Mission Control — embedded Ripple escrow status.
-   Presentation only. Reads SW_ESCROW's read-only validated-ledger state.
-   Keeps Ripple escrow first-class without adding another Mission Control card. */
+/* Live App — keep Ripple escrow OFF the HOME mission-control surface.
+   The escrow engine remains read-only and accessible through Escrow Watch/Menu.
+   This layer only preserves the owner-only current-position filter and removes
+   any legacy/home escrow presentation so the original ShadowWatch Report card
+   remains completely untouched. */
 (function () {
   'use strict';
 
-  // account_objects may include Escrow objects where the queried account is only
-  // the destination. CURRENT RIPPLE ESCROW counts owner-only objects.
+  // XRPL account_objects can include Escrow objects linked to an account merely
+  // because it is the destination. CURRENT RIPPLE ESCROW must count only objects
+  // actually owned by the queried Ripple account (Escrow.Account === result.account).
   try {
     var escrowApi = window.SW_ESCROW;
     if (escrowApi && typeof escrowApi.handleResp === 'function' && !escrowApi._ownerOnlyObjectFilter) {
@@ -26,82 +29,46 @@
     }
   } catch (_) {}
 
-  // Remove the previous standalone card if an older cached script mounted it.
+  function removeHomeEscrow() {
+    try {
+      var node = document.getElementById('sw-ripple-escrow-home');
+      if (node) node.remove();
+    } catch (_) {}
+    try {
+      var style = document.getElementById('sw-ripple-escrow-home-style');
+      if (style) style.remove();
+    } catch (_) {}
+  }
+
+  // escrow-watch.js predates the current Mission Control and may still attempt
+  // to mount its old dedicated HOME line during position refreshes. Suppress
+  // presentation only; do not alter escrow scanning, history, or the Escrow
+  // Watch panel itself.
+  removeHomeEscrow();
+
   try {
-    var old = document.getElementById('sw-ripple-escrow-home');
-    if (old) old.remove();
+    var observer = new MutationObserver(function (mutations) {
+      var shouldClean = false;
+      for (var i = 0; i < mutations.length && !shouldClean; i++) {
+        var added = mutations[i].addedNodes || [];
+        for (var j = 0; j < added.length; j++) {
+          var n = added[j];
+          if (!n || n.nodeType !== 1) continue;
+          if (n.id === 'sw-ripple-escrow-home' || n.id === 'sw-ripple-escrow-home-style' ||
+              (n.querySelector && n.querySelector('#sw-ripple-escrow-home, #sw-ripple-escrow-home-style'))) {
+            shouldClean = true;
+            break;
+          }
+        }
+      }
+      if (shouldClean) removeHomeEscrow();
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    window.SW_RIPPLE_ESCROW_HOME_SUPPRESSOR = {
+      installed: true,
+      presentation_only: true,
+      menu_only: true,
+      disconnect: function () { try { observer.disconnect(); } catch (_) {} }
+    };
   } catch (_) {}
-
-  var hero = document.querySelector('#mc-grid .mc-card-featured');
-  if (!hero) return;
-  var copy = hero.querySelector('.mc-card-copy') || hero;
-
-  var strip = document.createElement('div');
-  strip.id = 'sw-ripple-escrow-home';
-  strip.className = 'sw-ripple-escrow-home sw-ripple-escrow-inline';
-  strip.setAttribute('role', 'button');
-  strip.setAttribute('tabindex', '0');
-  strip.setAttribute('aria-label', 'Open Ripple Escrow Watch');
-  strip.innerHTML = '<span class="sw-re-k">RIPPLE ESCROW</span>' +
-    '<span class="sw-re-v" id="homeRippleEscrowLocked">SYNCING…</span>' +
-    '<span class="sw-re-m" id="homeRippleEscrowMeta">0/20</span>' +
-    '<span class="sw-re-r" id="homeRippleEscrowRecent">96H CHECK…</span>';
-
-  function openEscrow(ev) {
-    try { if (ev) { ev.preventDefault(); ev.stopPropagation(); } } catch (_) {}
-    try { if (typeof window.openEscrowWatch === 'function') window.openEscrowWatch(); } catch (_) {}
-  }
-  strip.addEventListener('click', openEscrow);
-  strip.addEventListener('keydown', function (ev) {
-    if (ev && (ev.key === 'Enter' || ev.key === ' ')) openEscrow(ev);
-  });
-  copy.appendChild(strip);
-
-  if (!document.getElementById('sw-ripple-escrow-home-style')) {
-    var st = document.createElement('style');
-    st.id = 'sw-ripple-escrow-home-style';
-    st.textContent = [
-      '#sw-ripple-escrow-home.sw-ripple-escrow-inline{margin-top:5px;padding-top:5px;border-top:1px solid rgba(255,200,61,.32);display:flex;align-items:center;gap:7px;min-width:0;width:100%;box-sizing:border-box;cursor:pointer;line-height:1.05}',
-      '#sw-ripple-escrow-home.sw-ripple-escrow-inline:hover{border-top-color:rgba(255,200,61,.7)}',
-      '.sw-ripple-escrow-inline .sw-re-k{font:800 7.5px Orbitron,sans-serif;letter-spacing:.08em;color:#ffc83d;white-space:nowrap}',
-      '.sw-ripple-escrow-inline .sw-re-v{font:900 9.5px Orbitron,sans-serif;color:#00ff66;white-space:nowrap}',
-      '.sw-ripple-escrow-inline .sw-re-m{font:700 7px "Share Tech Mono",monospace;color:#8ca996;white-space:nowrap}',
-      '.sw-ripple-escrow-inline .sw-re-r{font:600 6.8px "Share Tech Mono",monospace;color:#75847c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-      '@media(max-width:620px){#sw-ripple-escrow-home.sw-ripple-escrow-inline{gap:5px;margin-top:4px;padding-top:4px}.sw-ripple-escrow-inline .sw-re-k{font-size:7px}.sw-ripple-escrow-inline .sw-re-v{font-size:9px}.sw-ripple-escrow-inline .sw-re-m{font-size:6.6px}.sw-ripple-escrow-inline .sw-re-r{display:none}}',
-      '@media(max-width:380px){.sw-ripple-escrow-inline .sw-re-k{font-size:6.5px}.sw-ripple-escrow-inline .sw-re-v{font-size:8.4px}.sw-ripple-escrow-inline .sw-re-m{font-size:6.2px}}'
-    ].join('');
-    document.head.appendChild(st);
-  }
-
-  function short(n) {
-    n = Number(n || 0);
-    if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
-    if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
-    return Math.floor(n).toLocaleString();
-  }
-
-  function render() {
-    var api = window.SW_ESCROW;
-    if (!api) return;
-    var p = typeof api.currentRipplePosition === 'function' ? api.currentRipplePosition() : null;
-    var s = typeof api.computeSummary === 'function' ? api.computeSummary() : null;
-    var v = document.getElementById('homeRippleEscrowLocked');
-    var m = document.getElementById('homeRippleEscrowMeta');
-    var r = document.getElementById('homeRippleEscrowRecent');
-    if (!v || !m || !r) return;
-
-    if (p && p.complete) v.textContent = short(p.locked_xrp) + ' XRP';
-    else if (p && p.status === 'PARTIAL') v.textContent = 'SYNC ' + p.answered_owners + '/' + p.expected_owners;
-    else v.textContent = 'SYNCING…';
-
-    if (p) {
-      m.textContent = p.complete
-        ? (p.answered_owners + '/' + p.expected_owners + ' · ' + p.active_objects + ' OBJ')
-        : (p.answered_owners + '/' + p.expected_owners);
-    }
-    if (s) r.textContent = s.lookbackH + 'H · ' + s.ripple.unlocks + ' REL · ' + s.ripple.locks + ' LOCK';
-  }
-
-  window.addEventListener('shadowwatch:ripple-escrow-position', render);
-  render();
 })();
