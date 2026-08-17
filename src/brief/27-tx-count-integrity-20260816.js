@@ -1,11 +1,11 @@
 /* ═══════════════════════════════════════════════════════════════════
    SHADOW WATCH — TX COUNT INTEGRITY PROBE
-   2026-08-16
+   2026-08-17
 
-   Diagnostics + presentation only. Watches canonical state.txs and records any
-   same-run decrease. V3 distinguishes the core's intentional hash dedupe from
-   a real loss of unique ledger transactions, and keeps the cockpit LEDGER TX
-   tile on the unique-hash count while a scan is still collecting rows.
+   Diagnostics + presentation only. Watches canonical state.txs, distinguishes
+   raw per-wallet observations from unique XRPL transactions, and treats a new
+   scan as an explicit lifecycle boundary so the prior run cannot be counted as
+   evidence lost by the next run.
 
    Scanner state, XRPL requests, dedupe rules, evidence and report math are not
    modified here.
@@ -13,10 +13,11 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026.08.16.3';
+  var VERSION = '2026.08.17.1';
   var lastScanning = false;
   var active = null;
   var completed = null;
+  var pendingBoundary = null;
   var seq = 0;
 
   function stateRef() {
@@ -47,23 +48,24 @@
   function txHash(t) {
     return String(t && (t.hash || t.tx_hash || t.txid || (t.tx && t.tx.hash)) || '').trim();
   }
-  function txKey(t, i) {
-    var h = txHash(t);
-    if (h) return 'H:' + h;
+  function fallbackKey(t) {
     var parts = [
       t && (t.date || t.ts || t.timestamp || ''),
       t && (t.type || t.TransactionType || (t.tx && t.tx.TransactionType) || ''),
       t && (t.from || t.Account || (t.tx && t.tx.Account) || ''),
       t && (t.to || t.Destination || (t.tx && t.tx.Destination) || ''),
       t && (t.amount || t.Amount || (t.tx && t.tx.Amount) || ''),
-      t && (t.ledger_index || t.ledgerIndex || ''),
-      i
+      t && (t.ledger_index || t.ledgerIndex || '')
     ];
     return 'F:' + parts.join('|');
   }
-  function descriptor(t, i) {
+  function txKey(t) {
+    var h = txHash(t);
+    return h ? 'H:' + h : fallbackKey(t);
+  }
+  function descriptor(t) {
     return {
-      key: txKey(t, i),
+      key: txKey(t),
       hash: txHash(t) || null,
       type: String(t && (t.type || t.TransactionType || (t.tx && t.tx.TransactionType)) || 'UNKNOWN'),
       from: String(t && (t.from || t.Account || (t.tx && t.tx.Account)) || ''),
@@ -73,27 +75,26 @@
     };
   }
 
-  function uniqueCount(rows) {
+  function currentKeySet(rows) {
+    var set = new Set();
     rows = Array.isArray(rows) ? rows : [];
-    var seen = new Set();
-    var hashless = 0;
-    for (var i = 0; i < rows.length; i++) {
-      var h = txHash(rows[i]);
-      if (h) seen.add('H:' + h);
-      else hashless++;
-    }
-    return seen.size + hashless;
+    for (var i = 0; i < rows.length; i++) set.add(txKey(rows[i]));
+    return set;
   }
+  function uniqueCount(rows) { return currentKeySet(rows).size; }
 
-  function begin(s, n) {
+  function begin(s, observedCount, reason) {
+    var rows = txRows(s);
     active = {
       version: VERSION,
       probe_id: 'TXI-' + Date.now().toString(36).toUpperCase() + '-' + (++seq),
       scan_id: scanId(s),
       started_at: new Date().toISOString(),
+      start_reason: reason || 'polling_transition',
       completed_at: null,
-      initial_count: n,
-      current_count: n,
+      initial_count: 0,
+      first_observed_count: observedCount,
+      current_count: observedCount,
       peak_count: 0,
       peak_unique_count: 0,
       peak_duplicate_observations: 0,
@@ -106,23 +107,22 @@
       removed_analysis: [],
       integrity_classification: 'COLLECTING',
       read_only: true,
+      new_run_boundary_clean: true,
       _peakMap: new Map(),
       _peakIndexedTo: 0
     };
-    captureGrowth(s, txRows(s));
+    captureGrowth(rows);
     try { s.tx_count_integrity = active; } catch (_) {}
   }
 
-  // Index only the newly appended tail. The map is keyed by transaction hash,
-  // so its size is the live unique-transaction count even while state.txs still
-  // contains duplicate observations from both watched sides of the same tx.
-  function captureGrowth(s, rows) {
+  function captureGrowth(rows) {
     if (!active) return;
+    rows = Array.isArray(rows) ? rows : [];
     var n = rows.length;
     if (n <= active.peak_count) return;
     var start = Math.min(active._peakIndexedTo || 0, n);
     for (var i = start; i < n; i++) {
-      var d = descriptor(rows[i], i);
+      var d = descriptor(rows[i]);
       active._peakMap.set(d.key, d);
     }
     active._peakIndexedTo = n;
@@ -134,12 +134,11 @@
 
   function analyzeDecrease(rows, from, to) {
     if (!active || !(active._peakMap instanceof Map)) return null;
-    var current = new Set();
-    for (var i = 0; i < rows.length; i++) current.add(txKey(rows[i], i));
-
+    var current = currentKeySet(rows);
     var removed = [];
     var byType = {};
     var hashes = 0, withoutHash = 0;
+
     active._peakMap.forEach(function (d, key) {
       if (current.has(key)) return;
       removed.push(d);
@@ -148,11 +147,16 @@
     });
 
     removed.sort(function (a, b) { return String(a.type).localeCompare(String(b.type)); });
-    var delta = from - to;
+    var delta = Math.max(0, from - to);
     var peakUnique = Number(active.peak_unique_count || active._peakMap.size || 0);
     var duplicateObs = Math.max(0, Number(active.peak_count || from) - peakUnique);
     var currentUnique = current.size;
-    var dedupeOnly = removed.length === 0 && delta > 0 && currentUnique === peakUnique && delta === duplicateObs;
+    var newlyVisibleUnique = Math.max(0, currentUnique - peakUnique);
+    var expectedDedupeDelta = Math.max(0, duplicateObs - newlyVisibleUnique);
+    var noUniqueLoss = removed.length === 0 && currentUnique >= peakUnique;
+    var exactDedupeMath = noUniqueLoss && delta === expectedDedupeDelta;
+    var classification = exactDedupeMath ? 'EXPECTED_HASH_DEDUPE' :
+      (noUniqueLoss ? 'CANONICALIZATION_NO_UNIQUE_LOSS' : 'UNEXPLAINED_UNIQUE_ROW_CHANGE');
 
     return {
       from: from,
@@ -161,7 +165,9 @@
       current_unique_count: currentUnique,
       peak_unique_count: peakUnique,
       duplicate_observations_at_peak: duplicateObs,
-      classification: dedupeOnly ? 'EXPECTED_HASH_DEDUPE' : 'UNEXPLAINED_UNIQUE_ROW_CHANGE',
+      newly_visible_unique_at_canonicalization: newlyVisibleUnique,
+      expected_hash_dedupe_delta: expectedDedupeDelta,
+      classification: classification,
       unique_transactions_lost: removed.length,
       removed_fingerprints: removed.length,
       removed_with_hash: hashes,
@@ -172,11 +178,11 @@
   }
 
   function sample(s, n) {
-    if (!active) begin(s, n);
+    if (!active) begin(s, n, 'sampling_fallback');
     if (!active.scan_id) active.scan_id = scanId(s);
     var rows = txRows(s);
     var previous = Number(active.current_count || 0);
-    if (n > Number(active.peak_count || 0)) captureGrowth(s, rows);
+    if (n > Number(active.peak_count || 0)) captureGrowth(rows);
 
     if (n < previous) {
       var analysis = analyzeDecrease(rows, previous, n);
@@ -215,39 +221,83 @@
     active.completed_at = new Date().toISOString();
 
     var analyses = active.removed_analysis || [];
-    var allDedupe = analyses.length > 0 && analyses.every(function (a) { return a.classification === 'EXPECTED_HASH_DEDUPE'; });
+    var allSafe = analyses.length > 0 && analyses.every(function (a) {
+      return a.classification === 'EXPECTED_HASH_DEDUPE' || a.classification === 'CANONICALIZATION_NO_UNIQUE_LOSS';
+    });
     if (!active.decrease_count) active.integrity_classification = 'NO_DECREASE';
-    else if (allDedupe && active.final_unique_count === active.peak_unique_count) active.integrity_classification = 'EXPECTED_HASH_DEDUPE_ONLY';
+    else if (allSafe && active.final_unique_count >= active.peak_unique_count) active.integrity_classification = 'CANONICALIZATION_NO_UNIQUE_LOSS';
     else active.integrity_classification = 'UNEXPLAINED_UNIQUE_ROW_CHANGE';
 
     completed = JSON.parse(JSON.stringify(serializable(active)));
     try { s.tx_count_integrity = completed; } catch (_) {}
     active = null;
   }
+
   function publicSnapshot() {
     var row = active ? serializable(active) : completed;
     return row ? JSON.parse(JSON.stringify(row)) : null;
   }
+
+  function resetForNewRun(reason) {
+    var s = stateRef();
+    var baseline = txCount(s);
+    active = null;
+    completed = null;
+    pendingBoundary = {
+      at_ms: Date.now(),
+      at: new Date().toISOString(),
+      baseline_count: baseline,
+      reason: reason || 'shadow.scan.started'
+    };
+    try {
+      if (s) s.tx_count_integrity = {
+        version: VERSION,
+        status: 'AWAITING_NEW_RUN_RESET',
+        baseline_from_previous_run: baseline,
+        read_only: true
+      };
+    } catch (_) {}
+  }
+
+  function maybeBeginPending(s, n) {
+    if (!pendingBoundary) return false;
+    var age = Date.now() - pendingBoundary.at_ms;
+    var baseline = Number(pendingBoundary.baseline_count || 0);
+    var resetObserved = baseline === 0 || n === 0 || n < baseline;
+    if (!resetObserved && age < 1200) return true;
+    begin(s, n, resetObserved ? 'new_run_reset_observed' : 'new_run_boundary_timeout');
+    pendingBoundary = null;
+    return false;
+  }
+
+  try {
+    var bus = window.SHADOW_EVENT_BUS;
+    if (bus && typeof bus.on === 'function') {
+      bus.on('shadow.scan.started', function () { resetForNewRun('shadow.scan.started'); });
+    }
+  } catch (_) {}
 
   setInterval(function () {
     var s = stateRef();
     if (!s) return;
     var scanning = s.scanning === true;
     var n = txCount(s);
-    if (scanning && !lastScanning) begin(s, n);
-    if (scanning) sample(s, n);
-    if (!scanning && lastScanning) finish(s, n);
+
+    if (scanning && !lastScanning && !pendingBoundary && !active) resetForNewRun('polling_scan_start');
+    if (scanning) {
+      if (!maybeBeginPending(s, n)) sample(s, n);
+    }
+    if (!scanning && lastScanning) {
+      pendingBoundary = null;
+      if (active) finish(s, n);
+    }
     lastScanning = scanning;
   }, 100);
 
-  // The cockpit used state.txs.length directly. During collection that is a
-  // RAW OBSERVATION count: the same ledger transaction can exist twice when
-  // both watched accounts return it. Core correctly dedupes by hash later,
-  // which made the visible number appear to fall. Show unique hashes while the
-  // scan is active; after the scan, show the final canonical state count.
   function liveDisplayCount() {
     var s = stateRef();
     if (!s) return null;
+    if (pendingBoundary) return 0;
     if (s.scanning === true && active && active._peakMap instanceof Map) return active._peakMap.size;
     return txCount(s);
   }
@@ -274,13 +324,13 @@
     var fn = null;
     try { fn = window._swRenderInstruments || (typeof _swRenderInstruments === 'function' ? _swRenderInstruments : null); } catch (_) {}
     if (typeof fn !== 'function') return false;
-    if (fn._swTxUniqueDisplay20260816) return true;
+    if (fn._swTxUniqueDisplay20260817) return true;
     var wrapped = function (p, SP, scanning) {
       var out = fn.apply(this, arguments);
       repairLedgerTile(!!scanning);
       return out;
     };
-    wrapped._swTxUniqueDisplay20260816 = true;
+    wrapped._swTxUniqueDisplay20260817 = true;
     wrapped._swOriginal = fn;
     try { window._swRenderInstruments = wrapped; } catch (_) {}
     try { _swRenderInstruments = wrapped; } catch (_) {}
@@ -299,7 +349,8 @@
       '=== TX COUNT INTEGRITY ===',
       'Probe: ' + snap.version + ' · read-only',
       'Scan: ' + (snap.scan_id || '—'),
-      'Initial state.txs: ' + snap.initial_count,
+      'New-run boundary clean: ' + (snap.new_run_boundary_clean === true ? 'YES' : 'NO/UNKNOWN'),
+      'Initial logical state.txs: ' + snap.initial_count + ' · first observed after reset: ' + snap.first_observed_count,
       'Peak raw observations: ' + snap.peak_count,
       'Peak unique transactions: ' + snap.peak_unique_count,
       'Duplicate observations at peak: ' + snap.peak_duplicate_observations,
@@ -312,17 +363,18 @@
     (snap.decreases || []).forEach(function (d, i) {
       lines.push('  [' + (i + 1) + '] ' + d.from + ' → ' + d.to + ' (' + d.delta + ') · phase=' + (d.phase || '—') + ' · ' + (d.classification || 'UNCLASSIFIED') + ' · ' + d.at);
     });
-    if (!(snap.decreases || []).length) lines.push('  None observed in canonical state.txs during the sampled scan.');
+    if (!(snap.decreases || []).length) lines.push('  None observed inside this scan boundary.');
 
     (snap.removed_analysis || []).forEach(function (a, i) {
       lines.push('');
       lines.push('TX CHANGE ANALYSIS #' + (i + 1));
       lines.push('  Classification: ' + (a.classification || '—'));
       lines.push('  Raw delta: ' + a.expected_delta + ' · duplicate observations at peak: ' + a.duplicate_observations_at_peak);
-      lines.push('  Peak unique: ' + a.peak_unique_count + ' · current unique: ' + a.current_unique_count);
+      lines.push('  Peak unique: ' + a.peak_unique_count + ' · current unique: ' + a.current_unique_count + ' · newly visible unique: ' + a.newly_visible_unique_at_canonicalization);
+      lines.push('  Expected hash-dedupe delta after new uniques: ' + a.expected_hash_dedupe_delta);
       lines.push('  Unique transactions lost: ' + a.unique_transactions_lost);
-      if (a.classification === 'EXPECTED_HASH_DEDUPE') {
-        lines.push('  Meaning: raw per-wallet observations were collapsed by transaction hash; no unique ledger transaction disappeared.');
+      if (a.classification === 'EXPECTED_HASH_DEDUPE' || a.classification === 'CANONICALIZATION_NO_UNIQUE_LOSS') {
+        lines.push('  Meaning: raw per-wallet observations changed during canonicalization, but no previously observed unique ledger transaction disappeared.');
       }
       lines.push('  Removed unique fingerprints: ' + a.removed_fingerprints + ' · with hash: ' + a.removed_with_hash + ' · without hash/fallback-key: ' + a.removed_without_hash);
       lines.push('  By transaction type: ' + Object.keys(a.removed_by_type || {}).sort().map(function (k) { return k + '=' + a.removed_by_type[k]; }).join(' · '));
@@ -340,12 +392,12 @@
     var fn = null;
     try { fn = window.buildShadowWatchDebugFile || (typeof buildShadowWatchDebugFile === 'function' ? buildShadowWatchDebugFile : null); } catch (_) {}
     if (typeof fn !== 'function') return false;
-    if (fn._swTxCountIntegrity20260816) return true;
+    if (fn._swTxCountIntegrity20260817) return true;
     var wrapped = function () {
       var text = fn.apply(this, arguments);
       try { return appendDebug(text); } catch (_) { return text; }
     };
-    wrapped._swTxCountIntegrity20260816 = true;
+    wrapped._swTxCountIntegrity20260817 = true;
     wrapped._swOriginal = fn;
     try { window.buildShadowWatchDebugFile = wrapped; } catch (_) {}
     try { buildShadowWatchDebugFile = wrapped; } catch (_) {}
@@ -367,6 +419,7 @@
     get: publicSnapshot,
     liveUniqueCount: liveDisplayCount,
     appendDebug: appendDebug,
-    repairLedgerTile: repairLedgerTile
+    repairLedgerTile: repairLedgerTile,
+    resetForNewRun: resetForNewRun
   };
 })();
