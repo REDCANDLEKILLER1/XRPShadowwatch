@@ -175,4 +175,15 @@
     d.setAttribute('data-sw-debug-probe-cleanup', '2026-08-16.1');
     document.body.appendChild(d);
   } catch (_) {}
+
+  // Keep the evidence-led targeted news lane under the same source governor as
+  // the normal news lane. This loads independently of the historical hotfix
+  // chain so a dead GDELT source cannot add four redundant 8s retries.
+  try {
+    var n = document.createElement('script');
+    n.src = '/src/brief/29-targeted-news-suppression-20260817.js';
+    n.async = false;
+    n.setAttribute('data-sw-targeted-news-suppression', '2026-08-17.1');
+    document.body.appendChild(n);
+  } catch (_) {}
 })();
