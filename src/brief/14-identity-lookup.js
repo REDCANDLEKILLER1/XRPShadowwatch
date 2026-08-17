@@ -252,7 +252,9 @@
       window.SHADOW_EVENT_BUS.on('shadow.report.sealed', function (data) {
         try {
           var d = (data && data.payload) ? data.payload : data;
-          if (!d || (!d.scan_id && !d.report_id && !d.date)) return;   // ignore test emissions
+          var seal = d && d.seal ? d.seal : null;
+          if (!d || (!(d.scan_id || d.report_id || d.date) &&
+                     !(seal && (seal.scan_id || seal.report_id || seal.date)))) return; // ignore test emissions
           setTimeout(function () { try { run({ limit: 40 }); } catch (_) {} }, 4000);
         } catch (_) {}
       });
@@ -268,4 +270,145 @@
     _clearCache: function () { try { localStorage.removeItem(STORE); } catch (_) {}
                                _state = { resolved: {}, misses: {}, conflicts: [], lastRun: 0, running: false }; }
   };
+})();
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   P5N3V HOTFIX OVERLAY — 2026-08-17
+   Small runtime overlay for defects proven by SW-20260817-P5N3V.
+   Kept here rather than replacing the 1.7 MB core file so the patch remains
+   reviewable and reversible as a single small source change.
+
+   Fixes:
+   • permanently includes the one scanner-promoted receiver in the watch set;
+   • stops receiver balance / sampled tx_count from being counted as new flow;
+   • starts GO2 helper jobs for the real nested evidence-seal event shape;
+   • makes TOTAL DEBUG use the upgraded GO2 debug renderer for sections 15/17/19.
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  // 1) Scanner-reviewed promotion. Behavioral label only; no ownership claim.
+  try {
+    var promotedAddress = 'rDHyd2wTXnoT1MTvCigLGpm8o7WdhE5mGi';
+    if (typeof WATCHLIST !== 'undefined' && typeof KNOWN !== 'undefined' && !KNOWN[promotedAddress]) {
+      var promoted = {
+        label: 'LARGE_RECV_rDHyd2',
+        address: promotedAddress,
+        cat: 'discovered_receiver'
+      };
+      WATCHLIST.push(promoted);
+      KNOWN[promotedAddress] = promoted;
+    }
+  } catch (_) {}
+
+  // 2) Discovery accounting: receiver_followthrough.balance_xrp is a balance
+  // snapshot and receiver_followthrough.tx_count is a sampling statistic. The
+  // core collector used to add both on top of the already-counted inbound flow.
+  try {
+    if (typeof collectDiscoveryCandidates === 'function' && !collectDiscoveryCandidates._p5n3vFixed) {
+      var _p5n3vCollect = collectDiscoveryCandidates;
+      var _wrappedCollect = function (pack) {
+        var source = pack || ((typeof state !== 'undefined' && state.pack) ? state.pack : {}) || {};
+        var follow = Array.isArray(source.receiver_followthrough) ? source.receiver_followthrough : null;
+        if (!follow || !follow.length) return _p5n3vCollect(source);
+        var clean = Object.assign({}, source, {
+          receiver_followthrough: follow.map(function (r) {
+            return Object.assign({}, r || {}, { balance_xrp: 0, tx_count: 0 });
+          })
+        });
+        return _p5n3vCollect(clean);
+      };
+      _wrappedCollect._p5n3vFixed = true;
+      _wrappedCollect._original = _p5n3vCollect;
+      collectDiscoveryCandidates = _wrappedCollect;
+    }
+  } catch (_) {}
+
+  // 3) GO2 helper launch: buildEvidenceSeal emits { seal, ts }, so report/scan
+  // identity is normally nested under payload.seal. The legacy listener only
+  // checked payload directly and silently rejected every real sealed report.
+  try {
+    var _lastHelperSeal = null;
+    if (window.SHADOW_EVENT_BUS && typeof window.SHADOW_EVENT_BUS.on === 'function') {
+      window.SHADOW_EVENT_BUS.on('shadow.report.sealed', function (data) {
+        try {
+          var d = (data && data.payload) ? data.payload : data;
+          var seal = d && d.seal ? d.seal : null;
+          if (!seal || !(seal.scan_id || seal.report_id || seal.date)) return;
+          var sealKey = seal.scan_id || seal.report_id || seal.date;
+          if (_lastHelperSeal === sealKey) return;
+          _lastHelperSeal = sealKey;
+          var HP = window.SHADOW_HELPER_POOL;
+          var FLAGS = window.SHADOW_SYSTEM_FLAGS;
+          if (!HP || !FLAGS || !FLAGS.helperPool || !HP.enabled || typeof HP.assignJobs !== 'function') return;
+          var activePack = (typeof state !== 'undefined' && state.pack) ? state.pack : d;
+          setTimeout(function () { try { HP.assignJobs(activePack); } catch (_) {} }, 2000);
+        } catch (_) {}
+      });
+    }
+  } catch (_) {}
+
+  // 4) TOTAL DEBUG only: use the upgraded debug renderer when present. The
+  // clean TOTAL REPORT remains untouched.
+  try {
+    if (typeof buildShadowWatchDebugFile === 'function' &&
+        typeof _TOTAL_DEBUG_SECTIONS !== 'undefined' &&
+        !buildShadowWatchDebugFile._p5n3vFixed) {
+      var _p5n3vBuildDebug = function () {
+        var sections = _TOTAL_DEBUG_SECTIONS;
+        var modeLabel = 'TOTAL DEBUG FILE';
+        var divider = '============================================================';
+        var reportId = (typeof state !== 'undefined' && state.pack && (state.pack.report_id || state.pack.scan_id)) ||
+                       (typeof state !== 'undefined' && state.seal && state.seal.report_id) ||
+                       (typeof state !== 'undefined' && state.lastReportId) || 'unknown';
+        var generatedAt = new Date().toISOString();
+        var lines = [];
+        lines.push(divider);
+        lines.push('XRPMAN // SHADOW WATCH — ' + modeLabel);
+        lines.push('Powered by XMΣMΣ');
+        lines.push(divider);
+        lines.push('Report ID:    ' + reportId);
+        lines.push('Generated:    ' + generatedAt);
+        lines.push('App Version:  ' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : 'unknown'));
+        lines.push('');
+        lines.push('Shadow Watch needs two export modes: multi-file archive style for local');
+        lines.push('records, and one total TXT handoff file for mobile/ChatGPT sharing.');
+        lines.push('');
+        lines.push('Sections (in order):');
+        sections.forEach(function (s) { lines.push('  ' + s.num + ' — ' + s.label); });
+        lines.push('');
+        lines.push(divider);
+        lines.push('');
+        sections.forEach(function (s) {
+          lines.push(divider);
+          lines.push('SECTION ' + s.num + ' — ' + s.label);
+          lines.push(divider);
+          lines.push('');
+          var text = '', ok = false;
+          try {
+            var resolver = (typeof window.buildDebugSectionContent === 'function')
+              ? window.buildDebugSectionContent
+              : ((typeof _resolveReportSource === 'function') ? _resolveReportSource : null);
+            var src = resolver ? resolver(s.kind, (typeof state !== 'undefined' ? (state.pack || {}) : {})) : null;
+            if (src && src.ok && src.text) {
+              text = String(src.text).trim();
+              ok = text.length > 0;
+            }
+          } catch (_) {}
+          lines.push(ok ? text : '[EMPTY / NOT GENERATED THIS RUN]');
+          lines.push('');
+          lines.push('');
+        });
+        lines.push(divider);
+        lines.push('END OF ' + modeLabel);
+        lines.push('Report ID: ' + reportId);
+        lines.push('Generated: ' + generatedAt);
+        lines.push(divider);
+        return lines.join('\n');
+      };
+      _p5n3vBuildDebug._p5n3vFixed = true;
+      buildShadowWatchDebugFile = _p5n3vBuildDebug;
+    }
+  } catch (_) {}
 })();
