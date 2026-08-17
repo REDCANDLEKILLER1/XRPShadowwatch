@@ -110,3 +110,15 @@
     document.body.appendChild(s);
   } catch (_) {}
 })();
+
+// Q5S3W transport repair: diversify reconnects and give Ripple current-position
+// verification a bounded isolated second chance after a transient XRPL outage.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/32-xrpl-resilience-20260817.js?v=20260817.1';
+    s.async = false;
+    s.setAttribute('data-sw-xrpl-resilience', '2026-08-17.1');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();
