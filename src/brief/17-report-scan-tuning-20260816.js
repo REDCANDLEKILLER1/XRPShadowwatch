@@ -12,7 +12,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026.08.16.3';
+  var VERSION = '2026.08.17.1';
   var PROMOTIONS = [
     {
       address: 'rJP1s6gaopZxXbpGegkxBspUgm5HjLUjBH',
@@ -62,6 +62,13 @@
       cat: 'discovered_receiver',
       balance_xrp_observed: 2000001,
       source_report: 'SW-20260816-EILRG'
+    },
+    {
+      address: 'rDHyd2wTXnoT1MTvCigLGpm8o7WdhE5mGi',
+      label: 'LARGE_RECV_rDHyd2',
+      cat: 'discovered_receiver',
+      balance_xrp_observed: 4225574.019047,
+      source_report: 'SW-20260817-P5N3V'
     }
   ];
 
