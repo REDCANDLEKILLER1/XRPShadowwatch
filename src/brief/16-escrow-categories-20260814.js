@@ -129,7 +129,8 @@
 (function () {
   try {
     function load17() {
-      var s=document.createElement('script'); s.src='/src/brief/17-report-scan-tuning-20260816.js'; s.async=false; s.setAttribute('data-sw-report-scan-tuning','2026-08-16.2'); document.body.appendChild(s);
+      if (window.SW_REPORT_SCAN_TUNING_20260816) return;
+      var s=document.createElement('script'); s.src='/src/brief/17-report-scan-tuning-20260816.js'; s.async=false; s.setAttribute('data-sw-report-scan-tuning','2026-08-19.1'); document.body.appendChild(s);
     }
     function load25() {
       var p=document.createElement('script'); p.src='/src/brief/25-ripple-escrow-position-20260816.js?v=20260816.1'; p.async=false; p.setAttribute('data-sw-ripple-escrow-position','2026-08-16.1'); p.onload=load17; document.body.appendChild(p);
