@@ -269,3 +269,24 @@
                                _state = { resolved: {}, misses: {}, conflicts: [], lastRun: 0, running: false }; }
   };
 })();
+
+// Load report-only repair layers in order. The second layer owns the Escrows
+// parent category and splits Ripple Escrow from Other XRPL Escrows.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/15-report-hotfix-20260814.js';
+    s.async = false;
+    s.setAttribute('data-sw-hotfix', '2026-08-14.2');
+    s.onload = function () {
+      try {
+        var e = document.createElement('script');
+        e.src = '/src/brief/16-escrow-categories-20260814.js';
+        e.async = false;
+        e.setAttribute('data-sw-escrow-categories', '2026-08-14.1');
+        document.body.appendChild(e);
+      } catch (_) {}
+    };
+    document.body.appendChild(s);
+  } catch (_) {}
+})();

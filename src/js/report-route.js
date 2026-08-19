@@ -9,6 +9,13 @@
        There is no cut-down "share view" to keep in sync with the real one, which
        is the only version of this that cannot drift out of date.
 
+       IMPORTANT: the REPORT and the MAIN SHADOW WATCH APP are separate runtime
+       engines even though /report is hosted inside the same index.html shell.
+       Entering through /report must therefore start the main app's background
+       infrastructure too (XRPL socket, HVT database, black box/session engine),
+       otherwise navigating from the report into LIVE/MAP/GRAPH reveals a shell
+       whose engine was never started.
+
        Two directions:
          · arriving AT /report      → boot straight into the brief
          · opening the brief in-app → the address bar becomes /report, so the link
@@ -161,15 +168,29 @@
       // thumb that a stranger has no reason to know to hold. The tutorial is
       // suppressed for this visit only, in memory: nothing is written to storage,
       // so their next normal visit still gets the full first-run experience.
+      //
+      // 2026-08-17 ROOT-CAUSE FIX:
+      // Previously the temporary checkTutorial override was an empty function.
+      // finishBoot() calls checkTutorial(), and checkTutorial() is normally the
+      // gateway to autoStartSystem(). Making it empty meant a direct /report visit
+      // could run the REPORT engine but never start the MAIN app engine. LIVE then
+      // showed the HTML-default ACTIVE label with AWAITING UPLINK, and MAP/GRAPH
+      // had no socket data to render. Suppress only the tutorial — NOT startup.
       function bootIntoReport() {
         try {
           _home = '/';
 
-          // suppress the first-run tutorial for THIS page load only
+          // suppress the first-run tutorial for THIS page load only, while still
+          // doing the infrastructure startup that the real checkTutorial normally
+          // reaches. Do not call applyUiMode here: /report owns the visible route.
           try {
             if (typeof window.checkTutorial === 'function' && !window.checkTutorial.__reportRoute) {
               var origCheck = window.checkTutorial;
-              window.checkTutorial = function () { /* deep link: straight to the report */ };
+              window.checkTutorial = function () {
+                try {
+                  if (typeof autoStartSystem === 'function') autoStartSystem();
+                } catch (_) {}
+              };
               window.checkTutorial.__reportRoute = true;
               window.checkTutorial.__original = origCheck;
             }
@@ -189,9 +210,23 @@
           var t = setInterval(function () {
             var sp = document.getElementById('splash-screen');
             var done = !sp || sp.dataset.done === '1' || sp.style.display === 'none';
-            if (done || ++tries > 40) { clearInterval(t); openBrief(true); }
+            if (done || ++tries > 40) {
+              clearInterval(t);
+              // Belt-and-suspenders: if a browser did not expose the global
+              // function binding through window.checkTutorial, guarantee that the
+              // main app infrastructure is running before the user can navigate
+              // out of the report.
+              try {
+                if (typeof isConnected !== 'undefined' && !isConnected &&
+                    typeof autoStartSystem === 'function') autoStartSystem();
+              } catch (_) {}
+              openBrief(true);
+            }
           }, 150);
         } catch (_) {
+          try {
+            if (typeof autoStartSystem === 'function') autoStartSystem();
+          } catch (__) {}
           openBrief(true);
         }
       }

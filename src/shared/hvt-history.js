@@ -281,3 +281,39 @@
     DRAINED_RATIO: DRAINED_RATIO, BLEEDING_RATIO: BLEEDING_RATIO
   };
 })();
+
+// ── 2026-08-14 REPORT-APPROVED ROSTER PROMOTIONS ────────────────────────────
+// The report's own Auto Discovery promoted these four to ADD on
+// SW-20260814-FCZVX. This file loads in BOTH applications after hvt-roster.js
+// and before either engine, so injecting them here immediately keeps the live
+// wall and Report on one roster without waiting for the next generated roster
+// commit. scripts/build-hvt-roster.js carries the same promotion set so the next
+// regeneration makes them ordinary generated targets rather than runtime-only.
+(function () {
+  'use strict';
+  try {
+    var R = window.SW_HVT_ROSTER;
+    if (!R || !Array.isArray(R.targets)) return;
+    var adds = [
+      { address:'rpY7bZBkA98P8zds5LdBktAKj9ifekPdkE', label:'WHALE_RECV_rpY7bZ', handle:'WHALE_RECV_rpY7bZ', type:'HVT', identified:false, confidence:null, expected_xrp:null, expected_source:null, sources:['report'] },
+      { address:'rU5NDVnQ6nHBvD33en6HjWipY67PJ7hcXG', label:'WHALE_RECV_rU5NDV', handle:'WHALE_RECV_rU5NDV', type:'HVT', identified:false, confidence:null, expected_xrp:null, expected_source:null, sources:['report'] },
+      { address:'rsnXj9TDwt49XxCM64YrTEnSzwcY4awZnn', label:'EXOUT_RECV_rsnXj9', handle:'EXOUT_RECV_rsnXj9', type:'HVT', identified:false, confidence:null, expected_xrp:null, expected_source:null, sources:['report'] },
+      { address:'rw1xqK3TvKCZcdTcHGp6b2Q8dELnCCGFvT', label:'LARGE_RECV_rw1xqK', handle:'LARGE_RECV_rw1xqK', type:'HVT', identified:false, confidence:null, expected_xrp:null, expected_source:null, sources:['report'] }
+    ];
+    var seen = Object.create(null);
+    R.targets.forEach(function (t) { if (t && t.address) seen[t.address] = true; });
+    var added = 0;
+    adds.forEach(function (t) {
+      if (!seen[t.address]) { R.targets.push(t); seen[t.address] = true; added++; }
+    });
+    if (added && R.stats) {
+      R.stats.total = R.targets.length;
+      if (typeof R.stats.from_report_only === 'number') R.stats.from_report_only += added;
+    }
+    R.runtime_promotions = R.runtime_promotions || {};
+    R.runtime_promotions['2026-08-14'] = {
+      added: added,
+      addresses: adds.map(function (t) { return t.address; })
+    };
+  } catch (_) {}
+})();
