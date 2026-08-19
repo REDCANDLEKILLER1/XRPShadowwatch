@@ -122,3 +122,15 @@
     document.body.appendChild(s);
   } catch (_) {}
 })();
+
+// Presentation-only terminology correction: distinguish XRPL Escrow objects
+// from Ripple-labeled registry addresses before the production catch-up merge.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/33-escrow-terminology-20260819.js?v=20260819.1';
+    s.async = false;
+    s.setAttribute('data-sw-escrow-terminology', '2026-08-19.1');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();
