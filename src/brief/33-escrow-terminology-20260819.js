@@ -88,3 +88,16 @@
     reinstall:install
   };
 })();
+
+// Issue #19: load the required Morning Story prayer/scripture guard after all
+// historical presentation layers so it is the final public-content repair.
+(function () {
+  try {
+    if (window.SW_MORNING_REQUIRED_CONTENT_20260819) return;
+    var s = document.createElement('script');
+    s.src = '/src/brief/34-morning-required-content-20260819.js';
+    s.async = false;
+    s.setAttribute('data-sw-morning-required-content', '2026-08-19.1');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();
