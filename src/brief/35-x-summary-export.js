@@ -285,6 +285,10 @@
     btn.parentNode.replaceChild(clone, btn);
     btn = clone;
     btn._swXSummaryV2Bound = true;
+    // Script 09 retries its legacy SHARE TO X binder for ~15 seconds. Mark
+    // this final presentation handler as satisfying that binder so it cannot
+    // clone the button back out from under the X-summary export path.
+    btn._v333hHF3Bound = true;
     btn.addEventListener('click', function (e) {
       e.preventDefault();
       if (window.SW_SHARE && typeof window.SW_SHARE.show === 'function') {
