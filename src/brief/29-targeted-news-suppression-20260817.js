@@ -147,3 +147,16 @@
     document.body.appendChild(s);
   } catch (_) {}
 })();
+
+// Presentation-only runtime phase visibility. This late bridge observes the
+// existing shadowSay/shadowProgress/event-bus lifecycle and renders a second
+// phase bar without changing the scanner or the existing overall percentage.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/37-phase-progress-runtime-visibility-20260820.js?v=20260820.1';
+    s.async = false;
+    s.setAttribute('data-sw-phase-progress-runtime', '2026-08-20.1');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();
