@@ -53,7 +53,8 @@ const REPORT_PROMOTIONS = [
   { handle: 'SPLITTER_rNAQWc', address: 'rNAQWcAYTbgC6wvdWLCa6su7VRsepiarTR', cat: 'next_hop_splitter' },
   { handle: 'EXOUT_RECV_rnrqyM', address: 'rnrqyM7kS6wmC5demJm9vrfdN2vLgS8LfY', cat: 'discovered_receiver' },
   { handle: 'WHALE_RECV_rDHYrd', address: 'rDHYrdu78ZU3qhiKttB7z73GJYpSQFMVHj', cat: 'discovered_whale' },
-  { handle: 'WHALE_RECV_rUkxsG', address: 'rUkxsGUE3E7AUngmwRT46uGwRDJ8pa5L7s', cat: 'discovered_whale' }
+  { handle: 'WHALE_RECV_rUkxsG', address: 'rUkxsGUE3E7AUngmwRT46uGwRDJ8pa5L7s', cat: 'discovered_whale' },
+  { handle: 'LARGE_RECV_rDT9vb', address: 'rDT9vb8Jd9USHfWFh5nEhpwfJD3DbjXn88', cat: 'discovered_receiver' }
 ];
 
 // "20M Split 1" / "RIPPLE_1.3B" / "Main 300M Reserve" → the size the label claims.
