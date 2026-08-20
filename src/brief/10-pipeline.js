@@ -734,13 +734,75 @@ function _covLead(cov, seed){
 }
 
 function _buildExecutiveSummary(interps, pack){
-  var seed=_nvSeed(pack), best=_topInterp(interps), moves=interps[0];
+  var seed=_nvSeed(pack), best=_topInterp(interps), moves=interps[0], absorber=interps[5];
   var cov=_cov(pack);
   // A scan that lost most of the board reports the outage, not the calm.
   if(cov.severe) return _covLead(cov, seed)+' '+_nvBeat(seed,0);
   var covNote=cov.degraded
     ? ' Coverage note: '+cov.checked+' of '+cov.total+' wallets answered — the numbers below are of what was reachable, not the whole list.'
     : '';
+
+  // Issue #26: when aggregate whale activity is material, the public lead must
+  // describe the scale of the whole window before highlighting one transfer.
+  // This consumes existing scan evidence only; it does not alter any scanner,
+  // threshold, evidence, discovery, or read-only behavior.
+  var shadow=_num(pack&&pack.shadow_volume_xrp);
+  var largeTxs=_arr(pack&&pack.large_transfers);
+  var largeCt=largeTxs.length||_num(pack&&pack.large_transfers_count);
+  if(shadow>=2000000 && largeCt>=2){
+    var parts=[];
+    parts.push(_xrpFmt(shadow)+' XRP moved across '+largeCt+' large transfer'+(largeCt===1?'':'s')+' in the window.');
+
+    if(absorber&&absorber.has_signal&&absorber.summary){
+      parts.push(_firstSentence(absorber.summary));
+    }
+
+    if(moves&&moves.has_signal&&(moves.headline||moves.summary)){
+      var anomaly=_firstSentence(moves.headline||moves.summary).replace(/\s+overnight(?=[.!?]?$)/i,'');
+      if(anomaly){
+        parts.push('The standout individual anomaly was '+_lc1(anomaly));
+      }
+    }
+
+    // Tie follow-through to the actual largest transfer recipient.
+    var top=null;
+    if(largeTxs.length){
+      top=largeTxs.slice().sort(function(a,b){ return _num(b&&b.amount)-_num(a&&a.amount); })[0]||null;
+    }
+    var topTo=top&&(top.to||top.receiver);
+    var rows=_arr(pack&&pack.receiver_followthrough);
+    var follow=null;
+    if(topTo){
+      for(var fi=0;fi<rows.length;fi++){
+        if(rows[fi]&&rows[fi].address===topTo){ follow=rows[fi]; break; }
+      }
+    }
+    if(follow){
+      var fwdCt=_num(follow.forwarded_large_count);
+      var fwdAmt=_num(follow.forwarded_large_total_xrp);
+      if(fwdCt>0&&fwdAmt>0){
+        parts.push('That recipient subsequently forwarded '+_xrpFmt(fwdAmt)+' XRP onward in '+fwdCt+
+          ' large transaction'+(fwdCt===1?'':'s')+' — routing behavior, not ownership or intent proof.');
+      } else if(String(follow.classification||'')==='RECEIVER_STILL_HOLDING_SIZE'){
+        var bal=_num(follow.balance_xrp);
+        parts.push('That recipient was still holding'+(bal>0?' about '+_xrpFmt(bal)+' XRP':' size')+
+          ' at the follow-through check — observable behavior, not proof of intent.');
+      }
+    }
+
+    // Transaction-window completeness is independent from balance/read coverage.
+    var txc=pack&&pack.tx_scan_coverage;
+    if(txc&&txc.full_window_complete===false){
+      parts.push('⚠️ TX WINDOW: INCOMPLETE — '+_num(txc.complete_wallets)+'/'+_num(txc.target_wallets)+
+        ' complete; '+_num(txc.failed_wallets)+' failed; '+_num(txc.truncated_wallets)+
+        ' truncated. Zero-result claims are not definitive.');
+    }
+
+    parts.push('Transfer classifications are heuristic; movement does not prove intent.');
+    if(covNote) parts.push(covNote.trim());
+    return parts.join(' ');
+  }
+
   var openers=[
     'I kept watch over the Ledger while you slept. ',
     'Another night on patrol, and the Ledger tipped its hand: ',
@@ -787,15 +849,8 @@ function _buildExecutiveSummary(interps, pack){
   ];
   var factRaw=(moves&&moves.has_signal)?(moves.headline||moves.summary):(best?best.summary:'');
   if(!factRaw) return _nvPick(openers,seed,0)+_nvPick(quietOpen,seed,7)+covNote+' '+_nvBeat(seed,0);
-  // v16.23: several openers end in "Overnight, " and the large-move headline
-  // ends in "overnight." — so the summary read "Fresh receipts, still warm.
-  // Overnight, 50M XRP moved from Ripple to a large XRP holder overnight."
-  // Fine on the page, a stumble when it is read out. Drop the fact's trailing
-  // "overnight" when the opener already established the window.
   var _open = _nvPick(openers,seed,0);
   var _fact = _lc1(_firstSentence(factRaw));
-  // Anywhere in the opener counts, not just the end: "I ran the whole board
-  // overnight, and here's the read: …moved from Binance to Coinbase overnight."
   if(/overnight/i.test(_open)) _fact = _fact.replace(/\s+overnight(?=[.!?]?$)/i, '');
   var line=_open+_fact;
   var score=_num(pack&&pack.risk_score&&pack.risk_score.score);
@@ -803,8 +858,6 @@ function _buildExecutiveSummary(interps, pack){
              :score>=50?_nvPick(['My instincts are up — something’s moving out there.','The Ledger’s running warm tonight, and I’m watching close.','Not a siren yet, but the needle’s twitching. I’m leaning in.','Enough motion to keep me honest — I’m tracking it.','Warm, not hot. But warm is how the big ones start.','A few wallets stretched their legs. Worth a second look tomorrow.','Nothing alarming, but the shape of it has my attention.','More motion than usual and no obvious reason for it yet.','Middle of the dial. I am staying in the chair.'],seed,1)
              :score>=25?_nvPick(['Nothing villainous, but I kept one eye open.','A quiet patrol — steady, nothing extreme.','Low hum on the board. I logged it and moved on.','Mostly calm, a little chatter. Nothing I’d wake you for.','Slow night — but slow is when you catch the sloppy ones.','Routine traffic, logged and filed. No drama to sell you.','A working night. Nothing that changes the picture.','Ordinary motion on an ordinary board. I still read every line.','Gentle night. The interesting ones usually follow these.'],seed,1)
              :_nvPick(['Otherwise the Ledger behaved itself.','The rest of the board stayed in line.','A still night — the rails were quiet and honest.','Nothing else tried to slip past. Good.','Calm water tonight — I still counted every ripple.','Flat board, honest hours. Nothing to report is a report.','Everything sat exactly where it was left.','No movement worth your time — and I checked all of it.','Dead quiet, start to finish. I will take it.'],seed,1);
-  // Close the open on one of XRPMan's signature beats — keeps the voice front
-  // and center before we get into the facts.
   return line+(posture?' '+posture:'')+covNote+' '+_nvBeat(seed,0);
 }
 
