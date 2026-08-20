@@ -160,3 +160,15 @@
     document.body.appendChild(s);
   } catch (_) {}
 })();
+
+// NA2TM combined acceptance cleanup: one report-approved wallet promotion and
+// two presentation-only text repairs from the verified PR #28 runtime output.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/38-na2tm-acceptance-cleanup-20260820.js?v=20260820.1';
+    s.async = false;
+    s.setAttribute('data-sw-na2tm-acceptance', '2026-08-20.1');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();
