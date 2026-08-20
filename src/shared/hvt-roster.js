@@ -20,14 +20,14 @@
 // Regenerate with scripts/build-hvt-roster.js after adding wallets to either
 // app. Do not hand-edit — the generator is the source of truth.
 //
-// 229 targets · 128 with a sourced identity · 32 carrying a size claim
+// 243 targets · 128 with a sourced identity · 32 carrying a size claim
 window.SW_HVT_ROSTER = {
  "version": 1,
- "generated": "2026-08-13",
+ "generated": "2026-08-20",
  "stats": {
-  "total": 229,
+  "total": 243,
   "identified": 128,
-  "from_report_only": 95,
+  "from_report_only": 109,
   "from_wall_only": 5,
   "from_registry_only": 29,
   "both": 45,
@@ -2000,6 +2000,32 @@ window.SW_HVT_ROSTER = {
    ]
   },
   {
+   "address": "rnrqyM7kS6wmC5demJm9vrfdN2vLgS8LfY",
+   "label": "EXOUT_RECV_rnrqyM",
+   "handle": "EXOUT_RECV_rnrqyM",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rsnXj9TDwt49XxCM64YrTEnSzwcY4awZnn",
+   "label": "EXOUT_RECV_rsnXj9",
+   "handle": "EXOUT_RECV_rsnXj9",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
    "address": "rBntsdo3fAS5sb3pqe7LvvxTS8qngFYAe1",
    "label": "GENESIS_WHALE_8",
    "handle": "GENESIS_WHALE_8",
@@ -2299,6 +2325,19 @@ window.SW_HVT_ROSTER = {
    ]
   },
   {
+   "address": "rDHyd2wTXnoT1MTvCigLGpm8o7WdhE5mGi",
+   "label": "LARGE_RECV_rDHyd2",
+   "handle": "LARGE_RECV_rDHyd2",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
    "address": "rfah8jhiJwPhcWEn2eQZehWqKKqAWGjxp1",
    "label": "LARGE_RECV_rfah8j",
    "handle": "LARGE_RECV_rfah8j",
@@ -2403,6 +2442,19 @@ window.SW_HVT_ROSTER = {
    ]
   },
   {
+   "address": "rLG9Vpi3xLgfkzAfPkL9AJmD433DY7MoJk",
+   "label": "LARGE_RECV_rLG9Vp",
+   "handle": "LARGE_RECV_rLG9Vp",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
    "address": "rLoD9U2ghXP2xUYbtML6G6v1p8LhM9mSnc",
    "label": "LARGE_RECV_rLoD9U",
    "handle": "LARGE_RECV_rLoD9U",
@@ -2419,6 +2471,19 @@ window.SW_HVT_ROSTER = {
    "address": "rMjtwnezA5oV6rxtqfRr54nngqR3Lng4wY",
    "label": "LARGE_RECV_rMjtwn",
    "handle": "LARGE_RECV_rMjtwn",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rML7EMb8QoaN8BraqHHdWZzSU4nReYRR9w",
+   "label": "LARGE_RECV_rML7EM",
+   "handle": "LARGE_RECV_rML7EM",
    "type": "HVT",
    "identified": false,
    "confidence": null,
@@ -2523,6 +2588,19 @@ window.SW_HVT_ROSTER = {
    "address": "rUjfTQpvBr6wsGGxMw6sRmRQGG76nvp8Ln",
    "label": "LARGE_RECV_rUjfTQ",
    "handle": "LARGE_RECV_rUjfTQ",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rw1xqK3TvKCZcdTcHGp6b2Q8dELnCCGFvT",
+   "label": "LARGE_RECV_rw1xqK",
+   "handle": "LARGE_RECV_rw1xqK",
    "type": "HVT",
    "identified": false,
    "confidence": null,
@@ -2676,9 +2754,35 @@ window.SW_HVT_ROSTER = {
    ]
   },
   {
+   "address": "r4x919MCsHKknPJMSt87g7tjMdwwo9wk6K",
+   "label": "SPLITTER_r4x919",
+   "handle": "SPLITTER_r4x919",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
    "address": "rBNCyNEwpaEbGP9nqkQeYcvwYAwwKkRzTR",
    "label": "SPLITTER_rBNCyN",
    "handle": "SPLITTER_rBNCyN",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rBpFQot2zM5kpEz8mQ1P76i5EU5ZzDEBC4",
+   "label": "SPLITTER_rBpFQo",
+   "handle": "SPLITTER_rBpFQo",
    "type": "HVT",
    "identified": false,
    "confidence": null,
@@ -2728,6 +2832,19 @@ window.SW_HVT_ROSTER = {
    ]
   },
   {
+   "address": "rhhB3igjitCmsN3PLh5zAgUuYvHJD8mJdd",
+   "label": "SPLITTER_rhhB3i",
+   "handle": "SPLITTER_rhhB3i",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
    "address": "rhWt2bhRq3wiK9sQnYVmhhKb5Dr2SE32hk",
    "label": "SPLITTER_rhWt2b",
    "handle": "SPLITTER_rhWt2b",
@@ -2757,6 +2874,19 @@ window.SW_HVT_ROSTER = {
    "address": "rLuvSFafgVja7ZgEtoqa1SwSt1xNGaztLZ",
    "label": "SPLITTER_rLuvSF",
    "handle": "SPLITTER_rLuvSF",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rNAQWcAYTbgC6wvdWLCa6su7VRsepiarTR",
+   "label": "SPLITTER_rNAQWc",
+   "handle": "SPLITTER_rNAQWc",
    "type": "HVT",
    "identified": false,
    "confidence": null,
@@ -2962,6 +3092,19 @@ window.SW_HVT_ROSTER = {
    ]
   },
   {
+   "address": "rDHYrdu78ZU3qhiKttB7z73GJYpSQFMVHj",
+   "label": "WHALE_RECV_rDHYrd",
+   "handle": "WHALE_RECV_rDHYrd",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
    "address": "rHecLk1MZPnTXGUeog3aSaGZ9fEDCo4bRv",
    "label": "WHALE_RECV_rHecLk",
    "handle": "WHALE_RECV_rHecLk",
@@ -3092,6 +3235,19 @@ window.SW_HVT_ROSTER = {
    ]
   },
   {
+   "address": "rpY7bZBkA98P8zds5LdBktAKj9ifekPdkE",
+   "label": "WHALE_RECV_rpY7bZ",
+   "handle": "WHALE_RECV_rpY7bZ",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
    "address": "rQDYQ14B35Eby3TAW8sFpUJcyTqPTFtjpg",
    "label": "WHALE_RECV_rQDYQ1",
    "handle": "WHALE_RECV_rQDYQ1",
@@ -3108,6 +3264,32 @@ window.SW_HVT_ROSTER = {
    "address": "rQUUAjDPTLWTEHrpNtQvryUdvd1afc6TcB",
    "label": "WHALE_RECV_rQUUAj",
    "handle": "WHALE_RECV_rQUUAj",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rU5NDVnQ6nHBvD33en6HjWipY67PJ7hcXG",
+   "label": "WHALE_RECV_rU5NDV",
+   "handle": "WHALE_RECV_rU5NDV",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rUkxsGUE3E7AUngmwRT46uGwRDJ8pa5L7s",
+   "label": "WHALE_RECV_rUkxsG",
+   "handle": "WHALE_RECV_rUkxsG",
    "type": "HVT",
    "identified": false,
    "confidence": null,
