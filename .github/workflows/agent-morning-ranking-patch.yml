@@ -1,0 +1,181 @@
+name: Agent Morning Story Ranking Patch
+
+on:
+  push:
+    branches:
+      - agent/morning-story-shadow-volume-ranking
+    paths:
+      - .github/workflows/agent-morning-ranking-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/morning-story-shadow-volume-ranking
+
+      - name: Patch canonical Morning Story builder and clean scope
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/brief/10-pipeline.js')
+          text = path.read_text()
+          start = text.index('function _buildExecutiveSummary(interps, pack){')
+          end = text.index('\nfunction _buildWhatMatteredMost(interps, pack){', start)
+
+          replacement = r'''function _buildExecutiveSummary(interps, pack){
+            var seed=_nvSeed(pack), best=_topInterp(interps), moves=interps[0], absorber=interps[5];
+            var cov=_cov(pack);
+            // A scan that lost most of the board reports the outage, not the calm.
+            if(cov.severe) return _covLead(cov, seed)+' '+_nvBeat(seed,0);
+            var covNote=cov.degraded
+              ? ' Coverage note: '+cov.checked+' of '+cov.total+' wallets answered — the numbers below are of what was reachable, not the whole list.'
+              : '';
+
+            // Issue #26: when aggregate whale activity is material, the public lead must
+            // describe the scale of the whole window before highlighting one transfer.
+            // This consumes existing scan evidence only; it does not alter any scanner,
+            // threshold, evidence, discovery, or read-only behavior.
+            var shadow=_num(pack&&pack.shadow_volume_xrp);
+            var largeTxs=_arr(pack&&pack.large_transfers);
+            var largeCt=largeTxs.length||_num(pack&&pack.large_transfers_count);
+            if(shadow>=2000000 && largeCt>=2){
+              var parts=[];
+              parts.push(_xrpFmt(shadow)+' XRP moved across '+largeCt+' large transfer'+(largeCt===1?'':'s')+' in the window.');
+
+              if(absorber&&absorber.has_signal&&absorber.summary){
+                parts.push(_firstSentence(absorber.summary));
+              }
+
+              if(moves&&moves.has_signal&&(moves.headline||moves.summary)){
+                var anomaly=_firstSentence(moves.headline||moves.summary).replace(/\s+overnight(?=[.!?]?$)/i,'');
+                if(anomaly){
+                  parts.push('The standout individual anomaly was '+_lc1(anomaly));
+                }
+              }
+
+              // Tie follow-through to the actual largest transfer recipient.
+              var top=null;
+              if(largeTxs.length){
+                top=largeTxs.slice().sort(function(a,b){ return _num(b&&b.amount)-_num(a&&a.amount); })[0]||null;
+              }
+              var topTo=top&&(top.to||top.receiver);
+              var rows=_arr(pack&&pack.receiver_followthrough);
+              var follow=null;
+              if(topTo){
+                for(var fi=0;fi<rows.length;fi++){
+                  if(rows[fi]&&rows[fi].address===topTo){ follow=rows[fi]; break; }
+                }
+              }
+              if(follow){
+                var fwdCt=_num(follow.forwarded_large_count);
+                var fwdAmt=_num(follow.forwarded_large_total_xrp);
+                if(fwdCt>0&&fwdAmt>0){
+                  parts.push('That recipient subsequently forwarded '+_xrpFmt(fwdAmt)+' XRP onward in '+fwdCt+
+                    ' large transaction'+(fwdCt===1?'':'s')+' — routing behavior, not ownership or intent proof.');
+                } else if(String(follow.classification||'')==='RECEIVER_STILL_HOLDING_SIZE'){
+                  var bal=_num(follow.balance_xrp);
+                  parts.push('That recipient was still holding'+(bal>0?' about '+_xrpFmt(bal)+' XRP':' size')+
+                    ' at the follow-through check — observable behavior, not proof of intent.');
+                }
+              }
+
+              // Transaction-window completeness is independent from balance/read coverage.
+              var txc=pack&&pack.tx_scan_coverage;
+              if(txc&&txc.full_window_complete===false){
+                parts.push('⚠️ TX WINDOW: INCOMPLETE — '+_num(txc.complete_wallets)+'/'+_num(txc.target_wallets)+
+                  ' complete; '+_num(txc.failed_wallets)+' failed; '+_num(txc.truncated_wallets)+
+                  ' truncated. Zero-result claims are not definitive.');
+              }
+
+              parts.push('Transfer classifications are heuristic; movement does not prove intent.');
+              if(covNote) parts.push(covNote.trim());
+              return parts.join(' ');
+            }
+
+            var openers=[
+              'I kept watch over the Ledger while you slept. ',
+              'Another night on patrol, and the Ledger tipped its hand: ',
+              'The city sleeps; the Ledger never does. Overnight, ',
+              'XRPMan on the wire — while you were out cold, ',
+              'While the world slept, I worked the Ledger. ',
+              'Morning. Here’s what moved in the dark: ',
+              'I ran the whole board overnight, and here’s the read: ',
+              'Coffee’s hot and the Ledger’s open — overnight, ',
+              'You were sleeping. The whales weren’t. ',
+              'Fresh off the night shift on the Ledger: ',
+              'I never blinked. Here’s what crossed the wire: ',
+              'The Ledger doesn’t clock out, and neither do I. Overnight, ',
+              'Let’s open the books on last night: ',
+              'Straight from the night watch: ',
+              'Kettle on, board up — here’s the overnight: ',
+              'Nothing got past me. Here’s the tape: ',
+              'Sat with the Ledger till the sun came up. Overnight, ',
+              'The wires ran all night. What they carried: ',
+              'Back from the watch, notebook full. Overnight, ',
+              'You slept. I counted. Here’s the count: ',
+              'Same seat, same screens, new night. Overnight, ',
+              'Doors were locked, money still moved. Here it is: ',
+              'I stayed up so this line could be short: ',
+              'Everything below crossed the Ledger while you were out: ',
+              'Long night on the board. Here’s what it gave up: ',
+              'Fresh receipts, still warm. Overnight, ',
+              'No one announced any of this. Overnight, ',
+              'Here’s the honest read from the night shift: ',
+              'Ledger’s open, coffee’s poured — overnight, ',
+              'Quiet hours, loud wallets. Overnight, '
+            ];
+            var quietOpen=[
+              'the Ledger stayed quiet under my watch. No whale broke cover — and a still night on patrol is a good night.',
+              'the rails ran quiet and honest. Nobody big blinked, and that’s worth saying out loud.',
+              'it was a calm shift. No heavy hands, no cover blown — I still counted every ripple.',
+              'the board sat still. A quiet night isn’t a wasted one; it’s the baseline I measure the loud ones against.',
+              'nothing crossed that was worth waking you for. I checked anyway, wallet by wallet.',
+              'the whales stayed under. No cover blown, no cover needed — I logged the quiet and kept the seat warm.',
+              'the wires carried ordinary traffic and nothing else. That is a finding too, and I am reporting it as one.',
+              'not one wallet did anything it had not done before. Boring is a result, and tonight it is the result.',
+              'the money stayed where it went to sleep. I watched it not move for hours, which is the job.',
+              'no heavy hands on the board. I would rather tell you that plainly than dress up a slow night.'
+            ];
+            var factRaw=(moves&&moves.has_signal)?(moves.headline||moves.summary):(best?best.summary:'');
+            if(!factRaw) return _nvPick(openers,seed,0)+_nvPick(quietOpen,seed,7)+covNote+' '+_nvBeat(seed,0);
+            var _open = _nvPick(openers,seed,0);
+            var _fact = _lc1(_firstSentence(factRaw));
+            if(/overnight/i.test(_open)) _fact = _fact.replace(/\s+overnight(?=[.!?]?$)/i, '');
+            var line=_open+_fact;
+            var score=_num(pack&&pack.risk_score&&pack.risk_score.score);
+            var posture=score>=75?_nvPick(['The signal flared red — this is a full-alert night on the Ledger.','Every alarm I’ve got lit up. Top of the dial.','This is a loud one — the board’s screaming and I’m all eyes.','Red across the board. When it’s this hot, somebody’s making a move.','Full alert. The heavy hands came out to play tonight.','I have not seen the board light like this in a while. Eyes up.','This is the kind of night the receipts get printed for.','Everything I watch moved at once. That is not coincidence, that is coordination.','Loud, fast, and deliberate. Somebody wanted this done before morning.','If you read one report this week, make it this one.'],seed,1)
+                       :score>=50?_nvPick(['My instincts are up — something’s moving out there.','The Ledger’s running warm tonight, and I’m watching close.','Not a siren yet, but the needle’s twitching. I’m leaning in.','Enough motion to keep me honest — I’m tracking it.','Warm, not hot. But warm is how the big ones start.','A few wallets stretched their legs. Worth a second look tomorrow.','Nothing alarming, but the shape of it has my attention.','More motion than usual and no obvious reason for it yet.','Middle of the dial. I am staying in the chair.'],seed,1)
+                       :score>=25?_nvPick(['Nothing villainous, but I kept one eye open.','A quiet patrol — steady, nothing extreme.','Low hum on the board. I logged it and moved on.','Mostly calm, a little chatter. Nothing I’d wake you for.','Slow night — but slow is when you catch the sloppy ones.','Routine traffic, logged and filed. No drama to sell you.','A working night. Nothing that changes the picture.','Ordinary motion on an ordinary board. I still read every line.','Gentle night. The interesting ones usually follow these.'],seed,1)
+                       :_nvPick(['Otherwise the Ledger behaved itself.','The rest of the board stayed in line.','A still night — the rails were quiet and honest.','Nothing else tried to slip past. Good.','Calm water tonight — I still counted every ripple.','Flat board, honest hours. Nothing to report is a report.','Everything sat exactly where it was left.','No movement worth your time — and I checked all of it.','Dead quiet, start to finish. I will take it.'],seed,1);
+            return line+(posture?' '+posture:'')+covNote+' '+_nvBeat(seed,0);
+          }
+          '''
+
+          path.write_text(text[:start] + replacement + text[end:])
+          PY
+
+          # Restore loader to main and remove unrelated/obsolete wrapper files.
+          git show origin/main:src/brief/29-targeted-news-suppression-20260817.js > src/brief/29-targeted-news-suppression-20260817.js
+          rm -f src/brief/36-morning-shadow-volume-ranking-20260820.js
+          rm -f src/brief/37-phase-progress-runtime-visibility-20260820.js
+          rm -f .github/workflows/agent-morning-ranking-patch.yml
+
+          node --check src/brief/10-pipeline.js
+
+      - name: Commit corrected scope
+        shell: bash
+        run: |
+          git config user.name "ShadowWatch Builder"
+          git config user.email "actions@users.noreply.github.com"
+          git add -- src/brief/10-pipeline.js src/brief/29-targeted-news-suppression-20260817.js src/brief/36-morning-shadow-volume-ranking-20260820.js src/brief/37-phase-progress-runtime-visibility-20260820.js .github/workflows/agent-morning-ranking-patch.yml
+          git diff --cached --check
+          git commit -m "Fix canonical Morning Story aggregate ranking"
+          git push origin HEAD:agent/morning-story-shadow-volume-ranking
