@@ -1,0 +1,44 @@
+name: Agent one-shot Morning Story audit fix
+
+on:
+  push:
+    branches:
+      - agent/morning-story-shadow-volume-ranking
+    paths:
+      - .github/workflows/agent-one-shot-morning-story-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/morning-story-shadow-volume-ranking
+          fetch-depth: 0
+
+      - name: Apply narrow quoted-journalism provenance fix
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('src/brief/10-pipeline.js')
+          s = p.read_text(encoding='utf-8')
+          old = """      var guard=0;\n      for(var at=out.indexOf(t); at>-1 && guard<200; at=out.indexOf(t), guard++){\n"""
+          new = """      var guard=0, folded=t.toLowerCase();\n      // Headline text can be sentence-normalised before rendering (for example\n      // _lc1 turns \"Why Is...\" into \"why Is...\"). Provenance stripping must\n      // still recognise that as quoted journalism, so match case-insensitively.\n      for(var at=out.toLowerCase().indexOf(folded); at>-1 && guard<200;\n          at=out.toLowerCase().indexOf(folded), guard++){\n"""
+          if s.count(old) != 1:
+              raise SystemExit(f'expected exactly one target block, found {s.count(old)}')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+
+      - name: Syntax check
+        run: node --check src/brief/10-pipeline.js
+
+      - name: Commit patch and remove one-shot helper
+        run: |
+          rm .github/workflows/agent-one-shot-morning-story-fix.yml
+          git config user.name "ShadowWatch Builder"
+          git config user.email "builder@users.noreply.github.com"
+          git add src/brief/10-pipeline.js .github/workflows/agent-one-shot-morning-story-fix.yml
+          git commit -m "fix: preserve quoted-news provenance during audit"
+          git push origin HEAD:agent/morning-story-shadow-volume-ranking
