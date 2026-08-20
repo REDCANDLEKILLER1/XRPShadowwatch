@@ -109,3 +109,15 @@
     promoteWallet: promoteWallet
   };
 })();
+
+// Hard finalization boundary. Loaded after all current report/runtime wrappers so
+// incomplete evidence can never reach the daily archive or evidence seal.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/40-hard-preseal-completion-gate-20260820.js?v=20260820.1';
+    s.async = false;
+    s.setAttribute('data-sw-hard-preseal-completion-gate', '2026-08-20.1');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();
