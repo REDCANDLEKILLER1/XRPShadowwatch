@@ -1535,8 +1535,12 @@ function _stripQuotedJournalism(report, interpretations){
       if(!r||r.kind!=='news_article') return;
       var t=String(r.label||'');
       if(t.length<8) return;                 // too short to be a headline; skip
-      var guard=0;
-      for(var at=out.indexOf(t); at>-1 && guard<200; at=out.indexOf(t), guard++){
+      var guard=0, folded=t.toLowerCase();
+      // Headline text can be sentence-normalised before rendering (for example
+      // _lc1 turns "Why Is..." into "why Is..."). Provenance stripping must
+      // still recognise that as quoted journalism, so match case-insensitively.
+      for(var at=out.toLowerCase().indexOf(folded); at>-1 && guard<200;
+          at=out.toLowerCase().indexOf(folded), guard++){
         var end=at+t.length;
         // ref.label is title.slice(0,80), so a longer headline leaves a tail —
         // extend the cut to the end of that headline segment (they are joined
