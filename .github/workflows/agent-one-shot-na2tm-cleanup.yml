@@ -1,0 +1,124 @@
+name: Agent one-shot NA2TM cleanup
+
+on:
+  push:
+    branches:
+      - agent/aug20-report-wallet-promotions
+    paths:
+      - .github/workflows/agent-one-shot-na2tm-cleanup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/aug20-report-wallet-promotions
+          fetch-depth: 0
+
+      - name: Apply NA2TM acceptance cleanup
+        shell: python
+        run: |
+          from pathlib import Path
+
+          # 1) Public narrative cleanup from real NA2TM output.
+          p = Path('src/brief/10-pipeline.js')
+          s = p.read_text(encoding='utf-8')
+          old = "parts.push('Transfer classifications are heuristic; movement does not prove intent.');"
+          new = "parts.push('These classifications describe observed movement only; they do not prove intent.');"
+          if old not in s:
+            raise SystemExit('executive classification sentence anchor not found')
+          s = s.replace(old, new, 1)
+
+          old = """    var clauses=others.slice(0,2).map(function(i){
+      return _lc1(String(i.headline||_firstSentence(i.summary)||'').replace(/\\s*[.;,]+\\s*$/,''));
+    }).filter(Boolean);"""
+          new = """    var clauses=others.slice(0,2).map(function(i){
+      var raw=String(i.headline||_firstSentence(i.summary)||'').replace(/\\s*[.;,]+\\s*$/,'');
+      var quotedNews=_arr(i.source_refs).some(function(r){ return r && r.kind==='news_article'; });
+      return quotedNews ? raw : _lc1(raw);
+    }).filter(Boolean);"""
+          if old not in s:
+            raise SystemExit('What Mattered Most clause anchor not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+
+          # 2) Promote the one wallet NA2TM explicitly marked ADD.
+          p = Path('src/brief/17-report-scan-tuning-20260816.js')
+          s = p.read_text(encoding='utf-8')
+          addr = 'rDT9vb8Jd9USHfWFh5nEhpwfJD3DbjXn88'
+          if addr not in s:
+            anchor = """    {
+    address: 'rUkxsGUE3E7AUngmwRT46uGwRDJ8pa5L7s',
+    label: 'WHALE_RECV_rUkxsG',
+    cat: 'discovered_whale',
+    balance_xrp_observed: 52000000,
+    source_report: 'SW-20260820-4OGEM'
+  }
+"""
+            if anchor not in s:
+              raise SystemExit('runtime promotion anchor not found')
+            block = """    {
+    address: 'rDT9vb8Jd9USHfWFh5nEhpwfJD3DbjXn88',
+    label: 'LARGE_RECV_rDT9vb',
+    cat: 'discovered_receiver',
+    balance_xrp_observed: null,
+    source_report: 'SW-20260820-NA2TM'
+  }
+"""
+            s = s.replace(anchor, anchor.rstrip() + ',\n' + block, 1)
+          p.write_text(s, encoding='utf-8')
+
+          p = Path('scripts/build-hvt-roster.js')
+          s = p.read_text(encoding='utf-8')
+          if addr not in s:
+            anchor = "  { handle: 'LARGE_RECV_rDHyd2', address: 'rDHyd2wTXnoT1MTvCigLGpm8o7WdhE5mGi', cat: 'discovered_receiver' }"
+            # Prefer the end of the current REPORT_PROMOTIONS list rather than a stale historical position.
+            marker = '\n];\n\n// "20M Split 1"'
+            if marker not in s:
+              raise SystemExit('REPORT_PROMOTIONS end marker not found')
+            row = "  { handle: 'LARGE_RECV_rDT9vb', address: 'rDT9vb8Jd9USHfWFh5nEhpwfJD3DbjXn88', cat: 'discovered_receiver' }"
+            before, after = s.split(marker, 1)
+            before = before.rstrip()
+            if before.endswith('}'):
+              before += ',\n' + row
+            else:
+              raise SystemExit('unexpected REPORT_PROMOTIONS structure')
+            s = before + marker + after
+          p.write_text(s, encoding='utf-8')
+
+      - name: Regenerate shared HVT roster
+        run: node scripts/build-hvt-roster.js 2026-08-20
+
+      - name: Verify NA2TM fixes
+        run: |
+          node --check src/brief/10-pipeline.js
+          node --check src/brief/17-report-scan-tuning-20260816.js
+          node - <<'NODE'
+          const fs=require('fs'),vm=require('vm');
+          const pipe=fs.readFileSync('src/brief/10-pipeline.js','utf8');
+          if(pipe.includes("Transfer classifications are heuristic;")) throw new Error('sanitizer-hole sentence still present');
+          if(!pipe.includes("These classifications describe observed movement only;")) throw new Error('replacement classification sentence missing');
+          if(!pipe.includes("quotedNews ? raw : _lc1(raw)")) throw new Error('headline capitalization guard missing');
+          const addr='rDT9vb8Jd9USHfWFh5nEhpwfJD3DbjXn88';
+          const tuning=fs.readFileSync('src/brief/17-report-scan-tuning-20260816.js','utf8');
+          if(!tuning.includes(addr)) throw new Error('runtime promotion missing');
+          const ctx={window:{}}; vm.createContext(ctx); vm.runInContext(fs.readFileSync('src/shared/hvt-roster.js','utf8'),ctx);
+          const roster=ctx.window.SW_HVT_ROSTER;
+          if(!roster.targets.some(t=>t.address===addr)) throw new Error('shared HVT promotion missing');
+          if(roster.stats.rejected_invalid!==0) throw new Error('roster rejected an invalid address');
+          console.log('NA2TM acceptance fixes verified; HVT targets='+roster.targets.length);
+          NODE
+          npm run check
+
+      - name: Commit cleanup and remove one-shot workflow
+        run: |
+          rm .github/workflows/agent-one-shot-na2tm-cleanup.yml
+          git config user.name "ShadowWatch Builder"
+          git config user.email "builder@users.noreply.github.com"
+          git add src/brief/10-pipeline.js src/brief/17-report-scan-tuning-20260816.js scripts/build-hvt-roster.js src/shared/hvt-roster.js .github/workflows/agent-one-shot-na2tm-cleanup.yml
+          git commit -m "fix: close NA2TM report acceptance gaps"
+          git push origin HEAD:agent/aug20-report-wallet-promotions
