@@ -134,3 +134,16 @@
     document.body.appendChild(s);
   } catch (_) {}
 })();
+
+// Presentation-only X/Twitter summary export. Loaded after the existing tail
+// so it can bind the final SHARE TO X surface without touching forensic/debug
+// exports or any scanner/evidence/discovery behavior.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/35-x-summary-export.js?v=20260820.2';
+    s.async = false;
+    s.setAttribute('data-sw-x-summary-export', '2026-08-20.2');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();
