@@ -1,0 +1,104 @@
+name: Agent one-shot discovery performance fix
+
+on:
+  push:
+    branches:
+      - agent/aug20-report-wallet-promotions
+    paths:
+      - .github/workflows/agent-one-shot-discovery-perf.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/aug20-report-wallet-promotions
+          fetch-depth: 0
+
+      - name: Replace quadratic discovery counters with single-pass counters
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('src/brief/02-core.js')
+          s = p.read_text(encoding='utf-8')
+          start_marker = "  const flowMap = {};   // addr -> { amounts: Set, count }"
+          end_marker = "  // 8. Active in last 24h"
+          if start_marker not in s or end_marker not in s:
+            raise SystemExit('discovery performance anchors not found')
+          start = s.index(start_marker)
+          end = s.index(end_marker, start)
+          new = '''  // Build all repeated-flow counters in ONE pass. The previous implementation
+          // built flowMap once, then re-filtered the entire transaction array for every
+          // recipient and re-scanned the global size-bucket map for every recipient. On
+          // a 75k-tx run that became O(recipients × transactions) and froze the main
+          // thread for nearly two minutes. These counters are mathematically identical
+          // but computed while each transaction is already in hand.
+          const flowMap = {};   // addr -> { count,total,lastTs,midBandCount,sizeBuckets }
+          (state.txs || []).forEach(t => {
+            if (t.currency !== 'XRP' || !t.to) return;
+            const amt = n(t.amount);
+            if (amt <= 0) return;
+            if (!flowMap[t.to]) {
+              flowMap[t.to] = { count: 0, total: 0, lastTs: null, midBandCount: 0, sizeBuckets: {} };
+            }
+            const f = flowMap[t.to];
+            f.count++;
+            f.total += amt;
+            if (amt >= 100000 && amt < 1000000) f.midBandCount++;
+            if (t.timestamp || t.ts) f.lastTs = t.timestamp || t.ts;
+            const bucket = Math.round(amt);
+            f.sizeBuckets[bucket] = (f.sizeBuckets[bucket] || 0) + 1;
+          });
+          Object.keys(flowMap).forEach(addr => {
+            const f = flowMap[addr];
+            // repeated mid-size: 3+ tx in 100K-1M range
+            if (f.midBandCount >= 3) {
+              bump(addr, 'repeated_mid_size', {
+                reason: 'repeated mid-size flow (' + f.midBandCount + ' transfers in 100K-1M range)',
+                value_xrp: n(f.total),
+                tx_count: n(f.count),
+                last_seen: f.lastTs,
+                active_last_24h: true,
+                repeated_mid_size: true
+              });
+            }
+            // repeated same-size: any rounded amount bucket with >=3 hits
+            const repeatedSameCount = Object.keys(f.sizeBuckets).reduce((count, bucket) =>
+              count + (f.sizeBuckets[bucket] >= 3 ? 1 : 0), 0);
+            if (repeatedSameCount) {
+              bump(addr, 'repeated_same_size', {
+                reason: 'repeated same-size transfer pattern (' + repeatedSameCount + ' bucket(s))',
+                value_xrp: n(f.total),
+                tx_count: n(f.count),
+                repeated_same_size: true,
+                active_last_24h: true
+              });
+            }
+          });
+
+          '''
+          s = s[:start] + new + s[end:]
+          p.write_text(s, encoding='utf-8')
+
+      - name: Verify syntax and exact counter semantics
+        run: |
+          node --check src/brief/02-core.js
+          node - <<'NODE'
+          function old(txs){const flowMap={},sizeMap={};txs.forEach(t=>{if(t.currency!=='XRP'||!t.to)return;const amt=+t.amount;if(amt<=0)return;if(!flowMap[t.to])flowMap[t.to]={amounts:new Set(),count:0,total:0,lastTs:null};flowMap[t.to].amounts.add(Math.round(amt));flowMap[t.to].count++;flowMap[t.to].total+=amt;if(t.timestamp||t.ts)flowMap[t.to].lastTs=t.timestamp||t.ts;const bucket=Math.round(amt),k=t.to+'|'+bucket;sizeMap[k]=(sizeMap[k]||0)+1;});const out={};Object.keys(flowMap).forEach(addr=>{const f=flowMap[addr];const mid=txs.filter(t=>t.to===addr&&t.currency==='XRP'&&+t.amount>=100000&&+t.amount<1000000).length;const same=Object.keys(sizeMap).filter(k=>k.startsWith(addr+'|')&&sizeMap[k]>=3).length;out[addr]={count:f.count,total:f.total,lastTs:f.lastTs,mid,same};});return out}
+          function neu(txs){const flowMap={};txs.forEach(t=>{if(t.currency!=='XRP'||!t.to)return;const amt=+t.amount;if(amt<=0)return;if(!flowMap[t.to])flowMap[t.to]={count:0,total:0,lastTs:null,midBandCount:0,sizeBuckets:{}};const f=flowMap[t.to];f.count++;f.total+=amt;if(amt>=100000&&amt<1000000)f.midBandCount++;if(t.timestamp||t.ts)f.lastTs=t.timestamp||t.ts;const bucket=Math.round(amt);f.sizeBuckets[bucket]=(f.sizeBuckets[bucket]||0)+1;});const out={};Object.keys(flowMap).forEach(addr=>{const f=flowMap[addr];const same=Object.keys(f.sizeBuckets).reduce((c,b)=>c+(f.sizeBuckets[b]>=3?1:0),0);out[addr]={count:f.count,total:f.total,lastTs:f.lastTs,mid:f.midBandCount,same};});return out}
+          const addrs=['rA','rB','rC','rD'];const tx=[];for(let i=0;i<10000;i++)tx.push({currency:i%11===0?'USD':'XRP',to:addrs[i%4],amount:(i%7===0?250000:((i%13)*100000+0.4)),timestamp:String(i)});if(JSON.stringify(old(tx))!==JSON.stringify(neu(tx)))throw new Error('counter semantics changed');console.log('discovery counter semantic regression PASS');
+          NODE
+          npm run check
+
+      - name: Commit performance fix and remove one-shot workflow
+        run: |
+          rm .github/workflows/agent-one-shot-discovery-perf.yml
+          git config user.name "ShadowWatch Builder"
+          git config user.email "builder@users.noreply.github.com"
+          git add src/brief/02-core.js .github/workflows/agent-one-shot-discovery-perf.yml
+          git commit -m "perf: make discovery flow scoring linear"
+          git push origin HEAD:agent/aug20-report-wallet-promotions
