@@ -147,3 +147,16 @@
     document.body.appendChild(s);
   } catch (_) {}
 })();
+
+// Issue #23 news runtime repair. Keep it at the very end of the active tail so
+// the progressive, abortable fetcher is the final news implementation seen by
+// the post-ledger report run. Scanner/evidence/discovery behavior is untouched.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/36-news-progressive-ceiling-20260820.js?v=20260820.1';
+    s.async = false;
+    s.setAttribute('data-sw-news-progressive-ceiling', '2026-08-20.1');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();
