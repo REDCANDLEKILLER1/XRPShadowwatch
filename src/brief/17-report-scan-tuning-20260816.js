@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026.08.19.1';
+  var VERSION = '2026.08.20.1';
   var SNAPSHOT_KEY = 'shadowwatch_snapshot_v30';
   var TX_SAFETY_MAX_PAGES = 250;
   var PROMOTIONS = [
@@ -75,7 +75,70 @@
       cat: 'discovered_receiver',
       balance_xrp_observed: 4225574.019047,
       source_report: 'SW-20260817-P5N3V'
-    }
+    },
+    {
+    address: 'rLG9Vpi3xLgfkzAfPkL9AJmD433DY7MoJk',
+    label: 'LARGE_RECV_rLG9Vp',
+    cat: 'discovered_receiver',
+    balance_xrp_observed: 10318146,
+    source_report: 'SW-20260820-FP7RI'
+  },
+    {
+    address: 'rhhB3igjitCmsN3PLh5zAgUuYvHJD8mJdd',
+    label: 'SPLITTER_rhhB3i',
+    cat: 'next_hop_splitter',
+    balance_xrp_observed: 11178122,
+    source_report: 'SW-20260820-FP7RI'
+  },
+    {
+    address: 'rBpFQot2zM5kpEz8mQ1P76i5EU5ZzDEBC4',
+    label: 'SPLITTER_rBpFQo',
+    cat: 'next_hop_splitter',
+    balance_xrp_observed: null,
+    source_report: 'SW-20260820-FP7RI'
+  },
+    {
+    address: 'rML7EMb8QoaN8BraqHHdWZzSU4nReYRR9w',
+    label: 'LARGE_RECV_rML7EM',
+    cat: 'discovered_receiver',
+    balance_xrp_observed: 8700062,
+    source_report: 'SW-20260820-FP7RI'
+  },
+    {
+    address: 'r4x919MCsHKknPJMSt87g7tjMdwwo9wk6K',
+    label: 'SPLITTER_r4x919',
+    cat: 'next_hop_splitter',
+    balance_xrp_observed: 4,
+    source_report: 'SW-20260820-X5I20'
+  },
+    {
+    address: 'rNAQWcAYTbgC6wvdWLCa6su7VRsepiarTR',
+    label: 'SPLITTER_rNAQWc',
+    cat: 'next_hop_splitter',
+    balance_xrp_observed: 7650,
+    source_report: 'SW-20260820-ABSQ7'
+  },
+    {
+    address: 'rnrqyM7kS6wmC5demJm9vrfdN2vLgS8LfY',
+    label: 'EXOUT_RECV_rnrqyM',
+    cat: 'discovered_receiver',
+    balance_xrp_observed: 1149480,
+    source_report: 'SW-20260820-BP7EU'
+  },
+    {
+    address: 'rDHYrdu78ZU3qhiKttB7z73GJYpSQFMVHj',
+    label: 'WHALE_RECV_rDHYrd',
+    cat: 'discovered_whale',
+    balance_xrp_observed: 52000000,
+    source_report: 'SW-20260820-4OGEM'
+  },
+    {
+    address: 'rUkxsGUE3E7AUngmwRT46uGwRDJ8pa5L7s',
+    label: 'WHALE_RECV_rUkxsG',
+    cat: 'discovered_whale',
+    balance_xrp_observed: 52000000,
+    source_report: 'SW-20260820-4OGEM'
+  }
   ];
 
   function promoteOne(p) {

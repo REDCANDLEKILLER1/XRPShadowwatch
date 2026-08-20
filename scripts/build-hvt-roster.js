@@ -44,7 +44,17 @@ const REPORT_PROMOTIONS = [
   { handle: 'WHALE_RECV_rU5NDV', address: 'rU5NDVnQ6nHBvD33en6HjWipY67PJ7hcXG', cat: 'discovered_whale' },
   { handle: 'EXOUT_RECV_rsnXj9', address: 'rsnXj9TDwt49XxCM64YrTEnSzwcY4awZnn', cat: 'discovered_receiver' },
   { handle: 'LARGE_RECV_rw1xqK', address: 'rw1xqK3TvKCZcdTcHGp6b2Q8dELnCCGFvT', cat: 'discovered_receiver' },
-  { handle: 'LARGE_RECV_rDHyd2', address: 'rDHyd2wTXnoT1MTvCigLGpm8o7WdhE5mGi', cat: 'discovered_receiver' }
+  { handle: 'LARGE_RECV_rDHyd2', address: 'rDHyd2wTXnoT1MTvCigLGpm8o7WdhE5mGi', cat: 'discovered_receiver' },
+  { handle: 'LARGE_RECV_rLG9Vp', address: 'rLG9Vpi3xLgfkzAfPkL9AJmD433DY7MoJk', cat: 'discovered_receiver' },
+  { handle: 'SPLITTER_rhhB3i', address: 'rhhB3igjitCmsN3PLh5zAgUuYvHJD8mJdd', cat: 'next_hop_splitter' },
+  { handle: 'SPLITTER_rBpFQo', address: 'rBpFQot2zM5kpEz8mQ1P76i5EU5ZzDEBC4', cat: 'next_hop_splitter' },
+  { handle: 'LARGE_RECV_rML7EM', address: 'rML7EMb8QoaN8BraqHHdWZzSU4nReYRR9w', cat: 'discovered_receiver' },
+  { handle: 'SPLITTER_r4x919', address: 'r4x919MCsHKknPJMSt87g7tjMdwwo9wk6K', cat: 'next_hop_splitter' },
+  { handle: 'SPLITTER_rNAQWc', address: 'rNAQWcAYTbgC6wvdWLCa6su7VRsepiarTR', cat: 'next_hop_splitter' },
+  { handle: 'EXOUT_RECV_rnrqyM', address: 'rnrqyM7kS6wmC5demJm9vrfdN2vLgS8LfY', cat: 'discovered_receiver' },
+  { handle: 'WHALE_RECV_rDHYrd', address: 'rDHYrdu78ZU3qhiKttB7z73GJYpSQFMVHj', cat: 'discovered_whale' },
+  { handle: 'WHALE_RECV_rUkxsG', address: 'rUkxsGUE3E7AUngmwRT46uGwRDJ8pa5L7s', cat: 'discovered_whale' },
+  { handle: 'LARGE_RECV_rDT9vb', address: 'rDT9vb8Jd9USHfWFh5nEhpwfJD3DbjXn88', cat: 'discovered_receiver' }
 ];
 
 // "20M Split 1" / "RIPPLE_1.3B" / "Main 300M Reserve" → the size the label claims.

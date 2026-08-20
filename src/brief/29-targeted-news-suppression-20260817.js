@@ -14,9 +14,39 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026.08.17.1';
+  var VERSION = '2026.08.20.2';
+
+  function _sameRunFailure() {
+    try {
+      var ni = null;
+      if (typeof state !== 'undefined' && state) {
+        ni = state.newsIntel || (state.pack && state.pack.news_intel) || null;
+      }
+      var st = ni && ni.source_status;
+      if (!st) return null;
+      var gd = String(st.gdelt || st.GDELT || '').toUpperCase();
+      if (gd !== 'FAILED' && gd !== 'TRANSPORT_FAILED') return null;
+
+      var healthy = 0;
+      ['rss_feeds','google_news','cryptocompare'].forEach(function (k) {
+        var v = String(st[k] || '').toUpperCase();
+        if (v === 'OK' || v === 'CONTENT_OK') healthy++;
+      });
+      if (healthy >= 2) {
+        return {
+          suppressed: true,
+          sameRun: true,
+          healthy: healthy,
+          reason: 'GDELT already failed in this scan while ' + healthy + ' healthy news lanes remain'
+        };
+      }
+    } catch (_) {}
+    return null;
+  }
 
   function suppression() {
+    var sameRun = _sameRunFailure();
+    if (sameRun) return sameRun;
     try {
       if (typeof newsSuppression === 'function') return newsSuppression('GDELT') || { suppressed:false };
     } catch (_) {}
@@ -37,7 +67,7 @@
       }
       var r = p.news_intelligence_router;
       if (!Array.isArray(r.source_limits)) r.source_limits = [];
-      var row = 'Targeted GDELT skipped — shared source governor suppression active' + (reason ? ': ' + reason : '.');
+      var row = 'Targeted GDELT skipped — redundant retry avoided' + (reason ? ': ' + reason : '.');
       if (r.source_limits.indexOf(row) < 0) r.source_limits.push(row);
     } catch (_) {}
   }
@@ -54,7 +84,7 @@
         noteSkippedIntents(queryIntents, s.reason || 'provider suppressed');
         try {
           if (typeof log === 'function') {
-            log('Evidence-led GDELT skipped — source governor already suppressed it' +
+            log('Evidence-led GDELT skipped — ' + (s.reason || 'source governor suppressed it') +
               (s.nextRetryMin != null ? ' · next probe in ' + s.nextRetryMin + ' min.' : '.'));
           }
         } catch (_) {}
@@ -72,6 +102,7 @@
       version: VERSION,
       read_only: true,
       respects_shared_gdelt_governor: true,
+      skips_same_run_failed_gdelt_when_redundant: true,
       ledger_scan_changed: false,
       healthy_news_sources_changed: false
     };
@@ -144,6 +175,31 @@
     s.src = '/src/brief/35-x-summary-export.js?v=20260820.2';
     s.async = false;
     s.setAttribute('data-sw-x-summary-export', '2026-08-20.2');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();
+
+// Presentation-only runtime phase visibility. This late bridge observes the
+// existing shadowSay/shadowProgress/event-bus lifecycle and renders a second
+// phase bar without changing the scanner or the existing overall percentage.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/37-phase-progress-runtime-visibility-20260820.js?v=20260820.1';
+    s.async = false;
+    s.setAttribute('data-sw-phase-progress-runtime', '2026-08-20.1');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();
+
+// NA2TM combined acceptance cleanup: one report-approved wallet promotion and
+// two presentation-only text repairs from the verified PR #28 runtime output.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/38-na2tm-acceptance-cleanup-20260820.js?v=20260820.1';
+    s.async = false;
+    s.setAttribute('data-sw-na2tm-acceptance', '2026-08-20.1');
     document.body.appendChild(s);
   } catch (_) {}
 })();

@@ -4682,49 +4682,54 @@ function collectDiscoveryCandidates(pack) {
 
   // 7. Repeated mid-size + same-size flows derived from state.txs
   // Group recipients by (to, amount-bucket); flag those with ≥3 hits.
-  const flowMap = {};   // addr -> { amounts: Set, count }
-  const sizeMap = {};   // addr|bucket -> count
-  (state.txs || []).forEach(t => {
-    if (t.currency !== 'XRP' || !t.to) return;
-    const amt = n(t.amount);
-    if (amt <= 0) return;
-    if (!flowMap[t.to]) flowMap[t.to] = { amounts: new Set(), count: 0, total: 0, lastTs: null };
-    flowMap[t.to].amounts.add(Math.round(amt));
-    flowMap[t.to].count++;
-    flowMap[t.to].total += amt;
-    if (t.timestamp || t.ts) flowMap[t.to].lastTs = t.timestamp || t.ts;
-    const bucket = Math.round(amt);
-    const sizeKey = t.to + '|' + bucket;
-    sizeMap[sizeKey] = (sizeMap[sizeKey] || 0) + 1;
-  });
-  Object.keys(flowMap).forEach(addr => {
-    const f = flowMap[addr];
-    // repeated mid-size: 3+ tx in 100K-1M range
-    const inMidBand = (state.txs || []).filter(t =>
-      t.to === addr && t.currency === 'XRP' && n(t.amount) >= 100000 && n(t.amount) < 1000000
-    ).length;
-    if (inMidBand >= 3) {
-      bump(addr, 'repeated_mid_size', {
-        reason: 'repeated mid-size flow (' + inMidBand + ' transfers in 100K-1M range)',
-        value_xrp: n(f.total),
-        tx_count: n(f.count),
-        last_seen: f.lastTs,
-        active_last_24h: true,
-        repeated_mid_size: true
-      });
-    }
-    // repeated same-size: any bucket with ≥3 hits
-    const repeatedSame = Object.keys(sizeMap).filter(k => k.startsWith(addr + '|') && sizeMap[k] >= 3);
-    if (repeatedSame.length) {
-      bump(addr, 'repeated_same_size', {
-        reason: 'repeated same-size transfer pattern (' + repeatedSame.length + ' bucket(s))',
-        value_xrp: n(f.total),
-        tx_count: n(f.count),
-        repeated_same_size: true,
-        active_last_24h: true
-      });
-    }
-  });
+  // Build all repeated-flow counters in ONE pass. The previous implementation
+// built flowMap once, then re-filtered the entire transaction array for every
+// recipient and re-scanned the global size-bucket map for every recipient. On
+// a 75k-tx run that became O(recipients × transactions) and froze the main
+// thread for nearly two minutes. These counters are mathematically identical
+// but computed while each transaction is already in hand.
+const flowMap = {};   // addr -> { count,total,lastTs,midBandCount,sizeBuckets }
+(state.txs || []).forEach(t => {
+  if (t.currency !== 'XRP' || !t.to) return;
+  const amt = n(t.amount);
+  if (amt <= 0) return;
+  if (!flowMap[t.to]) {
+    flowMap[t.to] = { count: 0, total: 0, lastTs: null, midBandCount: 0, sizeBuckets: {} };
+  }
+  const f = flowMap[t.to];
+  f.count++;
+  f.total += amt;
+  if (amt >= 100000 && amt < 1000000) f.midBandCount++;
+  if (t.timestamp || t.ts) f.lastTs = t.timestamp || t.ts;
+  const bucket = Math.round(amt);
+  f.sizeBuckets[bucket] = (f.sizeBuckets[bucket] || 0) + 1;
+});
+Object.keys(flowMap).forEach(addr => {
+  const f = flowMap[addr];
+  // repeated mid-size: 3+ tx in 100K-1M range
+  if (f.midBandCount >= 3) {
+    bump(addr, 'repeated_mid_size', {
+      reason: 'repeated mid-size flow (' + f.midBandCount + ' transfers in 100K-1M range)',
+      value_xrp: n(f.total),
+      tx_count: n(f.count),
+      last_seen: f.lastTs,
+      active_last_24h: true,
+      repeated_mid_size: true
+    });
+  }
+  // repeated same-size: any rounded amount bucket with >=3 hits
+  const repeatedSameCount = Object.keys(f.sizeBuckets).reduce((count, bucket) =>
+    count + (f.sizeBuckets[bucket] >= 3 ? 1 : 0), 0);
+  if (repeatedSameCount) {
+    bump(addr, 'repeated_same_size', {
+      reason: 'repeated same-size transfer pattern (' + repeatedSameCount + ' bucket(s))',
+      value_xrp: n(f.total),
+      tx_count: n(f.count),
+      repeated_same_size: true,
+      active_last_24h: true
+    });
+  }
+});
 
   // 8. Active in last 24h — anything appearing in state.txs is by definition
   //    inside the scan window. Already flagged on most sources above.
