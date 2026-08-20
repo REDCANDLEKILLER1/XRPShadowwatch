@@ -148,6 +148,18 @@
   } catch (_) {}
 })();
 
+// Presentation-only Morning Story ranking fix. Uses existing runtime evidence
+// to prioritize aggregate Shadow Volume before concentration and single anomalies.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/36-morning-shadow-volume-ranking-20260820.js?v=20260820.1';
+    s.async = false;
+    s.setAttribute('data-sw-morning-shadow-volume-ranking', '2026-08-20.1');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();
+
 // Presentation-only runtime phase visibility. This late bridge observes the
 // existing shadowSay/shadowProgress/event-bus lifecycle and renders a second
 // phase bar without changing the scanner or the existing overall percentage.
