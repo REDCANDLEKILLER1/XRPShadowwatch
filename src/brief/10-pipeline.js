@@ -711,6 +711,16 @@ function _cov(pack){
   return { checked:0, failed:0, total:0, pct:1, percent:100,
            degraded:false, severe:false, line:'', caveat:'' };
 }
+// v16.24 (audit P1): the SAME integrity verdict the structured report and the
+// intel brief already consume, read straight from 02-core. scanIntegrity() is the
+// single source of truth; nothing here re-derives it. Without this the Morning
+// Story — the section that is read out on air — was the one public surface with
+// no mid-scan-link-loss guard at all, and it narrated a dead socket as "a quiet
+// night — no villain broke cover (5/100)".
+function _intg(pack){
+  if(typeof scanIntegrity==='function'){ try{ return scanIntegrity(pack); }catch(_){} }
+  return { linkLost:false, sealed:true, headline:'', sealLine:'', missing:[], line:'' };
+}
 // The blunt version, for the top of the story.
 function _covLead(cov, seed){
   return _nvPick([
@@ -736,6 +746,9 @@ function _covLead(cov, seed){
 function _buildExecutiveSummary(interps, pack){
   var seed=_nvSeed(pack), best=_topInterp(interps), moves=interps[0], absorber=interps[5];
   var cov=_cov(pack);
+  // An unreached phase is not a finding. Say so first, before any narrative.
+  var ig=_intg(pack);
+  if(ig.linkLost) return ig.headline+'. '+ig.line+' '+_nvBeat(seed,0);
   // A scan that lost most of the board reports the outage, not the calm.
   if(cov.severe) return _covLead(cov, seed)+' '+_nvBeat(seed,0);
   var covNote=cov.degraded
@@ -914,6 +927,10 @@ function _buildWhatMatteredMost(interps, pack){
   // board was read. With most of the list dark, the honest answer is that we do
   // not know — say that instead of dressing an outage up as a calm night.
   var cov=_cov(pack);
+  var ig=_intg(pack);
+  if(ig.linkLost) return 'The scan did not finish, so I cannot tell you what mattered most. '+
+    (ig.missing.length?ig.missing.join(' and ')+' never ran. ':'')+
+    'What is missing below was not reached, not found empty.';
   if(cov.severe) return _nvPick([
     'What mattered most is what I could not see. '+cov.failed+' of '+cov.total+' wallets never reported in, so anything I tell you about "no moves" tonight is about the '+cov.checked+' that answered, and nothing else.',
     'The thing that mattered tonight was the blackout, not the board. Only '+cov.checked+' wallets came back. I will not dress that up as a quiet shift.',
@@ -988,6 +1005,8 @@ function _buildEvidence(interps, pack){
   // Same rule as WHAT MATTERED MOST: "no move crossed the line" is a finding
   // about a board that was read. With the list mostly dark it is not available.
   var covE=_cov(pack);
+  var igE=_intg(pack);
+  if(igE.linkLost) return 'No evidence is offered for this run. '+igE.headline+' — the ledger read stopped partway, so anything absent below is unread, not clear.';
   if(!parts.length && covE.severe)
     return _nvPick([
       'The evidence tonight is the read itself: '+covE.checked+' of '+covE.total+' wallets answered, '+covE.failed+' did not.',
@@ -1005,6 +1024,8 @@ function _buildWatchNext(interps, pack){
   // The first thing to do about an unread board is read it. Nothing else on this
   // list matters until that happens, so it goes at the top.
   var cov=_cov(pack);
+  var ig=_intg(pack);
+  if(ig.linkLost) bullets.push('Re-run the scan — the XRPL link dropped mid-pass and this report is NOT SEALED.');
   if(cov.degraded)
     bullets.push('Re-run the scan — '+cov.failed+' of '+cov.total+' wallets never answered this pass'+
                  (cov.severe?', and nothing below is settled until they do.':'.'));
@@ -1049,6 +1070,15 @@ function _buildVerdict(interps, pack){
   // v16.10: a low score off an unread board is not a verdict. Say what the
   // number actually measures before anyone reads it on air as an all-clear.
   var cov=_cov(pack);
+  var ig=_intg(pack);
+  if(ig.linkLost){
+    return _nvPick(['Today’s forensic read: ','The read, straight up: ','Bottom line off the Ledger: ','My call this morning: '],seed,32)+
+      ig.headline+'. '+ig.sealLine+'. '+
+      'The score reads '+risk+'/100, but the scan stopped partway, so it is not a verdict and I will not offer one. '+
+      'Re-run before anything here is treated as the night’s record. '+_nvBeat(seed,5)+
+      ' Not financial advice. XRP-only forensic watch.\n\n'+
+      'I’m XRPMan, and I tell on the banks.';
+  }
   if(cov.severe){
     return _nvPick(['Today’s forensic read: ','The read, straight up: ','Bottom line off the Ledger: ','My call this morning: '],seed,32)+
       _nvPick([
@@ -1095,6 +1125,8 @@ function _usdC(v){
 // night's on-chain activity. Only prints lines that actually have data.
 function _buildLedgerDiagnostics(pack){
   var p=pack||{}, L=[];
+  var _ig=_intg(p);
+  if(_ig.linkLost) L.push('• '+_ig.headline+' — '+_ig.sealLine+'. Figures below cover only the phases that completed.');
   var price=_num(p.xrp_price!=null?p.xrp_price:p.price), d24=_num(p.xrp_delta_24h_pct);
   if(price>0){
     var q=(d24>1.5?' (24h firm)':d24<-1.5?' (24h soft)':d24?' (24h flat)':'');
