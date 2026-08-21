@@ -94,6 +94,7 @@
     };
     wrapped._swTargetedNewsSuppression20260817 = true;
     wrapped._swOriginal = fn;
+    wrapped._original = fn._original || fn;
 
     try { window.fetchEvidenceLedNews = wrapped; } catch (_) {}
     try { fetchEvidenceLedNews = wrapped; } catch (_) {}

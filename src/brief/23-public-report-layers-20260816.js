@@ -246,6 +246,7 @@
       };
       wrapped._swPublicLayers20260816 = true;
       wrapped._swPublicLayersOriginal = original;
+      wrapped._original = original._original || original;
       buildMorningStoryText = wrapped;
       window.buildMorningStoryText = wrapped;
       return true;
@@ -262,6 +263,7 @@
       };
       wrapped._swPublicLayers20260816 = true;
       wrapped._swPublicLayersOriginal = original;
+      wrapped._original = original._original || original;
       buildXRPMainReport = wrapped;
       window.buildXRPMainReport = wrapped;
       return true;

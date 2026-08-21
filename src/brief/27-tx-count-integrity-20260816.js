@@ -332,6 +332,7 @@
     };
     wrapped._swTxUniqueDisplay20260817 = true;
     wrapped._swOriginal = fn;
+    wrapped._original = fn._original || fn;
     try { window._swRenderInstruments = wrapped; } catch (_) {}
     try { _swRenderInstruments = wrapped; } catch (_) {}
     return true;
@@ -399,6 +400,7 @@
     };
     wrapped._swTxCountIntegrity20260817 = true;
     wrapped._swOriginal = fn;
+    wrapped._original = fn._original || fn;
     try { window.buildShadowWatchDebugFile = wrapped; } catch (_) {}
     try { buildShadowWatchDebugFile = wrapped; } catch (_) {}
     return true;

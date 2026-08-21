@@ -195,6 +195,9 @@
         return out;
       };
       fetchGdelt._sw20260814Wrapped = true;
+      // Audit finding C: expose the wrapped original under the repo-wide name so
+      // unwrap-and-inspect tooling reaches the real implementation, not this shim.
+      fetchGdelt._original = origFetchGdelt._original || origFetchGdelt;
     }
   } catch (_) {}
 

@@ -150,6 +150,7 @@
       };
       wrapped._sw20260816ToneGuard = true;
       wrapped._sw20260816ToneOriginal = original;
+      wrapped._original = original._original || original;
       buildMorningStoryText = wrapped;
       window.buildMorningStoryText = wrapped;
     }
