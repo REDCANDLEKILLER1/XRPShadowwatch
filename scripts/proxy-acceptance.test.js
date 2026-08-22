@@ -1,6 +1,11 @@
 // Acceptance for audit finding B. Hermetic: globalThis.fetch is replaced so the
 // allowlist logic runs against REAL allowlisted hostnames with no network.
-const handler = require('/home/user/XRPShadowwatch/api/proxy.js');
+// Resolved relative to THIS file, not to an absolute path or the cwd. An
+// absolute path here silently loaded whichever proxy.js happened to sit in that
+// one directory: run from a git worktree, a CI checkout, or any clone at another
+// location, the suite tested main's UNPATCHED proxy and reported 10 false
+// failures against a branch whose code was correct.
+const handler = require(require('path').join(__dirname, '..', 'api', 'proxy.js'));
 
 function mkRes() {
   const r = { headers: {}, code: 0, body: null };
