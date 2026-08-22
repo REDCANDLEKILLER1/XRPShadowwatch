@@ -876,6 +876,20 @@ function _buildExecutiveSummary(interps, pack){
 
 function _buildWhatMatteredMost(interps, pack){
   var seed=_nvSeed(pack), band=interps[4], absorber=interps[5];
+  // v16.24 (audit P1 follow-up): this gate was placed at the BOTTOM of the
+  // function, below every narrative branch. It only fired when the run had no
+  // signal at all — the synthetic degraded case. A REAL mid-scan drop is not
+  // that shape: balances are read first, so the phases that completed before the
+  // link died still produce interpretations, `others.length` is truthy, and this
+  // section returned "If you read one thing, read this: Coinbase absorbed 40M
+  // XRP this scan" on a report the other five sections had already stamped NOT
+  // SEALED. On air that is the one paragraph anybody remembers. The guard has to
+  // come before the narrative, exactly as it does in EXECUTIVE SUMMARY, EVIDENCE,
+  // WHAT TO WATCH NEXT, VERDICT and LEDGER DIAGNOSTICS.
+  var ig=_intg(pack);
+  if(ig.linkLost) return 'The scan did not finish, so I cannot tell you what mattered most. '+
+    (ig.missing.length?ig.missing.join(' and ')+' never ran. ':'')+
+    'What is missing below was not reached, not found empty.';
   var tails=[
     ' Down here the Ledger leads and the chart just follows along.',
     ' The chart plays catch-up; the Ledger already knew.',
@@ -927,10 +941,6 @@ function _buildWhatMatteredMost(interps, pack){
   // board was read. With most of the list dark, the honest answer is that we do
   // not know — say that instead of dressing an outage up as a calm night.
   var cov=_cov(pack);
-  var ig=_intg(pack);
-  if(ig.linkLost) return 'The scan did not finish, so I cannot tell you what mattered most. '+
-    (ig.missing.length?ig.missing.join(' and ')+' never ran. ':'')+
-    'What is missing below was not reached, not found empty.';
   if(cov.severe) return _nvPick([
     'What mattered most is what I could not see. '+cov.failed+' of '+cov.total+' wallets never reported in, so anything I tell you about "no moves" tonight is about the '+cov.checked+' that answered, and nothing else.',
     'The thing that mattered tonight was the blackout, not the board. Only '+cov.checked+' wallets came back. I will not dress that up as a quiet shift.',
