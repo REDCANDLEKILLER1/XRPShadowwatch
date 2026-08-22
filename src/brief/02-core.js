@@ -23697,7 +23697,10 @@ function shadowWatchHotfix8NewsFetchResilienceSmokeTest() {
     /RSS_BATCH_SIZE\s*=\s*4/.test(rssAllFn) || /slice\([^,]+,\s*[^+]+\+\s*4\)/.test(rssAllFn) || /batch.*4/i.test(rssAllFn));
 
   // 5. GDELT bails on first failure, uses 5s timeout
-  const gdeltFn = fetchGdelt.toString();
+  // Audit finding C: unwrap like the sibling checks below. fetchGdelt is wrapped
+  // by 15-report-hotfix-20260814; inspecting the shim instead of the real
+  // implementation reported a resilience regression that had not happened.
+  const gdeltFn = ((typeof fetchGdelt === 'function' && fetchGdelt._original) || fetchGdelt).toString();
   check('GDELT uses 5s per-query timeout',
     /GDELT_QUERY_TIMEOUT_MS\s*=\s*5000/.test(gdeltFn));
   check('GDELT bails on first failure (consecutiveFails >= 1)',

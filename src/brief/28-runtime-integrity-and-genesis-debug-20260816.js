@@ -297,6 +297,7 @@
     };
     wrapped._swRuntimeIntegrityGenesisDebug20260817 = true;
     wrapped._swOriginal = fn;
+    wrapped._original = fn._original || fn;
     try { window.buildShadowWatchDebugFile = wrapped; } catch (_) {}
     try { buildShadowWatchDebugFile = wrapped; } catch (_) {}
     return true;

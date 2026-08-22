@@ -39,6 +39,7 @@
     };
     wrapped._swEscrowTerminology20260819 = true;
     wrapped._swOriginal = original;
+    wrapped._original = original._original || original;
     try { window.buildMorningStoryText = wrapped; } catch (_) {}
     try { buildMorningStoryText = wrapped; } catch (_) {}
     return true;
@@ -54,6 +55,7 @@
     };
     wrapped._swEscrowTerminology20260819 = true;
     wrapped._swOriginal = original;
+    wrapped._original = original._original || original;
     try { window.buildXRPMainReport = wrapped; } catch (_) {}
     try { buildXRPMainReport = wrapped; } catch (_) {}
     return true;

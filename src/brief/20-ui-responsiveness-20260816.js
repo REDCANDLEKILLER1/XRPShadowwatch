@@ -86,6 +86,7 @@
     }
 
     throttled._swUiOriginal = original;
+    throttled._original = original._original || original;
     throttled._swUiMinMs = minMs;
     return throttled;
   }
@@ -151,6 +152,7 @@
       };
       guardedSetTarget._swMonotonic = true;
       guardedSetTarget._swOriginal = originalSetTarget;
+      guardedSetTarget._original = originalSetTarget._original || originalSetTarget;
       sm.setTarget = guardedSetTarget;
       progressGuarded = true;
     }
@@ -171,6 +173,7 @@
       };
       guardedUpdateProgress._swMonotonic = true;
       guardedUpdateProgress._swOriginal = originalUpdateProgress;
+      guardedUpdateProgress._original = originalUpdateProgress._original || originalUpdateProgress;
       narr.updateProgress = guardedUpdateProgress;
       progressGuarded = true;
     }

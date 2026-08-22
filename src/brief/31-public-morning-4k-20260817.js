@@ -132,6 +132,7 @@
     };
     wrapped._swPublic4kGovernor20260817 = true;
     wrapped._swOriginal = fn;
+    wrapped._original = fn._original || fn;
 
     try { window.buildMorningStoryText = wrapped; } catch (_) {}
     try { buildMorningStoryText = wrapped; } catch (_) {}

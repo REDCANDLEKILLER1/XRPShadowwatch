@@ -80,6 +80,7 @@
     };
     wrapped._swNa2tmAcceptance20260820 = true;
     wrapped._swOriginal = fn;
+    wrapped._original = fn._original || fn;
     try { window.buildMorningStoryText = wrapped; } catch (_) { return false; }
     return true;
   }

@@ -212,6 +212,7 @@
       };
       morningWrapped._swShadowFlowContext = true;
       morningWrapped._swShadowFlowOriginal = originalMorning;
+      morningWrapped._original = originalMorning._original || originalMorning;
       buildMorningStoryText = morningWrapped;
       window.buildMorningStoryText = morningWrapped;
     }
@@ -303,6 +304,7 @@
       };
       shadowSayWrapped._swRunTimer = true;
       shadowSayWrapped._swRunTimerOriginal = originalShadowSay;
+      shadowSayWrapped._original = originalShadowSay._original || originalShadowSay;
       shadowSay = shadowSayWrapped;
       window.shadowSay = shadowSayWrapped;
     }
@@ -320,6 +322,7 @@
       };
       runWrapped._swRunTimer = true;
       runWrapped._swRunTimerOriginal = originalRun;
+      runWrapped._original = originalRun._original || originalRun;
       run = runWrapped;
       window.run = runWrapped;
       var btn = document.getElementById('scanBtn');
@@ -393,6 +396,7 @@
       };
       debugWrapped._swRunTimer = true;
       debugWrapped._swRunTimerOriginal = originalDebug;
+      debugWrapped._original = originalDebug._original || originalDebug;
       buildShadowWatchDebugFile = debugWrapped;
       window.buildShadowWatchDebugFile = debugWrapped;
     }

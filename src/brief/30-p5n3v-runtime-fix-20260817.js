@@ -39,6 +39,7 @@
       };
       wrappedCollect._swP5N3VAccountingFix = true;
       wrappedCollect._swOriginal = originalCollect;
+      wrappedCollect._original = originalCollect._original || originalCollect;
       collectDiscoveryCandidates = wrappedCollect;
       try { window.collectDiscoveryCandidates = wrappedCollect; } catch (_) {}
     }
@@ -58,6 +59,7 @@
       };
       recordCompat._swP5N3VCompat = true;
       recordCompat._swOriginal = originalRecord;
+      recordCompat._original = originalRecord._original || originalRecord;
       DT.record = recordCompat;
     }
   } catch (_) {}

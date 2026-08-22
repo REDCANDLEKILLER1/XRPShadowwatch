@@ -187,6 +187,7 @@
         };
         wrappedSay._swPhaseRuntime20260820 = true;
         wrappedSay._swOriginal = originalSay;
+        wrappedSay._original = originalSay._original || originalSay;
         try { window.shadowSay = wrappedSay; } catch (_) {}
         try { shadowSay = wrappedSay; } catch (_) {}
       }
@@ -204,6 +205,7 @@
         };
         wrappedProgress._swPhaseRuntime20260820 = true;
         wrappedProgress._swOriginal = originalProgress;
+        wrappedProgress._original = originalProgress._original || originalProgress;
         try { window.shadowProgress = wrappedProgress; } catch (_) {}
         try { shadowProgress = wrappedProgress; } catch (_) {}
       }
@@ -257,6 +259,7 @@
       };
       nar.updateProgress._swPhaseRuntime20260820 = true;
       nar.updateProgress._swOriginal = original;
+      nar.updateProgress._original = original._original || original;
       return true;
     } catch (_) { return false; }
   }

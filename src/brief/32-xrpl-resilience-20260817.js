@@ -104,6 +104,7 @@
       };
       resilientConnectXRPL._swResilience20260817 = true;
       resilientConnectXRPL._swOriginal = originalConnectXRPL;
+      resilientConnectXRPL._original = originalConnectXRPL._original || originalConnectXRPL;
       try { connectXRPL = resilientConnectXRPL; } catch (_) {}
       try { window.connectXRPL = resilientConnectXRPL; } catch (_) {}
     }
@@ -291,6 +292,7 @@
       };
       resilientEscrowBackfill._swResilience20260817 = true;
       resilientEscrowBackfill._swOriginal = originalEscrowBackfill;
+      resilientEscrowBackfill._original = originalEscrowBackfill._original || originalEscrowBackfill;
       try { escrowBackfill = resilientEscrowBackfill; } catch (_) {}
       try { window.escrowBackfill = resilientEscrowBackfill; } catch (_) {}
     }
