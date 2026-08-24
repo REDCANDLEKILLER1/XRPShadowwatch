@@ -1,6 +1,12 @@
 PH',`Loading shared graph ${hn.toLocaleString()} nodes…`);
   const r=await hubAsset('checkpoint');
-  const cp=await r.json();
+  let cp;
+  const ct=(r.headers.get('content-type')||'').toLowerCase();
+  if(ct.includes('gzip')){
+    if(!('DecompressionStream' in window))throw new Error('Browser cannot decompress shared checkpoint.');
+    const stream=r.body.pipeThrough(new DecompressionStream('gzip'));
+    cp=JSON.parse(await new Response(stream).text());
+  }else cp=await r.json();
   let g=cp?.graph;
   if(cp?.schema==='shadowwatch.genesis-lineage-hub.visual.v1'){
     const nodes={};
