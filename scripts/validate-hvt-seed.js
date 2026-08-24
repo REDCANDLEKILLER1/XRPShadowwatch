@@ -78,8 +78,19 @@ function base58decode(s) {
   }
   const bytes = [];
   while (num > 0n) { bytes.unshift(Number(num & 0xffn)); num >>= 8n; }
-  for (const ch of s) { if (ch === 'r' && bytes[0] !== 0) bytes.unshift(0); else break; }
-  return Buffer.from(bytes);
+  // Leading zero BYTES are encoded as leading 'r' (alphabet index 0), one 'r'
+  // per zero byte, and the numeric conversion above drops every one of them.
+  //
+  // The first version stopped at the first 'r' (`bytes[0] !== 0` went false as
+  // soon as one zero was restored), so any account whose 20-byte ID itself
+  // starts with a zero decoded to 24 or fewer bytes and was rejected as
+  // malformed. Four real accounts in the genesis lineage set fail that way,
+  // rrrrrpFPXE6EtfdrXekHGL5ESo1Vcexs8 worst of all — five leading zero bytes,
+  // decoded to 21, rejected. Counting the prefix instead of inspecting the
+  // output is the whole fix.
+  let zeros = 0;
+  for (const ch of s) { if (ch === ALPHABET[0]) zeros++; else break; }
+  return Buffer.from(new Array(zeros).fill(0).concat(bytes));
 }
 function validAddress(a) {
   if (typeof a !== 'string' || a[0] !== 'r' || a.length < 25 || a.length > 35) return false;
