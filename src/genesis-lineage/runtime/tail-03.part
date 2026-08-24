@@ -1,0 +1,129 @@
+rents} · truncated ${truncatedParents} · prior complete ${priorComplete}`+
+      (activeText?`\n${activeText}`:'');
+    $('#progress').style.width=(totalShards?shardsDone/totalShards*100:100)+'%';
+  }
+
+  async function finalizeParent(state){
+    if(state.finalized)return;
+    state.finalized=true;
+    const rs=state.results.filter(Boolean);
+    if(rs.length!==state.shardCount||state.failed){
+      failedParents++;
+      graph.segmentTraces[state.key]={
+        complete:false,truncated:false,evidenceMode:'EVERY_DROP_V1',collectorMode:'ISOLATED_SHARDED_V1',
+        evidenceSaved:false,address:state.address,from:state.logicalFrom,to:state.logicalTo,resolvedTo:state.resolvedTo,
+        shards:state.shardCount,finishedAt:new Date().toISOString(),server:serverUrl,error:'one or more shards failed'
+      };
+      return;
+    }
+    if(rs.some(r=>r.truncated||!r.complete)){
+      truncatedParents++;
+      graph.segmentTraces[state.key]={
+        complete:false,truncated:true,evidenceMode:'EVERY_DROP_V1',collectorMode:'ISOLATED_SHARDED_V1',
+        evidenceSaved:false,address:state.address,from:state.logicalFrom,to:state.logicalTo,resolvedTo:state.resolvedTo,
+        shards:state.shardCount,pages:rs.reduce((n,r)=>n+r.pages,0),txCount:rs.reduce((n,r)=>n+r.txCount,0),
+        finishedAt:new Date().toISOString(),server:serverUrl
+      };
+      return;
+    }
+
+    let flows=dedupeByHash(rs.flatMap(r=>r.flows||[]));
+    let effects=dedupeByHash(rs.flatMap(r=>r.effects||[]));
+    flows.sort((a,b)=>(a.ledger||0)-(b.ledger||0)||(a.hash||'').localeCompare(b.hash||''));
+    effects.sort((a,b)=>(a.ledger||0)-(b.ledger||0)||(a.hash||'').localeCompare(b.hash||''));
+
+    const pages=rs.reduce((n,r)=>n+r.pages,0),txCount=rs.reduce((n,r)=>n+r.txCount,0);
+    const evidence={
+      schema:'shadowwatch.genesis-drop-evidence.segment.v1',
+      evidenceMode:'EVERY_DROP_V1',collectorMode:'ISOLATED_SHARDED_V1',
+      address:state.address,from:state.logicalFrom,to:state.logicalTo,resolvedTo:state.resolvedTo,
+      server:serverUrl,finishedAt:new Date().toISOString(),
+      shards:state.shardCount,
+      shardRanges:rs.map((r,i)=>({index:i,from:r._from,to:r._to,pages:r.pages,txCount:r.txCount})),
+      pages,txCount,effectCount:effects.length,flowCount:flows.length,effects,flows
+    };
+
+    await idbPutEvidence(state.key,evidence); // seal parent only after all shard evidence is combined and persisted
+    playback.loaded=false;
+    mergeSegmentFlows(flows);
+
+    effectTotal+=effects.length;directFlowTotal+=flows.length;
+    graph.segmentTraces[state.key]={
+      complete:true,truncated:false,evidenceMode:'EVERY_DROP_V1',collectorMode:'ISOLATED_SHARDED_V1',
+      evidenceSaved:true,pages,txCount,effectCount:effects.length,flowCount:flows.length,
+      address:state.address,from:state.logicalFrom,to:state.logicalTo,resolvedTo:state.resolvedTo,
+      shards:state.shardCount,finishedAt:new Date().toISOString(),server:serverUrl
+    };
+    parentsDone++;
+    log(`PARENT SEALED ${state.address} L${state.logicalFrom}→${state.logicalTo} via ${state.shardCount} shard(s): pages=${pages}, tx=${txCount}, effects=${effects.length}, flows=${flows.length}.`);
+  }
+
+  async function worker(workerId){
+    const client=clients[workerId-1];
+    while(true){
+      if(pauseRequested)return;
+      const idx=next++;if(idx>=shardJobs.length)return;
+      const job=shardJobs[idx],state=parentStates.get(job.parentKey);
+      active.set(workerId,job);update();
+      try{
+        const r=await traceSegment(job.address,job.seg,client);
+        r._from=job.seg.from;r._to=job.seg.to;
+        state.results[job.shardIndex]=r;
+        if(r.truncated)state.truncated=true;
+      }catch(e){
+        if(String(e.message)==='paused')return;
+        state.failed=true;
+        log(`ISO-W${workerId} shard failed ${job.address} L${job.seg.from}→${job.seg.to}: ${e.message}`,'ERROR');
+      }finally{
+        active.delete(workerId);shardsDone++;
+        state.pending=Math.max(0,state.pending-1);
+        if(state.pending===0){
+          try{await finalizeParent(state)}
+          catch(e){
+            state.failed=true;failedParents++;
+            log(`Parent finalize failed ${state.address} L${state.logicalFrom}→${state.logicalTo}: ${e.message}`,'ERROR');
+          }
+        }
+        turboCompletedJobs++;update();
+        if(turboCompletedJobs%4===0)save();
+      }
+    }
+  }
+
+  try{
+    update();
+    await Promise.all(Array.from({length:Math.min(concurrency,Math.max(1,totalShards))},(_,i)=>worker(i+1)));
+    save();
+    if(pauseRequested){
+      $('#batchState').textContent=`Isolated turbo paused after ${shardsDone}/${totalShards} shards. Completed parent evidence remains sealed; resume will skip it.`;
+      log(`ISOLATED TURBO PAUSED shards=${shardsDone}/${totalShards}.`,'WARN');
+    }else{
+      const all=Object.values(graph.segmentTraces||{}).filter(s=>s.evidenceMode==='EVERY_DROP_V1');
+      const complete=all.filter(s=>s.complete&&s.evidenceSaved!==false).length;
+      $('#batchState').textContent=`ISOLATED TURBO FINISHED · evidence-complete ${complete}/${ids.length*intervals.length} · parent failures ${failedParents} · truncated ${truncatedParents} · validated tip L${validatedTip}`;
+      $('#progress').style.width='100%';
+      log(`ISOLATED TURBO FINISHED evidence-complete=${complete}/${ids.length*intervals.length}, failedParents=${failedParents}, truncated=${truncatedParents}.`);
+    }
+  }finally{
+    for(const c of clients)c.close();
+    turboRunning=false;batchRunning=false;
+    $('#turboHistoryBtn').disabled=false;$('#traceGenesisBtn').disabled=false;
+    save();draw();renderInspector();
+  }
+}
+
+async function batchGenesis(){
+  if(batchRunning)return;
+  batchRunning=true;
+  pauseRequested=false;
+  $('#traceGenesisBtn').disabled=true;
+
+  const ids=EMBEDDED.nodes.map(n=>n.id);
+  const w=selectedWindow();
+  const concurrency=Math.max(1,Math.min(8,Number($('#batchConcurrency').value)||4));
+
+  let nextIndex=0;
+  let completed=0;
+  let skipped=0;
+  let failed=0;
+  
