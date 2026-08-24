@@ -1,0 +1,35 @@
+name: Genesis repair seal
+
+on:
+  push:
+    branches:
+      - agent/genesis-lineage-hub
+    paths:
+      - api/lineage-repair.js
+      - scripts/run-genesis-repair-seal.js
+      - .github/workflows/genesis-repair-seal.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: genesis-repair-seal
+  cancel-in-progress: false
+
+jobs:
+  seal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax check
+        run: |
+          node --check api/lineage-repair.js
+          node --check scripts/run-genesis-repair-seal.js
+      - name: Recompute, verify, and store missing Genesis parents
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/run-genesis-repair-seal.js
