@@ -255,7 +255,6 @@ async function createBlob(content, encoding) {
 }
 
 async function atomicCommit(files, message) {
-  // files: [{path, content}] UTF-8 only for runtime deltas/manifest.
   const refPath = '/repos/' + OWNER + '/' + REPO + '/git/ref/heads/' + DATA_BRANCH.split('/').map(encodeURIComponent).join('/');
   const ref = await gh(refPath);
   const parentSha = ref.object.sha;
@@ -377,6 +376,17 @@ async function handler(req, res) {
           path = sanitizeDeltaPath(String(delta));
           const allowed = new Set((manifest.sync && manifest.sync.deltas || []).map(d => d.path));
           if (!path || !allowed.has(path)) path = null;
+        }
+        if (asset === 'checkpoint' && Array.isArray(manifest.base?.checkpoint?.parts)) {
+          const pieces = [];
+          for (const partPath of manifest.base.checkpoint.parts) {
+            const pr = await ghRaw(partPath);
+            pieces.push((await pr.text()).trim());
+          }
+          const buf = zlib.gunzipSync(Buffer.from(pieces.join(''), 'base64'));
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.status(200).send(buf);
+          return;
         }
         if (!path) { res.status(404).json({ error: 'hub asset not found' }); return; }
         const upstream = await ghRaw(path);
