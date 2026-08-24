@@ -1,6 +1,6 @@
 {
   "schema": "shadowwatch.genesis-lineage-hub.v1",
-  "updatedAt": "2026-08-24T06:11:31.068Z",
+  "updatedAt": "2026-08-24T06:14:11.721Z",
   "source": {
     "schema": "shadowwatch.xrpl.genesis-history.v1",
     "snapshotLedger": 32570,
@@ -54,20 +54,13 @@
   },
   "coverage": {
     "requiredSegments": 2448,
-    "evidenceComplete": 2447,
-    "missingSegments": [
-      {
-        "key": "r9hEDb4xBGRfBCcX3E4FirDWQBAYtpxC8K|4181980|10852617",
-        "address": "r9hEDb4xBGRfBCcX3E4FirDWQBAYtpxC8K",
-        "from": 4181980,
-        "to": 10852617
-      }
-    ],
+    "evidenceComplete": 2448,
+    "missingSegments": [],
     "sealed": false,
     "graphNodes": 1258,
     "graphEdges": 2072,
     "validatedTip": null,
-    "note": "Historical Every-Drop coverage is 2447/2448; listed missing segments remain unsealed.",
+    "note": "All 2448 historical segments are accounted for, including server-recomputed pinned repair records; repo seal remains false until the registered 2446-segment base exact archive is physically stored.",
     "repairs": {
       "rnzi": {
         "id": "rnzi",
@@ -92,9 +85,37 @@
         "collectorMode": "HTTP_SHARDED_PINNED_V3",
         "serverPolicy": "PINNED_PER_SHARD_RESTART_ON_FAIL",
         "storedAt": "2026-08-24T06:11:31.068Z"
+      },
+      "r9h": {
+        "id": "r9h",
+        "key": "r9hEDb4xBGRfBCcX3E4FirDWQBAYtpxC8K|4181980|10852617",
+        "address": "r9hEDb4xBGRfBCcX3E4FirDWQBAYtpxC8K",
+        "from": 4181980,
+        "to": 10852617,
+        "encoding": "gzip+base64-parts",
+        "parts": [
+          "data/genesis-lineage/repairs/r9h/parent-01.b64",
+          "data/genesis-lineage/repairs/r9h/parent-02.b64",
+          "data/genesis-lineage/repairs/r9h/parent-03.b64",
+          "data/genesis-lineage/repairs/r9h/parent-04.b64",
+          "data/genesis-lineage/repairs/r9h/parent-05.b64",
+          "data/genesis-lineage/repairs/r9h/parent-06.b64"
+        ],
+        "partsCount": 6,
+        "rawBytes": 9917864,
+        "gzipBytes": 1322838,
+        "sha256": "210075055ba4db0360cbd2579e8d1f87f9561bf5242e3547d37d8ba62e1f80bb",
+        "gzipSha256": "a06673e9dea3d6476920c3581c663dae001ecf95f12949a6d56dd0f015bef7fd",
+        "pages": 203,
+        "txCount": 77407,
+        "effectCount": 27039,
+        "flowCount": 30,
+        "collectorMode": "HTTP_SHARDED_PINNED_V3",
+        "serverPolicy": "PINNED_PER_SHARD_RESTART_ON_FAIL",
+        "storedAt": "2026-08-24T06:14:11.721Z"
       }
     },
-    "scanComplete": false
+    "scanComplete": true
   },
   "sync": {
     "enabled": true,
