@@ -2529,6 +2529,32 @@ function _stripPublisherSuffix(s) {
 //
 // Fourth member of the same family as the coverage and baseline guards: a
 // failure that leaves no trace in the narrative.
+// How much of the board was actually read before the link died. Counted, never
+// assumed: wallets_checked when the pack carries it, otherwise the CHECKED rows
+// themselves. The scanner writes status in upper case (CHECKED / FAILED), so the
+// test is case-insensitive and anchored — 'FAILED' must not match 'CHECKED'.
+function _balancesReadCount(p) {
+  const q = p || {};
+  const direct = Number(q.wallets_checked);
+  if (isFinite(direct) && direct >= 0 && q.wallets_checked != null) return direct;
+  const rows = q.wallet_results || q.wallets || [];
+  return rows.filter(w => /^CHECKED/i.test(String((w && w.status) || ''))).length;
+}
+
+function _linkLostLine(p, missing) {
+  const read = _balancesReadCount(p);
+  const tail = (missing && missing.length ? ': ' + missing.join(' and ') + ' did not run' : '')
+    + '. Sections missing below are NOT findings of nothing; they were not reached. Re-run for a complete pass.';
+  if (read > 0) {
+    return 'The XRPL link dropped mid-scan and could not be rebuilt. Balances were already read, so the '
+      + 'coverage figure stands \u2014 but the later phases stopped where they were' + tail;
+  }
+  // The link died before the balance pass produced anything. Saying the coverage
+  // figure "stands" here would dress a total outage up as a partial one.
+  return 'The XRPL link dropped before a single wallet could be read, so this run has no balances at all. '
+    + 'The coverage figure below measures the outage, not the board' + tail;
+}
+
 function scanIntegrity(pack) {
   const p = pack || {};
   let lost = !!p.scan_link_lost;
@@ -2552,11 +2578,18 @@ function scanIntegrity(pack) {
     sealLine: lost ? 'REPORT NOT SEALED' : '',
     at: p.scan_link_lost_at || (typeof state !== 'undefined' ? state.linkLostAt : null) || null,
     missing: missing,
-    line: lost
-      ? ('The XRPL link dropped mid-scan and could not be rebuilt. Balances were already read, so the coverage figure stands — but the later phases stopped where they were'
-         + (missing.length ? ': ' + missing.join(' and ') + ' did not run' : '')
-         + '. Sections missing below are NOT findings of nothing; they were not reached. Re-run for a complete pass.')
-      : ''
+    // v16.25: this clause used to assert "Balances were already read, so the
+    // coverage figure stands" on EVERY link loss. The comment above admits the
+    // balance pass has only "usually" finished by then — and "usually" was being
+    // published as fact. SW-20260824-I1ZKV lost the link before the balance pass
+    // got anywhere, read 0 of 251 wallets, and still told the reader its balances
+    // were in hand. That is this guard committing the exact fault it exists to
+    // prevent: a sentence claiming something nobody checked.
+    //
+    // Read the coverage instead of assuming it. Both branches are true statements
+    // about a scan that died; they differ on WHEN it died, which is the thing the
+    // reader needs in order to know what the numbers below are worth.
+    line: lost ? _linkLostLine(p, missing) : ''
   };
 }
 
