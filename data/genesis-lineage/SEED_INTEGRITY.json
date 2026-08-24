@@ -1,0 +1,36 @@
+{
+  "schema": "shadowwatch.genesis-lineage-hub.integrity.v1",
+  "generatedAt": "2026-08-24T04:51:16.851235Z",
+  "checkpoint": {
+    "schema": "shadowwatch.genesis-lineage-hub.visual.v2",
+    "parts": [
+      {"path":"data/genesis-lineage/base/checkpoint-01.b64","bytes":4000,"gitBlobSha1":"f362e0b3690adc11e31189baf7e43a219772cf70"},
+      {"path":"data/genesis-lineage/base/checkpoint-02.b64","bytes":4000,"gitBlobSha1":"8c52c8583e17c8555c98869dd118d58d811b2707"},
+      {"path":"data/genesis-lineage/base/checkpoint-03.b64","bytes":8000,"gitBlobSha1":"496b88be59489b9a8e2e1716a7be6f0e7ebce0f1"},
+      {"path":"data/genesis-lineage/base/checkpoint-04.b64","bytes":8000,"gitBlobSha1":"7b075275bf7d290475beb736a9e0275898026e59"},
+      {"path":"data/genesis-lineage/base/checkpoint-05.b64","bytes":8000,"gitBlobSha1":"8021305a9f7aee0f5919ec0b8d9db7202eb7460d"},
+      {"path":"data/genesis-lineage/base/checkpoint-06.b64","bytes":8000,"gitBlobSha1":"8af14777bb8d7f41246757ab1d848cc267450668"},
+      {"path":"data/genesis-lineage/base/checkpoint-07.b64","bytes":8000,"gitBlobSha1":"0685a4af031557142514974e2f474ff71a41a8cc"},
+      {"path":"data/genesis-lineage/base/checkpoint-08.b64","bytes":8000,"gitBlobSha1":"c05e60a8d3395cd67098daed8c671d5f021c580d"},
+      {"path":"data/genesis-lineage/base/checkpoint-09.b64","bytes":8000,"gitBlobSha1":"ce2c03bad83bff0145ae1f8c535369b0f8c0770a"},
+      {"path":"data/genesis-lineage/base/checkpoint-10.b64","bytes":8000,"gitBlobSha1":"13665e66e82146084e80b763f2cf5e3c62410f0c"},
+      {"path":"data/genesis-lineage/base/checkpoint-11.b64","bytes":8000,"gitBlobSha1":"590c3aa68dbf9c08b09ef6555c47dc0356d2ee79"},
+      {"path":"data/genesis-lineage/base/checkpoint-12.b64","bytes":8000,"gitBlobSha1":"b36eb1c0daef7dcfbc8d92c09445a9f0feb5c19c"},
+      {"path":"data/genesis-lineage/base/checkpoint-13.b64","bytes":6024,"gitBlobSha1":"78f9a0d63b59e6db90565764c36bc2051b5ff36a"}
+    ],
+    "base64Chars": 94024,
+    "compressedBytes": 70518,
+    "uncompressedBytes": 207999,
+    "gzipSha256": "0fefe7c684f522a8192258259caa09807fa169dd3991d2110498d6e4ef95bb84",
+    "sha256": "2c8c7362331f0d863d336289da25514cf626d7d1471487fcdb6a71db0790765d",
+    "nodes": 1258,
+    "edges": 2072
+  },
+  "sourceEvidenceArchive": {
+    "repoStored": false,
+    "bytes": 7665134,
+    "sha256": "5bbcb1d8f4c8531a7b1f09c3297ffe60123affb2700bc5619e4e85fb03383215",
+    "evidenceComplete": 2446,
+    "requiredSegments": 2448
+  }
+}
