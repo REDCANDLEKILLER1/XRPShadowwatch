@@ -1,0 +1,150 @@
+ const active=new Set();
+
+  log(`BATCH START genesis 136 one-hop ${w.fromDate}→${w.toDate}, concurrency=${concurrency}.`);
+
+  function updateBatchState(){
+    const activeText=[...active].map(compactAddr).join(', ');
+    $('#batchState').textContent=
+      `Done ${completed}/${ids.length} · active ${active.size}/${concurrency} · skipped ${skipped} · failed ${failed}`+
+      (activeText?`\n${activeText}`:'');
+    $('#progress').style.width=(completed/ids.length*100)+'%';
+  }
+
+  async function worker(workerId){
+    while(true){
+      if(pauseRequested)return;
+      const i=nextIndex++;
+      if(i>=ids.length)return;
+
+      const id=ids[i];
+      const old=graph.traces[id];
+
+      if(old && old.window && old.window.from===w.from && old.window.to===w.to && !old.truncated){
+        skipped++;
+        completed++;
+        log(`BATCH skip completed ${id}.`);
+        updateBatchState();
+        continue;
+      }
+
+      active.add(id);
+      updateBatchState();
+
+      try{
+        log(`WORKER ${workerId} tracing ${id}.`);
+        await traceWallet(id);
+      }catch(e){
+        failed++;
+        log(`WORKER ${workerId} failed ${id}: ${e.message}`,'ERROR');
+      }finally{
+        active.delete(id);
+        completed++;
+        updateBatchState();
+      }
+
+      // Tiny cooperative yield; no artificial 80 ms inter-wallet delay.
+      await new Promise(r=>setTimeout(r,0));
+    }
+  }
+
+  try{
+    await Promise.all(
+      Array.from({length:Math.min(concurrency,ids.length)},(_,i)=>worker(i+1))
+    );
+
+    if(pauseRequested){
+      log(`BATCH PAUSED at ${completed}/${ids.length}.`,'WARN');
+      $('#batchState').textContent=`Paused after ${completed}/${ids.length}. Resume by pressing TRACE ALL 136 again.`;
+    }else{
+      log(`BATCH FINISHED genesis one-hop: completed=${completed}, skipped=${skipped}, failed=${failed}.`);
+      $('#batchState').textContent=`Finished ${completed}/${ids.length} · skipped ${skipped} · failed ${failed}.`;
+      $('#progress').style.width='100%';
+    }
+  }catch(e){
+    log(`BATCH STOPPED: ${e.message}`,'ERROR');
+    $('#batchState').textContent='Stopped: '+e.message;
+  }finally{
+    batchRunning=false;
+    $('#traceGenesisBtn').disabled=false;
+    save();
+    draw();
+  }
+}
+function reportText(){
+  const nodes=Object.values(graph.nodes),edges=Object.values(graph.edges);
+  const genesisNodes=nodes.filter(n=>n.kind==='genesis'),discovered=nodes.filter(n=>n.kind!=='genesis');
+  const top=edges.slice().sort((a,b)=>(b.totalXRP||0)-(a.totalXRP||0)).slice(0,40);
+  const complete=Object.values(graph.traces).filter(t=>!t.truncated).length,trunc=Object.values(graph.traces).filter(t=>t.truncated).length;
+  const dropSegments=Object.values(graph.segmentTraces||{}).filter(s=>s.evidenceMode==='EVERY_DROP_V1');
+  const dropComplete=dropSegments.filter(s=>s.complete).length,dropTrunc=dropSegments.filter(s=>s.truncated).length;
+  const dropEffects=dropSegments.reduce((n,s)=>n+(s.effectCount||0),0);
+  const w=selectedWindow();
+  let s=`SHADOWWATCH — GENESIS LINEAGE LAB REPORT
+Generated: ${new Date().toISOString()}
+Source schema: ${EMBEDDED.schema}
+Source snapshot ledger: ${EMBEDDED.snapshotLedger}
+Genesis wallets: ${genesisNodes.length}
+Discovered destination wallets: ${discovered.length}
+Graph edges: ${edges.length}
+Legacy completed wallet traces: ${complete}
+Legacy truncated wallet traces: ${trunc}
+Every-drop evidence segments complete: ${dropComplete}/${EMBEDDED.genesisCount*EMBEDDED.anchors.length}
+Every-drop evidence segments truncated: ${dropTrunc}
+Every-drop XRP balance effects stored: ${dropEffects}
+Collector: isolated worker sockets + weighted heavy-range sharding (v1.7 when present)
+Selected analysis window: ${w.fromDate} / L${w.from} → ${w.toDate} / L${w.to}
+
+EVIDENCE RULE
+Playback begins at ledger 32,570 and reveals native-XRP routing chronologically. Direct graph edges represent native-XRP routing/commitment records only. EVERY-DROP evidence separately records exact AccountRoot balance deltas and fees for all successful balance-affecting transactions encountered. Neither proves ownership, identity, intent, exchange activity or sale activity.
+
+TOP DIRECT XRP FLOWS
+`;
+  top.forEach((e,i)=>{s+=`${i+1}. ${e.source} -> ${e.target}
+   type=${e.type} year=${e.year||'unknown'} totalXRP=${isDrops(e.totalDrops)?dropsToXrpString(e.totalDrops):fmt(e.totalXRP)} exactDrops=${isDrops(e.totalDrops)?e.totalDrops:'legacy'} txCount=${e.count} ledger=${e.firstLedger}-${e.lastLedger}
+`});
+  return s;
+}
+
+function rippleIso(sec){
+  if(sec==null)return null;
+  try{return new Date((Number(sec)+946684800)*1000).toISOString()}catch{return null}
+}
+function playbackEventFromFlow(f){
+  return {
+    ledger:Number(f.ledger)||0,
+    hash:f.hash||'',
+    source:f.source,target:f.dest,
+    drops:String(f.drops||'0'),
+    type:f.type||'Payment',
+    year:Number(f.year)||ledgerApproxYear(f.ledger),
+    date:f.date??null,
+    iso:rippleIso(f.date)
+  };
+}
+function graphFallbackEvents(){
+  return Object.values(graph.edges).map(e=>({
+    ledger:Number(e.firstLedger)||0,
+    hash:(e.hashes&&e.hashes[0])||'',
+    source:e.source,target:e.target,
+    drops:isDrops(e.totalDrops)?e.totalDrops:String(Math.max(0,Math.round(Number(e.totalXRP||0)*1e6))),
+    type:e.type||'Payment',
+    year:Number(e.year)||ledgerApproxYear(e.firstLedger),
+    date:null,iso:null,approx:true
+  })).filter(e=>e.ledger>0).sort((a,b)=>a.ledger-b.ledger||a.source.localeCompare(b.source));
+}
+async function loadExactPlaybackEvents(){
+  const rows=await idbAllEvidence();
+  const byHash=new Map(),noHash=[];
+  for(const row of rows){
+    const ev=row.value;
+    if(ev?.evidenceMode!=='EVERY_DROP_V1')continue;
+    for(const f of (ev.flows||[])){
+      const p=playbackEventFromFlow(f);
+      if(p.hash)byHash.set(p.hash,p);else noHash.push(p);
+    }
+  }
+  const arr=[...byHash.values(),...noHash].sort((a,b)=>a.ledger-b.ledger||(a.date||0)-(b.date||0)||a.hash.localeCompare(b.hash));
+  return arr;
+}
+async function preparePlayback(force=false){
+  if(playback.loaded
