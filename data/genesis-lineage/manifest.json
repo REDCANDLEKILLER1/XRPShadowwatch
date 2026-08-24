@@ -1,0 +1,83 @@
+{
+  "schema": "shadowwatch.genesis-lineage-hub.v1",
+  "updatedAt": "2026-08-24T03:31:18.602Z",
+  "source": {
+    "schema": "shadowwatch.xrpl.genesis-history.v1",
+    "snapshotLedger": 32570,
+    "genesisWallets": 136
+  },
+  "database": {
+    "branch": "hub/genesis-lineage-data",
+    "mode": "append-delta",
+    "readOnlyXRPL": true
+  },
+  "base": {
+    "checkpoint": {
+      "path": null,
+      "parts": [
+        "data/genesis-lineage/base/visual-v2-01.b64",
+        "data/genesis-lineage/base/visual-v2-02.b64",
+        "data/genesis-lineage/base/visual-v2-03.b64",
+        "data/genesis-lineage/base/visual-v2-04.b64",
+        "data/genesis-lineage/base/visual-v2-05.b64",
+        "data/genesis-lineage/base/visual-v2-06.b64",
+        "data/genesis-lineage/base/visual-v2-07.b64"
+      ],
+      "encoding": "gzip+base64-parts",
+      "schema": "shadowwatch.genesis-lineage-hub.visual.v2",
+      "sha256": "2c8c7362331f0d863d336289da25514cf626d7d1471487fcdb6a71db0790765d",
+      "gzipSha256": "0fefe7c684f522a8192258259caa09807fa169dd3991d2110498d6e4ef95bb84",
+      "bytes": 207999,
+      "compressedBytes": 70518,
+      "partsCount": 7
+    },
+    "evidence": {
+      "path": null,
+      "bytes": 7665134,
+      "segments": 2446,
+      "available": false,
+      "archiveSha256": "5bbcb1d8f4c8531a7b1f09c3297ffe60123affb2700bc5619e4e85fb03383215",
+      "note": "Exact Every-Drop archive is registered by hash but not yet stored on the hub branch; local/imported evidence remains authoritative until bootstrap migration."
+    }
+  },
+  "coverage": {
+    "requiredSegments": 2448,
+    "evidenceComplete": 2446,
+    "missingSegments": [
+      {
+        "key": "rnziParaNb8nsU4aruQdwYE3j5jUcqjzFm|4181980|10852617",
+        "address": "rnziParaNb8nsU4aruQdwYE3j5jUcqjzFm",
+        "from": 4181980,
+        "to": 10852617
+      },
+      {
+        "key": "r9hEDb4xBGRfBCcX3E4FirDWQBAYtpxC8K|4181980|10852617",
+        "address": "r9hEDb4xBGRfBCcX3E4FirDWQBAYtpxC8K",
+        "from": 4181980,
+        "to": 10852617
+      }
+    ],
+    "sealed": false,
+    "graphNodes": 1258,
+    "graphEdges": 2072,
+    "validatedTip": null,
+    "note": "Base evidence includes dynamic ledger_index_max=-1 intervals from the source run; a fixed validated tip is not yet sealed for the base."
+  },
+  "sync": {
+    "enabled": true,
+    "ready": true,
+    "trackedClass": "genesis-136",
+    "writePolicy": "server-recomputes-XRPL; clients may trigger sync but cannot submit canonical evidence",
+    "githubTokenEnv": ["SHADOWWATCH_HUB_GITHUB_TOKEN", "GITHUB_TOKEN"],
+    "dataBranch": "hub/genesis-lineage-data",
+    "deltas": [],
+    "fixedThroughLedger": 106477809,
+    "tipByAccount": {},
+    "trackedAddresses": [
+      "r2oU84CFuT4MgmrDejBaoyHNvovpMSPiA","r3AthBf5eW4b9ujLoXNHFeeEJsK3PtJDea","r3PDtZSa5LiYp1Ysn1vMuMzB59RzV3W9QH","r3WjZU5LKLmjh8ff1q2RiaPLcUJeSU414x","r3kmLJN5D28dHuH8vZNUZpMC43pEHpaocV","r43ksW5oFnW7FMjQXDqpYGJfUwmLan9dGo","r43mpEMKY1cVUX8k6zKXnRhZMEyPU9aHzR","r49pCti5xm7WVNceBaiz7vozvE9zUGq8z2","r4DGz8SxHXLaqsA9M2oocXsrty6BMSQvw3","r4HabKLiKYtCbwnGG3Ev4HqncmXWsCtF9F","r4U5AcSVABL6Ym85jB94KYnURnzkRDqh1Y","r4cmKj1gK9EcNggeHMy1eqWakPBicwp69R","r4mscDrVMQz2on2px31aV5e5ouHeRPn8oy","r4q1ujKY4hwBpgFNFx43629f2LuViU4LfA","r8TR1AeB1RDQFabM6i8UoFsRF5basqoHJ","r9aRw8p1jHtR9XhDAE22TjtM7PdupNXhkx","r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59","r9duXXmUuhSs6JxKpPCSh2tPUg9AGvE2cG","r9hEDb4xBGRfBCcX3E4FirDWQBAYtpxC8K","r9ssnjg97d86PxMrjVsCAX1xE9qg8czZTu","rB59DESmVnTwXd2SCy1G4ReVkP5UM7ZYcN","rB5TihdPbKgMrkFqrqUC3yLdE8hhv4BdeY","rBJwwXADHqbwsp6yhrqoyt2nmFx9FB83Th","rBKPS4oLSaV2KVVuHH8EpQqMGgGefGFQs7","rBQQwVbHrkf8TEcW4h4MtE6EUyPQedmtof","rBY8EZDiCNMjjhrC7SCfaGr2PzGWtSntNy","rBnmYPdB5ModK8NyDUad1mxuQjHVp6tAbk","rBqCdAqw7jLH3EDx1Gkw4gUAbFqF7Gap4c","rBrspBLnwBRXEeszToxcDUHs4GbWtGrhdE","rD1jovjQeEpvaDwn9wKaYokkXXrqo4D23x","rDCJ39V8yW39Ar3Pod7umxnrp24jATE1rt","rDJvoVn8PyhwvHAWuTdtqkH4fuMLoWsZKG","rDa8TxBdCfokqZyyYEpGMsiKziraLtyPe8","rDngjhgeQZj9FNtW8adgHvdpMJtSBMymPe","rDsDR1pFaY8Ythr8px4N98bSueixyrKvPx","rDy7Um1PmjPgkyhJzUWo1G8pzcDan9drox","rEA2XzkTXi6sWRzTVQVyUoSX4yJAzNxucd","rEJkrunCP8hpvk4ijxUgEWnxCE6iUiXxc2","rEMqTpu21XNk62QjTgVXKDig5HUpNnHvij","rEUXZtdhEtCDPxJ3MAgLNMQpq4ASgjrV6i","rEWDpTUVU9fZZtzrywAUE6D6UcFzu6hFdE","rEe6VvCzzKU1ib9waLknXvEXywVjjUWFDN","rEyhgkRqGdCK7nXtfmADrqWYGT6rSsYYEZ","rGLUu9LfpKyZyeTtSRXpU15e2FfrdvtADa","rGRGYWLmSvPuhKm4rQV287PpJUgTB1VeD7","rGow3MKvbQJvuzPPP4vEoohGmLLZ5jXtcC","rGqM8S5GnGwiEdZ6QRm1GThiTAa89tS86E","rGwUWgN5BEg3QGNY3RX2HfYowjUTZdid3E","rHC5QwZvGxyhC75StiJwZCrfnHhtSWrr8Y","rHDcKZgR7JDGQEe9r13UZkryEVPytV6L6F","rHSTEtAcRZBg1SjcR4KKNQzJKF3y86MNxT","rHTxKLzRbniScyQFGMb3NodmxA848W8dKM","rHWKKygGWPon9WSj4SzTH7vS4ict1QWKo9","rHXS898sKZX6RY3WYPo5hW6UGnpBCnDzfr","rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh","rHrSTVSjMsZKeZMenkpeLgHGvY5svPkRvR","rHzWtXTBrArrGoLDixQAgcSD2dBisM19fF","rJ51FBSh6hXSUkFdMxwmtcorjx9izrC1yj","rJ6VE6L87yaVmdyxa9jZFXSAdEFSoTGPbE","rJFGHvCtpPrftTmeNAs8bYy5xUeTaxCD5t","rJQx7JpaHUBgk7C56T2MeEAu1JZcxDekgH","rJRyob8LPaA3twGEQDPU2gXevWhpSgD8S6","rJYMACXJd1eejwzZA53VncYmiK2kZSBxyD","rJZCJ2jcohxtTzssBPeTGHLstMNEj5D96n","rKHD6m92oprEVdi1FwGfTzxbgKt8eQfUYL","rKMhQik9qdyq8TDCYT92xPPRnFtuq8wvQK","rKZig5RFv5yWAqMi9PtC5akkGpNtn3pz8A","rKdH2TKVGjoJkrE8zQKosL2PCvG2LcPzs5","rLBwqTG5ErivwPXGaAGLQzJ2rr7ZTpjMx7","rLCAUzFMzKzcyRLa1B4LRqEMsUkYXX1LAs","rLCvFaWk9WkJCCyg9Byvwbe9gxn1pnMLWL","rLeRkwDgbPVeSakJ2uXC2eqR8NLWMvU3kN","rLebJGqYffmcTbFwBzWJRiv5fo2ccmmvsB","rLiCWKQNUs8CQ81m2rBoFjshuVJviSRoaJ","rLp9pST1aAndXTeUYFkpLtkmtZVNcMs2Hc","rLqQ62u51KR3TFcewbEbJTQbCuTqsg82EY","rLs1MzkFWCxTbuAHgjeTZK4fcCDDnf2KRv","rLzpfV5BFjUmBs8Et75Wurddg4CCXFLDFU","rM1oqKtfh1zgjdAgbFmaRm3btfGBX25xVo","rMNKtUq5Z5TB5C4MJnwzUZ3YP7qmMGog3y","rMNzmamctjEDqgwyBKbYfEzHbMeSkLQfaS","rMYBVwiY95QyUnCeuBQA1D47kXA9zuoBui","rMkq9vs7zfJyQSPPkS2JgD8hXpDR5djrTA","rMwNkcpvcJucoWbFW89EGT6TfZyGUkaGso","rNRG8YAUqgsqoE5HSNPHTYqEGoKzMd7DJr","rNSnpURu2o7mD9JPjaLsdUw2HEMx5xHzd","rNWzcdSkXL28MeKaPwrvR3i7yU6XoqCiZc","rPFPa8AjKofbPiYNtYqSWxYA4A9Eqrf9jG","rPWyiv5PXyKWitakbaKne4cnCQppRvDc5B","rPcHbQ26o4Xrwb2bu5gLc3gWUsS52yx1pG","rPgrEG6nMMwAM1VbTumL23dnEX4UmeUHk7","rPhMwMcn8ewJiM6NnP6xrm9NZBbKZ57kw1","rPrz9m9yaXT94nWbqEG2SSe9kdU4Jo1CxA","rQsiKrEtzTFZkQjF9MrxzsXHCANZJSd1je","rU5KBPzSyPycRVW1HdgCKjYpU6W9PKQdE8","rUZRZ2b4NyCxjHSQKiYnpBuCWkKwDWTjxw","rUf6pynZ8ucVj1jC9bKExQ7mb9sQFooTPK","rUnFEsHjxqTswbivzL2DNHBb34rhAgZZZK","rUvEG9ahtFRcdZHi3nnJeFcJWhwXQoEkbi","rUy6q3TxE4iuVWMpzycrQfD5uZok51g1cq","rUzSNPtxrmeSTpnjsvaTuQvF2SQFPFSvLn","rVehB9r1dWghqrzJxY2y8qTiKxMgHFtQh","ramPgJkA1LSLevMg2Yrs1jWbqPTsSbbYHQ","rauPN85FeNYLBpHgJJFH6g9fYUWBmJKKhs","rf7phSp1ABzXhBvEwgSA7nRzWv2F7K5VM7","rf8kg7r5Fc8cCszGdD2jeUZt2FrgQd76BS","rfCXAzsmsnqDvyQj2TxDszTsbVj5cRTXGM","rfitr7nL7MX85LLKJce7E3ATQjSiyUPDfj","rfpQtAXgPpHNzfnAYykgT6aWa94xvTEYce","rhDfLV1hUCanViHnjJaq3gF1R2mo6PDCSC","rhWcbzUj9SVJocfHGLn58VYzXvoVnsU44u","rhdAw3LiEfWWmSrbnZG3udsN7PoWKT56Qo","rhuCtPvq6jJeYF1S7aEmAcE5iM8LstSrrP","rhxbkK9jGqPVLZSWPvCEmmf15xHBfJfCEy","rnCiWCUZXAHPpEjLY1gCjtbuc9jM1jq8FD","rnGTwRTacmqZZBwPB6rh3H1W4GoTZCQtNA","rnNPCm97TBMPprUGbfwqp1VpkfHUqMeUm7","rnT9PFSfAnWyj2fd7D5TCoCyCYbK4n356A","rnj8sNUBCw3J6sSstY9QDDoncnijFwH7Cs","rnp8kFTTm6KW8wsbgczfmv56kWXghPSWbK","rnxyvrF2mUhK6HubgPxUfWExERAwZXMhVL","rnziParaNb8nsU4aruQdwYE3j5jUcqjzFm","rp1xKo4CWEzTuT2CmfHnYntKeZSf21KqKq","rpGaCyHRYbgKhErgFih3RdjJqXDsYBouz3","rpWrw1a5rQjZba1VySn2jichsPuB4GVnoC","rphasxS8Q5p5TLTpScQCBhh5HfJfPbM2M8","rppWupV826yJUFd2zcpRGSjQHnAHXqe7Ny","rsQP8f9fLtd58hwjEArJz2evtrKULnCNif","rsRpe4UHx6HB32kJJ3FjB6Q1wUdY2wi3xi","rshceBo6ftSVYo8h5uNPzRWbdqk4W6g9va","rsjB6kHDBDUw7iB5A1EVDK1WmgmR6yFKpB","rwCYkXihZPm7dWuPCXoS3WXap7vbnZ8uzB","rwDWD2WoU7npQKKeYd6tyiLkmr7DuyRgsz","rwZpVacRQHYArgN3NzUfuKEcRDfbdvqGMi","rwoE5PxARitChLgu6VrMxWBHN7j11Jt18x","rwpRq4gQrb58N7PRJwYEQaoSui6Xd3FC7j"
+    ],
+    "maxAccountsPerBatch": 8,
+    "maxIncrementalLedgerSpan": 250000,
+    "xrplHttpEndpoint": "https://s1.ripple.com:51234/"
+  }
+}
