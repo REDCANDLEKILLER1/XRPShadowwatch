@@ -1,9 +1,17 @@
 # ShadowWatch Genesis Lineage Database
 
-Canonical data branch for the Genesis Lineage Lab.
+Canonical shared-history data branch for the Genesis Lineage Lab inside ShadowWatch.xyz.
 
-The browser treats this branch as a shared history hub. XRPL evidence remains read-only. Public clients may trigger server-side incremental sync, but canonical evidence is recomputed by the server from XRPL before any hub write.
+- Branch: `hub/genesis-lineage-data`
+- Manifest: `data/genesis-lineage/manifest.json`
+- Integrity record: `data/genesis-lineage/SEED_INTEGRITY.json`
+- Canonical visual/history seed: `data/genesis-lineage/base/checkpoint-01.b64` through `checkpoint-13.b64`
+- Encoding: gzip bytes represented as ordered base64 text parts
+- XRPL access: read-only
+- Update model: append-only server-recomputed deltas
 
-Current base seed: 2026-08-24. The manifest explicitly records 2,446/2,448 Every-Drop segments as sealed and lists the two remaining historical gaps. The conservative fixed incremental boundary is ledger 106,477,809.
+The stored seed reconstructs `shadowwatch.genesis-lineage-hub.visual.v2` with 1,258 nodes and 2,072 edges. `SEED_INTEGRITY.json` records each part's Git blob SHA-1 plus whole-artifact SHA-256 values so reconstruction can be verified independently.
 
-The visual checkpoint is stored as gzip bytes split into base64 text parts because the application API decodes it server-side before returning JSON. Exact Every-Drop evidence is registered by SHA-256 in the manifest but remains pending hub bootstrap migration; this is not represented as sealed hub evidence until those bytes are actually stored.
+Historical Every-Drop coverage is explicitly **2,446 / 2,448**, not sealed. The two missing ranges remain listed in the manifest. The full exact Every-Drop source archive is registered by its SHA-256 but is not represented as physically stored on this branch; local/imported evidence remains authoritative for those exact effect bodies until a later archive migration.
+
+The conservative fixed incremental boundary is ledger `106,477,809`. Public browser clients never write ledger evidence directly. They may trigger the ShadowWatch server-side sync endpoint; the server independently reads XRPL, recomputes evidence, and appends canonical deltas to this branch.
