@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>ShadowWatch — Genesis Lineage Lab v1.9 — Hub Sync</title>
+<link rel="stylesheet" href="/src/genesis-lineage/style.css">
+</head>
+<body>
+<div id="app">
+<header>
+  <button id="menuBtn" class="secondary" title="Debug / menu">☰</button>
+  <h1>SHADOWWATCH — GENESIS LINEAGE LAB</h1>
+  <span class="badge">READ-ONLY</span><span class="badge">LOCAL RESEARCH</span>
+  <button id="controlsBtn" class="secondary">CONTROLS</button>
+  <button id="inspectBtn" class="secondary">INSPECT</button>
+  <div id="connectionPill" class="reconnecting" title="XRPL connection is maintained automatically">
+    <span id="connectionDot"></span><span id="connectionText">XRPL AUTO</span>
+  </div>
+  <div id="hubPill" class="syncing" title="Shared lineage history hub">
+    <span id="hubDot"></span><span id="hubText">HUB LOAD</span>
+  </div>
+  <div id="topStatus">136 genesis wallets · lineage graph</div>
+</header>
+<div class="main">
+<main id="graphWrap">
+  <canvas id="graph"></canvas>
+  <div id="graphHud">Loading genesis ring…</div>
+  <div id="legend"><b>FIRST SEEN YEAR</b><div id="yearLegend"></div><div style="margin-top:5px"><span class="dot" style="background:#ffd166"></span>Selected</div></div>
+</main>
+<aside class="sidebar" id="sidebar">
+  <button id="closeControlsBtn" class="drawerClose">× CLOSE CONTROLS</button>
+  <div class="section">
+    <h2>XRPL CONNECTION</h2>
+    <label>WebSocket endpoint</label>
+    <select id="server">
+      <option>wss://xrplcluster.com</option>
+      <option>wss://s1.ripple.com</option>
+      <option>wss://s2.ripple.com</option>
+    </select>
+    <div class="row" style="margin-top:7px">
+      <button id="fitBtn" class="secondary">FIT GRAPH</button>
+    </div>
+    <div id="connState" class="small ok" style="margin-top:6px">AUTO-CONNECT enabled. Reconnects automatically.</div>
+  </div>
+
+  <div class="section">
+    <h2>TRACE WINDOW</h2>
+    <label>From anchor</label><select id="fromAnchor"></select>
+    <div style="height:6px"></div>
+    <label>To anchor</label><select id="toAnchor"></select>
+    <div class="row" style="margin-top:7px">
+      <div><label>Native XRP threshold</label><input id="minXrp" type="number" value="0" min="0" step="0.000001" disabled></div>
+      <div><label>Page cap / wallet/segment</label><input id="pageCap" type="number" value="500" min="1" max="5000"></div>
+    </div>
+    <div class="small" style="margin-top:6px">EVERY-DROP MODE: threshold is locked to 0. Exact drops are stored as integer strings. Direct native-XRP routes are graphed; all XRP account-balance effects, fees, and unresolved XRP effects are retained as segment evidence.</div>
+  </div>
+
+  <div class="section">
+    <h2>LINEAGE ACTIONS</h2>
+    <div class="row" style="margin-bottom:7px">
+      <div>
+        <label>Batch concurrency</label>
+        <select id="batchConcurrency">
+          <option value="2">2 workers</option>
+          <option value="4">4 workers</option>
+          <option value="8" selected>8 workers — recommended</option>
+          <option value="12">12 workers — fast</option>
+          <option value="16">16 workers — aggressive</option>
+        </select>
+      </div>
+      <div>
+        <label>Mode</label>
+        <div class="small" style="padding-top:8px">Isolated socket per worker. Heavy ledger ranges auto-shard; largest work starts first.</div>
+      </div>
+    </div>
+    <button id="traceSelectedBtn" style="width:100%">TRACE SELECTED WALLET → ONE HOP</button>
+    <button id="traceGenesisBtn" style="width:100%;margin-top:6px">TRACE ALL 136 → ONE HOP</button>
+    <button id="turboHistoryBtn" style="width:100%;margin-top:6px">EVERY DROP FULL HISTORY — ISOLATED TURBO</button>
+    <div class="small" style="margin-top:6px">Every-drop scan uses isolated worker sockets, weighted scheduling, and safe non-overlapping ledger shards for heavy intervals. A parent interval is COMPLETE only after every shard exhausts pagination and the combined evidence is persisted.</div>
+    <div class="row" style="margin-top:6px">
+      <button id="pauseBtn" class="secondary">PAUSE</button>
+      <button id="clearEdgesBtn" class="danger">CLEAR GRAPH EDGES</button>
+    </div>
+    <div id="batchState" class="small" style="margin-top:7px">Idle.</div>
+    <div id="progressOuter"><div id="progress"></div></div>
+  </div>
+
+  <div class="section">
+    <h2>SEARCH / VIEW</h2>
+    <label>Find wallet</label><input id="search" placeholder="r... or partial address">
+    <div class="row" style="margin-top:6px">
+      <button id="findBtn" class="secondary">FIND</button>
+      <button id="resetViewBtn" class="secondary">RESET VIEW</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button id="showAllBtn" class="secondary">SHOW ALL</button>
+      <button id="genesisOnlyBtn" class="secondary">GENESIS ONLY</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>SAVE / REPORT</h2>
+    <div class="row">
+      <button id="exportGraphBtn" class="secondary">EXPORT GRAPH</button>
+      <button id="importGraphBtn" class="secondary">IMPORT GRAPH</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button id="reportBtn" class="secondary">GENERATE REPORT</button>
+      <button id="exportEvidenceBtn" class="secondary">EXPORT DROP EVIDENCE</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button id="importEvidenceBtn" class="secondary">IMPORT DROP EVIDENCE</button>
+      <button id="clearEvidenceBtn" class="danger">CLEAR DROP EVIDENCE</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button id="clearSavedBtn" class="danger">CLEAR LOCAL SAVE</button>
+    </div>
+    <input id="importFile" type="file" accept=".json,application/json" style="display:none">
+    <input id="importEvidenceFile" type="file" accept=".json,.gz,application/json,application/gzip,application/x-gzip" style="display:none">
+    <div id="recoveryState" class="small" style="margin-top:6px">Recovery state initializing…</div>
+    <div id="hubState" class="small" style="margin-top:5px">Shared hub initializing…</div>
+    <div class="small" style="margin-top:6px">The shared hub is the canonical startup source. LocalStorage/IndexedDB are only a device cache; if empty, the app seeds the 136-wallet ring while the hub graph loads.</div>
+  </div>
+</aside>
+<aside class="inspector" id="inspector">
+  <button id="closeInspectorBtn" class="drawerClose">× CLOSE INSPECTOR</button>
+  <div class="section">
+    <h2>SELECTED NODE</h2>
+    <div id="nodeTitle">None</div>
+    <div id="nodeMeta" class="small" style="margin-top:7px">Tap/click a node.</div>
+  </div>
+  <div class="section">
+    <h2>FLOW SUMMARY</h2>
+    <div id="flowSummary" class="kv"><span>Outbound links</span><b>0</b><span>Inbound links</span><b>0</b></div>
+  </div>
+  <div class="section">
+    <h2>CONNECTED FLOWS</h2>
+    <div id="edgeList" class="edgeList"><div class="edgeRow">No node selected.</div></div>
+  </div>
+  <div class="section">
+    <h2>EVIDENCE RULE</h2>
+    <div class="small">A graph edge means the selected XRPL transaction record routed XRP or an account-deletion destination between these addresses in the chosen ledger window. It does <b>not</b> prove common ownership, a sale, exchange activity, intent, or identity.</div>
+  </div>
+</aside>
+</div>
+<div id="underGraph">
+  <div id="playbackBar">
+    <button id="historyPlay">▶ PLAY</button>
+    <select id="historySpeed" title="Playback speed">
+      <option value="0.5">0.5×</option>
+      <option value="1" selected>1×</option>
+      <option value="2">2×</option>
+      <option value="5">5×</option>
+      <option value="10">10×</option>
+      <option value="25">25×</option>
+      <option value="100">100×</option>
+    </select>
+    <select id="historyMode" title="Playback source">
+      <option value="auto" selected>EXACT / AUTO</option>
+      <option value="graph">GRAPH FALLBACK</option>
+    </select>
+    <button id="historyStart" class="secondary" title="Start of history">|◀</button>
+    <button id="historyEnd" class="secondary" title="Current history">▶|</button>
+  </div>
+  <input id="historyRange" type="range" min="0" max="1000" value="1000" step="1" aria-label="Historical playback position">
+  <div id="historyReadout">History playback ready · current graph shown</div>
+  <div id="graphActions">
+    <button id="quickCheckpoint" class="secondary">SAVE CHECKPOINT</button>
+    <button id="quickCenter" class="secondary">CENTER</button>
+  </div>
+  <div id="quietNav">
+    <button id="quickBack" class="secondary" disabled>← BACK</button>
+    <button id="quickForward" class="secondary" disabled>FORWARD →</button>
+  </div>
+</div>
+
+</div>
+
+<div id="drawer">
+  <div class="drawerHead"><b>DEBUG / RESEARCH LOG</b><button id="closeDrawer" class="secondary" style="margin-left:auto">CLOSE</button></div>
+  <div class="row" style="margin-top:8px">
+    <button id="copyDebug" class="secondary">COPY LOG</button>
+    <button id="downloadDebug" class="secondary">DOWNLOAD LOG</button>
+    <button id="clearDebug" class="danger">CLEAR</button>
+  </div>
+  <div id="debug"></div>
+</div>
+<div id="toast"></div>
+
+<script src="/src/genesis-lineage/seed.js"></script>
+<script src="/src/genesis-lineage/app.js"></script>
+</body>
+</html>
