@@ -1,0 +1,168 @@
+dDrops(tx,item){
+  const meta=txMeta(item);
+  const d=meta.delivered_amount ?? meta.DeliveredAmount;
+  if(isDrops(d))return d;
+  if(isDrops(tx.Amount))return tx.Amount;
+  return null;
+}
+function extractDirectFlow(source,item,effect=null){
+  if(!successful(item))return null;
+  const tx=txObj(item),meta=txMeta(item),type=tx.TransactionType||'';
+  if(tx.Account!==source)return null;
+  let dest=null,drops=null,classification=null;
+  if(type==='Payment'){
+    dest=tx.Destination;
+    drops=nativeDeliveredDrops(tx,item);
+    if(!drops)return null;
+    classification='NATIVE_PAYMENT';
+  }else if(type==='EscrowCreate'){
+    dest=tx.Destination;
+    if(!isDrops(tx.Amount))return null;
+    drops=tx.Amount;classification='ESCROW_LOCK';
+  }else if(type==='PaymentChannelCreate'){
+    dest=tx.Destination;
+    if(!isDrops(tx.Amount))return null;
+    drops=tx.Amount;classification='PAYCHAN_LOCK';
+  }else if(type==='AccountDelete'){
+    dest=tx.Destination;
+    const d=dest?accountBalanceDeltaDrops(meta,dest):null;
+    if(d===null||d<=0n)return null;
+    drops=d.toString();classification='ACCOUNT_DELETE_TRANSFER';
+  }else return null;
+  if(!dest||dest===source||bi(drops)<=0n)return null;
+  const ledger=Number(item.ledger_index||tx.ledger_index||0);
+  const year=rippleYear(tx.date)||ledgerApproxYear(ledger);
+  return {source,dest,type,classification,drops,ledger,hash:tx.hash||item.hash||'',date:tx.date||null,year};
+}
+function ensureChildNode(parentId,dest,year=null){
+  if(graph.nodes[dest]){
+    const n=graph.nodes[dest];
+    if(year && (!n.firstSeenYear || year<n.firstSeenYear))n.firstSeenYear=year;
+    return n;
+  }
+  const p=graph.nodes[parentId]||{x:0,y:0,depth:0};
+  const siblingCount=Object.values(graph.nodes).filter(n=>n.parent===parentId).length;
+  const depth=(p.depth||0)+1;
+  const angle=((hashCode(dest)%360)/180)*Math.PI + siblingCount*.41;
+  const radius=150+depth*48+(siblingCount%7)*13;
+  const n={id:dest,kind:'discovered',depth,parent:parentId,x:p.x+Math.cos(angle)*radius,y:p.y+Math.sin(angle)*radius,traceStatus:'UNTRACED',visible:true,firstSeenYear:year||null};
+  graph.nodes[dest]=n;return n;
+}
+function hashCode(s){let h=0;for(let i=0;i<s.length;i++)h=((h<<5)-h+s.charCodeAt(i))|0;return Math.abs(h)}
+function addFlow(f){
+  ensureChildNode(f.source,f.dest,f.year);
+  const year=f.year||ledgerApproxYear(f.ledger);
+  const k=edgeKey(f.source,f.dest,f.type,year);
+  const e=graph.edges[k]||(graph.edges[k]={id:k,source:f.source,target:f.dest,type:f.type,classification:f.classification||null,year,totalDrops:'0',totalXRP:0,count:0,unknownValueCount:0,firstLedger:null,lastLedger:null,hashes:[]});
+  e.count++;
+  if(f.drops!=null){
+    const prior=isDrops(e.totalDrops)?bi(e.totalDrops):BigInt(Math.max(0,Math.round(Number(e.totalXRP||0)*1e6)));
+    e.totalDrops=(prior+bi(f.drops)).toString();
+    e.totalXRP=Number(e.totalDrops)/1e6;
+  }else if(f.xrp!=null){
+    const add=BigInt(Math.max(0,Math.round(Number(f.xrp)*1e6)));
+    const prior=isDrops(e.totalDrops)?bi(e.totalDrops):0n;
+    e.totalDrops=(prior+add).toString();e.totalXRP=Number(e.totalDrops)/1e6;
+  }else e.unknownValueCount++;
+  if(!e.firstLedger||f.ledger<e.firstLedger)e.firstLedger=f.ledger;
+  if(!e.lastLedger||f.ledger>e.lastLedger)e.lastLedger=f.ledger;
+  if(f.hash&&e.hashes.length<200&&!e.hashes.includes(f.hash))e.hashes.push(f.hash);
+}
+async function traceWallet(address){
+  const node=graph.nodes[address]||ensureChildNode(selected||EMBEDDED.nodes[0].id,address);
+  const w=selectedWindow(),cap=Math.max(1,Number($('#pageCap').value)||100),minXrp=Math.max(0,Number($('#minXrp').value)||0);
+  node.traceStatus='RUNNING';renderInspector();draw();
+  log(`TRACE START ${address} L${w.from}→L${w.to}, minXRP=${minXrp}, cap=${cap}`);
+  let marker,pages=0,txCount=0,flowCount=0,truncated=false;
+  do{
+    if(pauseRequested)throw new Error('paused');
+    const req={command:'account_tx',account:address,ledger_index_min:w.from,ledger_index_max:w.to,binary:false,forward:true,limit:400};
+    if(marker)req.marker=marker;
+    const r=await rpcRetry(req);
+    pages++;
+    for(const item of (r.transactions||[])){
+      txCount++;
+      const effect=normalizeAccountEffect(address,item);
+      const f=extractDirectFlow(address,item,effect);
+      if(!f)continue;
+      addFlow(f);flowCount++;
+    }
+    marker=r.marker;
+    if(!batchRunning)$('#batchState').textContent=`${compactAddr(address)} · page ${pages}/${cap} · tx ${txCount} · graphed flows ${flowCount}`;
+    if(marker&&pages>=cap){truncated=true;break}
+  }while(marker);
+  node.traceStatus=truncated?'TRUNCATED':'COMPLETE';
+  graph.traces[address]={address,window:w,pages,txCount,flowCount,truncated,finishedAt:new Date().toISOString(),server:$('#server').value,minXrp};
+  log(`TRACE ${node.traceStatus} ${address}: pages=${pages}, tx=${txCount}, flows=${flowCount}${truncated?' marker remained':''}`,truncated?'WARN':'INFO');
+  save();renderInspector();draw();
+  return graph.traces[address];
+}
+
+function historyIntervals(){
+  const arr=EMBEDDED.anchors.slice().sort((a,b)=>Number(a.ledger)-Number(b.ledger));
+  const jobs=[];
+  for(let i=0;i<arr.length;i++){
+    const from=Number(arr[i].ledger);
+    const to=i<arr.length-1?Number(arr[i+1].ledger)-1:-1;
+    jobs.push({from,to,fromDate:arr[i].date,toDate:i<arr.length-1?arr[i+1].date:'validated tip'});
+  }
+  return jobs;
+}
+function segmentKey(address,from,to){return `${address}|${from}|${to}`}
+function mergeSegmentFlows(flows){
+  for(const f of flows)addFlow(f);
+}
+async function traceSegment(address,seg,client){
+  const cap=Math.max(1,Number($('#pageCap').value)||500);
+  let marker,pages=0,txCount=0;
+  const flows=[],effects=[];
+  do{
+    if(pauseRequested)throw new Error('paused');
+    const req={command:'account_tx',account:address,ledger_index_min:seg.from,ledger_index_max:seg.to,binary:false,forward:true,limit:400};
+    if(marker)req.marker=marker;
+    const r=client?await client.rpcRetry(req):await rpcRetry(req);
+    pages++;
+    for(const item of (r.transactions||[])){
+      txCount++;
+      const effect=normalizeAccountEffect(address,item);
+      if(effect)effects.push(effect);
+      const f=extractDirectFlow(address,item,effect);
+      if(f)flows.push(f);
+    }
+    marker=r.marker;
+    if(marker&&pages>=cap){
+      return {complete:false,truncated:true,pages,txCount,flowCount:flows.length,effectCount:effects.length,flows:[],effects:[],markerPresent:true};
+    }
+  }while(marker);
+  return {complete:true,truncated:false,pages,txCount,flowCount:flows.length,effectCount:effects.length,flows,effects};
+}
+function chooseShardCount(meta,from,to,concurrency){
+  if(to<from)return 1;
+  const pages=Number(meta?.pages||0),tx=Number(meta?.txCount||0);
+  let n=1;
+  if(pages>=256||tx>=50000)n=16;
+  else if(pages>=96||tx>=20000)n=12;
+  else if(pages>=48||tx>=10000)n=8;
+  else if(pages>=16||tx>=3000)n=4;
+  else if(pages>=5||tx>=800)n=2;
+  const span=to-from+1;
+  n=Math.min(n,Math.max(1,Math.floor(span/5000)));
+  return Math.max(1,n);
+}
+function splitLedgerRange(from,to,count){
+  count=Math.max(1,Math.min(count,to-from+1));
+  if(count===1)return [{from,to,index:0,count:1}];
+  const span=to-from+1,base=Math.floor(span/count),rem=span%count;
+  const out=[];let cur=from;
+  for(let i=0;i<count;i++){
+    const size=base+(i<rem?1:0),end=cur+size-1;
+    out.push({from:cur,to:end,index:i,count});cur=end+1;
+  }
+  return out;
+}
+function dedupeByHash(items){
+  const seen=new Set(),out=[];
+  for(const x of items){
+    const h=x?.hash||'';
+    const k=h||`${x.ledger}|${x.address||x.source||''}|${x.destination||x.dest||x.target||''}|${x.type||''}|${x.balanceDeltaDrops||x.drops||''}`;
+    if(seen.has(k))continue;seen
