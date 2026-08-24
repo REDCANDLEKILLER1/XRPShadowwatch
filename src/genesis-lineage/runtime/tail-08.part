@@ -1,0 +1,80 @@
+;
+  for(const [k,v] of Object.entries(graph.segmentTraces||{}))if(v.evidenceMode==='EVERY_DROP_V1')delete graph.segmentTraces[k];
+  save();await refreshRecoveryState();toast('Drop evidence cleared.');log('Cleared every-drop evidence.','WARN');
+};
+$('#clearSavedBtn').onclick=()=>{if(confirm('Delete locally saved lineage graph?')){localStorage.removeItem(STORE_KEY);toast('Local save deleted.')}};
+$('#menuBtn').onclick=()=>$('#drawer').classList.add('open');$('#closeDrawer').onclick=()=>$('#drawer').classList.remove('open');
+$('#copyDebug').onclick=async()=>{try{await navigator.clipboard.writeText(debugLines.join('\n'));toast('Debug copied.')}catch{toast('Clipboard blocked.')}};
+$('#downloadDebug').onclick=()=>download(`shadowwatch-lineage-debug-${new Date().toISOString().slice(0,10)}.txt`,debugLines.join('\n'),'text/plain');
+$('#clearDebug').onclick=()=>{debugLines=[];$('#debug').textContent=''};
+$('#controlsBtn').style.display='inline-block';$('#inspectBtn').style.display='inline-block'
+function closeMobileDrawers(){
+  $('#sidebar').classList.remove('mobileOpen');
+  $('#inspector').classList.remove('mobileOpen');
+}
+$('#controlsBtn').onclick=()=>{
+  const willOpen=!$('#sidebar').classList.contains('mobileOpen');
+  closeMobileDrawers();
+  if(willOpen)$('#sidebar').classList.add('mobileOpen');
+};
+$('#inspectBtn').onclick=()=>{
+  const willOpen=!$('#inspector').classList.contains('mobileOpen');
+  closeMobileDrawers();
+  if(willOpen)$('#inspector').classList.add('mobileOpen');
+};
+$('#closeControlsBtn').onclick=()=>$('#sidebar').classList.remove('mobileOpen');
+$('#closeInspectorBtn').onclick=()=>$('#inspector').classList.remove('mobileOpen');
+
+canvas.addEventListener('wheel',e=>{e.preventDefault();const r=canvas.getBoundingClientRect(),mx=e.clientX-r.left-r.width/2,my=e.clientY-r.top-r.height/2;const wx=(mx-camera.x)/camera.scale,wy=(my-camera.y)/camera.scale;const f=Math.exp(-e.deltaY*.001);const ns=Math.max(.06,Math.min(8,camera.scale*f));camera.x=mx-wx*ns;camera.y=my-wy*ns;camera.scale=ns;draw()},{passive:false});
+canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});drag={active:true,lastX:e.clientX,lastY:e.clientY,moved:false};if(pointers.size===2){const p=[...pointers.values()];pinchStart={dist:Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y),scale:camera.scale}}});
+canvas.addEventListener('pointermove',e=>{
+  if(pointers.has(e.pointerId))pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size===2&&pinchStart){const p=[...pointers.values()],d=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);camera.scale=Math.max(.06,Math.min(8,pinchStart.scale*d/pinchStart.dist));draw();return}
+  if(drag.active){const dx=e.clientX-drag.lastX,dy=e.clientY-drag.lastY;if(Math.hypot(dx,dy)>1)drag.moved=true;camera.x+=dx;camera.y+=dy;drag.lastX=e.clientX;drag.lastY=e.clientY;draw()}
+  else{const h=hitNode(e.clientX,e.clientY);hovered=h&&h.id;draw()}
+});
+canvas.addEventListener('pointerup',e=>{
+  const wasMoved=drag.moved;
+  pointers.delete(e.pointerId);
+  if(pointers.size<2)pinchStart=null;
+  drag.active=false;
+  if(!wasMoved){
+    const h=hitNode(e.clientX,e.clientY);
+    if(h)selectNode(h.id);
+    else $('#inspector').classList.remove('mobileOpen');
+  }
+});
+canvas.addEventListener('pointercancel',e=>{pointers.delete(e.pointerId);drag.active=false;pinchStart=null});
+window.addEventListener('resize',()=>{resize()});
+
+initAnchors();
+renderYearLegend();
+const hadLocal=loadSaved();
+if(!hadLocal){
+  seedGraph();
+  log('No local graph yet; seeded 136-wallet ring while shared hub loads.');
+}
+migrateGraphYears();
+resize();renderInspector();updateNavButtons();
+requestAnimationFrame(()=>requestAnimationFrame(()=>fitGraph()));
+if(!hadLocal){
+  idbLoad().then(g=>{
+    if(g&&g.nodes&&Object.keys(g.nodes).length>Object.keys(graph.nodes).length){
+      graph=g;if(!graph.segmentTraces)graph.segmentTraces={};
+      migrateGraphYears();
+      log(`Recovered newer IndexedDB workspace: ${Object.keys(graph.nodes).length} nodes, ${Object.keys(graph.edges).length} edges.`);
+      toast('Recovered newer saved workspace.');fitGraph();renderInspector();refreshRecoveryState();
+    }
+  });
+}
+window.addEventListener('beforeunload',()=>{try{localStorage.setItem(STORE_KEY,JSON.stringify(graph))}catch{}});
+$('#topStatus').textContent=`${EMBEDDED.genesisCount} genesis wallets · ${EMBEDDED.anchors.length} anchors · historical playback`;
+log(`App ready. Source created ${EMBEDDED.sourceCreatedAt}. ${EMBEDDED.genesisCount} genesis wallets, ${EMBEDDED.anchors.length} anchors.`);
+refreshRecoveryState();
+setConnectionUi('reconnecting','XRPL CONNECTING');
+connect().catch(e=>{log(`Initial auto-connect failed: ${e.message}`,'WARN');scheduleReconnect(e.message)});
+startKeepAlive();
+hubBootstrap();
+preparePlayback().then(()=>{ if(playback.events.length) renderPlayback(playback.events.length); }).catch(e=>log(`Playback prep deferred: ${e.message}`,'WARN'));
+requestAnimationFrame(()=>requestAnimationFrame(()=>fitGraph()));
+})();
