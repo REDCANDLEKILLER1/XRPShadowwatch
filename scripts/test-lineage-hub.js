@@ -15,5 +15,7 @@ const issued={ledger_index:124,tx:{Account:'rA',Destination:'rB',TransactionType
 check('issued currency is not XRP flow', t.directFlow('rA',issued)===null);
 check('delta path allowlist', !!t.sanitizeDeltaPath('data/genesis-lineage/deltas/2026-08/a.json'));
 check('delta path traversal blocked', t.sanitizeDeltaPath('data/genesis-lineage/deltas/../manifest.json')===null);
+check('client cannot advance beyond validated tip', t.canonicalTargetLedger(999999,123456)===123456);
+check('client may request an older deterministic tip', t.canonicalTargetLedger(120000,123456)===120000);
 console.log(`lineage hub tests ${pass}/${pass+fail}`);
 process.exitCode=fail?1:0;
