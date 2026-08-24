@@ -1,0 +1,151 @@
+name: Seal Genesis Generation 0
+
+on:
+  push:
+    branches:
+      - agent/genesis-lineage-hub
+    paths:
+      - scripts/seal-genesis-generation0.js
+      - .github/workflows/seal-genesis-generation0.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: shadowwatch-genesis-generation0-seal
+  cancel-in-progress: false
+
+jobs:
+  seal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GENESIS_SCAN_CONCURRENCY: '16'
+    steps:
+      - name: Checkout builder branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/genesis-lineage-hub
+          path: builder
+
+      - name: Checkout lineage data branch
+        uses: actions/checkout@v4
+        with:
+          ref: hub/genesis-lineage-data
+          path: hubdata
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Rebuild fixed Generation 0 evidence from XRPL
+        run: |
+          mkdir -p "$RUNNER_TEMP/genesis-seal"
+          node builder/scripts/seal-genesis-generation0.js \
+            hubdata/data/genesis-lineage/manifest.json \
+            "$RUNNER_TEMP/genesis-seal"
+
+      - name: Install sealed evidence into data branch
+        run: |
+          cp "$RUNNER_TEMP/genesis-seal/generation0-evidence.json.gz" \
+            hubdata/data/genesis-lineage/base/generation0-evidence.json.gz
+          cp "$RUNNER_TEMP/genesis-seal/generation0-index.json" \
+            hubdata/data/genesis-lineage/base/generation0-index.json
+
+      - name: Seal manifest and integrity metadata
+        run: |
+          node <<'NODE'
+          const fs=require('fs');
+          const manifestPath='hubdata/data/genesis-lineage/manifest.json';
+          const integrityPath='hubdata/data/genesis-lineage/SEED_INTEGRITY.json';
+          const indexPath='hubdata/data/genesis-lineage/base/generation0-index.json';
+          const m=JSON.parse(fs.readFileSync(manifestPath,'utf8'));
+          const i=JSON.parse(fs.readFileSync(integrityPath,'utf8'));
+          const x=JSON.parse(fs.readFileSync(indexPath,'utf8'));
+          const now=new Date().toISOString();
+
+          m.updatedAt=now;
+          m.database=m.database||{};
+          m.database.repoSeedStored=true;
+          m.database.canonicalGraphStored=true;
+          m.database.exactEvidenceArchiveStored=true;
+          m.base=m.base||{};
+          m.base.evidence={
+            path:x.archivePath,
+            encoding:'gzip',
+            schema:x.archiveSchema,
+            bytes:x.bytes,
+            compressedBytes:x.compressedBytes,
+            segments:x.completeSegments,
+            available:true,
+            sha256:x.sha256,
+            gzipSha256:x.gzipSha256,
+            effectCount:x.effectCount,
+            flowCount:x.flowCount,
+            txCount:x.txCount,
+            pages:x.pages,
+            fixedThroughLedger:x.fixedThroughLedger,
+            note:'Canonical Generation 0 Every-Drop archive rebuilt server-side from read-only XRPL account_tx and sealed only after all 2448 parent ranges exhausted markers.'
+          };
+          m.coverage=m.coverage||{};
+          m.coverage.requiredSegments=2448;
+          m.coverage.evidenceComplete=2448;
+          m.coverage.missingSegments=[];
+          m.coverage.sealed=true;
+          m.coverage.validatedTip=x.fixedThroughLedger;
+          m.coverage.note=`Generation 0 sealed through fixed baseline ledger ${x.fixedThroughLedger}. Incremental hub deltas begin after this ledger.`;
+          m.sync=m.sync||{};
+          m.sync.fixedThroughLedger=x.fixedThroughLedger;
+          const tracked=m.sync.trackedAddresses||[];
+          m.sync.tipByAccount=Object.fromEntries(tracked.map(a=>[a,x.fixedThroughLedger]));
+
+          i.generatedAt=now;
+          i.sourceEvidenceArchive={
+            repoStored:true,
+            path:x.archivePath,
+            schema:x.archiveSchema,
+            bytes:x.bytes,
+            compressedBytes:x.compressedBytes,
+            sha256:x.sha256,
+            gzipSha256:x.gzipSha256,
+            evidenceComplete:2448,
+            requiredSegments:2448,
+            effectCount:x.effectCount,
+            flowCount:x.flowCount,
+            txCount:x.txCount,
+            fixedThroughLedger:x.fixedThroughLedger
+          };
+          i.legacyBrowserArchive=x.legacyBrowserArchive;
+
+          fs.writeFileSync(manifestPath,JSON.stringify(m,null,2)+'\n');
+          fs.writeFileSync(integrityPath,JSON.stringify(i,null,2)+'\n');
+          NODE
+
+      - name: Verify sealed files and commit data branch
+        run: |
+          node <<'NODE'
+          const fs=require('fs'),crypto=require('crypto'),zlib=require('zlib');
+          const root='hubdata/data/genesis-lineage';
+          const idx=JSON.parse(fs.readFileSync(root+'/base/generation0-index.json','utf8'));
+          const gz=fs.readFileSync(root+'/base/generation0-evidence.json.gz');
+          const raw=zlib.gunzipSync(gz);
+          const h=b=>crypto.createHash('sha256').update(b).digest('hex');
+          if(gz.length!==idx.compressedBytes||raw.length!==idx.bytes)throw new Error('size mismatch');
+          if(h(gz)!==idx.gzipSha256||h(raw)!==idx.sha256)throw new Error('hash mismatch');
+          const a=JSON.parse(raw);
+          if(a.coverage?.completeSegments!==2448||a.coverage?.sealed!==true)throw new Error('archive not sealed');
+          if(!Array.isArray(a.segments)||a.segments.length!==2448)throw new Error('segment count mismatch');
+          console.log(`VERIFIED 2448/2448 effects=${idx.effectCount} flows=${idx.flowCount} tx=${idx.txCount}`);
+          NODE
+          cd hubdata
+          git config user.name 'shadowwatch-genesis-hub'
+          git config user.email 'actions@users.noreply.github.com'
+          git add data/genesis-lineage/manifest.json \
+                  data/genesis-lineage/SEED_INTEGRITY.json \
+                  data/genesis-lineage/base/generation0-evidence.json.gz \
+                  data/genesis-lineage/base/generation0-index.json
+          if git diff --cached --quiet; then
+            echo 'No data changes to commit.'
+          else
+            git commit -m 'Seal Genesis Generation 0 Every-Drop evidence'
+            git push origin HEAD:hub/genesis-lineage-data
+          fi
