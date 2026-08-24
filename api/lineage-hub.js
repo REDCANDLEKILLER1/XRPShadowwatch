@@ -5,14 +5,12 @@
 // they cannot submit canonical ledger evidence. The server re-reads XRPL and
 // computes the evidence itself before writing an append-only delta to the hub.
 //
-// Required Vercel env for writes to the private repository:
+// Required Vercel env for access to the private repository:
 //   SHADOWWATCH_HUB_GITHUB_TOKEN (preferred) or GITHUB_TOKEN
 // Fine-grained token permission: Contents — Read and write, Metadata — Read.
 // Never expose that token to client JavaScript.
 
 'use strict';
-
-const zlib = require('zlib');
 
 const OWNER = 'REDCANDLEKILLER1';
 const REPO = 'XRPShadowwatch';
@@ -80,6 +78,34 @@ async function ghRaw(path) {
     throw e;
   }
   return r;
+}
+
+async function readBaseAsset(spec) {
+  if (!spec) return null;
+  if (spec.path) {
+    const r = await ghRaw(spec.path);
+    return { buffer: Buffer.from(await r.arrayBuffer()), contentType: r.headers.get('content-type') || null };
+  }
+  if (Array.isArray(spec.parts) && spec.parts.length && spec.encoding === 'gzip+base64-parts') {
+    const chunks = [];
+    for (const path of spec.parts) {
+      const r = await ghRaw(path);
+      chunks.push((await r.text()).trim());
+    }
+    return { buffer: Buffer.from(chunks.join(''), 'base64'), contentType: 'application/gzip' };
+  }
+  return null;
+}
+
+function canonicalTargetLedger(requested, validated) {
+  const v = Number(validated);
+  if (!Number.isInteger(v) || v <= 0) throw new Error('validated target ledger unavailable');
+  if (requested == null || requested === '') return v;
+  const r = Number(requested);
+  if (!Number.isInteger(r) || r <= 0) {
+    const e = new Error('invalid target ledger'); e.status = 400; throw e;
+  }
+  return Math.min(r, v);
 }
 
 async function readManifest() {
@@ -284,9 +310,11 @@ function sanitizeDeltaPath(path) {
   return path;
 }
 
+function compactAddress(a) { return a.slice(0,6) + '-' + a.slice(-5); }
+
 async function doSync(body) {
   if (!token()) {
-    const e = new Error('hub write token is not configured'); e.status = 503; throw e;
+    const e = new Error('hub repository token is not configured'); e.status = 503; throw e;
   }
   const manifest = await readManifest();
   if (!manifest.sync || !manifest.sync.ready) {
@@ -301,8 +329,8 @@ async function doSync(body) {
   if (accounts.some(a => !tracked.has(a))) {
     const e = new Error('sync may only target tracked genesis addresses'); e.status = 403; throw e;
   }
-  const tip = body.to == null ? await validatedTip() : Number(body.to);
-  if (!Number.isInteger(tip) || tip <= 0) { const e = new Error('invalid target ledger'); e.status = 400; throw e; }
+  const validated = await validatedTip();
+  const tip = canonicalTargetLedger(body.to, validated);
   const tipBy = Object.assign({}, manifest.sync.tipByAccount || {});
   const work = [];
   for (const address of accounts) {
@@ -321,7 +349,7 @@ async function doSync(body) {
 
   const allTracked = manifest.sync.trackedAddresses || [];
   let fixedThrough = Infinity;
-  for (const a of allTracked) fixedThrough = Math.min(fixedThrough, Number(tipBy[a] || 0));
+  for (const a of allTracked) fixedThrough = Math.min(fixedThrough, Number(tipBy[a] || manifest.sync.fixedThroughLedger || 0));
   if (!Number.isFinite(fixedThrough)) fixedThrough = Number(manifest.sync.fixedThroughLedger || 0);
 
   const now = new Date().toISOString();
@@ -363,46 +391,33 @@ async function handler(req, res) {
       const delta = req.query && req.query.delta;
       if (asset || delta) {
         const manifest = await readManifest();
-        let path = null;
         if (asset) {
           const map = {
-            checkpoint: manifest.base && manifest.base.checkpoint && manifest.base.checkpoint.path,
-            evidence: manifest.base && manifest.base.evidence && manifest.base.evidence.path,
-            report: manifest.base && manifest.base.report && manifest.base.report.path,
-            debug: manifest.base && manifest.base.debug && manifest.base.debug.path
+            checkpoint: manifest.base && manifest.base.checkpoint,
+            evidence: manifest.base && manifest.base.evidence,
+            report: manifest.base && manifest.base.report,
+            debug: manifest.base && manifest.base.debug
           };
-          path = map[String(asset)] || null;
-        } else {
-          path = sanitizeDeltaPath(String(delta));
-          const allowed = new Set((manifest.sync && manifest.sync.deltas || []).map(d => d.path));
-          if (!path || !allowed.has(path)) path = null;
-        }
-        if (asset === 'checkpoint' && Array.isArray(manifest.base?.checkpoint?.parts)) {
-          const pieces = [];
-          for (const partPath of manifest.base.checkpoint.parts) {
-            const pr = await ghRaw(partPath);
-            pieces.push((await pr.text()).trim());
-          }
-          const buf = zlib.gunzipSync(Buffer.from(pieces.join(''), 'base64'));
-          res.setHeader('Content-Type', 'application/json; charset=utf-8');
-          res.status(200).send(buf);
+          const spec = map[String(asset)] || null;
+          const loaded = await readBaseAsset(spec);
+          if (!loaded) { res.status(404).json({ error: 'hub asset not found' }); return; }
+          const fallbackType = String(asset) === 'evidence' ? 'application/gzip' : (String(asset) === 'report' || String(asset) === 'debug' ? 'text/plain; charset=utf-8' : 'application/json');
+          res.setHeader('Content-Type', loaded.contentType || fallbackType);
+          res.status(200).send(loaded.buffer);
           return;
         }
-        if (!path) { res.status(404).json({ error: 'hub asset not found' }); return; }
+        const path = sanitizeDeltaPath(String(delta));
+        const allowed = new Set((manifest.sync && manifest.sync.deltas || []).map(d => d.path));
+        if (!path || !allowed.has(path)) { res.status(404).json({ error: 'hub asset not found' }); return; }
         const upstream = await ghRaw(path);
-        let buf = Buffer.from(await upstream.arrayBuffer());
-        if (asset === 'checkpoint' && manifest.base?.checkpoint?.encoding === 'gzip+base64') {
-          buf = zlib.gunzipSync(Buffer.from(buf.toString('utf8').trim(), 'base64'));
-          res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        } else {
-          res.setHeader('Content-Type', upstream.headers.get('content-type') || (path.endsWith('.gz') ? 'application/gzip' : 'application/json'));
-        }
-        res.status(200).send(buf);
+        res.setHeader('Content-Type', upstream.headers.get('content-type') || 'application/json');
+        res.status(200).send(Buffer.from(await upstream.arrayBuffer()));
         return;
       }
       const manifest = await readManifest();
       res.status(200).json({
         ok: true,
+        accessConfigured: Boolean(token()),
         writeConfigured: Boolean(token()),
         branch: DATA_BRANCH,
         manifest
@@ -426,5 +441,5 @@ async function handler(req, res) {
 module.exports = handler;
 module.exports._test = {
   accountBalanceDeltaDrops, normalizeEffect, directFlow, sanitizeDeltaPath,
-  successful, isDrops, bi
+  successful, isDrops, bi, compactAddress, canonicalTargetLedger
 };
