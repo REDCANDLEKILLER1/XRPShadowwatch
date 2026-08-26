@@ -1255,11 +1255,30 @@ function _buildSources(interpretations, pack){
       sources.push(ref);
     });
   });
-  // Also call legacy renderClickableSources for GDELT/news URLs
+  // Also collect curated legacy news URLs. This is part of the plain-text
+  // read-aloud report, so the HTML renderer must never be used here. The
+  // pipeline already owns the SOURCES section header; strip the legacy
+  // renderer's own header and only add URLs not already bound above.
   var legacySources='';
-  if(typeof window.renderClickableSources==='function'){
+  if(typeof window.renderPlainTextSources==='function'){
     legacySources=_safe(function(){
-      return window.renderClickableSources(pack)||'';
+      var items=(typeof window.getNewsSources==='function')
+        ? window.getNewsSources(pack)
+        : [];
+      if(typeof window.filterSourcesForReport==='function'){
+        items=window.filterSourcesForReport(items);
+      } else if(typeof window.rankNewsItems==='function'){
+        items=window.rankNewsItems(items).slice(0,8);
+      }
+      items=_arr(items).filter(function(item){
+        var url=item&&item.url;
+        if(!url||seen[url]) return false;
+        seen[url]=true;
+        return true;
+      });
+      return (window.renderPlainTextSources(items)||'')
+        .replace(/^\s*SOURCES\s*\n?/i,'')
+        .trim();
     },'');
   }
   if(!sources.length && !legacySources) return '[No external sources for today\u2019s scan.]';
