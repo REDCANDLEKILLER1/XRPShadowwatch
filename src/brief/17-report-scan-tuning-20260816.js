@@ -16,9 +16,16 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026.08.20.1';
+  var VERSION = '2026.08.26.1';
   var SNAPSHOT_KEY = 'shadowwatch_snapshot_v30';
   var TX_SAFETY_MAX_PAGES = 250;
+  // Lever A: estimate only to choose a candidate, then prove the candidate's
+  // ledger close time is at/before the requested start. If that proof cannot
+  // be established, fall back to the legacy -1 scan rather than risk under-read.
+  var TX_RANGE_MARGIN_LEDGERS = 1200;
+  var TX_RANGE_EST_LEDGER_MS = 4000;
+  var TX_RANGE_MAX_REFINES = 4;
+  var txLedgerRangeCache = Object.create(null);
   var PROMOTIONS = [
     {
       address: 'rJP1s6gaopZxXbpGegkxBspUgm5HjLUjBH',
@@ -230,6 +237,10 @@
         pages_scanned: num(p.pages_scanned),
         boundary_reached: !!p.boundary_reached,
         history_exhausted: !!p.history_exhausted,
+        ledger_index_min: num(p.ledger_index_min) || -1,
+        range_bound_proven: !!p.range_bound_proven,
+        range_bound_close_time: p.range_bound_close_time || null,
+        range_bound_reason: p.range_bound_reason || null,
         error: p.error || null
       };
     });
@@ -248,6 +259,90 @@
     return c;
   }
 
+  function ledgerIndexFrom(res) {
+    var ledger = res && res.ledger;
+    var raw = res && res.ledger_index;
+    if (raw == null && ledger) raw = ledger.ledger_index != null ? ledger.ledger_index : ledger.seq;
+    var x = Number(raw);
+    return Number.isFinite(x) && x > 0 ? Math.floor(x) : null;
+  }
+
+  function ledgerCloseMsFrom(res) {
+    var ledger = res && res.ledger;
+    var raw = ledger && ledger.close_time != null ? ledger.close_time : (res && res.close_time);
+    var sec = Number(raw);
+    if (!Number.isFinite(sec) || sec < 0) return null;
+    return (sec + 946684800) * 1000;
+  }
+
+  function txLedgerRangeForStart(ws, startMs) {
+    var key = String(Math.floor(Number(startMs) || 0));
+    if (txLedgerRangeCache[key]) return txLedgerRangeCache[key];
+
+    txLedgerRangeCache[key] = (async function () {
+      var fallback = {
+        proven: false,
+        ledger_index_min: -1,
+        lower_close_ms: null,
+        reason: 'range proof unavailable'
+      };
+      try {
+        var latest = await xrpl(ws, {
+          command: 'ledger', ledger_index: 'validated', transactions: false, expand: false
+        });
+        var latestIndex = ledgerIndexFrom(latest);
+        var latestCloseMs = ledgerCloseMsFrom(latest);
+        if (!latestIndex || !Number.isFinite(latestCloseMs)) {
+          fallback.reason = 'validated ledger index/time unavailable';
+          return fallback;
+        }
+
+        var ageMs = Math.max(0, latestCloseMs - Number(startMs));
+        var ledgersBack = Math.ceil(ageMs / TX_RANGE_EST_LEDGER_MS) + TX_RANGE_MARGIN_LEDGERS;
+        var candidate = Math.max(1, latestIndex - ledgersBack);
+
+        for (var attempt = 0; attempt < TX_RANGE_MAX_REFINES; attempt++) {
+          var probe = await xrpl(ws, {
+            command: 'ledger', ledger_index: candidate, transactions: false, expand: false
+          });
+          var closeMs = ledgerCloseMsFrom(probe);
+          if (!Number.isFinite(closeMs)) {
+            fallback.reason = 'candidate ledger close time unavailable';
+            return fallback;
+          }
+          if (closeMs <= startMs) {
+            var proven = {
+              proven: true,
+              ledger_index_min: candidate,
+              lower_close_ms: closeMs,
+              reason: 'candidate ledger close time <= requested start'
+            };
+            try {
+              if (typeof log === 'function') log('tx-range bound: ledger_min=' + candidate +
+                ' close=' + new Date(closeMs).toISOString() + ' start=' + new Date(startMs).toISOString() +
+                ' margin_ledgers=' + TX_RANGE_MARGIN_LEDGERS);
+            } catch (_) {}
+            return proven;
+          }
+
+          var extra = Math.ceil((closeMs - startMs) / TX_RANGE_EST_LEDGER_MS) + TX_RANGE_MARGIN_LEDGERS;
+          var next = Math.max(1, candidate - extra);
+          if (next >= candidate) next = Math.max(1, candidate - TX_RANGE_MARGIN_LEDGERS);
+          candidate = next;
+        }
+        fallback.reason = 'candidate could not be proven older than requested start';
+      } catch (e) {
+        fallback.reason = e && e.message ? e.message : String(e || 'ledger range probe failed');
+      }
+      try {
+        if (typeof log === 'function') log('tx-range bound unavailable; using full retained history: ' + fallback.reason);
+      } catch (_) {}
+      return fallback;
+    })();
+
+    return txLedgerRangeCache[key];
+  }
+
   function installCompleteAccountTxPagination() {
     try {
       if (typeof accountTxWindowDepth !== 'function' || accountTxWindowDepth._swTxCompleteness20260819) return;
@@ -257,10 +352,12 @@
         var rows = [], marker = null, pages = 0;
         var boundaryReached = false, historyExhausted = false;
         var status = 'COMPLETE', error = '';
+        var range = await txLedgerRangeForStart(ws, startMs);
+        var ledgerMin = range && range.proven ? range.ledger_index_min : -1;
 
         while (pages < TX_SAFETY_MAX_PAGES) {
           try {
-            var req = { command: 'account_tx', account: account, ledger_index_min: -1, ledger_index_max: -1, limit: limit, forward: false };
+            var req = { command: 'account_tx', account: account, ledger_index_min: ledgerMin, ledger_index_max: -1, limit: limit, forward: false };
             if (marker) req.marker = marker;
             var res = await xrpl(ws, req);
             pages++;
@@ -280,7 +377,14 @@
 
             marker = res.marker || null;
             if (oldest <= startMs) { boundaryReached = true; break; }
-            if (!marker) { historyExhausted = true; break; }
+            if (!marker) {
+              // With a proven server-side lower bound, marker exhaustion means the
+              // requested range itself is exhausted — not that the account has no
+              // older history. Preserve history_exhausted for the legacy -1 path.
+              if (range && range.proven) boundaryReached = true;
+              else historyExhausted = true;
+              break;
+            }
           } catch (e) {
             status = 'FAILED';
             error = e && e.message ? e.message : String(e || 'account_tx failed');
@@ -294,6 +398,10 @@
           pages_scanned: pages,
           boundary_reached: boundaryReached,
           history_exhausted: historyExhausted,
+          ledger_index_min: ledgerMin,
+          range_bound_proven: !!(range && range.proven),
+          range_bound_close_time: range && Number.isFinite(range.lower_close_ms) ? new Date(range.lower_close_ms).toISOString() : null,
+          range_bound_reason: range && range.reason ? range.reason : null,
           error: error || null
         };
         proofByAccount[account] = proof;
