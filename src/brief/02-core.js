@@ -2544,19 +2544,54 @@ function _balancesReadCount(p) {
   return rows.filter(w => String((w && w.status) || '').trim().toUpperCase() === 'CHECKED').length;
 }
 
-// How many wallets this run was SUPPOSED to read. Canonical field first, then the
-// same checked+failed fallback scanCoverage already uses, then the row count —
-// rows are built from the whole active watchlist, so their length is the roster.
-// Returns 0 when the target cannot be established, and 0 must be read as
-// "unknown", never as "complete".
+// How many wallets this run was SUPPOSED to read. Returns 0 when the target
+// cannot be established, and 0 must be read as "unknown", never as "complete".
+//
+// Order matters, and an earlier version had it wrong. It tried the counters
+// before the rows and summed only wallets_checked + wallets_failed, omitting
+// wallets_invalid — which scanCoverage does count:
+//
+//     const failed = n(p.wallets_failed) + n(p.wallets_invalid);
+//
+// So a pack with checked=2, failed=0, invalid=1 and no watchlist_total scored
+// target=2 against 2 CHECKED rows and reported COMPLETE — "All 2 watched wallets
+// returned balances first" — while the roster it was handed held three. A false
+// COMPLETE inside the guard whose whole job is to stop false completeness.
+//
+// The rows are the roster: scanWallets builds one row per active watchlist entry
+// whatever its outcome, so their length is the most direct truth available and
+// now outranks any derived sum. Counters are a last resort and include invalid.
 function _balanceTargetCount(p) {
   const q = p || {};
+
+  // 1. canonical
   const declared = Number(q.watchlist_total);
   if (isFinite(declared) && declared > 0) return declared;
-  const checked = Number(q.wallets_checked), failed = Number(q.wallets_failed);
-  if (isFinite(checked) && isFinite(failed) && (checked + failed) > 0) return checked + failed;
+
+  // 2. the rows themselves — one per watched wallet, whatever happened to it
   const rows = q.wallet_results || q.wallets || [];
-  return rows.length || 0;
+  if (Array.isArray(rows) && rows.length > 0) return rows.length;
+
+  // 3. counters — and only when ALL THREE are explicitly present.
+  //
+  // A missing counter is not a zero. Defaulting an absent wallets_failed to 0 is
+  // the same unsafe assumption that produced the bug above, one level down: a
+  // pack carrying only wallets_checked would sum to exactly the number read and
+  // report COMPLETE, having accounted for nothing. There is no way to tell
+  // "omitted because none" from "omitted because unknown", so the strict reading
+  // is unknown. Real packs never reach here — buildPack always sets
+  // watchlist_total — so this costs nothing and closes a guess.
+  const nums = ['wallets_checked', 'wallets_failed', 'wallets_invalid'].map(k => {
+    const v = q[k];
+    return (v == null) ? null : Number(v);
+  });
+  if (nums.every(v => v !== null && isFinite(v) && v >= 0)) {
+    const sum = nums[0] + nums[1] + nums[2];
+    if (sum > 0) return sum;
+  }
+
+  // 4. unknown
+  return 0;
 }
 
 // Three states, not two. The first version of this fix corrected the 0-wallet
