@@ -1516,12 +1516,23 @@ function assertNoJSONArtifacts(report){
   return null;
 }
 
-function assertNoDeveloperLanguage(report){
+function assertNoDeveloperLanguage(report, interpretations){
   var devTerms=['threshold','heuristic','narrative_usable','evidence_level',
     'source_refs','has_signal','pipeline','boot','null','undefined',
     'NaN','degraded','governor','validation','schema'];
   var bodyEnd=report.indexOf('\uD83D\uDE4F THE DAILY PRAYER');
   var body=bodyEnd>-1?report.slice(0,bodyEnd):report;
+  // A newspaper's word choice is not our developer language. SW-20260827-VXOQO
+  // scanned 251/251 wallets cleanly and was still replaced by the fallback,
+  // because a cited headline read "XRP's Institutional Pipeline Widens as ETF
+  // Flows Hit Multi-Month Highs" and "pipeline" is on this list.
+  //
+  // Same landmine assertLabelProvenance hit on 2026-08-05, when three Binance
+  // headlines were read as identity claims. That one was fixed by excluding
+  // quoted journalism before scanning; this assertion never got the same
+  // treatment. Reuse the existing stripper rather than inventing a second rule —
+  // a quoted headline is the paper talking, not us, for every assertion.
+  body=_stripQuotedJournalism(body, interpretations);
   for(var i=0;i<devTerms.length;i++){
     var term=devTerms[i];
     // v3.34: word-boundary match. The old substring check false-flagged real
@@ -1703,7 +1714,7 @@ function auditPublicReport(reportText, violations, interpretations, isFallback){
   run(assertHumanReadable(reportText));
   run(assertNoDuplicateSections(reportText));
   run(assertNoJSONArtifacts(reportText));
-  run(assertNoDeveloperLanguage(reportText));
+  run(assertNoDeveloperLanguage(reportText, interpretations||[]));
   run(assertSourceBinding(reportText, interpretations||[]));
   run(assertLabelProvenance(reportText, interpretations||[]));
   run(assertNoArrayDumps(reportText));
