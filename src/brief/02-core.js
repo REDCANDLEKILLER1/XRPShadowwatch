@@ -2529,6 +2529,108 @@ function _stripPublisherSuffix(s) {
 //
 // Fourth member of the same family as the coverage and baseline guards: a
 // failure that leaves no trace in the narrative.
+// How much of the board was actually read before the link died. Counted, never
+// assumed: wallets_checked when the pack carries it, otherwise the CHECKED rows
+// themselves. The scanner writes status in upper case (CHECKED / FAILED), so the
+// test is case-insensitive and anchored — 'FAILED' must not match 'CHECKED'.
+function _balancesReadCount(p) {
+  const q = p || {};
+  const direct = Number(q.wallets_checked);
+  if (isFinite(direct) && direct >= 0 && q.wallets_checked != null) return direct;
+  const rows = q.wallet_results || q.wallets || [];
+  // The scanner's canonical success status is exactly 'CHECKED' — it is never a
+  // prefix of a longer status anywhere in the tree. Match it exactly; a prefix
+  // test would silently accept a future 'CHECKED_PARTIAL' as a full read.
+  return rows.filter(w => String((w && w.status) || '').trim().toUpperCase() === 'CHECKED').length;
+}
+
+// How many wallets this run was SUPPOSED to read. Returns 0 when the target
+// cannot be established, and 0 must be read as "unknown", never as "complete".
+//
+// Order matters, and an earlier version had it wrong. It tried the counters
+// before the rows and summed only wallets_checked + wallets_failed, omitting
+// wallets_invalid — which scanCoverage does count:
+//
+//     const failed = n(p.wallets_failed) + n(p.wallets_invalid);
+//
+// So a pack with checked=2, failed=0, invalid=1 and no watchlist_total scored
+// target=2 against 2 CHECKED rows and reported COMPLETE — "All 2 watched wallets
+// returned balances first" — while the roster it was handed held three. A false
+// COMPLETE inside the guard whose whole job is to stop false completeness.
+//
+// The rows are the roster: scanWallets builds one row per active watchlist entry
+// whatever its outcome, so their length is the most direct truth available and
+// now outranks any derived sum. Counters are a last resort and include invalid.
+function _balanceTargetCount(p) {
+  const q = p || {};
+
+  // 1. canonical
+  const declared = Number(q.watchlist_total);
+  if (isFinite(declared) && declared > 0) return declared;
+
+  // 2. the rows themselves — one per watched wallet, whatever happened to it
+  const rows = q.wallet_results || q.wallets || [];
+  if (Array.isArray(rows) && rows.length > 0) return rows.length;
+
+  // 3. counters — and only when ALL THREE are explicitly present.
+  //
+  // A missing counter is not a zero. Defaulting an absent wallets_failed to 0 is
+  // the same unsafe assumption that produced the bug above, one level down: a
+  // pack carrying only wallets_checked would sum to exactly the number read and
+  // report COMPLETE, having accounted for nothing. There is no way to tell
+  // "omitted because none" from "omitted because unknown", so the strict reading
+  // is unknown. Real packs never reach here — buildPack always sets
+  // watchlist_total — so this costs nothing and closes a guess.
+  const nums = ['wallets_checked', 'wallets_failed', 'wallets_invalid'].map(k => {
+    const v = q[k];
+    return (v == null) ? null : Number(v);
+  });
+  if (nums.every(v => v !== null && isFinite(v) && v >= 0)) {
+    const sum = nums[0] + nums[1] + nums[2];
+    if (sum > 0) return sum;
+  }
+
+  // 4. unknown
+  return 0;
+}
+
+// Three states, not two. The first version of this fix corrected the 0-wallet
+// case but still routed 1-of-251 and 251-of-251 through the same sentence, so a
+// barely-started run could imply the balance pass had finished. Coverage has
+// three real shapes and each gets its own true statement.
+function _linkLostLine(p, missing) {
+  const read = _balancesReadCount(p);
+  const target = _balanceTargetCount(p);
+  const tail = (missing && missing.length ? ': ' + missing.join(' and ') + ' did not run' : '')
+    + '. Sections missing below are NOT findings of nothing; they were not reached. Re-run for a complete pass.';
+
+  // ZERO — the link died before the balance pass produced anything.
+  if (read <= 0) {
+    return 'The XRPL link dropped before a single wallet could be read, so this run has no balances at all. '
+      + 'The coverage figure below measures the outage, not the board' + tail;
+  }
+
+  // COMPLETE — and only when the target is known AND was actually reached.
+  if (target > 0 && read === target) {
+    return 'The XRPL link dropped mid-scan and could not be rebuilt. All ' + target + ' watched wallets '
+      + 'returned balances first, so the coverage figure stands \u2014 but the later phases stopped where '
+      + 'they were' + tail;
+  }
+
+  // PARTIAL — say the count. Never imply the balance pass finished.
+  if (target > 0 && read < target) {
+    return 'The XRPL link dropped mid-scan and could not be rebuilt. Only ' + read + ' of ' + target
+      + ' watched wallets returned balances before it went, so the balance coverage below is partial, '
+      + 'not the whole board \u2014 and the later phases stopped where they were' + tail;
+  }
+
+  // UNKNOWN — no trustworthy target (absent, or read exceeds it and the two
+  // disagree). Some balances exist, but completeness cannot be proven, so it is
+  // not claimed.
+  return 'Some balances were read, but full balance coverage could not be proven before the link dropped'
+    + tail;
+}
+
 function scanIntegrity(pack) {
   const p = pack || {};
   let lost = !!p.scan_link_lost;
@@ -2552,11 +2654,18 @@ function scanIntegrity(pack) {
     sealLine: lost ? 'REPORT NOT SEALED' : '',
     at: p.scan_link_lost_at || (typeof state !== 'undefined' ? state.linkLostAt : null) || null,
     missing: missing,
-    line: lost
-      ? ('The XRPL link dropped mid-scan and could not be rebuilt. Balances were already read, so the coverage figure stands — but the later phases stopped where they were'
-         + (missing.length ? ': ' + missing.join(' and ') + ' did not run' : '')
-         + '. Sections missing below are NOT findings of nothing; they were not reached. Re-run for a complete pass.')
-      : ''
+    // v16.25: this clause used to assert "Balances were already read, so the
+    // coverage figure stands" on EVERY link loss. The comment above admits the
+    // balance pass has only "usually" finished by then — and "usually" was being
+    // published as fact. SW-20260824-I1ZKV lost the link before the balance pass
+    // got anywhere, read 0 of 251 wallets, and still told the reader its balances
+    // were in hand. That is this guard committing the exact fault it exists to
+    // prevent: a sentence claiming something nobody checked.
+    //
+    // Read the coverage instead of assuming it. Both branches are true statements
+    // about a scan that died; they differ on WHEN it died, which is the thing the
+    // reader needs in order to know what the numbers below are worth.
+    line: lost ? _linkLostLine(p, missing) : ''
   };
 }
 
