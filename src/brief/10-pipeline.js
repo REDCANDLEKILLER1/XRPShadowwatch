@@ -1255,11 +1255,42 @@ function _buildSources(interpretations, pack){
       sources.push(ref);
     });
   });
-  // Also call legacy renderClickableSources for GDELT/news URLs
+  // Also collect curated legacy news URLs. This is part of the plain-text
+  // read-aloud report, so the HTML renderer must never be used here. The
+  // pipeline already owns the SOURCES section header; strip the legacy
+  // renderer's own header and only add URLs not already bound above.
   var legacySources='';
-  if(typeof window.renderClickableSources==='function'){
+  if(typeof window.renderPlainTextSources==='function'){
     legacySources=_safe(function(){
-      return window.renderClickableSources(pack)||'';
+      var items=(typeof window.getNewsSources==='function')
+        ? window.getNewsSources(pack)
+        : [];
+      if(typeof window.filterSourcesForReport==='function'){
+        items=window.filterSourcesForReport(items);
+      } else if(typeof window.rankNewsItems==='function'){
+        items=window.rankNewsItems(items).slice(0,8);
+      }
+      items=_arr(items).filter(function(item){
+        var url=item&&item.url;
+        if(!url||seen[url]) return false;
+        seen[url]=true;
+        return true;
+      });
+      // The pipeline owns the numbering for the whole SOURCES section, but
+      // renderPlainTextSources always starts its own list at [1]. With both
+      // collections populated — an interpretation binding some headlines while
+      // the curated fallback supplies others, which is an ordinary shape — the
+      // one ruled section came out "[1] [2] [1] [2]".
+      //
+      // Renumber the renderer's output rather than reimplementing it: only the
+      // leading marker on a citation line is rewritten, so titles, URLs and the
+      // indented continuation lines are untouched, and this keeps working if the
+      // renderer's formatting changes.
+      var offset=sources.length;
+      return (window.renderPlainTextSources(items)||'')
+        .replace(/^\s*SOURCES\s*\n?/i,'')
+        .replace(/^\[(\d+)\]/gm, function(_m, d){ return '['+(Number(d)+offset)+']'; })
+        .trim();
     },'');
   }
   if(!sources.length && !legacySources) return '[No external sources for today\u2019s scan.]';
