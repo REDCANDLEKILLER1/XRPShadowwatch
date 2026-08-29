@@ -1799,7 +1799,38 @@ var _KGMT_BANNER=(function(){
   try{ if(typeof buildBrandedHeader==='function') return buildBrandedHeader()+'\n\n'; }catch(_){}
   return '\uD83E\uDE78 RedCandleKiller \uD83E\uDE78\nSHADOW WATCH\n\u2615 COFFEE & CRYPTO with STONE\n\n';
 })();
-var KGMT_TEXT=
+// The fallback used to be a module-level constant, so its prayer and scripture
+// were literally the string "[auto-rendered]", baked at parse time and
+// impossible to fill in. SW-20260827-VXOQO published exactly that on air.
+//
+// v16.24 fixed _buildPrayer / _buildScripture for the normal assembly path but
+// not this one — a report that gets audit-blocked is still a report that goes
+// out, and the prayer and scripture are required content every day. Build the
+// fallback at render time so the same date-seeded engine fills it.
+function _kgmtText(pack){
+  var prayer='', scripture='';
+  try{
+    var tone=_dailyTone(pack);
+    if(tone){
+      if(typeof tone.prayer==='string' && tone.prayer.trim()) prayer=tone.prayer.trim();
+      if(tone.scripture){
+        var ref=String(tone.scripture.ref||'').trim(), txt=String(tone.scripture.text||'').trim();
+        if(ref && txt) scripture=ref+'\n\u201C'+txt+'\u201D';
+        else if(txt)   scripture='\u201C'+txt+'\u201D';
+      }
+    }
+  }catch(_){}
+  // Only when the engine itself gives nothing. Never a placeholder that looks
+  // like content — say plainly that it could not be generated.
+  if(!prayer)    prayer='The prayer could not be generated for this run.';
+  if(!scripture) scripture='The scripture could not be generated for this run.';
+  return _KGMT_HEAD+
+    '\uD83D\uDE4F THE DAILY PRAYER\n'+prayer+'\n\n'+
+    '\uD83D\uDCD6 THE DAILY SCRIPTURE\n'+scripture+'\n\n'+
+    'SOURCES\n[No public sources available for today\u2019s fallback.]';
+}
+
+var _KGMT_HEAD=
 _KGMT_BANNER+
 'EXECUTIVE SUMMARY\n'+'\u2500'.repeat(17)+'\n'+
 'Today\'s scan completed. The public narrative engine could not assemble a publishable report from the available evidence. Raw evidence is intact in the dev panel and the GPT/Agent package.\n\n'+
@@ -1813,10 +1844,12 @@ _KGMT_BANNER+
 'VERDICT\n'+'\u2500'.repeat(7)+'\n'+
 'Audit blocked today\'s public report. Evidence is intact. Patrol holds.\n'+
 'Not financial advice. XRP-only forensic watch.\n\n'+
-'I\'m XRPMan, and I tell on the banks.\n\n'+
-'\uD83D\uDE4F THE DAILY PRAYER\n[auto-rendered]\n\n'+
-'\uD83D\uDCD6 THE DAILY SCRIPTURE\n[auto-rendered]\n\n'+
-'SOURCES\n[No public sources available for today\'s fallback.]';
+'I\'m XRPMan, and I tell on the banks.\n\n';
+
+// Kept for anything that still reads the old constant. It is the head only —
+// the published fallback comes from _kgmtText(pack), which fills in the real
+// prayer and scripture.
+var KGMT_TEXT=_KGMT_HEAD;
 
 /* ═════════════════════════════════════════════════════════════════════
    MAIN RENDER ENTRY POINT
@@ -1920,13 +1953,14 @@ function renderPublicReport(pack){
     try{ console.warn('[PIPELINE-V1] Audit failed. Rendering KGMT fallback.',audit.failures); }catch(_){}
 
     // Verify KGMT itself
-    var kgmtAudit=auditPublicReport(KGMT_TEXT,[],[],true);
+    var kgmtText=_kgmtText(pack);
+    var kgmtAudit=auditPublicReport(kgmtText,[],[],true);
     if(!kgmtAudit.pass){
       _logToDevPanel('KGMT self-audit failed ('+(kgmtAudit.failures||[]).map(function(f){return f.assertion;}).join(', ')+') — returning legacy.');
       return null; // let the routing hook fall back to the (humanized) legacy report
     }
     try{ window._SW_REPORT_MODE='audit-blocked fallback (KGMT) — see error log'; }catch(_){}
-    return KGMT_TEXT;
+    return kgmtText;
 
   }catch(err){
     _buildFailCount++;
@@ -2022,6 +2056,7 @@ window.PUBLIC_REPORT_PIPELINE_V1={
   sanitize:         sanitizePublicNarrative,
   audit:            auditPublicReport,
   kgmt:             KGMT_TEXT,
+  kgmtText:         _kgmtText,
   helpers:{
     summarizeLargeMoves:         summarizeLargeMoves,
     summarizeDominanceShift:     summarizeDominanceShift,
