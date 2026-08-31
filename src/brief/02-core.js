@@ -1978,7 +1978,7 @@ async function fetchOneRss(feed) {
   items.forEach(it => { it.source += '@' + proxy; });
   return items;
 }
-async function fetchAllRss() {
+async function fetchAllRss(onPublish, tierStatus, isLive) {
   // v3.26-hotfix6: filter the active list — skip disabled-by-default and
   // session-suppressed providers BEFORE wasting a fetch slot on them.
   const activeFeeds = RSS_FEEDS.filter(f => {
@@ -1994,19 +1994,41 @@ async function fetchAllRss() {
   // under the limit.
   const RSS_BATCH_SIZE = 4;
   const out = [];
-  for (let start = 0; start < activeFeeds.length; start += RSS_BATCH_SIZE) {
-    const batch = activeFeeds.slice(start, start + RSS_BATCH_SIZE);
-    const results = await Promise.allSettled(batch.map(fetchOneRss));
-    results.forEach((r, i) => {
-      const feedName = batch[i].name;
-      if (r.status === 'fulfilled' && r.value && r.value.length > 0) {
-        out.push(...r.value);
-        try { if (typeof recordNewsDoctorAttempt === 'function') recordNewsDoctorAttempt(feedName, true); } catch (_) {}
+
+  // Each feed is accounted for the instant IT settles, not when its batch does.
+  // The batch barrier is what made one hanging peer hold three feeds that had
+  // already answered — and every later batch behind them.
+  //
+  // The batches themselves stay: codetabs rate-limits at 5 req/sec, and firing
+  // all 7 at once got requests 6-7 refused outright (field log DP337). Slots are
+  // still capped at 4; what changed is that a landed feed is no longer made to
+  // wait for its slowest neighbour before being counted.
+  //
+  // onPublish/live are optional. When the caller supplies them (the progressive
+  // news lane does) each feed publishes as it lands and the walk stops at the
+  // session deadline. Called without them — any other caller, and every existing
+  // test — this behaves exactly as before.
+  const settleOne = (feed) => Promise.resolve()
+    .then(() => fetchOneRss(feed))
+    .then(items => {
+      if (items && items.length) {
+        out.push(...items);
+        try { if (typeof recordNewsDoctorAttempt === 'function') recordNewsDoctorAttempt(feed.name, true); } catch (_) {}
+        if (typeof onPublish === 'function') { try { onPublish('RSS ' + feed.name); } catch (_) {} }
       } else {
-        elog('RSS ' + feedName + ' failed', r.reason);
-        try { if (typeof recordNewsDoctorAttempt === 'function') recordNewsDoctorAttempt(feedName, false); } catch (_) {}
+        elog('RSS ' + feed.name + ' failed', new Error('empty'));
+        try { if (typeof recordNewsDoctorAttempt === 'function') recordNewsDoctorAttempt(feed.name, false); } catch (_) {}
       }
+    })
+    .catch(err => {
+      elog('RSS ' + feed.name + ' failed', err);
+      try { if (typeof recordNewsDoctorAttempt === 'function') recordNewsDoctorAttempt(feed.name, false); } catch (_) {}
     });
+
+  for (let start = 0; start < activeFeeds.length; start += RSS_BATCH_SIZE) {
+    if (typeof isLive === 'function' && !isLive()) break;   // session deadline
+    const batch = activeFeeds.slice(start, start + RSS_BATCH_SIZE);
+    await Promise.allSettled(batch.map(settleOne));
   }
   return out;
 }
@@ -2144,6 +2166,11 @@ function _buildNewsIntelSnapshot(rawItems, tierStatus, settings) {
   };
 }
 
+// Generation token for the news lane. A run that has been superseded, or has
+// passed its deadline, must never write state.newsIntel again.
+let _newsSessionSeq = 0;
+let _newsActiveSession = null;
+
 async function fetchNewsIntel(forceRefresh) {
   const settings = loadIntelSettings(false);
   const cacheMin = n(settings.intelCacheMinutes) || 30;
@@ -2160,14 +2187,27 @@ async function fetchNewsIntel(forceRefresh) {
     } catch {}
   }
 
-  // v3.26-hotfix8: two-tier fetch — populate state.newsIntel after FAST tier
-  // so the engine ceiling at 18s can't lose RSS results that already landed.
+  // ── PROGRESSIVE, DEADLINE-BOUNDED NEWS LANE ───────────────────────────────
+  // Replaces the two-tier fetch. That version had three faults, each proven
+  // against the live engine:
   //
-  // FAST tier: RSS feeds + CryptoCompare. Typically 1-3s. Should always finish
-  //            before the engine ceiling fires.
-  // SLOW tier: GDELT + Google News. Can take 16+s when proxies are dead.
-  //            If the engine ceiling fires while SLOW is still running, the
-  //            FAST results stay in state.newsIntel — not lost.
+  //   A. A slow peer held its whole batch. fetchAllRss awaits
+  //      Promise.allSettled per batch of 4, so one hanging feed delayed three
+  //      that had already answered, and every later batch too.
+  //   B. Google News could not start until the FAST tier had fully settled,
+  //      so a hanging RSS feed delayed a source that shares nothing with it.
+  //   D. The outer 18s Promise.race rejected, but nothing told the work to
+  //      stop, and a late resolution could still write state.newsIntel after
+  //      the report had moved on.
+  //
+  // Now: every source starts at once, each publishes the moment it lands, and
+  // one session deadline below the outer ceiling ends the wait.
+  //
+  // On cancellation: each request already carries its own AbortController and
+  // NEWS_ROUTE_TIMEOUT_MS (proxyFetch -> fetchWithTimeout), so sockets close on
+  // their own schedule. What this adds is a GENERATION TOKEN — after the
+  // deadline, a late resolution is counted and discarded, never merged. That is
+  // the property worth guaranteeing: no post-deadline state mutation.
   const useGdelt = settings.useGdelt !== false;
   const tierStatus = {
     cryptocompare: 'PENDING', rss_feeds: 'PENDING',
@@ -2175,40 +2215,92 @@ async function fetchNewsIntel(forceRefresh) {
   };
   let allItems = [];
 
-  // ── FAST TIER ──
-  const fast = await Promise.allSettled([fetchCryptoCompare(), fetchAllRss()]);
-  if (fast[0].status === 'fulfilled') { allItems = allItems.concat(fast[0].value); tierStatus.cryptocompare = 'OK'; }
-  else                                 { tierStatus.cryptocompare = 'FAILED'; }
-  if (fast[1].status === 'fulfilled') { allItems = allItems.concat(fast[1].value); tierStatus.rss_feeds     = 'OK'; }
-  else                                 { tierStatus.rss_feeds     = 'FAILED'; }
+  // Below the engine's outer 18s ceiling, so the lane finishes on its own terms
+  // and hands over a completed partial snapshot instead of being cut off.
+  const NEWS_SESSION_BUDGET_MS = 16500;
+  const session = { id: (_newsSessionSeq = (_newsSessionSeq || 0) + 1),
+                    deadline: Date.now() + NEWS_SESSION_BUDGET_MS,
+                    lateResolutions: 0, active: 0, publishes: 0, startedAt: Date.now() };
+  _newsActiveSession = session;
+  const live = () => _newsActiveSession === session && Date.now() < session.deadline;
 
-  // Snapshot state.newsIntel NOW — so engine ceiling can't lose what already landed
-  const fastIntel = _buildNewsIntelSnapshot(allItems, tierStatus, settings);
-  state.newsIntel = fastIntel;
-  if ($('newsIntelBox')) $('newsIntelBox').textContent = JSON.stringify(fastIntel, null, 2);
-  log('News FAST tier complete: ' + fastIntel.items.length + ' items from RSS+CryptoCompare.');
+  // Publish what has landed so far. Called as each source settles, so a report
+  // cut short still carries every verified headline that arrived before the cut.
+  const publish = (why) => {
+    if (_newsActiveSession !== session) return;   // a newer run owns state now
+    const snap = _buildNewsIntelSnapshot(allItems, tierStatus, settings);
+    state.newsIntel = snap;
+    session.publishes++;
+    if ($('newsIntelBox')) $('newsIntelBox').textContent = JSON.stringify(snap, null, 2);
+    log('News: ' + snap.items.length + ' item(s) after ' + why +
+        ' (+' + (Date.now() - session.startedAt) + 'ms)');
+    return snap;
+  };
 
-  // ── SLOW TIER ──
   // Automatic suppression, guarded by redundancy — see newsSuppression().
   const gdSup = (typeof newsSuppression === 'function') ? newsSuppression('GDELT') : { suppressed: false };
   state.newsSuppression = { GDELT: gdSup };
   if (gdSup.suppressed) {
     log('GDELT skipped this run — ' + gdSup.reason + '. Next probe in ' + gdSup.nextRetryMin + ' min.');
+    tierStatus.gdelt = 'SUPPRESSED';
   } else if (gdSup.probe) {
     log('GDELT probe — ' + gdSup.reason + '.');
   }
-  const slow = await Promise.allSettled([
-    (useGdelt && !gdSup.suppressed) ? fetchGdelt(settings) : Promise.resolve([]),
-    fetchGoogleNews()
-  ]);
-  if (gdSup.suppressed)                { tierStatus.gdelt       = 'SUPPRESSED'; }
-  else if (slow[0].status === 'fulfilled') { allItems = allItems.concat(slow[0].value); tierStatus.gdelt = 'OK'; }
-  else                                 { tierStatus.gdelt       = 'FAILED'; }
-  if (slow[1].status === 'fulfilled') { allItems = allItems.concat(slow[1].value); tierStatus.google_news = 'OK'; }
-  else                                 { tierStatus.google_news = 'FAILED'; }
 
-  // Final snapshot — merges all 4 tiers
+  // One lane per source. Every one starts NOW — no tier barrier between them.
+  const lane = (key, label, run) => {
+    session.active++;
+    return Promise.resolve()
+      .then(run)
+      .then(items => {
+        if (!live()) { session.lateResolutions++; return; }   // deadline passed: discard
+        allItems = allItems.concat(Array.isArray(items) ? items : []);
+        tierStatus[key] = 'OK';
+        publish(label);
+      })
+      .catch(() => {
+        if (!live()) { session.lateResolutions++; return; }
+        tierStatus[key] = 'FAILED';
+        publish(label + ' (failed)');
+      })
+      .finally(() => { session.active--; });
+  };
+
+  const lanes = [
+    lane('cryptocompare', 'CryptoCompare', () => fetchCryptoCompare()),
+    lane('rss_feeds',     'RSS',           () => fetchAllRss(publish, tierStatus, live)),
+    lane('google_news',   'Google News',   () => fetchGoogleNews())
+  ];
+  if (useGdelt && !gdSup.suppressed) lanes.push(lane('gdelt', 'GDELT', () => fetchGdelt(settings)));
+
+  // Wait for everything, or for the budget — whichever comes first.
+  let deadlineHit = false;
+  await Promise.race([
+    Promise.allSettled(lanes),
+    new Promise(res => setTimeout(() => { deadlineHit = true; res(); },
+                                  Math.max(0, session.deadline - Date.now())))
+  ]);
+
+  if (deadlineHit) {
+    // A source that has not answered is UNKNOWN, not failed — the same rule
+    // #43 established for the ceiling fallback. Marking it FAILED would tell
+    // the reader a feed let them down when we simply stopped waiting.
+    Object.keys(tierStatus).forEach(k => {
+      if (tierStatus[k] === 'PENDING') tierStatus[k] = 'DEADLINE_UNFINISHED';
+    });
+    log('News budget reached at ' + (Date.now() - session.startedAt) + 'ms; ' +
+        session.active + ' request(s) still outstanding, their results will be discarded.');
+  }
+
   const intel = _buildNewsIntelSnapshot(allItems, tierStatus, settings);
+  intel.lane_metrics = {
+    elapsed_ms: Date.now() - session.startedAt,
+    budget_ms: NEWS_SESSION_BUDGET_MS,
+    deadline_hit: deadlineHit,
+    active_at_deadline: deadlineHit ? session.active : 0,
+    late_resolutions: session.lateResolutions,
+    progressive_publishes: session.publishes
+  };
 
   // Update debug box with full tier accounting
   const dbgLines = [
@@ -23976,14 +24068,30 @@ function shadowWatchHotfix8NewsFetchResilienceSmokeTest() {
   check('GDELT bails on first failure (consecutiveFails >= 1)',
     /consecutiveFails\s*>=\s*1/.test(gdeltFn));
 
-  // 6. fetchNewsIntel uses tiered architecture — FAST tier writes state.newsIntel before SLOW
+  // 6. fetchNewsIntel publishes early and is deadline-bounded.
+  //
+  // These three used to read:
+  //   'has FAST TIER comment'   /FAST TIER/
+  //   'has SLOW TIER comment'   /SLOW TIER/
+  //   'assigns state.newsIntel = fastIntel (early write)'
+  //
+  // They asserted the SHAPE of the two-tier fetch, not the property it existed
+  // for. The property was: something lands in state.newsIntel early enough that
+  // the outer 18s ceiling cannot lose it. The progressive lane keeps that
+  // property and strengthens it — every source publishes as it settles, not just
+  // one tier boundary — but the literal strings are gone, so shape assertions
+  // went red on a change that made the guarantee stronger.
+  //
+  // Rewritten to assert the guarantee. A future rework of the lane should have to
+  // keep early publication and a bounded budget; it should not have to keep a
+  // particular comment.
   const fetchFn = (fetchNewsIntel._original || fetchNewsIntel).toString();
-  check('fetchNewsIntel has FAST TIER comment',
-    /FAST TIER/i.test(fetchFn));
-  check('fetchNewsIntel has SLOW TIER comment',
-    /SLOW TIER/i.test(fetchFn));
-  check('fetchNewsIntel assigns state.newsIntel = fastIntel (early write)',
-    /state\.newsIntel\s*=\s*fastIntel/.test(fetchFn));
+  check('fetchNewsIntel publishes before it finishes (early write survives the ceiling)',
+    /state\.newsIntel\s*=\s*snap/.test(fetchFn) && /publish\s*\(/.test(fetchFn));
+  check('fetchNewsIntel is bounded by a budget below the outer ceiling',
+    /NEWS_SESSION_BUDGET_MS/.test(fetchFn) && /deadline/i.test(fetchFn));
+  check('fetchNewsIntel discards results that arrive after the deadline',
+    /lateResolutions/.test(fetchFn));
   check('fetchNewsIntel calls _buildNewsIntelSnapshot',
     /_buildNewsIntelSnapshot/.test(fetchFn));
 
