@@ -99,6 +99,11 @@ const check = (name, ok, detail) => {
       '───────',
       'Bottom line off the Ledger: the Ledger is restless, and I am watching close. (63/100). What tipped me off: large transfer count, shadow volume, dust/tag flags. Watch the hands, not the mouth. Not financial advice. XRP-only forensic watch.',
       '',
+      'Escrow Watch',
+      '────────────',
+      'Ripple escrow: 32.00B XRP locked now across 101 active validated-ledger escrow objects.',
+      'Last 96h: 0 releases, 0 new locks.',
+      '',
       'LEDGER DIAGNOSTICS',
       '──────────────────',
       '• XRP price: ~$1.3475 (24h soft)',
@@ -131,6 +136,28 @@ const check = (name, ok, detail) => {
       { title: 'Passing the CLARITY Act could create over 230,000 US jobs', source: 'rss:u.today@self', url: 'https://u.today/e' },
       { title: 'Cryptex Allocates 4.88 Percent XRP Weighting in US Digital Asset ETF Filing', source: 'google_news@self', url: 'https://news.google.com/f' }
     ] } };
+
+    // Seed the real discovery inbox so AUTO_WALLET_FINDER produces a real list.
+    // Without this the wallet section renders empty and every check below would
+    // pass on an absent section.
+    const stamp = new Date().toISOString();
+    try {
+      state.discoveryInbox = [
+        { address: 'rND7mGebsCbcwJ5Xz7zwQQu77K4YGNZsJH', classification: 'LARGE_TRANSFER_RECEIVER',
+          score: 175, total_value_xrp: 1059628.695, tx_count: 63, seen_count: 1,
+          last_seen: stamp, first_seen: stamp, reasons: ['destination of large transfer'],
+          related_watched_wallets: ['Uphold'], sources: ['large_transfer'] },
+        { address: 'rUzWJkXyEtT8ekSSxkBYPqCvHpngcy6Fks', classification: 'LARGE_TRANSFER_RECEIVER',
+          score: 140, total_value_xrp: 13975984.107, tx_count: 172, seen_count: 1,
+          last_seen: stamp, first_seen: stamp, reasons: ['destination of large transfer'],
+          related_watched_wallets: ['Bithumb'], sources: ['large_transfer'] },
+        { address: 'rHm6ivKz9BwkUyTQ5r4mV8pLbNc2Xwq1fB', classification: 'LARGE_TRANSFER_RECEIVER',
+          score: 130, total_value_xrp: 1480000, tx_count: 12, seen_count: 1,
+          last_seen: stamp, first_seen: stamp, reasons: ['destination of large transfer'],
+          related_watched_wallets: [], sources: ['large_transfer'] }
+      ];
+      state.pack = PACK;
+    } catch (_) {}
 
     const build = window.SW_X_SUMMARY_EXPORT && window.SW_X_SUMMARY_EXPORT.build;
     out.hasBuilder = typeof build === 'function';
@@ -199,6 +226,75 @@ const check = (name, ok, detail) => {
     out.midSentence = secBodies.filter(b => /\b(to|of|the|and|a|in|for|tied to U\.S\.)$/i.test(b)).slice(0, 3);
     out.noMidSentenceCut = out.midSentence.length === 0;
 
+    // ── suggested wallets ────────────────────────────────────────────────
+    // Fed through the real AUTO_WALLET_FINDER by seeding state.discoveryInbox,
+    // so the counts must agree with the report's own AUTO DISCOVERY section.
+    const iSug = txt.indexOf('Suggested Watchlist Additions');
+    const sugBlock = iSug > -1 ? txt.slice(iSug, txt.indexOf('\n\n', iSug)) : '';
+    out.sugBlock = sugBlock.trim();
+    out.hasSuggested = iSug > -1;
+    out.sugHasSafety = /Nothing is added to the watchlist automatically/i.test(sugBlock)
+                    && /never ownership proof/i.test(sugBlock);
+    out.sugRows = sugBlock.split('\n').filter(l => /^•/.test(l)).length;
+    // Flagged, not identified: a behavioural classification, never the
+    // richlist-derived suggested_label, and never a bare exchange name as the
+    // wallet's identity.
+    out.sugNoIdentityLabel = !/_RL\b/.test(sugBlock) && !/CANDIDATE_r/i.test(sugBlock);
+    // The lifecycle phase is not printed: its DORMANT branch fires on unread
+    // balances, so it would state "dormant or closed account" about a wallet
+    // nobody measured.
+    out.sugNoLifecycleClaim = !/DORMANT|SELL_PRESSURE|ACCUMULATION|ROUTING/.test(sugBlock);
+    out.sugAddressesTruncated = sugBlock.split('\n').filter(l => /^•/.test(l))
+      .every(l => /r[A-Za-z0-9]{5}…[A-Za-z0-9]{4}/.test(l));
+
+    // The X post and the report's AUTO DISCOVERY section must never disagree
+    // about how many wallets were flagged. Both read the same finder, so the
+    // rendered header is checked against it rather than against a hard-coded
+    // number — this holds however rich or thin the candidate set happens to be.
+    try {
+      const finderList = window.AUTO_WALLET_FINDER.buildSuggestedWatchlistAdditions(PACK) || [];
+      const sp = (typeof _discoverySplit === 'function') ? _discoverySplit(finderList) : null;
+      const freshN = (sp && sp.known) ? sp.fresh.length : finderList.length;
+      const pool = (sp && sp.known) ? sp.fresh : finderList;
+      const recN = pool.filter(c => c && (c.action_tier === 'CRITICAL_ADD_REVIEW' ||
+                                          c.action_tier === 'RECOMMEND_FOR_WATCH')).length;
+      out.finderCounts = { fresh: freshN, rec: recN };
+      out.countsAgree = new RegExp('^' + freshN + ' flagged this scan, ' + recN +
+                                   ' recommended for review\\.').test(
+        sugBlock.split('\n')[1] || '');
+      // and every rendered row is a real candidate from that same list
+      const addrs = pool.map(c => String(c.address));
+      out.rowsAreRealCandidates = sugBlock.split('\n').filter(l => /^•/.test(l))
+        .every(l => {
+          const m = /^•\s*(r[A-Za-z0-9]{5})…([A-Za-z0-9]{4})/.exec(l);
+          return !!m && addrs.some(a => a.indexOf(m[1]) === 0 && a.slice(-4) === m[2]);
+        });
+      // rows never exceed the cap, and never exceed what the finder produced
+      out.rowsWithinPool = out.sugRows <= Math.min(3, pool.length);
+    } catch (e) { out.countsAgree = false; out.countErr = String(e && e.message); }
+
+    // ── section order ────────────────────────────────────────────────────
+    // Escrow used to be appended after the prayer, scripture AND disclaimer.
+    const at = h => txt.indexOf('\n' + h + '\n');
+    out.order = {
+      news: at('NEWS'), exec: txt.indexOf('Executive Summary'),
+      moves: txt.indexOf('Largest XRP Movements'), escrow: txt.indexOf('Escrow Watch'),
+      stats: txt.indexOf('Watched Wallets / Shadow Volume'),
+      sug: iSug, verdict: txt.indexOf('Verdict / Risk'),
+      prayer: txt.indexOf('THE DAILY PRAYER'), scripture: txt.indexOf('THE DAILY SCRIPTURE'),
+      disc: txt.indexOf('\nDisclaimer\n')
+    };
+    const o = out.order;
+    // Both escrow order checks short-circuit on "escrow absent". The fixture
+    // therefore has to contain an Escrow Watch section, or reverting the
+    // positioning fix passes unnoticed — it did, once.
+    out.escrowPresent   = o.escrow > -1;
+    out.newsNearTop     = o.news > -1 && o.news < o.exec;
+    out.ledgerBeforeSignoff = o.escrow === -1 || (o.escrow < o.prayer && o.escrow < o.disc);
+    out.escrowWithLedger = o.escrow === -1 || (o.escrow > o.moves && o.escrow < o.verdict);
+    out.suggestedBeforeVerdict = o.sug === -1 || (o.sug > o.stats && o.sug < o.verdict);
+    out.disclaimerLast  = o.disc > o.prayer && o.disc > o.scripture && o.disc > o.verdict;
+
     // ── the movements list keeps its own first item ──────────────────────
     // Letting the Executive Summary claim first left this section opening on
     // "A second transfer of 20M XRP…" — a second with no first.
@@ -259,16 +355,40 @@ const check = (name, ok, detail) => {
   check('stats section carries stats, not verdict prose', r.statsNoVerdictProse);
   check('stats bullets survive as separate lines', r.statsKeptBullets);
 
-  console.log('\n5. dedupe reorders claims, not the reader\'s experience');
+  console.log('\n5. suggested watchlist additions');
+  console.log(r.sugBlock.split('\n').map(l => '    ' + l).join('\n'));
+  check('the wallet list is in the post at all', r.hasSuggested);
+  check('it carries the review-only safety language', r.sugHasSafety, r.sugBlock);
+  check('it lists candidates', r.sugRows >= 1, r.sugRows);
+  console.log('     finder says: ' + JSON.stringify(r.finderCounts));
+  check('the counts agree with the wallet finder itself', r.countsAgree,
+        { rendered: r.sugBlock.split('\n')[1], finder: r.finderCounts, err: r.countErr });
+  check('every listed wallet is a real candidate from that list', r.rowsAreRealCandidates);
+  check('rows never exceed the cap or the pool', r.rowsWithinPool, r.sugRows);
+  check('addresses are truncated, not full', r.sugAddressesTruncated);
+  check('behavioural classification only, no identity label', r.sugNoIdentityLabel, r.sugBlock);
+  check('no lifecycle claim (its DORMANT branch fires on unread balances)',
+        r.sugNoLifecycleClaim, r.sugBlock);
+
+  console.log('\n6. section order reads as a script');
+  check('news is near the top, before the summary', r.newsNearTop, r.order);
+  check('the escrow section is actually present (order checks are not vacuous)',
+        r.escrowPresent, r.order);
+  check('escrow sits with the ledger, not after the sign-off', r.escrowWithLedger, r.order);
+  check('no ledger content after the prayer/disclaimer', r.ledgerBeforeSignoff, r.order);
+  check('what-to-watch comes before the verdict', r.suggestedBeforeVerdict, r.order);
+  check('the disclaimer is genuinely last', r.disclaimerLast, r.order);
+
+  console.log('\n7. dedupe reorders claims, not the reader\'s experience');
   check('movements list starts with its own first transfer', r.movNotOrphaned, r.movFirstLine);
   check('the specific transfer lives in the movements section', r.movHasKraken);
   check('executive summary keeps its aggregate', r.execKeptAggregate);
 
-  console.log('\n6. dedupe does not eat real information');
+  console.log('\n8. dedupe does not eat real information');
   check('three same-amount transfers to different destinations all survive',
         r.allDistinctSurvive, r.distinctKept);
 
-  console.log('\n7. no broken fragments');
+  console.log('\n9. no broken fragments');
   check('no orphan "63/100)" fragment', r.noOrphanScore);
   check('the risk score is printed as a labelled reading', r.riskLabelled);
   check('no SECTION header leaks into the post', r.noSectionHeader);

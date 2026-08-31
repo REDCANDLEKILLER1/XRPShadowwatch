@@ -371,6 +371,76 @@
       /\n(?:Sources|Escrow Watch|⚠️|I'm XRPMan)\s*\n/i), 280);
   }
 
+  // ── SUGGESTED WATCHLIST ADDITIONS ───────────────────────────────────────
+  // The scan flags candidates every run and the full report exports all of
+  // them; the X post never carried any. This prints the top few.
+  //
+  // Two rules it must not break:
+  //   1. `classification` only — NEVER `suggested_label`. That label can be
+  //      derived from richlist identity, and printing it would name a wallet's
+  //      owner off a third-party list. Flagged, not identified.
+  //   2. The safety line ships with the list, not as a footnote somewhere
+  //      else. Nothing here is added to the watchlist automatically and the
+  //      post has to say so.
+  function xrpShort(v) {
+    v = Number(v) || 0;
+    if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+    if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+    if (v >= 1e3) return (v / 1e3).toFixed(2) + 'K';
+    return String(Math.round(v));
+  }
+  function suggestedWallets(pack, max) {
+    max = max || 3;
+    var list = [];
+    try {
+      if (window.AUTO_WALLET_FINDER &&
+          typeof window.AUTO_WALLET_FINDER.buildSuggestedWatchlistAdditions === 'function') {
+        list = window.AUTO_WALLET_FINDER.buildSuggestedWatchlistAdditions(pack || {}) || [];
+      }
+    } catch (_) { return ''; }
+    if (!list.length) return '';
+
+    // Found in THIS scan, not the standing backlog — the same split the
+    // report's AUTO DISCOVERY section uses, so the two cannot disagree.
+    var fresh = list;
+    try {
+      if (typeof _discoverySplit === 'function') {
+        var sp = _discoverySplit(list);
+        if (sp && sp.known) fresh = sp.fresh;
+      }
+    } catch (_) {}
+    if (!fresh.length) return '';
+
+    var rec = fresh.filter(function (c) {
+      return c && (c.action_tier === 'CRITICAL_ADD_REVIEW' || c.action_tier === 'RECOMMEND_FOR_WATCH');
+    });
+    var show = (rec.length ? rec : fresh).slice().sort(function (a, b) {
+      return (Number(b.score) || 0) - (Number(a.score) || 0);
+    }).slice(0, max);
+    if (!show.length) return '';
+
+    var lines = [fresh.length + ' flagged this scan, ' + rec.length +
+                 ' recommended for review. Nothing is added to the watchlist automatically.'];
+    show.forEach(function (c) {
+      var a = String(c.address || '');
+      var bits = [a.length > 14 ? a.slice(0, 6) + '…' + a.slice(-4) : a];
+      if (c.classification) bits.push(String(c.classification));
+      if (Number(c.total_value_xrp) > 0) bits.push(xrpShort(c.total_value_xrp) + ' XRP');
+      if (c.score != null) bits.push(c.score + '/200');
+      // lifecycle_phase is deliberately NOT printed. Its DORMANT branch is
+      // `!stillHolding && seen_count < 2`, and stillHolding is
+      // `currentBalance != null && currentBalance > 0` — so a wallet whose
+      // balance was never read is false there and gets rendered "dormant or
+      // closed account". That is absence of data reported as a finding, and
+      // this post is read aloud on air. classification, value and score are
+      // each measured; the phase is not, so it stays out until the branch
+      // distinguishes unread from zero.
+      lines.push('• ' + bits.join(' · '));
+    });
+    lines.push('Behavioural evidence only — never ownership proof.');
+    return compact(lines.join('\n'), 470);
+  }
+
   function coverageWarning(text, pack) {
     var s = String(text || '');
     var m = s.match(/[^\n]*(?:TX WINDOW:\s*INCOMPLETE|Transaction-window coverage incomplete)[^\n]*/i);
@@ -436,34 +506,48 @@
     var statsTxt = stats(s, seen);
     var verd     = verdict(s, seen);
 
+    // ── ORDER ───────────────────────────────────────────────────────────
+    // Read aloud, this is a script, so it runs as one: context, then what
+    // happened, then the receipts, then the read, then what to watch, then the
+    // bottom line, then the sign-off.
+    //
+    // Escrow Watch used to be appended dead last — AFTER the prayer, the
+    // scripture AND the disclaimer — because it was handled as optional
+    // content rather than positioned content. On air that meant closing with
+    // "not financial advice" and then reading out Ripple's escrow balance. It
+    // is ledger fact and now sits with the ledger.
+    //
+    // Coverage sits directly under the numbers it qualifies, not three
+    // sections away from them.
     var required = [];
     pushSection(required, 'SHADOW WATCH', branding(s));
-    // News sits at the top, where it used to be, and carries the publisher
-    // instead of a tracking link.
+    // News stays at the top, where the operator has always had it.
     pushSection(required, 'NEWS', newsHeadlines(s, pack, 4));
     pushSection(required, 'Executive Summary', exec);
     pushSection(required, 'Largest XRP Movements', moves);
-    pushSection(required, 'Evidence Highlights', evidence);
+    var escrowAt = required.length;                    // escrow belongs here
     pushSection(required, 'Watched Wallets / Shadow Volume', statsTxt);
     pushSection(required, 'Coverage', coverageWarning(s, pack));
+    pushSection(required, 'Evidence Highlights', evidence);
+    pushSection(required, 'Suggested Watchlist Additions', suggestedWallets(pack, 3));
     pushSection(required, 'Verdict / Risk', verd);
     pushSection(required, '🙏 THE DAILY PRAYER', prayer(s));
     pushSection(required, '📖 THE DAILY SCRIPTURE', scripture(s));
-    pushSection(required, 'Disclaimer', disclaimer());
+    pushSection(required, 'Disclaimer', disclaimer());   // genuinely last
 
-    var body = clean(required.join('\n\n'));
-
-    // Priority 3 content (candidate lists, JSON, richlist, internal diagnostics,
-    // repeated explanations) is intentionally not admitted to the X renderer.
-    // Priority 2 escrow may be included only when all required content already fits.
+    // Priority 3 content (candidate lists, JSON, richlist, internal
+    // diagnostics, repeated explanations) is intentionally not admitted here.
+    // Escrow is priority 2: included only when everything required already
+    // fits, but inserted in its proper place rather than tacked on the end.
+    var body = '';
     var escrow = optionalEscrow(s);
     if (escrow) {
-      var withEscrow = body + '\n\nEscrow Watch\n' + escrow;
-      try {
-        var test = finalize(withEscrow);
-        if (test.length <= 3900) body = withEscrow;
-      } catch (_) {}
+      var withEscrow = required.slice();
+      withEscrow.splice(escrowAt, 0, 'Escrow Watch\n' + clean(escrow));
+      var candidate = clean(withEscrow.join('\n\n'));
+      try { if (finalize(candidate).length <= 3900) body = candidate; } catch (_) {}
     }
+    if (!body) body = clean(required.join('\n\n'));
 
     // Section-level budget guard. Required sections have already been compacted
     // individually, so this should only reject pathological input rather than
