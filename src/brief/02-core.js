@@ -4342,8 +4342,20 @@ function buildNewsRouteDiagnostics(errorLogText, newsDebug, newsIntel) {
   // Build the union of known providers: those in source_status, source_breakdown,
   // and anything mentioned in the error log we can normalize.
   const seen = new Set();
-  Object.keys(newsIntel.source_status || {}).forEach(k => seen.add(normalizeNewsProviderName(k)));
-  Object.keys(newsIntel.source_breakdown || {}).forEach(k => seen.add(normalizeNewsProviderName(k)));
+  // Reserved aggregate keys describe the whole news lane, never a source, so they
+  // must not become provider cards here either. buildProviderTruthStatus has the
+  // same guard; this function builds its own universe and was missed by the first
+  // pass. Check the RAW key and the NORMALIZED name — normalizeNewsProviderName
+  // passes 'all' straight through, and a future mapping could produce a reserved
+  // word from something that did not look like one.
+  const _admitProvider = k => {
+    if (isReservedNewsProviderKey(k)) return;
+    const nm = normalizeNewsProviderName(k);
+    if (isReservedNewsProviderKey(nm)) return;
+    seen.add(nm);
+  };
+  Object.keys(newsIntel.source_status || {}).forEach(_admitProvider);
+  Object.keys(newsIntel.source_breakdown || {}).forEach(_admitProvider);
   const probeNames = ['CoinTelegraph','CoinTelegraph (CT-Main)','The Defiant','Decrypt','CoinDesk',
                       'NewsBTC','Bitcoinist','GDELT','Google News','NewsAPI','CryptoPanic',
                       'CryptoCompare','RSS feeds'];

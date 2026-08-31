@@ -127,6 +127,40 @@ const check = (name, ok, detail) => {
     out.ledgerOnly = !ni.items.length;
     out.degradationSafe = deg === null || typeof deg === 'object';
 
+    // ── the News Doctor's OWN universe builder ──────────────────────────
+    // buildNewsRouteDiagnostics builds its provider set separately from
+    // buildProviderTruthStatus. The first version of this suite only exercised
+    // the latter, so a reserved key could still become a News Doctor card while
+    // every check passed.
+    const doc = (typeof buildNewsRouteDiagnostics === 'function')
+      ? buildNewsRouteDiagnostics('', '', {
+          source_status: { all: 'FAILED', gdelt: 'FAILED' },
+          source_breakdown: {}
+        })
+      : null;
+    const docProv = (doc && doc.providers) || {};
+    const docKeys = Object.keys(docProv);
+    out.docRan          = !!doc;
+    out.docNoAll        = !docKeys.some(k => /^all$/i.test(String(k).trim()));
+    out.docKeepsGdelt   = docKeys.some(k => /gdelt/i.test(k));
+    out.docGdeltFailing = docKeys.filter(k => /gdelt/i.test(k))
+      .every(k => (docProv[k] || {}).overall_status !== 'CONTENT_OK');
+    // the summary counters must not count a phantom provider either
+    out.docTotal = docKeys.length;
+    out.docCountsExcludeAll = typeof doc === 'object' && doc !== null
+      ? !JSON.stringify(doc).match(/"(provider|name)"\s*:\s*"all"/i)
+      : false;
+    out.docKeys = docKeys.slice(0, 8);
+
+    // reserved key arriving via source_breakdown instead
+    const doc2 = (typeof buildNewsRouteDiagnostics === 'function')
+      ? buildNewsRouteDiagnostics('', '', {
+          source_status: {}, source_breakdown: { all: 4, gdelt: 0 }
+        })
+      : null;
+    out.doc2NoAll = !Object.keys((doc2 && doc2.providers) || {})
+      .some(k => /^all$/i.test(String(k).trim()));
+
     // ── a genuinely failing provider still reports ──────────────────────
     localStorage.setItem(KEY, JSON.stringify({
       GDELT: { provider:'GDELT', consecutive_failures: 5, failure_count: 5, success_count: 0 }
@@ -163,6 +197,15 @@ const check = (name, ok, detail) => {
   console.log('\n5. ledger-only preserved');
   check('zero verified headlines still reads as ledger-only', r.ledgerOnly);
   check('degradation detection stays well-formed', r.degradationSafe);
+
+  console.log('\n6. the News Doctor\'s own universe builder');
+  console.log('     providers built: ' + JSON.stringify(r.docKeys));
+  check('buildNewsRouteDiagnostics ran', r.docRan);
+  check('no provider named "all" from source_status', r.docNoAll, r.docKeys);
+  check('no provider named "all" from source_breakdown', r.doc2NoAll);
+  check('real GDELT still present', r.docKeepsGdelt, r.docKeys);
+  check('GDELT still reads as a genuine failure', r.docGdeltFailing);
+  check('diagnostic summary counts no phantom provider', r.docCountsExcludeAll);
 
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 
