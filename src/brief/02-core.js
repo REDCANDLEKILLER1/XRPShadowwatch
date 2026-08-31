@@ -1822,14 +1822,22 @@ const CORS_PROXIES = [
 ];
 
 // Try each proxy in order until one returns a usable response.
-async function proxyFetch(targetUrl, timeoutMs) {
+// The route walk is where a per-request timeout stops being a bound on the lane:
+// each proxy gets its own timeoutMs, so a dead cascade can run far past the
+// session budget. The session signal ends the walk — no further route is even
+// attempted once the lane is over.
+async function proxyFetch(targetUrl, timeoutMs, outerSignal, readAs) {
   let lastErr = null;
   for (const proxy of CORS_PROXIES) {
+    if (outerSignal && outerSignal.aborted) throw _abortErr('session ended before ' + proxy.name);
     try {
-      const r = await fetchWithTimeout(proxy.build(targetUrl), timeoutMs);
-      if (r.ok) return { response: r, proxy: proxy.name };
+      const got = await fetchWithTimeout(proxy.build(targetUrl), timeoutMs, outerSignal, readAs);
+      const r = readAs ? got.response : got;
+      if (r.ok) return readAs ? { response: r, proxy: proxy.name, body: got.body }
+                              : { response: r, proxy: proxy.name };
       lastErr = new Error(proxy.name + ' HTTP ' + r.status);
     } catch (e) {
+      if (outerSignal && outerSignal.aborted) throw _abortErr('session ended during ' + proxy.name);
       lastErr = new Error(proxy.name + ' ' + (e.message || 'failed'));
     }
   }
@@ -1882,11 +1890,54 @@ function newsCategories(t) {
   return c.length ? c : ['general'];
 }
 
-async function fetchWithTimeout(url, ms) {
+// `ms` bounds one request. `outerSignal` bounds the whole session it belongs to.
+// Both are needed and neither replaces the other: the per-request timeout stops a
+// single slow route, the session signal stops the lane from starting or
+// continuing work after its budget has gone.
+// `readAs` ('text' | 'json') is what makes the bounds real. fetch() resolves as
+// soon as the RESPONSE HEADERS arrive; the body still has to stream over the
+// same socket afterwards. This function used to clear its timer and detach the
+// session relay in `finally` at that moment — so every `await r.json()` and
+// `await response.text()` the callers ran happened with NO timeout and NO abort
+// path at all. A source that answered its headers promptly and then stalled its
+// body hung the lane forever, on the one path whose signal was already threaded
+// correctly. Passing `readAs` reads the body here, while both bounds still hold.
+async function fetchWithTimeout(url, ms, outerSignal, readAs) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms);
-  try { const r = await fetch(url, { signal: ctrl.signal }); clearTimeout(t); return r; }
-  catch (e) { clearTimeout(t); throw e; }
+  const relay = () => { try { ctrl.abort(); } catch (_) {} };
+  if (outerSignal) {
+    if (outerSignal.aborted) { clearTimeout(t); throw _abortErr('session already ended'); }
+    try { outerSignal.addEventListener('abort', relay, { once: true }); } catch (_) {}
+  }
+  try {
+    const r = await fetch(url, { signal: ctrl.signal });
+    if (!readAs) return r;
+    // A non-ok response's body is not read: the caller discards it either way,
+    // and reading it would spend the remaining budget on a payload nobody wants.
+    const body = r.ok ? (readAs === 'json' ? await r.json() : await r.text()) : null;
+    return { response: r, body };
+  }
+  finally {
+    clearTimeout(t);
+    if (outerSignal) { try { outerSignal.removeEventListener('abort', relay); } catch (_) {} }
+  }
+}
+
+function _abortErr(msg) {
+  const e = new Error(msg || 'aborted');
+  e.name = 'AbortError';
+  return e;
+}
+
+// A session cancellation is not a provider failure, and the discriminator has
+// to be the SHARED signal — never the error's name. fetchWithTimeout aborts its
+// OWN controller when a route runs long, so a per-route timeout also arrives as
+// an AbortError, and that one is a genuine failure the News Doctor must see.
+// Only the session signal distinguishes "we stopped asking" from "it did not
+// answer".
+function _sessionCancelled(outerSignal) {
+  return !!(outerSignal && outerSignal.aborted);
 }
 
 function normalizeItem(it) {
@@ -1907,7 +1958,7 @@ function normalizeItem(it) {
 // v3.3: Free anonymous tier returns "You need a valid auth key". Skip silently
 // unless user supplied a key in the dev panel CryptoCompare field.
 // To enable: register free at cryptocompare.com → paste key into dev panel.
-async function fetchCryptoCompare() {
+async function fetchCryptoCompare(outerSignal) {
   const key = ($('inCpKey')?.value || '').trim();
   if (!key) {
     // Silent skip — free tier deprecated. Field exists in dev panel for opt-in.
@@ -1919,10 +1970,13 @@ async function fetchCryptoCompare() {
   ];
   let allItems = [];
   for (const url of urls) {
+    // The second URL is a fresh network request. Starting it after the session
+    // has ended spends a route on an answer nobody will read.
+    if (_sessionCancelled(outerSignal)) break;
     try {
-      const r = await fetchWithTimeout(url, NEWS_ROUTE_TIMEOUT_MS);
+      const { response: r, body: j } = await fetchWithTimeout(
+        url, NEWS_ROUTE_TIMEOUT_MS, outerSignal, 'json');
       if (!r.ok) { elog('CryptoCompare HTTP ' + r.status, null); continue; }
-      const j = await r.json();
       let data = j.Data || j.data || j.Articles || j.articles || j;
       if (!Array.isArray(data)) {
         const shape = JSON.stringify(j).slice(0, 200);
@@ -1939,6 +1993,9 @@ async function fetchCryptoCompare() {
       allItems = allItems.concat(rows);
       if (allItems.length >= 20) break;
     } catch (e) {
+      // Cancelled by the session, not failed by the provider: no error line, no
+      // diagnosis, and no further routes.
+      if (_sessionCancelled(outerSignal)) break;
       elog('CryptoCompare ' + url.slice(-30), e);
     }
   }
@@ -1969,16 +2026,16 @@ function parseRssXml(xml, sourceName) {
     });
   }).filter(x => x.title);
 }
-async function fetchOneRss(feed) {
-  const { response, proxy } = await proxyFetch(feed.url, NEWS_ROUTE_TIMEOUT_MS);
-  const xml = await response.text();
+async function fetchOneRss(feed, outerSignal) {
+  const { proxy, body: xml } = await proxyFetch(
+    feed.url, NEWS_ROUTE_TIMEOUT_MS, outerSignal, 'text');
   if (!xml || xml.length < 50) throw new Error(feed.name + ' empty (' + proxy + ')');
   const items = parseRssXml(xml, feed.name);
   // tag which proxy was used (helpful for debugging)
   items.forEach(it => { it.source += '@' + proxy; });
   return items;
 }
-async function fetchAllRss() {
+async function fetchAllRss(onItems, tierStatus, isLive, outerSignal) {
   // v3.26-hotfix6: filter the active list — skip disabled-by-default and
   // session-suppressed providers BEFORE wasting a fetch slot on them.
   const activeFeeds = RSS_FEEDS.filter(f => {
@@ -1994,25 +2051,68 @@ async function fetchAllRss() {
   // under the limit.
   const RSS_BATCH_SIZE = 4;
   const out = [];
-  for (let start = 0; start < activeFeeds.length; start += RSS_BATCH_SIZE) {
-    const batch = activeFeeds.slice(start, start + RSS_BATCH_SIZE);
-    const results = await Promise.allSettled(batch.map(fetchOneRss));
-    results.forEach((r, i) => {
-      const feedName = batch[i].name;
-      if (r.status === 'fulfilled' && r.value && r.value.length > 0) {
-        out.push(...r.value);
-        try { if (typeof recordNewsDoctorAttempt === 'function') recordNewsDoctorAttempt(feedName, true); } catch (_) {}
+
+  // Each feed is accounted for the instant IT settles, not when its batch does.
+  // The batch barrier is what made one hanging peer hold three feeds that had
+  // already answered — and every later batch behind them.
+  //
+  // The batches themselves stay: codetabs rate-limits at 5 req/sec, and firing
+  // all 7 at once got requests 6-7 refused outright (field log DP337). Slots are
+  // still capped at 4; what changed is that a landed feed is no longer made to
+  // wait for its slowest neighbour before being counted.
+  //
+  // onPublish/live are optional. When the caller supplies them (the progressive
+  // news lane does) each feed publishes as it lands and the walk stops at the
+  // session deadline. Called without them — any other caller, and every existing
+  // test — this behaves exactly as before.
+  const settleOne = (feed) => Promise.resolve()
+    .then(() => fetchOneRss(feed, outerSignal))
+    .then(items => {
+      if (items && items.length) {
+        try { if (typeof recordNewsDoctorAttempt === 'function') recordNewsDoctorAttempt(feed.name, true); } catch (_) {}
+        // Hand the ROWS up, not just a nudge. An earlier version pushed them
+        // into the local `out` and called onPublish(label) — but the parent's
+        // accumulator does not receive `out` until this whole function resolves,
+        // so the snapshot that "progressive publish" built did not contain the
+        // headline that triggered it. The callback fired early; the data did not.
+        //
+        // Deadline is checked HERE too: past it, a landed feed must not reach
+        // the parent at all. Session identity alone is not enough — the session
+        // is still the active one after its own budget expires.
+        if (typeof onItems === 'function') {
+          if (typeof isLive !== 'function' || isLive()) {
+            try { onItems(items, 'RSS ' + feed.name); } catch (_) {}
+          }
+        } else {
+          out.push(...items);
+        }
       } else {
-        elog('RSS ' + feedName + ' failed', r.reason);
-        try { if (typeof recordNewsDoctorAttempt === 'function') recordNewsDoctorAttempt(feedName, false); } catch (_) {}
+        elog('RSS ' + feed.name + ' failed', new Error('empty'));
+        try { if (typeof recordNewsDoctorAttempt === 'function') recordNewsDoctorAttempt(feed.name, false); } catch (_) {}
       }
+    })
+    .catch(err => {
+      // The session ending is not the feed letting us down. Three recorded
+      // failures session-suppress a provider, so blaming a feed for our own
+      // deadline would quietly remove it from later runs. The per-route timeout
+      // inside fetchWithTimeout still lands here and still records normally —
+      // only the shared session signal is exempt.
+      if (_sessionCancelled(outerSignal)) return;
+      elog('RSS ' + feed.name + ' failed', err);
+      try { if (typeof recordNewsDoctorAttempt === 'function') recordNewsDoctorAttempt(feed.name, false); } catch (_) {}
     });
+
+  for (let start = 0; start < activeFeeds.length; start += RSS_BATCH_SIZE) {
+    if (typeof isLive === 'function' && !isLive()) break;   // session deadline
+    if (outerSignal && outerSignal.aborted) break;
+    const batch = activeFeeds.slice(start, start + RSS_BATCH_SIZE);
+    await Promise.allSettled(batch.map(settleOne));
   }
   return out;
 }
 
 // ── TIER 3: GDELT via proxy cascade (direct CORS-fails in browsers) ─
-async function fetchGdelt(settings) {
+async function fetchGdelt(settings, outerSignal) {
   // v3.26-hotfix6: skip if session-suppressed (3+ consecutive fails this session)
   if (typeof isProviderSessionDisabled === 'function' && isProviderSessionDisabled('GDELT')) {
     return [];
@@ -2027,12 +2127,16 @@ async function fetchGdelt(settings) {
   let consecutiveFails = 0;
   let anySuccess = false;
   const collected = [];
+  let cancelled = false;
   for (const q of queriesToTry) {
+    // Another query is another walk down the whole proxy cascade. Do not start
+    // one the session has already stopped waiting for.
+    if (_sessionCancelled(outerSignal)) { cancelled = true; break; }
     const direct = gdeltUrl(q, settings).toString();
     try {
-      const { response, proxy } = await proxyFetch(direct, GDELT_QUERY_TIMEOUT_MS);
-      const j = await response.json();
-      const raw = j.articles || [];
+      const { proxy, body: j } = await proxyFetch(
+        direct, GDELT_QUERY_TIMEOUT_MS, outerSignal, 'json');
+      const raw = (j && j.articles) || [];
       if (raw.length) {
         anySuccess = true;
         consecutiveFails = 0;
@@ -2044,15 +2148,21 @@ async function fetchGdelt(settings) {
         consecutiveFails++;
       }
     } catch (e) {
+      // A cancelled query is not a failed query. Counting it would push GDELT
+      // toward auto-suppression for a run it was never allowed to finish.
+      if (_sessionCancelled(outerSignal)) { cancelled = true; break; }
       elog('GDELT failed: ' + q.slice(0, 40), e);
       consecutiveFails++;
       // v3.26-hotfix8: bail on FIRST failure to protect the news ceiling
       if (consecutiveFails >= 1) break;
     }
   }
-  // Record outcome to session history (3 session-fails = auto-suppress)
+  // Record outcome to session history (3 session-fails = auto-suppress).
+  // A cancellation with nothing collected says nothing about GDELT's health, so
+  // it is not recorded at all — silence, not a mark against the provider. If it
+  // did answer before the cut, that success is real and still counts.
   try {
-    if (typeof recordNewsDoctorAttempt === 'function') {
+    if (typeof recordNewsDoctorAttempt === 'function' && !(cancelled && !anySuccess)) {
       recordNewsDoctorAttempt('GDELT', anySuccess);
     }
   } catch (_) {}
@@ -2060,17 +2170,18 @@ async function fetchGdelt(settings) {
 }
 
 // ── TIER 4: Google News RSS via proxy cascade ─────────────────
-async function fetchGoogleNews() {
+async function fetchGoogleNews(outerSignal) {
   // v3.26-hotfix6: skip if 3 consecutive session fails recorded
   if (typeof isProviderSessionDisabled === 'function' && isProviderSessionDisabled('Google News')) {
     return [];
   }
+  if (_sessionCancelled(outerSignal)) return [];
   // v3.8: tighter XRP-focused query — covers ecosystem terms + ETF + Clarity Act
   const q = '(XRP OR Ripple OR XRPL OR RLUSD) (ETF OR Clarity OR Japan OR SBI OR banking OR custody OR partnership OR ruling)';
   const rssUrl = 'https://news.google.com/rss/search?' + new URLSearchParams({ q, hl: 'en-US', gl: 'US', ceid: 'US:en' });
   try {
-    const { response, proxy } = await proxyFetch(rssUrl, NEWS_ROUTE_TIMEOUT_MS);
-    const xml = await response.text();
+    const { proxy, body: xml } = await proxyFetch(
+      rssUrl, NEWS_ROUTE_TIMEOUT_MS, outerSignal, 'text');
     const doc = new DOMParser().parseFromString(xml, 'text/xml');
     const items = Array.from(doc.querySelectorAll('item')).map(it => normalizeItem({
       source: 'google_news@' + proxy,
@@ -2082,6 +2193,10 @@ async function fetchGoogleNews() {
     try { if (typeof recordNewsDoctorAttempt === 'function') recordNewsDoctorAttempt('Google News', items.length > 0); } catch (_) {}
     return items;
   } catch (e) {
+    // Cancelled, not failed — the session stopped waiting. Recording a failure
+    // here would blame Google News for our own deadline, and three of those
+    // auto-suppress it for the rest of the session.
+    if (_sessionCancelled(outerSignal)) return [];
     elog('Google News failed', e);
     try { if (typeof recordNewsDoctorAttempt === 'function') recordNewsDoctorAttempt('Google News', false); } catch (_) {}
     return [];
@@ -2144,6 +2259,11 @@ function _buildNewsIntelSnapshot(rawItems, tierStatus, settings) {
   };
 }
 
+// Generation token for the news lane. A run that has been superseded, or has
+// passed its deadline, must never write state.newsIntel again.
+let _newsSessionSeq = 0;
+let _newsActiveSession = null;
+
 async function fetchNewsIntel(forceRefresh) {
   const settings = loadIntelSettings(false);
   const cacheMin = n(settings.intelCacheMinutes) || 30;
@@ -2160,14 +2280,27 @@ async function fetchNewsIntel(forceRefresh) {
     } catch {}
   }
 
-  // v3.26-hotfix8: two-tier fetch — populate state.newsIntel after FAST tier
-  // so the engine ceiling at 18s can't lose RSS results that already landed.
+  // ── PROGRESSIVE, DEADLINE-BOUNDED NEWS LANE ───────────────────────────────
+  // Replaces the two-tier fetch. That version had three faults, each proven
+  // against the live engine:
   //
-  // FAST tier: RSS feeds + CryptoCompare. Typically 1-3s. Should always finish
-  //            before the engine ceiling fires.
-  // SLOW tier: GDELT + Google News. Can take 16+s when proxies are dead.
-  //            If the engine ceiling fires while SLOW is still running, the
-  //            FAST results stay in state.newsIntel — not lost.
+  //   A. A slow peer held its whole batch. fetchAllRss awaits
+  //      Promise.allSettled per batch of 4, so one hanging feed delayed three
+  //      that had already answered, and every later batch too.
+  //   B. Google News could not start until the FAST tier had fully settled,
+  //      so a hanging RSS feed delayed a source that shares nothing with it.
+  //   D. The outer 18s Promise.race rejected, but nothing told the work to
+  //      stop, and a late resolution could still write state.newsIntel after
+  //      the report had moved on.
+  //
+  // Now: every source starts at once, each publishes the moment it lands, and
+  // one session deadline below the outer ceiling ends the wait.
+  //
+  // On cancellation: each request already carries its own AbortController and
+  // NEWS_ROUTE_TIMEOUT_MS (proxyFetch -> fetchWithTimeout), so sockets close on
+  // their own schedule. What this adds is a GENERATION TOKEN — after the
+  // deadline, a late resolution is counted and discarded, never merged. That is
+  // the property worth guaranteeing: no post-deadline state mutation.
   const useGdelt = settings.useGdelt !== false;
   const tierStatus = {
     cryptocompare: 'PENDING', rss_feeds: 'PENDING',
@@ -2175,40 +2308,136 @@ async function fetchNewsIntel(forceRefresh) {
   };
   let allItems = [];
 
-  // ── FAST TIER ──
-  const fast = await Promise.allSettled([fetchCryptoCompare(), fetchAllRss()]);
-  if (fast[0].status === 'fulfilled') { allItems = allItems.concat(fast[0].value); tierStatus.cryptocompare = 'OK'; }
-  else                                 { tierStatus.cryptocompare = 'FAILED'; }
-  if (fast[1].status === 'fulfilled') { allItems = allItems.concat(fast[1].value); tierStatus.rss_feeds     = 'OK'; }
-  else                                 { tierStatus.rss_feeds     = 'FAILED'; }
+  // Below the engine's outer 18s ceiling, so the lane finishes on its own terms
+  // and hands over a completed partial snapshot instead of being cut off.
+  // 16.5s in production, below the engine's 18s outer ceiling. Overridable so a
+  // regression can exercise the real deadline path in under a second — the
+  // alternative was stubbing Date.now, which does not shorten the timer that
+  // actually fires and made elapsed_ms fictional. A seam here buys a real
+  // measurement.
+  const NEWS_SESSION_BUDGET_MS =
+    (typeof window !== 'undefined' && window.__SW_NEWS_BUDGET_MS__ > 0)
+      ? window.__SW_NEWS_BUDGET_MS__ : 16500;
+  const session = { id: (_newsSessionSeq = (_newsSessionSeq || 0) + 1),
+                    deadline: Date.now() + NEWS_SESSION_BUDGET_MS,
+                    lateResolutions: 0, active: 0, publishes: 0, startedAt: Date.now(),
+                    ctrl: (typeof AbortController !== 'undefined') ? new AbortController() : null };
+  // A newer run supersedes this one immediately — including its in-flight work.
+  if (_newsActiveSession && _newsActiveSession.ctrl) {
+    try { _newsActiveSession.ctrl.abort(); } catch (_) {}
+  }
+  _newsActiveSession = session;
+  const sig = session.ctrl ? session.ctrl.signal : undefined;
+  const live = () => _newsActiveSession === session && Date.now() < session.deadline;
 
-  // Snapshot state.newsIntel NOW — so engine ceiling can't lose what already landed
-  const fastIntel = _buildNewsIntelSnapshot(allItems, tierStatus, settings);
-  state.newsIntel = fastIntel;
-  if ($('newsIntelBox')) $('newsIntelBox').textContent = JSON.stringify(fastIntel, null, 2);
-  log('News FAST tier complete: ' + fastIntel.items.length + ' items from RSS+CryptoCompare.');
+  // Publish what has landed so far. Called as each source settles, so a report
+  // cut short still carries every verified headline that arrived before the cut.
+  const publish = (why) => {
+    // Both conditions. Session identity alone let a late RSS feed write after
+    // the lane had already returned — the session is still the active one after
+    // its own budget expires, so only the clock catches that.
+    if (_newsActiveSession !== session) return;   // a newer run owns state now
+    if (Date.now() >= session.deadline) { session.lateResolutions++; return; }
+    const snap = _buildNewsIntelSnapshot(allItems, tierStatus, settings);
+    state.newsIntel = snap;
+    session.publishes++;
+    if ($('newsIntelBox')) $('newsIntelBox').textContent = JSON.stringify(snap, null, 2);
+    log('News: ' + snap.items.length + ' item(s) after ' + why +
+        ' (+' + (Date.now() - session.startedAt) + 'ms)');
+    return snap;
+  };
 
-  // ── SLOW TIER ──
   // Automatic suppression, guarded by redundancy — see newsSuppression().
   const gdSup = (typeof newsSuppression === 'function') ? newsSuppression('GDELT') : { suppressed: false };
   state.newsSuppression = { GDELT: gdSup };
   if (gdSup.suppressed) {
     log('GDELT skipped this run — ' + gdSup.reason + '. Next probe in ' + gdSup.nextRetryMin + ' min.');
+    tierStatus.gdelt = 'SUPPRESSED';
   } else if (gdSup.probe) {
     log('GDELT probe — ' + gdSup.reason + '.');
   }
-  const slow = await Promise.allSettled([
-    (useGdelt && !gdSup.suppressed) ? fetchGdelt(settings) : Promise.resolve([]),
-    fetchGoogleNews()
-  ]);
-  if (gdSup.suppressed)                { tierStatus.gdelt       = 'SUPPRESSED'; }
-  else if (slow[0].status === 'fulfilled') { allItems = allItems.concat(slow[0].value); tierStatus.gdelt = 'OK'; }
-  else                                 { tierStatus.gdelt       = 'FAILED'; }
-  if (slow[1].status === 'fulfilled') { allItems = allItems.concat(slow[1].value); tierStatus.google_news = 'OK'; }
-  else                                 { tierStatus.google_news = 'FAILED'; }
 
-  // Final snapshot — merges all 4 tiers
+  // One lane per source. Every one starts NOW — no tier barrier between them.
+  // alreadyReported: this lane delivered its rows through a callback as they
+  // landed, so its return value must not be concatenated a second time.
+  const lane = (key, label, run, alreadyReported) => {
+    session.active++;
+    return Promise.resolve()
+      .then(run)
+      .then(items => {
+        if (!live()) { session.lateResolutions++; return; }   // deadline passed: discard
+        if (alreadyReported) { if (tierStatus[key] === 'PENDING') tierStatus[key] = 'OK'; return; }
+        allItems = allItems.concat(Array.isArray(items) ? items : []);
+        tierStatus[key] = 'OK';
+        publish(label);
+      })
+      .catch(() => {
+        if (!live()) { session.lateResolutions++; return; }
+        tierStatus[key] = 'FAILED';
+        publish(label + ' (failed)');
+      })
+      .finally(() => { session.active--; });
+  };
+
+  // RSS reports each feed's rows the moment that feed lands, so they are in
+  // allItems BEFORE the snapshot is built. Anything it returns at the end is
+  // already accounted for, so the lane adds nothing further.
+  const onRssItems = (items, label) => {
+    if (!live()) { session.lateResolutions++; return; }
+    allItems = allItems.concat(Array.isArray(items) ? items : []);
+    tierStatus.rss_feeds = 'OK';
+    publish(label);
+  };
+
+  // Every lane carries the SAME session signal. An earlier revision threaded it
+  // into RSS only, so ending the session left CryptoCompare, Google News and
+  // GDELT still walking their proxy cascades after the lane had returned.
+  const lanes = [
+    lane('cryptocompare', 'CryptoCompare', () => fetchCryptoCompare(sig)),
+    lane('rss_feeds',     'RSS',           () => fetchAllRss(onRssItems, tierStatus, live, sig), true),
+    lane('google_news',   'Google News',   () => fetchGoogleNews(sig))
+  ];
+  if (useGdelt && !gdSup.suppressed) lanes.push(lane('gdelt', 'GDELT', () => fetchGdelt(settings, sig)));
+
+  // Wait for everything, or for the budget — whichever comes first.
+  let deadlineHit = false;
+  await Promise.race([
+    Promise.allSettled(lanes),
+    new Promise(res => setTimeout(() => { deadlineHit = true; res(); },
+                                  Math.max(0, session.deadline - Date.now())))
+  ]);
+
+  // End the lane for real: no further proxy route is attempted, and any request
+  // still open is aborted rather than merely ignored. The per-request timeout
+  // stays as a second bound; this is the one that bounds the SESSION.
+  if (session.ctrl) { try { session.ctrl.abort(); } catch (_) {} }
+  const activeAtAbort = session.active;
+  // Give aborted work a moment to unwind, then record what is genuinely left.
+  await new Promise(res => setTimeout(res, 60));
+  const activeAfterQuiesce = session.active;
+
+  if (deadlineHit) {
+    // A source that has not answered is UNKNOWN, not failed — the same rule
+    // #43 established for the ceiling fallback. Marking it FAILED would tell
+    // the reader a feed let them down when we simply stopped waiting.
+    Object.keys(tierStatus).forEach(k => {
+      if (tierStatus[k] === 'PENDING') tierStatus[k] = 'DEADLINE_UNFINISHED';
+    });
+    log('News budget reached at ' + (Date.now() - session.startedAt) + 'ms; ' +
+        session.active + ' request(s) still outstanding, their results will be discarded.');
+  }
+
   const intel = _buildNewsIntelSnapshot(allItems, tierStatus, settings);
+  intel.lane_metrics = {
+    elapsed_ms: Date.now() - session.startedAt,
+    budget_ms: NEWS_SESSION_BUDGET_MS,
+    deadline_hit: deadlineHit,
+    active_at_deadline: deadlineHit ? activeAtAbort : 0,
+    active_after_abort: activeAfterQuiesce,
+    quiesced: activeAfterQuiesce === 0,
+    late_resolutions: session.lateResolutions,
+    progressive_publishes: session.publishes
+  };
 
   // Update debug box with full tier accounting
   const dbgLines = [
@@ -2217,9 +2446,27 @@ async function fetchNewsIntel(forceRefresh) {
     `${tierStatus.gdelt === 'OK' ? '✓' : tierStatus.gdelt === 'SUPPRESSED' ? '⏸' : '✗'} GDELT: ${tierStatus.gdelt}`,
     `${tierStatus.google_news   === 'OK' ? '✓' : '✗'} Google News: ${tierStatus.google_news}`
   ];
-  if ($('newsDebugBox')) $('newsDebugBox').textContent = dbgLines.join('\n');
-
+  // The final write was unconditional, so a slow session A could finish after a
+  // newer session B had already published and overwrite it. Ownership gates
+  // every terminal write — state, cache, and UI alike.
+  if (_newsActiveSession !== session) {
+    log('News: a newer run owns the lane; discarding this run\u2019s final snapshot.');
+    intel.lane_metrics.superseded = true;
+    return intel;
+  }
   state.newsIntel = intel;
+  // #newsDebugBox is INPUT, not decoration, and it used to be written above
+  // this guard. buildNewsRouteDiagnostics reads it back when no newsDebug
+  // argument is passed (02-core.js ~4576), and so does getProviderHealth
+  // (~4491); those diagnostics become state.newsDiagnostics, which
+  // updateNewsDoctorHistory turns into persisted provider verdicts.
+  //
+  // So a superseded session A could correctly lose the news DATA to session B
+  // and then, finishing later, still stamp its own stale tier statuses into the
+  // box — leaving a diagnostic build to conclude a provider failed on a run
+  // whose results were discarded. Same ownership rule as the data; the race was
+  // just one channel further out.
+  if ($('newsDebugBox')) $('newsDebugBox').textContent = dbgLines.join('\n');
   // v3.32b: only cache real results. Caching a zero-headline/degraded snapshot
   // used to poison the next 30 min of scans ("degrading every time").
   try { if (intel.top_headlines && intel.top_headlines.length) localStorage.setItem(NEWS_CACHE_STORE, JSON.stringify(intel)); } catch {}
@@ -23976,14 +24223,30 @@ function shadowWatchHotfix8NewsFetchResilienceSmokeTest() {
   check('GDELT bails on first failure (consecutiveFails >= 1)',
     /consecutiveFails\s*>=\s*1/.test(gdeltFn));
 
-  // 6. fetchNewsIntel uses tiered architecture — FAST tier writes state.newsIntel before SLOW
+  // 6. fetchNewsIntel publishes early and is deadline-bounded.
+  //
+  // These three used to read:
+  //   'has FAST TIER comment'   /FAST TIER/
+  //   'has SLOW TIER comment'   /SLOW TIER/
+  //   'assigns state.newsIntel = fastIntel (early write)'
+  //
+  // They asserted the SHAPE of the two-tier fetch, not the property it existed
+  // for. The property was: something lands in state.newsIntel early enough that
+  // the outer 18s ceiling cannot lose it. The progressive lane keeps that
+  // property and strengthens it — every source publishes as it settles, not just
+  // one tier boundary — but the literal strings are gone, so shape assertions
+  // went red on a change that made the guarantee stronger.
+  //
+  // Rewritten to assert the guarantee. A future rework of the lane should have to
+  // keep early publication and a bounded budget; it should not have to keep a
+  // particular comment.
   const fetchFn = (fetchNewsIntel._original || fetchNewsIntel).toString();
-  check('fetchNewsIntel has FAST TIER comment',
-    /FAST TIER/i.test(fetchFn));
-  check('fetchNewsIntel has SLOW TIER comment',
-    /SLOW TIER/i.test(fetchFn));
-  check('fetchNewsIntel assigns state.newsIntel = fastIntel (early write)',
-    /state\.newsIntel\s*=\s*fastIntel/.test(fetchFn));
+  check('fetchNewsIntel publishes before it finishes (early write survives the ceiling)',
+    /state\.newsIntel\s*=\s*snap/.test(fetchFn) && /publish\s*\(/.test(fetchFn));
+  check('fetchNewsIntel is bounded by a budget below the outer ceiling',
+    /NEWS_SESSION_BUDGET_MS/.test(fetchFn) && /deadline/i.test(fetchFn));
+  check('fetchNewsIntel discards results that arrive after the deadline',
+    /lateResolutions/.test(fetchFn));
   check('fetchNewsIntel calls _buildNewsIntelSnapshot',
     /_buildNewsIntelSnapshot/.test(fetchFn));
 
