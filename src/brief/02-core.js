@@ -2446,8 +2446,6 @@ async function fetchNewsIntel(forceRefresh) {
     `${tierStatus.gdelt === 'OK' ? '✓' : tierStatus.gdelt === 'SUPPRESSED' ? '⏸' : '✗'} GDELT: ${tierStatus.gdelt}`,
     `${tierStatus.google_news   === 'OK' ? '✓' : '✗'} Google News: ${tierStatus.google_news}`
   ];
-  if ($('newsDebugBox')) $('newsDebugBox').textContent = dbgLines.join('\n');
-
   // The final write was unconditional, so a slow session A could finish after a
   // newer session B had already published and overwrite it. Ownership gates
   // every terminal write — state, cache, and UI alike.
@@ -2457,6 +2455,18 @@ async function fetchNewsIntel(forceRefresh) {
     return intel;
   }
   state.newsIntel = intel;
+  // #newsDebugBox is INPUT, not decoration, and it used to be written above
+  // this guard. buildNewsRouteDiagnostics reads it back when no newsDebug
+  // argument is passed (02-core.js ~4576), and so does getProviderHealth
+  // (~4491); those diagnostics become state.newsDiagnostics, which
+  // updateNewsDoctorHistory turns into persisted provider verdicts.
+  //
+  // So a superseded session A could correctly lose the news DATA to session B
+  // and then, finishing later, still stamp its own stale tier statuses into the
+  // box — leaving a diagnostic build to conclude a provider failed on a run
+  // whose results were discarded. Same ownership rule as the data; the race was
+  // just one channel further out.
+  if ($('newsDebugBox')) $('newsDebugBox').textContent = dbgLines.join('\n');
   // v3.32b: only cache real results. Caching a zero-headline/degraded snapshot
   // used to poison the next 30 min of scans ("degrading every time").
   try { if (intel.top_headlines && intel.top_headlines.length) localStorage.setItem(NEWS_CACHE_STORE, JSON.stringify(intel)); } catch {}

@@ -226,11 +226,22 @@ const check = (name, ok, detail) => {
     restore(orig);
 
     // ── overlapping sessions: an older run must not overwrite a newer ──
-    window.fetchCryptoCompare = async () => { await wait(2500); return mk('SESSION_A', 3); };
+    // A FAILS every lane and B succeeds on every lane, so the two sessions
+    // produce different tier statuses and therefore different #newsDebugBox
+    // text. Without that asymmetry both would render the same box and the
+    // diagnostic-ownership checks below could not tell whose text survived.
+    const dbgBox = () => (document.getElementById('newsDebugBox') || {}).textContent || '';
+    // A's CryptoCompare must fail EARLY — before B supersedes it — or the lane
+    // catch sees !live(), returns before setting FAILED, and A ends on PENDING.
+    // PENDING does not match getProviderHealth's failure regex, so a leak of it
+    // would slip past the diagnostics assertion below and that check would be
+    // passing by accident rather than because ownership held. A real FAILED in
+    // A's box is what makes the check bite.
+    window.fetchCryptoCompare = async () => { await wait(30);   throw new Error('A cc down'); };
     window.fetchAllRss        = async () => { await wait(2500); return mk('SESSION_A', 3); };
     window.fetchGoogleNews    = async () => { await wait(2500); return mk('SESSION_A', 3); };
     window.fetchGdelt         = async () => { await wait(2500); return mk('SESSION_A', 3); };
-    const runOld = fetchNewsIntel(true);            // session A — slow
+    const runOld = fetchNewsIntel(true);            // session A — fails fast, ends slow
     await wait(150);
     window.fetchCryptoCompare = async () => { await wait(20); return mk('SESSION_B', 4); };
     window.fetchAllRss        = async () => { await wait(20); return mk('SESSION_B', 4); };
@@ -238,11 +249,44 @@ const check = (name, ok, detail) => {
     window.fetchGdelt         = async () => { await wait(20); return mk('SESSION_B', 4); };
     const iNew = await fetchNewsIntel(true);        // session B — fast, wins
     const afterB = JSON.stringify(((state.newsIntel || {}).items || []).map(x => x.source));
+    const dbgAfterB = dbgBox();
     const iOld = await runOld;                      // A finishes last
+    await wait(60);                                 // let A's terminal writes land
     const afterA = JSON.stringify(((state.newsIntel || {}).items || []).map(x => x.source));
+    const dbgAfterA = dbgBox();
     out.bWon        = /SESSION_B/.test(afterB);
     out.aDidNotWin  = !/SESSION_A/.test(afterA) && afterA === afterB;
     out.aSuperseded = (iOld.lane_metrics || {}).superseded === true;
+
+    // ── the DIAGNOSTIC channel obeys the same ownership rule ────────────
+    // #newsDebugBox is an INPUT: buildNewsRouteDiagnostics reads it back when
+    // called without a newsDebug argument, and getProviderHealth does too.
+    // Those verdicts reach state.newsDiagnostics and can be persisted as
+    // provider history. A superseded session writing its own tier statuses
+    // there leaves telemetry from a run whose data was thrown away.
+    out.dbgShowsBWon    = /✓/.test(dbgAfterB) && !/FAILED/.test(dbgAfterB);
+    out.dbgStillB       = dbgAfterA === dbgAfterB;
+    // Any stale marker, not just FAILED: a superseded run can also leave
+    // PENDING behind, and "no FAILED" alone would call that clean.
+    out.dbgNoStaleFail  = !/✗|FAILED|PENDING|DEADLINE_UNFINISHED/.test(dbgAfterA);
+    // Prove the scenario can actually produce a poisoning value, so the
+    // diagnostics check below is not passing on an input that was harmless.
+    out.aWouldHaveLeakedFailure = /FAILED/.test(
+      ['✗ CryptoCompare: ' + ((iOld.source_status || {}).cryptocompare || '?')].join(''));
+    out.aCcStatus = (iOld.source_status || {}).cryptocompare;
+    out.dbgAfterA       = dbgAfterA.replace(/\n/g, ' | ').slice(0, 160);
+
+    // and a diagnostic build run AFTER A finished must not derive A's statuses
+    const diagAfter = (typeof buildNewsRouteDiagnostics === 'function')
+      ? buildNewsRouteDiagnostics() : null;
+    const provsAfter = (diagAfter && diagAfter.providers) || {};
+    out.diagRan = !!diagAfter;
+    out.diagNoStaleFailure = Object.keys(provsAfter).every(k => {
+      const st = String((provsAfter[k] || {}).overall_status || '');
+      return !/TRANSPORT_FAILED/.test(st);
+    });
+    out.diagStatuses = Object.keys(provsAfter).slice(0, 6)
+      .map(k => k + '=' + ((provsAfter[k] || {}).overall_status || '?'));
     restore(orig);
 
     // ── E: the REAL source paths honour the session signal ─────────────
@@ -466,9 +510,20 @@ const check = (name, ok, detail) => {
   check('an unfinished source is UNKNOWN, not FAILED', r.unfinishedNotFailed, r.dStatuses);
 
   console.log('\noverlapping sessions');
+  console.log('  debug box after the superseded run finished: ' + JSON.stringify(r.dbgAfterA));
   check('the newer session publishes', r.bWon);
   check('the older session cannot overwrite it', r.aDidNotWin);
   check('the older session reports itself superseded', r.aSuperseded);
+
+  console.log('\nthe diagnostic channel obeys ownership too');
+  check('the winning session owns the debug box', r.dbgShowsBWon, r.dbgAfterB);
+  check('a superseded session cannot rewrite it', r.dbgStillB, r.dbgAfterA);
+  check('no stale status of any kind is left behind', r.dbgNoStaleFail, r.dbgAfterA);
+  check('the superseded run really did hold a FAILED status to leak',
+        r.aWouldHaveLeakedFailure, r.aCcStatus);
+  check('buildNewsRouteDiagnostics ran', r.diagRan);
+  check('diagnostics cannot derive the superseded run\'s failures',
+        r.diagNoStaleFailure, r.diagStatuses);
 
   console.log('\nprogressive publication');
   check('more than one publish happened during the run', r.bPublishes > 1, r.bPublishes);
