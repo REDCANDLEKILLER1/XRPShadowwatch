@@ -36,9 +36,20 @@
    news hosts are unreachable from the build sandbox. So "no post-deadline state
    mutation" is proven here against a fake that resolves late by construction,
    which is the property that matters, but the socket-level behaviour of a real
-   hung proxy is not exercised. Each request already carries its own
-   AbortController and NEWS_ROUTE_TIMEOUT_MS via proxyFetch -> fetchWithTimeout;
-   this change does not alter that and does not claim to.
+   hung proxy is not exercised.
+
+   SECTIONS A-D REPLACE THE FETCHERS; SECTION E DOES NOT
+
+   A-D stub fetchCryptoCompare / fetchGdelt / fetchGoogleNews wholesale, so they
+   measure the ORCHESTRATION and nothing else — the signal handling inside those
+   functions never ran, and a stubbed fetcher that cooperates proves only that
+   the stub cooperates. Section E replaces window.fetch alone and drives the real
+   functions down the real proxy cascade, counting the requests each one makes so
+   that "no provider was blamed" is evidence rather than an absence.
+
+   Section D's fetchGdelt stub stays deliberately non-cooperative: it ignores the
+   signal, and the suite reports quiesced=false honestly rather than hiding a
+   caller that breaks the contract.
 
    Run: node scripts/news-progressive-lane.test.js
    Env: SW_TEST_PORT to override the port (default 8261).
@@ -109,14 +120,20 @@ const check = (name, ok, detail) => {
     const origSettings = window.loadIntelSettings;
     window.loadIntelSettings = () => ({ intelCacheMinutes: 0, useGdelt: true, timeout: 500 });
 
+    // fetchOneRss is captured too. Without it, the stub sections A and D install
+    // leaked into every later section — including the one below that must run
+    // the REAL RSS path — and the "production-shaped" run would have been the
+    // fake all over again.
     const snapshot = () => ({
       cc: window.fetchCryptoCompare, rss: window.fetchAllRss,
       gd: window.fetchGdelt, gn: window.fetchGoogleNews,
+      one: window.fetchOneRss, fetch: window.fetch,
       feeds: window.RSS_FEEDS ? window.RSS_FEEDS.slice() : null
     });
     const restore = o => {
       window.fetchCryptoCompare = o.cc; window.fetchAllRss = o.rss;
       window.fetchGdelt = o.gd; window.fetchGoogleNews = o.gn;
+      window.fetchOneRss = o.one; window.fetch = o.fetch;
       if (o.feeds && window.RSS_FEEDS) { window.RSS_FEEDS.length = 0; o.feeds.forEach(f => window.RSS_FEEDS.push(f)); }
     };
     const orig = snapshot();
@@ -228,6 +245,181 @@ const check = (name, ok, detail) => {
     out.aSuperseded = (iOld.lane_metrics || {}).superseded === true;
     restore(orig);
 
+    // ── E: the REAL source paths honour the session signal ─────────────
+    // Nothing here stubs fetchCryptoCompare / fetchGdelt / fetchGoogleNews /
+    // fetchAllRss. Only window.fetch is replaced, at the network boundary, so
+    // the production chains run for real:
+    //
+    //   fetchCryptoCompare -> fetchWithTimeout -> fetch
+    //   fetchGoogleNews / fetchOneRss / fetchGdelt -> proxyFetch
+    //                                    -> fetchWithTimeout -> fetch
+    //
+    // Every previous section replaced the fetchers wholesale, which meant the
+    // signal threading inside them was never once executed. A stubbed fetcher
+    // that cooperates proves only that the stub cooperates.
+    const origFetch = window.fetch;
+
+    // Models a real fetch faithfully in the one respect under test: an aborted
+    // signal rejects the request AND errors an already-open body stream.
+    // Anti-vacuity control. "No counter moved" is only evidence if the code that
+    // could have moved it actually ran, so every request the real fetchers make
+    // is counted and asserted on below.
+    let hits = { cryptocompare: 0, gdelt: 0, google: 0, rss: 0 };
+    const installFetch = (route) => {
+      window.fetch = (url, init) => {
+        const u = String(url);
+        if (/min-api\.cryptocompare\.com/.test(u)) hits.cryptocompare++;
+        else if (/gdeltproject\.org/.test(u))      hits.gdelt++;
+        else if (/news\.google\.com/.test(u))      hits.google++;
+        else                                        hits.rss++;
+        const sig = init && init.signal;
+        const mode = route(u);
+        return new Promise((resolve, reject) => {
+          const abortErr = () => { const e = new Error('The operation was aborted.'); e.name = 'AbortError'; return e; };
+          if (sig && sig.aborted) { reject(abortErr()); return; }
+          const onAbort = () => reject(abortErr());
+          if (sig) { try { sig.addEventListener('abort', onAbort, { once: true }); } catch (_) {} }
+
+          if (mode === 'netfail') {
+            setTimeout(() => reject(new TypeError('Failed to fetch')), 15);
+            return;
+          }
+          if (mode === 'headers-then-stall') {
+            // The case the old shape could not survive: headers land promptly,
+            // the body never completes. Both bounds used to be torn down at the
+            // moment these headers arrived.
+            setTimeout(() => {
+              let ctl = null;
+              const body = new ReadableStream({ start(c) { ctl = c; } });
+              if (sig) {
+                try {
+                  sig.addEventListener('abort', () => {
+                    try { ctl.error(abortErr()); } catch (_) {}
+                  }, { once: true });
+                } catch (_) {}
+              }
+              resolve(new Response(body, { status: 200, headers: { 'content-type': 'text/plain' } }));
+            }, 25);
+            return;
+          }
+          // 'hang' — only the abort ever ends this request.
+        });
+      };
+    };
+    const routeAll = (u) =>
+      /news\.google\.com/.test(u)          ? 'headers-then-stall' :
+      /min-api\.cryptocompare\.com/.test(u) ? 'hang' :
+      /gdeltproject\.org/.test(u)           ? 'hang' :
+                                              'headers-then-stall';   // RSS feeds
+
+    // A clean provider slate, then a seeded counter per provider so an
+    // increment is visible rather than inferred from absence.
+    // RSS_FEEDS is a top-level const — a lexical global, NOT a window property.
+    // `window.RSS_FEEDS` is undefined, so writing it that way silently produced
+    // a two-provider list and the seven RSS feeds went unchecked while every
+    // assertion still passed. Read the lexical binding.
+    const PROVIDERS = ['GDELT', 'Google News'].concat(
+      RSS_FEEDS.filter(f => !f.disabled_by_default).map(f => f.name));
+    out.eProviderCount = PROVIDERS.length;
+    out.eProviders = PROVIDERS.slice();
+    const seedCounters = () => {
+      const sess = {};
+      // 1, not 3: at 3 recordNewsDoctorAttempt sets a 4-minute `disabled_until`
+      // cooldown that isProviderSessionDisabled honours, and every fetcher would
+      // return [] before making a request — every assertion below would then
+      // pass without a single line of the code under test running.
+      PROVIDERS.forEach(nm => { sess[nm] = {
+        provider: nm, consecutive_fail_count: 1, last_success_at: null,
+        last_failure_at: null, disabled_for_session: false,
+        disabled_until: 0, preferred_route: null }; });
+      sessionStorage.setItem(window.NEWS_DOCTOR_SESSION_KEY, JSON.stringify(sess));
+    };
+    const readCounters = () => {
+      let sess = {};
+      try { sess = JSON.parse(sessionStorage.getItem(window.NEWS_DOCTOR_SESSION_KEY) || '{}'); } catch (_) {}
+      const o = {};
+      PROVIDERS.forEach(nm => { o[nm] = ((sess[nm] || {}).consecutive_fail_count); });
+      return o;
+    };
+    const errorLogText = () => (document.getElementById('errorLog') || {}).textContent || '';
+
+    if ($('inCpKey')) $('inCpKey').value = 'test-key';   // CryptoCompare opts in
+    localStorage.removeItem(window.NEWS_DOCTOR_HISTORY_KEY);
+
+    // E1 + E2 — session abort: everything quiesces, nobody is blamed for it.
+    installFetch(routeAll);
+    hits = { cryptocompare: 0, gdelt: 0, google: 0, rss: 0 };
+    seedCounters();
+    const beforeE = readCounters();
+    const errLenBefore = errorLogText().length;
+    window.__SW_NEWS_BUDGET_MS__ = 400;
+    const iE = await fetchNewsIntel(true);
+    delete window.__SW_NEWS_BUDGET_MS__;
+    const mE = iE.lane_metrics || {};
+    const afterE = readCounters();
+    const newErrLines = errorLogText().slice(errLenBefore).split('\n').filter(Boolean);
+
+    out.eDeadlineHit      = mE.deadline_hit === true;
+    out.eActiveAfterAbort = mE.active_after_abort;
+    out.eQuiesced         = mE.quiesced === true;
+    out.eElapsed          = mE.elapsed_ms;
+    out.eBefore           = beforeE;
+    out.eAfter            = afterE;
+    // Not one provider counter may move. A cancellation is not a failure, and
+    // three of these bench a provider for the rest of the session.
+    out.eNoCounterMoved   = PROVIDERS.every(nm => afterE[nm] === beforeE[nm]);
+    out.eMovedProviders   = PROVIDERS.filter(nm => afterE[nm] !== beforeE[nm]);
+    // elog is not an inert log line: getProviderHealth reads #errorLog back and
+    // scores any line matching /error|fail|.../ as a failed route, which
+    // updateNewsDoctorHistory then persists to localStorage across sessions.
+    out.eNoFailureLogged  = !newErrLines.some(l => /fail|error|timeout/i.test(l));
+    out.eNewErrLines      = newErrLines.slice(0, 4);
+    out.eHits             = Object.assign({}, hits);
+    // Each of the four real source paths must actually have reached the network.
+    out.eAllPathsRan      = hits.cryptocompare > 0 && hits.gdelt > 0 &&
+                            hits.google > 0 && hits.rss > 0;
+
+    // E3 — and the persistent history the log feeds must stay clean too.
+    state.newsDiagnostics = (typeof buildNewsRouteDiagnostics === 'function')
+      ? buildNewsRouteDiagnostics() : null;
+    if (typeof updateNewsDoctorHistory === 'function') updateNewsDoctorHistory();
+    let hist = {};
+    try { hist = JSON.parse(localStorage.getItem(window.NEWS_DOCTOR_HISTORY_KEY) || '{}'); } catch (_) {}
+    out.eHistNoFailures = Object.keys(hist).every(k => !(hist[k] || {}).consecutive_failures);
+    out.eHistOffenders  = Object.keys(hist).filter(k => (hist[k] || {}).consecutive_failures);
+
+    // E4 — an ORDINARY failure, with no session abort, must still record.
+    // Same real code paths, same fake fetch, only the failure mode differs:
+    // the network refuses instead of the session ending. If the abort guards
+    // were written too broadly they would swallow this too.
+    localStorage.removeItem(window.NEWS_DOCTOR_HISTORY_KEY);
+    sessionStorage.removeItem(window.NEWS_DOCTOR_SESSION_KEY);
+    installFetch(() => 'netfail');
+    hits = { cryptocompare: 0, gdelt: 0, google: 0, rss: 0 };
+    const errLenBefore2 = errorLogText().length;
+    window.__SW_NEWS_BUDGET_MS__ = 9000;      // generous: no deadline this time
+    const iF = await fetchNewsIntel(true);
+    delete window.__SW_NEWS_BUDGET_MS__;
+    const afterF = readCounters();
+    const newErrLines2 = errorLogText().slice(errLenBefore2).split('\n').filter(Boolean);
+    out.fDeadlineHit   = (iF.lane_metrics || {}).deadline_hit === true;
+    out.fCounters      = afterF;
+    out.fRecordedFails = PROVIDERS.some(nm => afterF[nm] > 0);
+    out.fLoggedFails   = newErrLines2.some(l => /fail/i.test(l));
+    out.fHits          = Object.assign({}, hits);
+    out.fAllPathsRan   = hits.cryptocompare > 0 && hits.gdelt > 0 &&
+                         hits.google > 0 && hits.rss > 0;
+    // Every provider that was asked must be marked down, not merely one of them.
+    out.fEveryProviderRecorded = PROVIDERS.every(nm => afterF[nm] > 0);
+    out.fMissed = PROVIDERS.filter(nm => !(afterF[nm] > 0));
+    out.fErrLines      = newErrLines2.slice(0, 4);
+
+    window.fetch = origFetch;
+    localStorage.removeItem(window.NEWS_DOCTOR_HISTORY_KEY);
+    sessionStorage.removeItem(window.NEWS_DOCTOR_SESSION_KEY);
+    if ($('inCpKey')) $('inCpKey').value = '';
+    restore(orig);
+
     // ── zero verified results stay ledger-only ──────────────────────────
     window.fetchCryptoCompare = async () => { throw new Error('down'); };
     window.fetchAllRss        = async () => { throw new Error('down'); };
@@ -280,6 +472,34 @@ const check = (name, ok, detail) => {
 
   console.log('\nprogressive publication');
   check('more than one publish happened during the run', r.bPublishes > 1, r.bPublishes);
+
+  console.log('\nE — the REAL source fetchers under a session abort');
+  console.log('     (nothing stubbed but window.fetch; real CryptoCompare, GDELT,');
+  console.log('      Google News and RSS code paths, real proxy cascade)');
+  console.log('     elapsed ' + r.eElapsed + 'ms on a 400ms budget, ' +
+              r.eActiveAfterAbort + ' request(s) still active after the abort');
+  console.log('     ' + r.eProviderCount + ' providers watched: ' + JSON.stringify(r.eProviders));
+  console.log('     requests actually made: ' + JSON.stringify(r.eHits));
+  console.log('     provider counters before: ' + JSON.stringify(r.eBefore));
+  console.log('     provider counters after:  ' + JSON.stringify(r.eAfter));
+  check('all four real source paths actually reached the network', r.eAllPathsRan, r.eHits);
+  check('all RSS feeds are in the watched set, not just GDELT/Google',
+        r.eProviderCount > 2, r.eProviders);
+  check('the session deadline fires', r.eDeadlineHit);
+  check('every real source path stops: 0 active after abort', r.eActiveAfterAbort === 0, r.eActiveAfterAbort);
+  check('the lane reports itself quiesced', r.eQuiesced);
+  check('no provider counter moves on a session abort', r.eNoCounterMoved, r.eMovedProviders);
+  check('no failure line is logged for a cancellation', r.eNoFailureLogged, r.eNewErrLines);
+  check('persistent News Doctor history records no failure', r.eHistNoFailures, r.eHistOffenders);
+
+  console.log('\nE4 — an ordinary failure is still a failure');
+  console.log('     requests actually made: ' + JSON.stringify(r.fHits));
+  console.log('     provider counters after a refusing network: ' + JSON.stringify(r.fCounters));
+  check('all four real source paths ran here too', r.fAllPathsRan, r.fHits);
+  check('no deadline was involved in this run', r.fDeadlineHit === false, r.fDeadlineHit);
+  check('a real network failure still records against the provider', r.fRecordedFails, r.fCounters);
+  check('EVERY asked provider is recorded, not just one', r.fEveryProviderRecorded, r.fMissed);
+  check('a real network failure is still logged', r.fLoggedFails, r.fErrLines);
 
   console.log('\nzero verified results');
   check('no items', r.zeroItems);

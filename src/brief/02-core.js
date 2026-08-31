@@ -1826,13 +1826,15 @@ const CORS_PROXIES = [
 // each proxy gets its own timeoutMs, so a dead cascade can run far past the
 // session budget. The session signal ends the walk — no further route is even
 // attempted once the lane is over.
-async function proxyFetch(targetUrl, timeoutMs, outerSignal) {
+async function proxyFetch(targetUrl, timeoutMs, outerSignal, readAs) {
   let lastErr = null;
   for (const proxy of CORS_PROXIES) {
     if (outerSignal && outerSignal.aborted) throw _abortErr('session ended before ' + proxy.name);
     try {
-      const r = await fetchWithTimeout(proxy.build(targetUrl), timeoutMs, outerSignal);
-      if (r.ok) return { response: r, proxy: proxy.name };
+      const got = await fetchWithTimeout(proxy.build(targetUrl), timeoutMs, outerSignal, readAs);
+      const r = readAs ? got.response : got;
+      if (r.ok) return readAs ? { response: r, proxy: proxy.name, body: got.body }
+                              : { response: r, proxy: proxy.name };
       lastErr = new Error(proxy.name + ' HTTP ' + r.status);
     } catch (e) {
       if (outerSignal && outerSignal.aborted) throw _abortErr('session ended during ' + proxy.name);
@@ -1892,7 +1894,15 @@ function newsCategories(t) {
 // Both are needed and neither replaces the other: the per-request timeout stops a
 // single slow route, the session signal stops the lane from starting or
 // continuing work after its budget has gone.
-async function fetchWithTimeout(url, ms, outerSignal) {
+// `readAs` ('text' | 'json') is what makes the bounds real. fetch() resolves as
+// soon as the RESPONSE HEADERS arrive; the body still has to stream over the
+// same socket afterwards. This function used to clear its timer and detach the
+// session relay in `finally` at that moment — so every `await r.json()` and
+// `await response.text()` the callers ran happened with NO timeout and NO abort
+// path at all. A source that answered its headers promptly and then stalled its
+// body hung the lane forever, on the one path whose signal was already threaded
+// correctly. Passing `readAs` reads the body here, while both bounds still hold.
+async function fetchWithTimeout(url, ms, outerSignal, readAs) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms);
   const relay = () => { try { ctrl.abort(); } catch (_) {} };
@@ -1900,7 +1910,14 @@ async function fetchWithTimeout(url, ms, outerSignal) {
     if (outerSignal.aborted) { clearTimeout(t); throw _abortErr('session already ended'); }
     try { outerSignal.addEventListener('abort', relay, { once: true }); } catch (_) {}
   }
-  try { const r = await fetch(url, { signal: ctrl.signal }); return r; }
+  try {
+    const r = await fetch(url, { signal: ctrl.signal });
+    if (!readAs) return r;
+    // A non-ok response's body is not read: the caller discards it either way,
+    // and reading it would spend the remaining budget on a payload nobody wants.
+    const body = r.ok ? (readAs === 'json' ? await r.json() : await r.text()) : null;
+    return { response: r, body };
+  }
   finally {
     clearTimeout(t);
     if (outerSignal) { try { outerSignal.removeEventListener('abort', relay); } catch (_) {} }
@@ -1911,6 +1928,16 @@ function _abortErr(msg) {
   const e = new Error(msg || 'aborted');
   e.name = 'AbortError';
   return e;
+}
+
+// A session cancellation is not a provider failure, and the discriminator has
+// to be the SHARED signal — never the error's name. fetchWithTimeout aborts its
+// OWN controller when a route runs long, so a per-route timeout also arrives as
+// an AbortError, and that one is a genuine failure the News Doctor must see.
+// Only the session signal distinguishes "we stopped asking" from "it did not
+// answer".
+function _sessionCancelled(outerSignal) {
+  return !!(outerSignal && outerSignal.aborted);
 }
 
 function normalizeItem(it) {
@@ -1931,7 +1958,7 @@ function normalizeItem(it) {
 // v3.3: Free anonymous tier returns "You need a valid auth key". Skip silently
 // unless user supplied a key in the dev panel CryptoCompare field.
 // To enable: register free at cryptocompare.com → paste key into dev panel.
-async function fetchCryptoCompare() {
+async function fetchCryptoCompare(outerSignal) {
   const key = ($('inCpKey')?.value || '').trim();
   if (!key) {
     // Silent skip — free tier deprecated. Field exists in dev panel for opt-in.
@@ -1943,10 +1970,13 @@ async function fetchCryptoCompare() {
   ];
   let allItems = [];
   for (const url of urls) {
+    // The second URL is a fresh network request. Starting it after the session
+    // has ended spends a route on an answer nobody will read.
+    if (_sessionCancelled(outerSignal)) break;
     try {
-      const r = await fetchWithTimeout(url, NEWS_ROUTE_TIMEOUT_MS);
+      const { response: r, body: j } = await fetchWithTimeout(
+        url, NEWS_ROUTE_TIMEOUT_MS, outerSignal, 'json');
       if (!r.ok) { elog('CryptoCompare HTTP ' + r.status, null); continue; }
-      const j = await r.json();
       let data = j.Data || j.data || j.Articles || j.articles || j;
       if (!Array.isArray(data)) {
         const shape = JSON.stringify(j).slice(0, 200);
@@ -1963,6 +1993,9 @@ async function fetchCryptoCompare() {
       allItems = allItems.concat(rows);
       if (allItems.length >= 20) break;
     } catch (e) {
+      // Cancelled by the session, not failed by the provider: no error line, no
+      // diagnosis, and no further routes.
+      if (_sessionCancelled(outerSignal)) break;
       elog('CryptoCompare ' + url.slice(-30), e);
     }
   }
@@ -1994,8 +2027,8 @@ function parseRssXml(xml, sourceName) {
   }).filter(x => x.title);
 }
 async function fetchOneRss(feed, outerSignal) {
-  const { response, proxy } = await proxyFetch(feed.url, NEWS_ROUTE_TIMEOUT_MS, outerSignal);
-  const xml = await response.text();
+  const { proxy, body: xml } = await proxyFetch(
+    feed.url, NEWS_ROUTE_TIMEOUT_MS, outerSignal, 'text');
   if (!xml || xml.length < 50) throw new Error(feed.name + ' empty (' + proxy + ')');
   const items = parseRssXml(xml, feed.name);
   // tag which proxy was used (helpful for debugging)
@@ -2059,6 +2092,12 @@ async function fetchAllRss(onItems, tierStatus, isLive, outerSignal) {
       }
     })
     .catch(err => {
+      // The session ending is not the feed letting us down. Three recorded
+      // failures session-suppress a provider, so blaming a feed for our own
+      // deadline would quietly remove it from later runs. The per-route timeout
+      // inside fetchWithTimeout still lands here and still records normally —
+      // only the shared session signal is exempt.
+      if (_sessionCancelled(outerSignal)) return;
       elog('RSS ' + feed.name + ' failed', err);
       try { if (typeof recordNewsDoctorAttempt === 'function') recordNewsDoctorAttempt(feed.name, false); } catch (_) {}
     });
@@ -2073,7 +2112,7 @@ async function fetchAllRss(onItems, tierStatus, isLive, outerSignal) {
 }
 
 // ── TIER 3: GDELT via proxy cascade (direct CORS-fails in browsers) ─
-async function fetchGdelt(settings) {
+async function fetchGdelt(settings, outerSignal) {
   // v3.26-hotfix6: skip if session-suppressed (3+ consecutive fails this session)
   if (typeof isProviderSessionDisabled === 'function' && isProviderSessionDisabled('GDELT')) {
     return [];
@@ -2088,12 +2127,16 @@ async function fetchGdelt(settings) {
   let consecutiveFails = 0;
   let anySuccess = false;
   const collected = [];
+  let cancelled = false;
   for (const q of queriesToTry) {
+    // Another query is another walk down the whole proxy cascade. Do not start
+    // one the session has already stopped waiting for.
+    if (_sessionCancelled(outerSignal)) { cancelled = true; break; }
     const direct = gdeltUrl(q, settings).toString();
     try {
-      const { response, proxy } = await proxyFetch(direct, GDELT_QUERY_TIMEOUT_MS);
-      const j = await response.json();
-      const raw = j.articles || [];
+      const { proxy, body: j } = await proxyFetch(
+        direct, GDELT_QUERY_TIMEOUT_MS, outerSignal, 'json');
+      const raw = (j && j.articles) || [];
       if (raw.length) {
         anySuccess = true;
         consecutiveFails = 0;
@@ -2105,15 +2148,21 @@ async function fetchGdelt(settings) {
         consecutiveFails++;
       }
     } catch (e) {
+      // A cancelled query is not a failed query. Counting it would push GDELT
+      // toward auto-suppression for a run it was never allowed to finish.
+      if (_sessionCancelled(outerSignal)) { cancelled = true; break; }
       elog('GDELT failed: ' + q.slice(0, 40), e);
       consecutiveFails++;
       // v3.26-hotfix8: bail on FIRST failure to protect the news ceiling
       if (consecutiveFails >= 1) break;
     }
   }
-  // Record outcome to session history (3 session-fails = auto-suppress)
+  // Record outcome to session history (3 session-fails = auto-suppress).
+  // A cancellation with nothing collected says nothing about GDELT's health, so
+  // it is not recorded at all — silence, not a mark against the provider. If it
+  // did answer before the cut, that success is real and still counts.
   try {
-    if (typeof recordNewsDoctorAttempt === 'function') {
+    if (typeof recordNewsDoctorAttempt === 'function' && !(cancelled && !anySuccess)) {
       recordNewsDoctorAttempt('GDELT', anySuccess);
     }
   } catch (_) {}
@@ -2121,17 +2170,18 @@ async function fetchGdelt(settings) {
 }
 
 // ── TIER 4: Google News RSS via proxy cascade ─────────────────
-async function fetchGoogleNews() {
+async function fetchGoogleNews(outerSignal) {
   // v3.26-hotfix6: skip if 3 consecutive session fails recorded
   if (typeof isProviderSessionDisabled === 'function' && isProviderSessionDisabled('Google News')) {
     return [];
   }
+  if (_sessionCancelled(outerSignal)) return [];
   // v3.8: tighter XRP-focused query — covers ecosystem terms + ETF + Clarity Act
   const q = '(XRP OR Ripple OR XRPL OR RLUSD) (ETF OR Clarity OR Japan OR SBI OR banking OR custody OR partnership OR ruling)';
   const rssUrl = 'https://news.google.com/rss/search?' + new URLSearchParams({ q, hl: 'en-US', gl: 'US', ceid: 'US:en' });
   try {
-    const { response, proxy } = await proxyFetch(rssUrl, NEWS_ROUTE_TIMEOUT_MS);
-    const xml = await response.text();
+    const { proxy, body: xml } = await proxyFetch(
+      rssUrl, NEWS_ROUTE_TIMEOUT_MS, outerSignal, 'text');
     const doc = new DOMParser().parseFromString(xml, 'text/xml');
     const items = Array.from(doc.querySelectorAll('item')).map(it => normalizeItem({
       source: 'google_news@' + proxy,
@@ -2143,6 +2193,10 @@ async function fetchGoogleNews() {
     try { if (typeof recordNewsDoctorAttempt === 'function') recordNewsDoctorAttempt('Google News', items.length > 0); } catch (_) {}
     return items;
   } catch (e) {
+    // Cancelled, not failed — the session stopped waiting. Recording a failure
+    // here would blame Google News for our own deadline, and three of those
+    // auto-suppress it for the rest of the session.
+    if (_sessionCancelled(outerSignal)) return [];
     elog('Google News failed', e);
     try { if (typeof recordNewsDoctorAttempt === 'function') recordNewsDoctorAttempt('Google News', false); } catch (_) {}
     return [];
@@ -2335,12 +2389,15 @@ async function fetchNewsIntel(forceRefresh) {
     publish(label);
   };
 
+  // Every lane carries the SAME session signal. An earlier revision threaded it
+  // into RSS only, so ending the session left CryptoCompare, Google News and
+  // GDELT still walking their proxy cascades after the lane had returned.
   const lanes = [
-    lane('cryptocompare', 'CryptoCompare', () => fetchCryptoCompare()),
+    lane('cryptocompare', 'CryptoCompare', () => fetchCryptoCompare(sig)),
     lane('rss_feeds',     'RSS',           () => fetchAllRss(onRssItems, tierStatus, live, sig), true),
-    lane('google_news',   'Google News',   () => fetchGoogleNews())
+    lane('google_news',   'Google News',   () => fetchGoogleNews(sig))
   ];
-  if (useGdelt && !gdSup.suppressed) lanes.push(lane('gdelt', 'GDELT', () => fetchGdelt(settings)));
+  if (useGdelt && !gdSup.suppressed) lanes.push(lane('gdelt', 'GDELT', () => fetchGdelt(settings, sig)));
 
   // Wait for everything, or for the budget — whichever comes first.
   let deadlineHit = false;
