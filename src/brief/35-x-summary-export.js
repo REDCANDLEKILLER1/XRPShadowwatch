@@ -98,10 +98,12 @@
         var k = normKey(sent);
         if (!k || k.length < 12) { kept.push(sent); return; }   // short connectives may repeat
         if (seen[k]) return;
-        var fk = factKey(sent);
-        if (fk && seen['fact:' + fk]) return;
+        // seen.__events is the ledger index for this run; absent means no
+        // event identity is available and only sentence-level dedupe applies.
+        var fk = eventKey(sent, seen.__events);
+        if (fk && seen[fk]) return;
         seen[k] = true;
-        if (fk) seen['fact:' + fk] = true;
+        if (fk) seen[fk] = true;
         kept.push(sent);
       });
       if (kept.length) outLines.push(kept.join(' '));
@@ -122,28 +124,85 @@
   // when a sentence names at least one entity: an amount alone is too weak, and
   // merging on it would silently collapse three genuinely separate 10.00M
   // escrow locks to the same destination into one.
-  function factKey(sent) {
+  // Named counterparties in a sentence: capitalised words that are not the
+  // sentence opener, plus raw r-addresses. XRP/XRPL are the unit, not a party.
+  function entityTokens(sent) {
     var s = String(sent || '');
-    var amt = s.match(/\b(\d[\d,.]*)\s*([KMB])\b\s*XRP\b/i);
-    if (!amt) return '';
     var ents = {};
-    // Named counterparties: capitalised words that are not the sentence opener,
-    // plus raw r-addresses. XRP/XRPL are the unit, not a counterparty.
     (s.match(/\br[1-9A-HJ-NP-Za-km-z]{24,34}\b/g) || []).forEach(function (a) { ents[a.toLowerCase()] = 1; });
-    var words = s.split(/\s+/);
-    words.forEach(function (w, i) {
+    s.split(/\s+/).forEach(function (w, i) {
       // Internal dots are part of the name (Crypto.com, u.today); a trailing
       // one is the sentence ending. Keeping it made "Kraken." and "Kraken"
-      // two different counterparties, so the two statements of the same
-      // transfer never matched.
+      // two different counterparties.
       var t = w.replace(/^[^A-Za-z0-9.]+|[^A-Za-z0-9.]+$/g, '').replace(/\.$/, '');
       if (i === 0 || !/^[A-Z]/.test(t) || t.length < 3) return;
       if (/^(XRP|XRPL|The|This|That|These|Those|A|An)$/i.test(t)) return;
       ents[t.toLowerCase()] = 1;
     });
-    var list = Object.keys(ents).sort();
-    if (!list.length) return '';
-    return (amt[1] + amt[2]).toLowerCase().replace(/,/g, '') + '|' + list.join(' ');
+    return Object.keys(ents);
+  }
+
+  function sentenceAmountXrp(sent) {
+    var m = String(sent || '').match(/\b(\d[\d,]*(?:\.\d+)?)\s*([KMB])\b\s*XRP\b/i);
+    if (!m) return 0;
+    var mult = { k: 1e3, m: 1e6, b: 1e9 }[m[2].toLowerCase()] || 0;
+    var v = parseFloat(m[1].replace(/,/g, '')) * mult;
+    return isFinite(v) && v > 0 ? v : 0;
+  }
+
+  // ── EVENT IDENTITY ──────────────────────────────────────────────────────
+  // The dedupe key was amount + named counterparty. That recognises the two
+  // differently worded statements of one transfer, but it is NOT a transaction
+  // identifier: a ledger holding
+  //
+  //     10M XRP → Kraken at 08:00
+  //     10M XRP → Kraken at 12:00
+  //
+  // produces the same fingerprint for two genuine, separate transfers, and the
+  // second would have been deleted as a restatement of the first. Silently
+  // dropping a real transaction from a forensic summary is worse than printing
+  // one twice.
+  //
+  // Identity now comes from the ledger: pack.large_transfers rows carry the
+  // transaction `hash` (classify() spreads the tx, so hash/amount/from/to
+  // survive onto the row). A sentence is only allowed to identify an event when
+  // it matches EXACTLY ONE row. Ambiguous or unmatched → no key at all, and the
+  // sentence is kept. This fails open by construction: repetition is a cosmetic
+  // fault, deletion is an evidential one.
+  function buildEventIndex(pack) {
+    var rows = (pack && pack.large_transfers) || [];
+    if (!Array.isArray(rows)) return [];
+    var out = [];
+    rows.forEach(function (t) {
+      if (!t || !t.hash) return;                 // no hash → no identity → never used
+      var amt = Number(t.amount) || 0;
+      if (amt <= 0) return;
+      var ents = [];
+      ['sender_label', 'receiver_label', 'from', 'to', 'label'].forEach(function (k) {
+        if (t[k]) ents.push(String(t[k]).toLowerCase());
+      });
+      out.push({ hash: String(t.hash), amount: amt, ents: ents });
+    });
+    return out;
+  }
+
+  function eventKey(sent, index) {
+    if (!index || !index.length) return '';
+    var val = sentenceAmountXrp(sent);
+    if (!val) return '';
+    var toks = entityTokens(sent);
+    if (!toks.length) return '';
+    var hits = index.filter(function (e) {
+      // Prose rounds ("25.29M"); the row carries the exact drops-derived value.
+      if (Math.abs(e.amount - val) / val > 0.005) return false;
+      return toks.some(function (t) {
+        return e.ents.some(function (x) { return x === t || x.indexOf(t) > -1 || t.indexOf(x) > -1; });
+      });
+    });
+    // Exactly one, or this sentence does not identify a single event and must
+    // not be used to delete anything.
+    if (hits.length !== 1) return '';
+    return 'evt:' + hits[0].hash;
   }
 
   // Cuts at a sentence boundary rather than mid-word. The old path ended a
@@ -500,6 +559,12 @@
     // without restating the standout a second time. Printing order below is
     // unchanged — summary first, then the detail.
     var seen = {};
+    // Non-enumerable so it can never be mistaken for a claimed-sentence key.
+    try {
+      Object.defineProperty(seen, '__events', {
+        value: buildEventIndex(pack), enumerable: false, writable: true
+      });
+    } catch (_) { seen.__events = buildEventIndex(pack); }
     var moves    = largeMoves(s, seen);            // claims the specific transfers
     var exec     = executive(s, seen);             // keeps the aggregate
     var evidence = evidenceHighlights(s, seen);

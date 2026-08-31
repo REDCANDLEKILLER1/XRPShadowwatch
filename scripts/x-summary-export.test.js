@@ -128,7 +128,22 @@ const check = (name, ok, detail) => {
 
     // The pack as the engine hands it over: newest-first, unranked, with the
     // three shapes that used to break the news block.
-    const PACK = { news_intel: { top_headlines: [
+    // Ledger evidence for event identity. Dedupe keys on the transaction hash,
+    // so the pack must carry the transfers the prose describes — without them
+    // there is no identity, and the exporter correctly refuses to delete
+    // anything.
+    const LT = [
+      { hash: 'A1'.repeat(32), amount: 25290000, from: 'rLHzPsX1', to: 'rKrakenAddr1',
+        sender_label: 'receiving wallet rLHzPs…rBJh', receiver_label: 'Kraken' },
+      { hash: 'B2'.repeat(32), amount: 20000000, from: 'rRippleX1', to: 'rWhaleAddr1',
+        sender_label: 'Ripple', receiver_label: 'large XRP holder' },
+      // TWO GENUINE TRANSFERS, same amount, same destination, different events.
+      { hash: 'C3'.repeat(32), amount: 10000000, from: 'rSenderA1', to: 'rKrakenAddr1',
+        sender_label: 'whale wallet rSendA…A1', receiver_label: 'Kraken' },
+      { hash: 'D4'.repeat(32), amount: 10000000, from: 'rSenderB1', to: 'rKrakenAddr1',
+        sender_label: 'whale wallet rSendB…B1', receiver_label: 'Kraken' }
+    ];
+    const PACK = { large_transfers: LT, news_intel: { top_headlines: [
       { title: 'Trump Announced the Biggest Oil Deal Ever: Why Did Prices Jump?', source: 'rss:beincrypto@self', url: 'https://beincrypto.com/a' },
       { title: 'Dogecoin Could Reach $5 By 2030, Analyst Says', source: 'rss:coinpedia@self', url: 'https://coinpedia.org/b' },
       { title: 'Ripple CLO says Clarity Act tied to U.S. jobs and economic growth, September vote in focus', source: 'google_news@self', url: 'https://news.google.com/c' },
@@ -309,10 +324,8 @@ const check = (name, ok, detail) => {
     out.execKeptAggregate = /547\.93M XRP moved across 153 large transfers/.test(
       txt.slice(iEx, txt.indexOf('\n\n', iEx)));
 
-    // ── the fact key must not eat genuinely distinct movements ──────────
-    // Merging on amount alone would collapse three separate 10.00M escrow locks
-    // into one. The key requires a named counterparty, so same-amount transfers
-    // to DIFFERENT destinations must all survive.
+    // ── dedupe must identify the EVENT, not the amount/entity pair ──────
+    // Same amount to DIFFERENT destinations — must all survive.
     const MULTI = STORY.replace(
       'Here are the receipts, straight off the Ledger.',
       'Here are the receipts, straight off the Ledger. 10.00M XRP moved to Bitstamp. 10.00M XRP moved to Bitfinex. 10.00M XRP moved to Uphold.');
@@ -320,6 +333,27 @@ const check = (name, ok, detail) => {
     out.distinctKept = ['Bitstamp', 'Bitfinex', 'Uphold'].filter(d =>
       new RegExp('10\\.00M XRP moved to ' + d).test(multi));
     out.allDistinctSurvive = out.distinctKept.length === 3;
+
+    // THE COLLISION CASE. Two genuine transactions, same amount, same named
+    // destination, distinct hashes (C3…/D4… in the pack above). An amount+entity
+    // key cannot tell them apart and would delete the second as a restatement.
+    const SAME = STORY.replace(
+      'Here are the receipts, straight off the Ledger.',
+      'Here are the receipts, straight off the Ledger. 10.00M XRP moved to Kraken in the first window. 10.00M XRP moved to Kraken in the second window.');
+    const same = build(SAME, PACK);
+    out.sameDestBoth = (same.match(/10\.00M XRP moved to Kraken/g) || []).length;
+    out.bothCollidingSurvive = out.sameDestBoth === 2;
+    out.sameWindows = ['first window', 'second window'].filter(w => same.indexOf(w) > -1);
+
+    // …and a genuine RESTATEMENT of one transaction still collapses. The 25.29M
+    // Kraken transfer is stated once in the Executive Summary and again, worded
+    // differently, in Evidence; both resolve to hash A1… so one survives.
+    out.restatementCollapses = out.krakenOnce;
+
+    // Without ledger evidence there is no identity, so nothing may be deleted.
+    const noPack = build(SAME, { news_intel: PACK.news_intel });
+    out.failsOpenWithoutPack =
+      (noPack.match(/10\.00M XRP moved to Kraken/g) || []).length === 2;
 
     return out;
   });
@@ -384,9 +418,14 @@ const check = (name, ok, detail) => {
   check('the specific transfer lives in the movements section', r.movHasKraken);
   check('executive summary keeps its aggregate', r.execKeptAggregate);
 
-  console.log('\n8. dedupe does not eat real information');
+  console.log('\n8. dedupe identifies the EVENT, never the amount/entity pair');
   check('three same-amount transfers to different destinations all survive',
         r.allDistinctSurvive, r.distinctKept);
+  check('two distinct transactions, same amount AND same destination, both survive',
+        r.bothCollidingSurvive, { printed: r.sameDestBoth, windows: r.sameWindows });
+  check('a restatement of one transaction still collapses', r.restatementCollapses);
+  check('with no ledger evidence it fails open and deletes nothing',
+        r.failsOpenWithoutPack);
 
   console.log('\n9. no broken fragments');
   check('no orphan "63/100)" fragment', r.noOrphanScore);
