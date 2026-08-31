@@ -229,9 +229,33 @@ function summarizeLargeMoves(pack){
     var txs=_arr(pack&&pack.large_transfers);
     if(!txs.length) return _blank();
     // Sort by amount descending, take top 3
-    var sorted=txs.slice().sort(function(a,b){
+    var ranked=txs.slice().sort(function(a,b){
       return _num(b.amount)-_num(a.amount);
-    }).slice(0,3);
+    });
+
+    // ── SAME-ENTITY MOVES ARE NOT THE ANOMALY ────────────────────────────
+    // This picked purely by size, so an exchange shuffling XRP between two of
+    // its OWN wallets became "the standout individual anomaly" — the lead line
+    // of the report, read aloud. On 2026-08-31 that was 25.29M "from Kraken to
+    // Kraken": routine treasury movement, and the least anomalous thing on the
+    // board, while an unnamed whale sending 22.77M to Coinbase sat below it.
+    //
+    // Both ends must carry a SOURCED identity before we call them the same
+    // party. Two unidentified wallets both render as "an unidentified wallet"
+    // and would otherwise look identical — identified===true is what keeps a
+    // genuine stranger-to-stranger transfer from being dismissed as internal.
+    function _sameEntity(tx){
+      var s=_entityName(tx&&(tx.from||tx.sender),pack,null);
+      var r=_entityName(tx&&(tx.to||tx.receiver),pack,null);
+      if(!s||!r||s.identified!==true||r.identified!==true) return false;
+      return _plain(s.name,s.provenance)===_plain(r.name,r.provenance);
+    }
+    // The internal move is NOT dropped — it is reported below, and LARGE MOVES
+    // still lists it in full. It just stops being called the anomaly.
+    var crossing=ranked.filter(function(t){ return !_sameEntity(t); });
+    var skippedInternal=(crossing.length && _sameEntity(ranked[0])) ? ranked[0] : null;
+    var pool=crossing.length?crossing:ranked;
+    var sorted=pool.slice(0,3);
     var top=sorted[0];
     if(!top||!_num(top.amount)) return _blank();
     var amt=_xrpFmt(_num(top.amount));
@@ -239,7 +263,12 @@ function summarizeLargeMoves(pack){
     var recvInfo=_entityName(top.to||top.receiver,pack,'an unidentified wallet');
     var senderName=_plain(senderInfo.name, senderInfo.provenance);
     var recvName=_plain(recvInfo.name, recvInfo.provenance);
-    var headline=amt+' XRP moved from '+senderName+' to '+recvName+' overnight.';
+    // When every move on the board is internal there is no crossing transfer to
+    // promote, so the wording has to stop pretending: "from Kraken to Kraken"
+    // reads as a mistake; "between two Kraken wallets" is what happened.
+    var headline=_sameEntity(top)
+      ? amt+' XRP moved between two '+senderName+' wallets overnight.'
+      : amt+' XRP moved from '+senderName+' to '+recvName+' overnight.';
     var parts=[headline];
     if(sorted.length>1){
       var t2=sorted[1];
@@ -247,8 +276,21 @@ function summarizeLargeMoves(pack){
       var r2Info=_entityName(t2.to||t2.receiver,pack,'an unidentified wallet');
       parts.push('A second transfer of '+a2+' XRP reached '+_plain(r2Info.name,r2Info.provenance)+'.');
     }
+    // Completeness: the largest single move still gets stated, with what it
+    // actually was, so demoting it never reads as hiding it.
+    if(skippedInternal){
+      var si=_entityName(skippedInternal.from||skippedInternal.sender,pack,null);
+      parts.push('The largest single move, '+_xrpFmt(_num(skippedInternal.amount))+
+                 ' XRP, was internal to '+_plain(si.name,si.provenance)+'.');
+    }
     var refs=[];
-    sorted.forEach(function(tx){
+    // The skipped internal transfer is NAMED in the summary above, so its
+    // ledger hash and label refs must be present too. assertLabelProvenance
+    // discards the entire public narrative when a name has no matching source
+    // ref — that is what blanked SW-20260813-FVZAO — and naming an entity
+    // without carrying its provenance is exactly how that happens.
+    var refSrc=skippedInternal?sorted.concat([skippedInternal]):sorted;
+    refSrc.forEach(function(tx){
       var hash=tx.hash||tx.tx_hash||tx.id;
       if(hash) refs.push({
         kind:'ledger_tx',id:hash,url:null,
