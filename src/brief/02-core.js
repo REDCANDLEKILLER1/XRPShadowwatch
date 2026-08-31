@@ -7243,9 +7243,19 @@ if (typeof window !== 'undefined') {
       rationale = hasPatternMemory
         ? 'Holding high balance across multiple scans — accumulation pattern.'
         : 'Holding high balance — possible accumulation or reserve.';
-    } else if (!stillHolding && seenCount < 2) {
+    } else if (currentBalance != null && !stillHolding && seenCount < 2) {
+      // `currentBalance != null` is the whole fix. stillHolding is
+      // `currentBalance != null && currentBalance > 0`, so it is ALSO false when
+      // the balance was never read — and this branch then reported a wallet
+      // nobody measured as "dormant or closed account". That is absence of data
+      // published as a finding, and it reached the on-air report:
+      // SW-20260831-4VF0C carried DORMANT for candidates whose balance was null.
+      // A measured zero is a finding; an unread balance is not.
       phase = LIFECYCLE_PHASES.dormant;
-      rationale = 'Zero balance or only seen once — dormant or closed account.';
+      rationale = 'Balance read as zero and seen only once — dormant or closed account.';
+    } else if (currentBalance == null) {
+      phase = LIFECYCLE_PHASES.unknown;
+      rationale = 'Balance not read this scan — lifecycle cannot be determined.';
     } else {
       phase = LIFECYCLE_PHASES.unknown;
       rationale = 'Insufficient scan history to determine lifecycle phase.';
@@ -8390,9 +8400,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         }
         var text = '';
         var sources = [];
-        if (typeof buildMorningStoryText === 'function') {
-          try { text = buildMorningStoryText(pack) || ''; } catch (_) {}
-        }
+        // Reads the canonical render — does not produce a second one.
+        try { text = canonicalMorningStory(pack) || ''; } catch (_) {}
         if (typeof buildMorningStorySources === 'function') {
           try { sources = buildMorningStorySources(pack) || []; } catch (_) {}
         }
@@ -9410,9 +9419,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         var pack = (typeof state !== 'undefined' && state.pack) ? state.pack : {};
         var reportText = '';
         var sources    = [];
-        if (typeof buildMorningStoryText === 'function') {
-          try { reportText = buildMorningStoryText(pack) || ''; } catch (_) {}
-        }
+        // Reads the canonical render — does not produce a second one.
+        try { reportText = canonicalMorningStory(pack) || ''; } catch (_) {}
         if (typeof buildMorningStorySources === 'function') {
           try { sources = buildMorningStorySources(pack) || []; } catch (_) {}
         } else if (pack && Array.isArray(pack.news_headlines)) {
@@ -13468,8 +13476,11 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     var _origDownload = MRF.download.bind(MRF);
     MRF.download = function() {
       try {
-        var txt = MRF._copyLastReport ||
-                  (typeof state !== 'undefined' && state.morningStoryReport) || '';
+        // Was: MRF._copyLastReport || state.morningStoryReport — two different
+        // renders, and this preferred the one the Total Report does NOT embed.
+        var txt = (typeof canonicalMorningStory === 'function')
+          ? (canonicalMorningStory() || '')
+          : ((typeof state !== 'undefined' && state.morningStoryReport) || '');
         var sources = MRF._copyLastSources || [];
         var pack    = MRF._copyLastPack   || (typeof state !== 'undefined' && state.pack) || {};
         if (!txt) return _origDownload();
@@ -15859,6 +15870,59 @@ function _patchBuildBundleForV321() {
 //    - Risk label BLACK / EXTREME is never silently downgraded.
 // ══════════════════════════════════════════════════════════════════════
 
+// ── ONE MORNING STORY PER RUN ────────────────────────────────────────────
+// buildMorningStoryText(pack) was being called independently THREE times in a
+// single run — once during the scan (02-core ~20123, which then also piped the
+// result through SW_DAILY_GATE), once from the UI path (~8394) and once on the
+// shadow.report.sealed event (~9414) — and two different results were kept:
+//
+//   state.morningStoryReport   → what TOTAL REPORT / TOTAL DEBUG embed
+//   MRF._copyLastReport        → what the standalone download preferred
+//
+// Those two are produced at different moments, against a wrapper chain that is
+// still being installed (four separate modules reassign
+// window.buildMorningStoryText), and only the scan's copy passes through the
+// daily gate. So one run published two materially different Morning Stories.
+// SW-20260831-4VF0C shipped a standalone file carrying "Under the Surface",
+// "How to Read It", mid-size flow and clustered flow, while the copy embedded
+// in the Total Report had none of them and worded the same escrow fact
+// differently ("coverage 20/20 public owners" vs "registry check 20/20 known
+// Ripple-labeled addresses").
+//
+// This is the single renderer. It produces the text once, stores it once, and
+// every export reads it. It is deliberately NOT a synchroniser between two
+// renderers — there is only one, and the stored value IS the canonical text.
+function canonicalMorningStory(pack, opts) {
+  opts = opts || {};
+  try {
+    const cached = (typeof state !== 'undefined' && state.morningStoryReport) || '';
+    if (!opts.rebuild && cached && cached.length > 50) return cached;
+  } catch (_) {}
+  const p = pack || (typeof state !== 'undefined' && state.pack) || {};
+  let t = '';
+  try {
+    // Always the WRAPPED global: four modules layer onto it (REAL NEWS
+    // injection, baseline repair, governor). Calling an unwrapped reference
+    // is how one consumer ended up with fewer sections than another.
+    const fn = (typeof window !== 'undefined' && typeof window.buildMorningStoryText === 'function')
+      ? window.buildMorningStoryText
+      : ((typeof buildMorningStoryText === 'function') ? buildMorningStoryText : null);
+    if (fn) t = fn(p) || '';
+  } catch (_) {}
+  // The daily gate is part of PRODUCING the canonical text, not a per-consumer
+  // step. Applied here it applies once; applied by one caller only, the popup
+  // and the downloaded file disagree about which brief the day actually has.
+  try {
+    if (t && typeof window !== 'undefined' && window.SW_DAILY_GATE &&
+        typeof window.SW_DAILY_GATE.gateDelivery === 'function') {
+      t = window.SW_DAILY_GATE.gateDelivery(t, p);
+    }
+  } catch (_) {}
+  try { if (t && typeof state !== 'undefined') state.morningStoryReport = t; } catch (_) {}
+  return t;
+}
+if (typeof window !== 'undefined') window.canonicalMorningStory = canonicalMorningStory;
+
 // ─── MODULE A — MORNING STORY REPORT ENGINE ───────────────────────────
 
 // Extract all narrative inputs from the current pack into a flat object
@@ -17714,7 +17778,9 @@ function _resolveReportSource(kind) {
       return { text: txt, ext: 'txt', ok: !!(txt && txt.length > 20) };
     }
     case 'morning-story': {
-      const ms = state.morningStoryReport || '';
+      const ms = (typeof canonicalMorningStory === 'function')
+        ? (canonicalMorningStory() || '')
+        : (state.morningStoryReport || '');
       return { text: ms, ext: 'txt', ok: !!(ms && ms.length > 50) };
     }
     case 'news-source-strategy': {
@@ -20119,18 +20185,11 @@ async function run() {
 
     // v3.23/v3.24: Morning Story built AFTER intelligence — uses live discovery + pattern memory
     try {
-      if (typeof buildMorningStoryText === 'function') {
-        state.morningStoryReport = buildMorningStoryText(p);
-        // DAILY BRIEF GATE (source): one fresh brief per 24h. When locked, this
-        // swaps in today's logged brief so BOTH the popup and the full-screen
-        // report show the same governed brief — no surface can leak a fresh one.
-        // Also archives the day's brief for the "on this day" history.
-        try {
-          if (window.SW_DAILY_GATE && typeof window.SW_DAILY_GATE.gateDelivery === 'function') {
-            state.morningStoryReport = window.SW_DAILY_GATE.gateDelivery(state.morningStoryReport, p);
-          }
-        } catch (_) {}
-      }
+      // The scan is the one place that RENDERS; every other consumer reads
+      // what this produced. The daily-brief gate is applied inside
+      // canonicalMorningStory so the popup and the file can never disagree
+      // about which brief the day has.
+      state.morningStoryReport = canonicalMorningStory(p, { rebuild: true });
     } catch (e) { elog('v3.24 morning story build', e); }
 
     bundle = buildBundle(p, null);

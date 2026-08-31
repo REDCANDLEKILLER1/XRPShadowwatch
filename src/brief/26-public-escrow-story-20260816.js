@@ -42,6 +42,51 @@
     });
     return { lookback_h:Math.round(ms/3600000), releases:releases, locks:locks, released_xrp:released, locked_xrp:locked };
   }
+  // ── NON-RIPPLE ESCROW, GROUPED BY OWNER ──────────────────────────────────
+  // The Morning Story reported ONLY Ripple's recent activity, so on
+  // SW-20260831-4VF0C it said "Last 96h: 0 releases · 0 new locks" while four
+  // EscrowCreates totalling 40M XRP happened on a non-Ripple owner
+  // (rfkXSaCZKTg1EZzec2rLDyrWHxRVJdtVXj, labelled "Flare Core Vault"). Ripple's
+  // 0/0 was true; the report was not, because a listener hears "nothing was
+  // locked". The structured report already separated these correctly — only the
+  // Morning Story collapsed them.
+  //
+  // Grouped by OWNER, because "owner wallets" and "escrow ledger objects" are
+  // different measurements and had been blurring into each other.
+  function ownerName(addr) {
+    try {
+      if (typeof _swWho === 'function') return _swWho(addr, null, { bare: true });
+    } catch (_) {}
+    var a = String(addr || '');
+    return a.length > 14 ? (a.slice(0, 6) + '\u2026' + a.slice(-4)) : (a || 'an unidentified owner');
+  }
+  function recentOther() {
+    var s = stateRef();
+    var rows = s && Array.isArray(s.escrow) ? s.escrow : [];
+    var ms = lookbackMs(), cutoff = Date.now() - ms;
+    var byOwner = {};
+    rows.forEach(function (e) {
+      if (!e || Number(e.ts || 0) < cutoff || isRippleOwner(e.owner)) return;
+      var k = String(e.owner || 'unknown');
+      if (!byOwner[k]) byOwner[k] = { owner: k, releases: 0, locks: 0, released: 0, locked: 0 };
+      var g = byOwner[k];
+      if (e.type === 'UNLOCK') { g.releases++; g.released += Number(e.xrp || 0); }
+      else if (e.type === 'LOCK') { g.locks++; g.locked += Number(e.xrp || 0); }
+    });
+    var groups = Object.keys(byOwner).map(function (k) { return byOwner[k]; })
+      .filter(function (g) { return g.locks || g.releases; })
+      .sort(function (a, b) { return (b.locked + b.released) - (a.locked + a.released); });
+    return {
+      lookback_h: Math.round(ms / 3600000),
+      groups: groups,
+      owners: groups.length,
+      releases: groups.reduce(function (x, g) { return x + g.releases; }, 0),
+      locks:    groups.reduce(function (x, g) { return x + g.locks; }, 0),
+      released_xrp: groups.reduce(function (x, g) { return x + g.released; }, 0),
+      locked_xrp:   groups.reduce(function (x, g) { return x + g.locked; }, 0)
+    };
+  }
+
   function position() {
     var s = stateRef();
     try {
@@ -71,20 +116,44 @@
   }
   function sectionText() {
     var r = recentRipple();
-    return [
+    var o = recentOther();
+    var lines = [
       HEADING,
       '────────────',
       positionSentence(),
-      'Last ' + r.lookback_h + 'h: ' + r.releases + ' release' + (r.releases === 1 ? '' : 's') + ' · ' + r.locks + ' new lock' + (r.locks === 1 ? '' : 's') + '.',
-      'Current locked inventory and recent escrow activity are separate measurements.'
-    ].join('\n');
+      // "Last 96h" alone read as the whole ledger's escrow activity. Say whose.
+      'Ripple, last ' + r.lookback_h + 'h: ' + r.releases + ' release' + (r.releases === 1 ? '' : 's') +
+        ' · ' + r.locks + ' new lock' + (r.locks === 1 ? '' : 's') + '.'
+    ];
+    if (o.groups.length) {
+      lines.push('Other XRPL escrow, last ' + o.lookback_h + 'h: ' +
+        o.locks + ' new lock' + (o.locks === 1 ? '' : 's') +
+        (o.locked_xrp ? ' totalling ' + compactXrp(o.locked_xrp) + ' XRP' : '') +
+        ' · ' + o.releases + ' release' + (o.releases === 1 ? '' : 's') +
+        (o.released_xrp ? ' totalling ' + compactXrp(o.released_xrp) + ' XRP' : '') +
+        ', across ' + o.owners + ' owner wallet' + (o.owners === 1 ? '' : 's') + '.');
+      o.groups.slice(0, 3).forEach(function (g) {
+        lines.push('• ' + ownerName(g.owner) + ': ' +
+          (g.locks ? g.locks + ' lock' + (g.locks === 1 ? '' : 's') + ' ' + compactXrp(g.locked) + ' XRP' : '') +
+          (g.locks && g.releases ? ' · ' : '') +
+          (g.releases ? g.releases + ' release' + (g.releases === 1 ? '' : 's') + ' ' + compactXrp(g.released) + ' XRP' : ''));
+      });
+    } else {
+      lines.push('Other XRPL escrow, last ' + o.lookback_h + 'h: none detected in scanned scope.');
+    }
+    // Three separate measurements that had been blurring together, plus the
+    // scope limit: this is the escrow this scan observed, not the whole XRPL.
+    lines.push('Ripple and non-Ripple escrow are separate. Active escrow objects are ledger objects, not owner wallets. Scope is escrow observed by this scan, not every escrow on the XRPL.');
+    return lines.join('\n');
   }
 
   function injectStory(text) {
     var out = String(text || '');
     if (!out) return out;
     // Refresh an older injected Escrow Watch block instead of duplicating it.
-    var existing = /\nEscrow Watch\n────────────\n[\s\S]*?Current locked inventory and recent escrow activity are separate measurements\.\n?/;
+    // Must match the block this module CURRENTLY emits, or a re-inject appends a
+    // second Escrow Watch instead of refreshing the first.
+    var existing = /\nEscrow Watch\n────────────\n[\s\S]*?(?:Current locked inventory and recent escrow activity are separate measurements\.|not every escrow on the XRPL\.)\n?/;
     if (existing.test(out)) return out.replace(existing, '\n' + sectionText() + '\n');
     var block = '\n\n' + sectionText() + '\n';
     var anchors = ['\nUnder the Surface\n', '\nWhat To Watch Next\n', '\nVerdict\n', '\nLEDGER DIAGNOSTICS\n'];

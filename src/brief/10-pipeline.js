@@ -1029,9 +1029,39 @@ function _buildEvidence(interps, pack){
   if(domShift&&domShift.has_signal) parts.push(domLead+' '+_lc1(domShift.summary));
   // v16.8: surface newly-discovered related wallets so the report says more.
   try {
+    // CANONICAL DISCOVERY COUNTS.
+    // This used to count state.discoveryInbox filtered to non-REJECTED — the
+    // raw cumulative evidence rows — and published 432 while the structured
+    // report for the very same run said 25 found this scan, 56 carried over,
+    // 81 in the queue, 14 recommended (SW-20260831-4VF0C). One document, two
+    // discovery counts, an order of magnitude apart. The variable was even
+    // named `fresh` while the comment below admitted it was cumulative.
+    //
+    // AUTO_WALLET_FINDER is the same source the structured report reads, and
+    // _discoverySplit is the single arbiter of found-this-scan vs carried-over.
+    var disc=null;
+    try{
+      var AWF=(typeof window!=='undefined')&&window.AUTO_WALLET_FINDER;
+      if(AWF&&typeof AWF.buildSuggestedWatchlistAdditions==='function'){
+        var list=AWF.buildSuggestedWatchlistAdditions(pack||{})||[];
+        var sp=(typeof _discoverySplit==='function')?_discoverySplit(list):null;
+        var pool=(sp&&sp.known)?sp.fresh:list;
+        disc={
+          queue:list.length,
+          fresh:(sp&&sp.known)?sp.fresh.length:list.length,
+          carried:(sp&&sp.known)?sp.carried.length:0,
+          recommended:pool.filter(function(c){
+            return c&&(c.action_tier==='CRITICAL_ADD_REVIEW'||c.action_tier==='RECOMMEND_FOR_WATCH');
+          }).length
+        };
+      }
+    }catch(_){}
+    // Fall back to the raw inbox ONLY when the canonical finder is unavailable,
+    // and say queue-total rather than implying it is this scan's find.
     var inbox=(typeof state!=='undefined' && _arr(state.discoveryInbox)) ||
               _arr(pack&&pack.discovery_candidates);
-    var fresh=inbox.filter(function(c){ return c && c.review_status!=='REJECTED' && c.review_status!=='SUPPRESSED'; });
+    var fresh=disc?{length:disc.queue}
+                  :inbox.filter(function(c){ return c && c.review_status!=='REJECTED' && c.review_status!=='SUPPRESSED'; });
     if(fresh.length){
       // fresh is the CUMULATIVE discovery queue (not new-this-scan). The report
       // also prints "Watched wallets: N" in LEDGER DIAGNOSTICS, so two different
@@ -1067,8 +1097,14 @@ function _buildEvidence(interps, pack){
         ' — behavior put them there and behavior alone. Not ownership proof, and I won’t dress it up as any.'
       ],seed,13);
       var watchedClause=watched?(', separate from the '+watched+' wallets on the permanent watch list'):'';
+      // When the canonical split is available, say which of the queue came from
+      // THIS scan — the number a listener actually wants — instead of a single
+      // cumulative figure that silently grows every run.
+      var breakdown=(disc&&(disc.fresh||disc.recommended))
+        ? (' — '+disc.fresh+' found this scan, '+disc.recommended+' recommended for review')
+        : '';
       parts.push(netLead+fresh.length+' flagged candidate'+(fresh.length===1?'':'s')+
-                 watchedClause+netTail);
+                 breakdown+watchedClause+netTail);
     }
   } catch(_){}
   if(news&&news.has_signal)   parts.push(newsLead+' '+_lc1(news.summary));
@@ -1232,6 +1268,20 @@ function _buildLedgerDiagnostics(pack){
     }
     L.push(wc);
   }
+  // WHICH WINDOW THESE COVER.
+  // The field is named tx_24h_count but holds whatever the run's window was —
+  // 153,826 rows across LAST 72H · MONDAY WEEKEND SWEEP on SW-20260831-4VF0C.
+  // The line printed no window at all while every neighbour said "(24h)", so a
+  // reader carried the 24h over onto a three-day figure. The lines around this
+  // one — price, exchange volume, DEX volume — really are 24h and keep it.
+  var winLbl='';
+  try{
+    if(p.tx_window&&p.tx_window.label) winLbl=String(p.tx_window.label);
+    else if(typeof getTxWindow==='function'){
+      var gw=getTxWindow(); if(gw&&gw.label) winLbl=String(gw.label);
+    }
+  }catch(_){}
+  var winSuffix=winLbl?(', '+winLbl):'';
   // Wide shot: ALL on-Ledger activity across the watched wallets, every size.
   var txn=_num(p.tx_24h_count), moved=_num(p.total_tx_xrp), act=_num(p.active_wallets);
   if(txn>0||moved>0){
@@ -1239,11 +1289,11 @@ function _buildLedgerDiagnostics(pack){
     if(txn>0)   ap.push(txn+' transaction'+(txn===1?'':'s'));
     if(moved>0) ap.push(_xrpFmt(moved)+' XRP moved');
     if(act>0)   ap.push(act+' wallet'+(act===1?'':'s')+' active');
-    L.push('\u2022 Watched activity (all sizes): '+ap.join(' \u00b7 '));
+    L.push('\u2022 Watched activity (all sizes'+winSuffix+'): '+ap.join(' \u00b7 '));
   }
   // Spotlight: the big whale moves only \u2014 a SUBSET of the activity line above.
   var sv=_num(p.shadow_volume_xrp), lt=_arr(p.large_transfers).length||_num(p.large_transfers_count);
-  if(sv>0) L.push('\u2022 Shadow volume (whale moves \u22651M): '+_xrpFmt(sv)+' XRP'+(lt>0?(' \u00b7 '+lt+' transfer'+(lt===1?'':'s')):''));
+  if(sv>0) L.push('\u2022 Shadow volume (whale moves \u22651M'+winSuffix+'): '+_xrpFmt(sv)+' XRP'+(lt>0?(' \u00b7 '+lt+' transfer'+(lt===1?'':'s')):''));
   var nd=_num(p.total_balance_delta_xrp!=null?p.total_balance_delta_xrp:p.balance_delta);
   if(Math.abs(nd)>=100000) L.push('\u2022 Net watched flow: '+(nd>0?'+':'\u2212')+_xrpFmt(Math.abs(nd))+' XRP '+(nd>0?'inward':'outward'));
   if(!L.length) return 'The rails were quiet \u2014 no market or ledger metrics crossed the wire this scan.';
