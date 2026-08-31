@@ -3701,8 +3701,9 @@ function buildProviderTruthStatus(pack) {
 
   // Build the universe of providers from status keys + breakdown keys
   const universe = new Set([
-    ...Object.keys(status).map(k => _humanProvider(k)),
-    ...Object.keys(breakdown).map(k => normalizeNewsProviderName ? normalizeNewsProviderName(k) : k),
+    ...Object.keys(status).filter(k => !isReservedNewsProviderKey(k)).map(k => _humanProvider(k)),
+    ...Object.keys(breakdown).filter(k => !isReservedNewsProviderKey(k))
+        .map(k => normalizeNewsProviderName ? normalizeNewsProviderName(k) : k),
     'CoinTelegraph','The Defiant','Decrypt','CoinDesk','NewsBTC','Bitcoinist','GDELT','Google News','CryptoCompare'
   ]);
 
@@ -15156,13 +15157,39 @@ if (typeof window !== 'undefined') {
 
 // ─── MODULE 5 — NEWS DOCTOR HISTORY ───────────────────────────────────
 
-// Load or init the news doctor history map
+// Aggregate words that describe the whole news lane, never a provider. A lane
+// outcome must never be attributed to a source: "all failed" is a statement
+// about our own fetch, and printing it as a provider tells the reader a feed let
+// them down when it may have been fine.
+const NEWS_RESERVED_PROVIDER_KEYS = ['all', 'any', 'none', 'unknown', '*'];
+function isReservedNewsProviderKey(k) {
+  const t = String(k == null ? '' : k).trim().toLowerCase();
+  return !t || NEWS_RESERVED_PROVIDER_KEYS.indexOf(t) > -1;
+}
+
+// Load or init the news doctor history map.
+//
+// Purges reserved keys on the way out. A previous build persisted "all" into
+// localStorage, so browsers already carry a poisoned record whose failure count
+// only ever climbs — nothing writes a success under a key no fetcher owns.
+// Cleaning on read means an existing device recovers on its next run without
+// anyone clearing storage by hand.
 function getNewsDoctorHistory() {
   try {
     const raw = localStorage.getItem(NEWS_DOCTOR_HISTORY_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') return parsed;
+      if (parsed && typeof parsed === 'object') {
+        let dropped = 0;
+        Object.keys(parsed).forEach(k => {
+          if (isReservedNewsProviderKey(k)) { delete parsed[k]; dropped++; }
+        });
+        if (dropped) {
+          try { localStorage.setItem(NEWS_DOCTOR_HISTORY_KEY, JSON.stringify(parsed)); } catch (_) {}
+          try { log('news doctor: dropped ' + dropped + ' reserved provider record(s) from history'); } catch (_) {}
+        }
+        return parsed;
+      }
     }
   } catch (_) {}
   return {};
@@ -15245,6 +15272,7 @@ function updateNewsDoctorHistory() {
   if (!diag || !diag.providers) return;
 
   Object.keys(diag.providers).forEach(provName => {
+    if (isReservedNewsProviderKey(provName)) return;   // lane outcome, not a source
     const prov = diag.providers[provName];
     if (!hist[provName]) {
       hist[provName] = {
@@ -15305,6 +15333,7 @@ if (typeof window !== 'undefined') {
   window.updateNewsDoctorHistory  = updateNewsDoctorHistory;
   window.exportNewsDoctorHistoryJson = exportNewsDoctorHistoryJson;
   window.NEWS_DOCTOR_HISTORY_KEY  = NEWS_DOCTOR_HISTORY_KEY;
+  window.isReservedNewsProviderKey = isReservedNewsProviderKey;
 }
 
 // ─── MODULE 2 — PATTERN MEMORY UI ─────────────────────────────────────
@@ -16285,6 +16314,7 @@ function _routerSourceLimits() {
   try {
     const hist = (typeof getNewsDoctorHistory === 'function' ? getNewsDoctorHistory() : null) || {};
     Object.keys(hist).forEach(k => {
+      if (isReservedNewsProviderKey(k)) return;
       const h = hist[k] || {};
       if (n(h.consecutive_failures) >= 3)
         out.push(k + ': unavailable this run and the ' + n(h.consecutive_failures) +
@@ -19740,7 +19770,20 @@ async function run() {
             summary: 'NEWS/MACRO CONTEXT — No live headlines. Ledger-only mode.',
             sentiment_score: 0, macro_risk_score: 0, regulatory_score: 0,
             banking_stress_score: 0, war_oil_score: 0,
-            source_status: { all: 'FAILED' }
+            // This used to be `source_status: { all: 'FAILED' }`. The lane timed
+            // out before any snapshot existed, so we know the LANE did not
+            // finish — we do not know that any particular provider failed. That
+            // synthetic key became a provider named "all" in the diagnostics,
+            // was persisted to the News Doctor history, and then published
+            // forever after as "all: unavailable this run and the 4 before it".
+            // It appeared on SW-20260827-FPXY4, a run where every wallet
+            // answered and nothing was actually wrong with the feeds.
+            //
+            // Empty is the honest map: nothing is known to have failed. The
+            // reason for the empty map is recorded off to one side, on a key no
+            // provider-universe code reads.
+            source_status: {},
+            lane_incomplete: isCeiling ? 'CEILING_BEFORE_SNAPSHOT' : 'NEWS_LANE_FAILED'
           };
         }
       }
