@@ -1,0 +1,50 @@
+name: regression
+
+# Every pull request and every push to main. Until now the only check GitHub ran
+# was a Vercel preview deploy, which proves the site builds and nothing about
+# whether the report tells the truth. Three changes reached production on
+# operator-reported numbers alone.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A newer push supersedes an in-flight run on the same ref.
+concurrency:
+  group: regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # No lockfile is committed and the only dependency is Playwright, so a
+      # plain install is both correct and fast. `npm ci` would fail without a
+      # lockfile.
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Runs the same list `npm test` runs locally, so a contributor cannot be
+      # green on their machine and red here because CI ran a different set.
+      - name: Regression suites
+        run: npm test
+
+      # The smoke gate compares against scripts/smoke-baseline.txt. If a
+      # baseline entry starts passing the run still succeeds, but the baseline
+      # should be regenerated so it cannot drift upward unnoticed.
+      - name: Smoke baseline drift
+        if: always()
+        run: |
+          echo "Baseline: $(wc -l < scripts/smoke-baseline.txt) known in-page failures."
+          echo "Regenerate with: npm run test:smoke-baseline"
