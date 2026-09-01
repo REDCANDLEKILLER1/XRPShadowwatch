@@ -120,7 +120,7 @@ function _getLabel(address, pack){
 // and more use to a reader than "an unidentified wallet".
 var _CAT_PHRASE = {
   exchange:                   'an exchange wallet',
-  escrow:                     'a Ripple escrow wallet',
+  escrow:                     'a watched wallet',
   whale:                      'a watched whale wallet',
   next_hop_splitter:          'a watched routing wallet',
   discovered_whale:           'a tracked whale wallet',
@@ -168,11 +168,15 @@ function _plain(name, provenance){
   // (RIPPLE_1.3B, RIPPLE_ESCROW_*) is a description of what the wallet does and
   // must never become a company either — it gets the neutral phrase.
   if(n.includes('ripple')&&!n.includes('xrpl')){
-    return /^ripple$/i.test(String(name).trim()) ? 'Ripple' : 'a Ripple escrow wallet';
+    // Only the exact sourced identity "Ripple" may be published as Ripple.
+    // Internal/watchlist handles such as RIPPLE_ESCROW_* are behavioural
+    // labels, not ownership proof, and must not turn an ordinary movement into
+    // a Ripple escrow claim.
+    return /^ripple$/i.test(String(name).trim()) ? 'Ripple' : 'a watched wallet';
   }
   if(n.includes('exchange')||n.includes('hot')) return 'an exchange wallet';
   if(n.includes('whale'))     return 'a large XRP holder';
-  if(n.includes('escrow'))    return 'an escrow wallet';
+  if(n.includes('escrow'))    return 'a watched wallet';
   if(n.includes('bridge')||n.includes('peg')) return 'a bridge reserve';
   return name; // fallback: use label as given if no mapping
 }
@@ -226,7 +230,21 @@ function _isXrpNews(title,url){
 /* Helper 1 — summarizeLargeMoves */
 function summarizeLargeMoves(pack){
   return _safe(function(){
-    var txs=_arr(pack&&pack.large_transfers);
+    // EscrowCreate / EscrowFinish / EscrowCancel belong to ESCROW WATCH, not
+    // Largest XRP Movements. Keeping them in both surfaces makes a lock/release
+    // read like an ordinary wallet-to-wallet transfer and can manufacture an
+    // "escrow movement" narrative even when the movement section has no
+    // independent Payment behind it.
+    function _isEscrowLedgerEvent(tx){
+      if(!tx) return false;
+      var nested=tx.tx||tx.transaction||tx.raw||{};
+      var raw=tx.TransactionType||tx.transaction_type||tx.tx_type||tx.txType||
+              tx.type||tx.kind||nested.TransactionType||nested.transaction_type||'';
+      var k=String(raw).replace(/[^a-z]/gi,'').toLowerCase();
+      return k==='escrowcreate'||k==='escrowfinish'||k==='escrowcancel'||
+             k==='lock'||k==='unlock';
+    }
+    var txs=_arr(pack&&pack.large_transfers).filter(function(tx){ return !_isEscrowLedgerEvent(tx); });
     if(!txs.length) return _blank();
     // Sort by amount descending, take top 3
     var ranked=txs.slice().sort(function(a,b){

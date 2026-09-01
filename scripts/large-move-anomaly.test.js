@@ -34,13 +34,14 @@ const check = (name, ok, detail) => {
 };
 
 // Load 10-pipeline.js in a sandbox with the identity registry the real run had.
-function load(identities) {
+function load(identities, known) {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src/brief/10-pipeline.js'), 'utf8');
   const win = { SW_WALLET_IDENTITIES: identities || {} };
   const ctx = {
     window: win, document: { getElementById: () => null, addEventListener() {} },
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     console, setTimeout, clearTimeout, Date, Math, JSON,
+    KNOWN: known || {},
     setInterval: () => 0, clearInterval: () => {},
     requestAnimationFrame: (f) => setTimeout(f, 0)
   };
@@ -125,6 +126,48 @@ check('the 30M stranger-to-stranger transfer still leads',
       /30\.00M XRP|30M XRP/.test(str.headline), str.headline);
 check('it is not described as internal',
       !/between two/i.test(str.headline) && !/internal to/i.test(str.headline), str.headline);
+
+console.log('\n5. behavioural escrow labels never become Ripple identity');
+const ESCROW_WATCH = 'rEscrowWatchAAAAAAAAAAAAAAAAAAAAAAA';
+const PAYEE        = 'rPayeeBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
+const watched = {};
+watched[ESCROW_WATCH] = { label: 'RIPPLE_ESCROW_42', cat: 'escrow' };
+const behavioural = load({}, watched).summarizeLargeMoves({
+  large_transfers: [
+    { from: ESCROW_WATCH, to: PAYEE, amount: 9000000, hash: '7'.repeat(64), TransactionType: 'Payment' }
+  ]
+});
+console.log('  headline: ' + JSON.stringify(behavioural.headline));
+check('does not call an unsourced escrow-category wallet Ripple',
+      !/Ripple/i.test(behavioural.headline), behavioural.headline);
+check('does not claim an escrow event from a mere watchlist category',
+      !/escrow/i.test(behavioural.headline), behavioural.headline);
+check('keeps the movement as a neutral watched-wallet Payment',
+      /watched wallet/i.test(behavioural.headline), behavioural.headline);
+
+console.log('\n6. actual escrow ledger events stay out of Largest XRP Movements');
+const mixed = load({}).summarizeLargeMoves({
+  large_transfers: [
+    { from: 'rEscrowOwnerCCCCCCCCCCCCCCCCCCCCCCC', to: 'rEscrowDestDDDDDDDDDDDDDDDDDDDDDDDD',
+      amount: 100000000, hash: '8'.repeat(64), TransactionType: 'EscrowFinish' },
+    { from: 'rSenderEEEEEEEEEEEEEEEEEEEEEEEEEEEE', to: 'rReceiverFFFFFFFFFFFFFFFFFFFFFFFFF',
+      amount: 5000000, hash: '6'.repeat(64), TransactionType: 'Payment' }
+  ]
+});
+console.log('  headline: ' + JSON.stringify(mixed.headline));
+check('EscrowFinish does not become the movement headline',
+      !/100\.00M XRP|100M XRP/.test(mixed.headline), mixed.headline);
+check('the real Payment remains eligible for movement reporting',
+      /5\.00M XRP|5M XRP/.test(mixed.headline), mixed.headline);
+
+const onlyEscrow = load({}).summarizeLargeMoves({
+  large_transfers: [
+    { from: 'rEscrowOwnerGGGGGGGGGGGGGGGGGGGGGGG', to: 'rEscrowDestHHHHHHHHHHHHHHHHHHHHHHHH',
+      amount: 75000000, hash: '5'.repeat(64), type: 'UNLOCK' }
+  ]
+});
+check('an escrow-only board produces no movement claim',
+      onlyEscrow.has_signal === false && onlyEscrow.headline === '', onlyEscrow);
 
 console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' CHECKS PASS'));
 process.exit(fail ? 1 : 0);
