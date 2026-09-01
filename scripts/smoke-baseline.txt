@@ -1,0 +1,61 @@
+morningStoryNewsRouterSmokeTest :: Morning Story HTML body in <pre> does not expose raw URL
+morningStoryNewsRouterSmokeTest :: Morning Story text has LEDGER STORY section
+morningStoryNewsRouterSmokeTest :: Morning Story text has PATTERN MEMORY section
+morningStoryNewsRouterSmokeTest :: Morning Story text has REAL NEWS or NEWS context section
+morningStoryNewsRouterSmokeTest :: Morning Story text preserves BLACK / EXTREME risk label
+morningStoryNewsRouterSmokeTest :: hudVersion contains v3.32a-helper-runtime-proof-lock
+newsAfterLedgerSmokeTest :: Morning Story has SOURCES section when governor cleared real news
+newsAfterLedgerSmokeTest :: Morning Story opening says "out" or "outflow" for negative net delta
+newsAfterLedgerSmokeTest :: hudVersion contains v3.24
+newsDoctorAutoDiscoverySmokeTest :: hudVersion contains v3.32a-helper-runtime-proof-lock
+reportIntelPolishSmokeTest :: headline ranking: White House/Bank/Stablecoin headline reaches P1
+reportIntelPolishSmokeTest :: hudVersion text contains v3.32a-helper-runtime-proof-lock
+reportIntelSourcesSmokeTest :: hudVersion text contains v3.32a-helper-runtime-proof-lock
+screenRouterSmokeTest :: hudVersion text contains v3.32a-helper-runtime-proof-lock
+shadowMemoryReviewSmokeTest :: hudVersion contains v3.32a-helper-runtime-proof-lock
+shadowWatchAutoWalletFinderSmokeTest :: Added KNOWN entry has review_session_only=true (safety flag)
+shadowWatchBloomHelperEngineSmokeTest :: Regression: Morning Story has CONFIDENCE FRAME
+shadowWatchBloomHelperEngineSmokeTest :: Regression: governor fallback in REAL NEWS
+shadowWatchEmbeddedRichlistSeedSmokeTest :: Bithumb gets richlist_seen=true from embedded seed
+shadowWatchEmbeddedRichlistSeedSmokeTest :: Operator-reviewed label (Bithumb Hot Wallet) overrides seed identity
+shadowWatchEmbeddedRichlistSeedSmokeTest :: Richlist balance from seed enriches candidate
+shadowWatchHelperRuntimeProofSmokeTest :: Regression: Morning Story has MARKET SNAPSHOT
+shadowWatchHotfix6RssReplacementSmokeTest :: Morning Story (1 group + 2 domains): NO "Ledger-matched context:" line
+shadowWatchHotfix6RssReplacementSmokeTest :: Morning Story (1 group + 2 domains): says "partial this scan"
+shadowWatchMarketSnapshotProgressLockSmokeTest :: CSS uses faster xaiTalk during speaking
+shadowWatchMarketSnapshotProgressLockSmokeTest :: Fallback cites 5 large transfers
+shadowWatchMarketSnapshotProgressLockSmokeTest :: Fallback cites 9.89M XRP shadow
+shadowWatchMarketSnapshotProgressLockSmokeTest :: Fallback shows actual net flow (749.07K)
+shadowWatchMarketSnapshotProgressLockSmokeTest :: Missing net flow → UNKNOWN, not 0
+shadowWatchMorningReportXaiProgressSmokeTest :: Heartbeat fires during active scan (silence gap)
+shadowWatchMorningReportXaiProgressSmokeTest :: Insufficient pack: digest cites ledger evidence in fallback
+shadowWatchMorningReportXaiProgressSmokeTest :: Insufficient pack: digest uses "no strong public news" fallback
+shadowWatchNewsIntelHardeningSmokeTest :: Provider disabled after 3 consecutive failures
+shadowWatchNewsIntelHardeningSmokeTest :: hudVersion contains v3.28
+shadowWatchNewsTemplateLockSmokeTest :: hudVersion contains v3.28
+shadowWatchPublicSourceGovernorCleanupSmokeTest :: Weak-news Morning Story has REAL NEWS fallback
+shadowWatchRichlistExportProofSmokeTest :: Operator-reviewed label still overrides richlist identity (Binance-Peg)
+shadowWatchRichlistIngestSmokeTest :: Operator-reviewed label overrides richlist identity
+shadowWatchRuntimeExportStampSmokeTest :: HUD version span shows v3.32a-helper-runtime-proof-lock
+shadowWatchStructuredSourcesTerminologyFixSmokeTest :: Regression: Morning Story still has CONFIDENCE FRAME (hotfix1j Patch E)
+shadowWatchTotalExportWalletLabelsSmokeTest :: Binance-Peg address has display_label in suggested list
+shadowWatchTotalExportWalletLabelsSmokeTest :: Binance-Peg address: classification is not Binance-Peg label
+shadowWatchTotalExportWalletLabelsSmokeTest :: Binance-Peg behavior classification preserved (not overwritten by label)
+shadowWatchTotalExportWalletLabelsSmokeTest :: Binance-Peg has identity_status field
+shadowWatchTotalExportWalletLabelsSmokeTest :: Binance-Peg review_status = REVIEWED_LABEL_APPLIED
+shadowWatchTotalExportWalletLabelsSmokeTest :: Bithumb address: classification is not Bithumb Hot Wallet label
+shadowWatchTotalExportWalletLabelsSmokeTest :: Bithumb has display_label in suggested list
+shadowWatchTotalExportWalletLabelsSmokeTest :: JSON export has identity_status for reviewed candidates
+shadowWatchTotalExportWalletLabelsSmokeTest :: Suggested Wallets TXT contains "Behavior classification:"
+shadowWatchTotalExportWalletLabelsSmokeTest :: Suggested Wallets TXT contains "Binance-Peg / Bridge"
+shadowWatchTotalExportWalletLabelsSmokeTest :: Suggested Wallets TXT contains "Bithumb Hot Wallet"
+shadowWatchTotalExportWalletLabelsSmokeTest :: Suggested Wallets TXT contains "Identity status:"
+shadowWatchTotalExportWalletLabelsSmokeTest :: Suggested Wallets TXT contains "Reviewed label:"
+shadowWatchTotalExportWalletLabelsSmokeTest :: Suggested Wallets TXT contains caution language
+shadowWatchVoiceGaugeSmartReportSmokeTest :: Morning Story contains CONFIDENCE FRAME
+shadowWatchXaiVoiceGaugeReadoutSmokeTest :: Boot line is typed into narrator
+shadowWatchXrpmanLiveNarrationBusSmokeTest :: Float button #mrfDownloadBtn present
+shadowWatchXrpmanLiveNarrationBusSmokeTest :: Float button #mrfOpenFullBtn present
+shadowWatchXrpmanLiveNarrationBusSmokeTest :: shadow.scan.started produces scan narration
+shadowWatchXrpmanLiveNarrationBusSmokeTest :: toggleSize() adds mrf-large class
+shadowWatchXrpmanLiveNarrationBusSmokeTest :: toggleSize() removes mrf-large again

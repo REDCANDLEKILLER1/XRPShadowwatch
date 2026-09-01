@@ -8,11 +8,16 @@
   "scripts": {
     "dev": "npx --yes serve@latest -l 5173 .",
     "serve": "python3 -m http.server 5173",
-    "check": "node scripts/check-syntax.js"
+    "check": "node scripts/check-syntax.js",
+    "test": "node scripts/run-tests.js",
+    "test:smoke-baseline": "node scripts/in-page-smoke.test.js --write-baseline"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/redcandlekiller1/xrpshadowwatch.git"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
 }
