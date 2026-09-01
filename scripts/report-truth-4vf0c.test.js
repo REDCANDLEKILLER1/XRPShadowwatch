@@ -193,6 +193,38 @@ const check = (name, ok, detail) => {
       : (!!discLine && discLine.indexOf(String(canonQueue) + ' flagged') > -1);
     out.discMode = (canonQueue === 0) ? 'empty-queue: no line expected' : 'queue: line must match canonical';
 
+    // ── ESCROW TRANSACTIONS ARE CLASSIFIED AS ESCROW ────────────────────
+    // classify() judged only sender/receiver. On an EscrowFinish `from` is the
+    // account that submitted the finish — anyone may finish a matured escrow —
+    // so Ripple's scheduled 500M unlock became "unidentified wallet → Ripple ·
+    // unclassified flow" (SW-20260901-Y7BFX), three times.
+    let cRel = null, cLock = null, cPay = null;
+    try {
+      cRel  = classify({ type: 'EscrowFinish', from: 'rPw6JAfinisher00000000000000000000',
+                         to: 'r9NpyVfLfUG8hatuCCHKzosyDtKnBdsEN3', amount: 500000000,
+                         currency: 'XRP', hash: 'E'.repeat(64) });
+      cLock = classify({ type: 'EscrowCreate', from: 'rfkXSaCZKTg1EZzec2rLDyrWHxRVJdtVXj',
+                         to: 'rMLNvZR9dascY5jtCfCv3whAp8HdUSZAQ', amount: 10000000,
+                         currency: 'XRP', hash: 'F'.repeat(64) });
+      // an ordinary payment must be unaffected
+      cPay  = classify({ type: 'Payment', from: 'rSomeSender000000000000000000000',
+                         to: 'rSomeReceiver0000000000000000000', amount: 5000000,
+                         currency: 'XRP', hash: '7'.repeat(64) });
+    } catch (e) { out.clsErr = String(e && e.message); }
+    out.clsReachable = !!cRel;
+    out.clsRelease = cRel && cRel.classification;
+    out.clsReleaseSender = cRel && cRel.sender_label;
+    out.clsLock = cLock && cLock.classification;
+    out.clsPay = cPay && cPay.classification;
+    out.clsReleaseIsEscrow = !!cRel && cRel.classification === 'ESCROW_RELEASE';
+    // the finisher must NOT be presented as the source of the funds
+    out.clsNoFinisherAsSender = !!cRel && cRel.sender_label === 'escrow' &&
+                                String(cRel.sender_label).indexOf('rPw6JA') < 0;
+    out.clsLockIsEscrow = !!cLock && cLock.classification === 'ESCROW_LOCK';
+    // and a normal payment is still classified the old way
+    out.clsPaymentUntouched = !!cPay && cPay.classification !== 'ESCROW_RELEASE' &&
+                                        cPay.classification !== 'ESCROW_LOCK';
+
     // ── 4. LIFECYCLE ────────────────────────────────────────────────────
     let lc = null, lcZero = null;
     try {
@@ -242,6 +274,15 @@ const check = (name, ok, detail) => {
   check('the raw inbox size never reaches the reader', r.discNoRawAnywhere, r.rawInbox);
   check('output agrees with the canonical finder', r.discAgrees,
         { line: r.discLine, canon: r.canon });
+
+  console.log('\n3b. escrow transactions are classified as escrow');
+  console.log('     release: ' + r.clsRelease + '  sender: ' + JSON.stringify(r.clsReleaseSender));
+  console.log('     lock:    ' + r.clsLock + '   payment: ' + r.clsPay);
+  check('classify() is reachable', r.clsReachable, r.clsErr);
+  check('an EscrowFinish is ESCROW_RELEASE, not UNKNOWN_FLOW', r.clsReleaseIsEscrow, r.clsRelease);
+  check('the finisher is not named as the source of funds', r.clsNoFinisherAsSender, r.clsReleaseSender);
+  check('an EscrowCreate is ESCROW_LOCK', r.clsLockIsEscrow, r.clsLock);
+  check('an ordinary payment is unaffected', r.clsPaymentUntouched, r.clsPay);
 
   console.log('\n4. an unread balance is UNKNOWN, never DORMANT');
   check('the lifecycle classifier is reachable', r.lcReachable, r.lcErr);

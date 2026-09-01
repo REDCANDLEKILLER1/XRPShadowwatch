@@ -168,6 +168,51 @@ const onlyEscrow = load({}).summarizeLargeMoves({
 });
 check('an escrow-only board produces no movement claim',
       onlyEscrow.has_signal === false && onlyEscrow.headline === '', onlyEscrow);
+console.log('\n7. a scheduled escrow unlock is not an anomaly');
+// The real 2026-09-01 board (SW-20260901-Y7BFX): Ripple's monthly 1B unlock in
+// three EscrowFinish releases, plus one genuine third-party move. The unlock is
+// bigger than everything else, so a size-first picker leads with it — and did.
+const RIPPLE_A = 'r9NpyVfLfUG8hatuCCHKzosyDtKnBdsEN3';
+const RIPPLE_B = 'rMhkqz3DeU7GUUJKGZofusbrTwZe6bDyb1';
+const FINISHER = 'rPw6JAbcdefghijklmnopqrstuvwxyzCspU';
+const IDENT2 = Object.assign({}, IDENT);
+IDENT2[RIPPLE_A] = { name: 'Ripple', provenance: 'registry' };
+IDENT2[RIPPLE_B] = { name: 'Ripple', provenance: 'registry' };
+const ESCROW_DAY = { large_transfers: [
+  { from: FINISHER, to: RIPPLE_A, amount: 500000000, hash: '1'.repeat(64),
+    type: 'EscrowFinish', classification: 'ESCROW_RELEASE',
+    sender_label: 'escrow', receiver_label: 'Ripple' },
+  { from: FINISHER, to: RIPPLE_B, amount: 400000000, hash: '2'.repeat(64),
+    type: 'EscrowFinish', classification: 'ESCROW_RELEASE',
+    sender_label: 'escrow', receiver_label: 'Ripple' },
+  { from: WHALE, to: COINBASE, amount: 22770000, hash: '3'.repeat(64),
+    classification: 'WATCHLIST_INTERNAL',
+    sender_label: 'WHALE_rsyDbF', receiver_label: 'Coinbase' }
+] };
+const esc = load(IDENT2).summarizeLargeMoves(ESCROW_DAY);
+console.log('  headline: ' + JSON.stringify(esc.headline));
+console.log('  summary : ' + JSON.stringify(esc.summary));
+check('the 500M escrow unlock is NOT the headline',
+      !/500(\.00)?M XRP moved from/.test(esc.headline), esc.headline);
+check('the real third-party move leads instead',
+      /22\.77M XRP/.test(esc.headline) && /Coinbase/.test(esc.headline), esc.headline);
+// WHERE THE ESCROW SENTENCE WENT. This block originally asserted that the unlock
+// stayed in the summary, renamed as an escrow release pointing at Escrow Watch.
+// #48 settled it the other way: _isEscrowLedgerEvent filters escrow out of
+// summarizeLargeMoves entirely and Escrow Watch owns that story alone. Keeping
+// both would have printed the same 500M twice under two different framings. So
+// the property here is now ABSENCE — and absence is asserted on the amounts and
+// the hashes, not on a sentence that no longer exists.
+check('no escrow amount appears anywhere in the movement summary',
+      !/500(\.00)?M XRP/.test(esc.summary) && !/400(\.00)?M XRP/.test(esc.summary),
+      esc.summary);
+check('no escrow release is described as a transfer from anyone',
+      !/escrow[^.]*moved from|moved from[^.]*escrow/i.test(esc.summary), esc.summary);
+check('neither escrow hash is cited as movement evidence',
+      !(esc.source_refs || []).some(r => r.id === '1'.repeat(64) || r.id === '2'.repeat(64)),
+      esc.source_refs);
+check('the real third-party hash IS cited',
+      (esc.source_refs || []).some(r => r.id === '3'.repeat(64)), esc.source_refs);
 
 console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' CHECKS PASS'));
 process.exit(fail ? 1 : 0);

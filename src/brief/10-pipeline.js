@@ -262,6 +262,17 @@ function summarizeLargeMoves(pack){
     // party. Two unidentified wallets both render as "an unidentified wallet"
     // and would otherwise look identical — identified===true is what keeps a
     // genuine stranger-to-stranger transfer from being dismissed as internal.
+    // A scheduled escrow unlock is the OPPOSITE of an anomaly — it is the most
+    // predictable movement on the ledger. On SW-20260901-Y7BFX, September 1st,
+    // Ripple's monthly 1B unlock became "the standout individual anomaly was
+    // 500M XRP moved from a large private holder to Ripple", and the risk score
+    // was built partly on it. Escrow movement belongs in Escrow Watch, which
+    // reports it properly; it does not belong in the anomaly slot.
+    function _isEscrowMove(tx){
+      var c=String((tx&&tx.classification)||'');
+      return c==='ESCROW_RELEASE'||c==='ESCROW_LOCK'||c==='ESCROW_FLOW'||
+             (tx&&(tx.type==='EscrowFinish'||tx.type==='EscrowCreate'));
+    }
     function _sameEntity(tx){
       var s=_entityName(tx&&(tx.from||tx.sender),pack,null);
       var r=_entityName(tx&&(tx.to||tx.receiver),pack,null);
@@ -270,8 +281,9 @@ function summarizeLargeMoves(pack){
     }
     // The internal move is NOT dropped — it is reported below, and LARGE MOVES
     // still lists it in full. It just stops being called the anomaly.
-    var crossing=ranked.filter(function(t){ return !_sameEntity(t); });
-    var skippedInternal=(crossing.length && _sameEntity(ranked[0])) ? ranked[0] : null;
+    var crossing=ranked.filter(function(t){ return !_sameEntity(t) && !_isEscrowMove(t); });
+    var skippedInternal=null;
+    if(crossing.length && (_sameEntity(ranked[0])||_isEscrowMove(ranked[0]))) skippedInternal=ranked[0];
     var pool=crossing.length?crossing:ranked;
     var sorted=pool.slice(0,3);
     var top=sorted[0];
@@ -297,9 +309,18 @@ function summarizeLargeMoves(pack){
     // Completeness: the largest single move still gets stated, with what it
     // actually was, so demoting it never reads as hiding it.
     if(skippedInternal){
-      var si=_entityName(skippedInternal.from||skippedInternal.sender,pack,null);
-      parts.push('The largest single move, '+_xrpFmt(_num(skippedInternal.amount))+
-                 ' XRP, was internal to '+_plain(si.name,si.provenance)+'.');
+      if(_isEscrowMove(skippedInternal)){
+        // Named for what it is, and pointed at the section that reports it.
+        var er=_entityName(skippedInternal.to||skippedInternal.receiver,pack,null);
+        parts.push('The largest single move, '+_xrpFmt(_num(skippedInternal.amount))+
+                   ' XRP, was an escrow '+
+                   (skippedInternal.classification==='ESCROW_LOCK'||skippedInternal.type==='EscrowCreate'?'lock':'release')+
+                   ' to '+_plain(er.name,er.provenance)+' — see Escrow Watch.');
+      } else {
+        var si=_entityName(skippedInternal.from||skippedInternal.sender,pack,null);
+        parts.push('The largest single move, '+_xrpFmt(_num(skippedInternal.amount))+
+                   ' XRP, was internal to '+_plain(si.name,si.provenance)+'.');
+      }
     }
     var refs=[];
     // The skipped internal transfer is NAMED in the summary above, so its

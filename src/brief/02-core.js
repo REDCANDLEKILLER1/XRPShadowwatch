@@ -574,6 +574,8 @@ const _SW_CLS_PHRASE = {
   EXCHANGE_INFLOW:                'exchange inflow',
   WHALE_TO_UNKNOWN:               'whale to unidentified wallet',
   ESCROW_FLOW:                    'escrow flow',
+  ESCROW_RELEASE:                 'escrow release (scheduled unlock)',
+  ESCROW_LOCK:                    'escrow lock',
   FRESH_ACCOUNT_RECEIVER:         'brand-new account taking size',
   NEXT_HOP_HOLDING:               'holding',
   NEXT_HOP_FORWARDING_DETECTED:   'forwarding onward',
@@ -1355,7 +1357,20 @@ function _ageText(h) {
 function classify(t) {
   const f = KNOWN[t.from], to = KNOWN[t.to];
   let type = 'UNKNOWN_FLOW', conf = 'MEDIUM', reason = 'receiver not in watchlist';
-  if (f && to)                                  { type = 'WATCHLIST_INTERNAL'; conf = 'HIGH'; reason = f.label + ' → ' + to.label; }
+  // AN ESCROW TRANSACTION IS ESCROW MOVEMENT, whatever the counterparties look
+  // like. This used to classify purely on sender/receiver, and on an
+  // EscrowFinish `from` is the account that SUBMITTED the finish — on the XRPL
+  // anyone may finish a matured escrow, so the finisher is not the source of the
+  // funds. On SW-20260901-Y7BFX that rendered Ripple's own scheduled 500M, 400M
+  // and 100M monthly unlocks as "unidentified wallet → Ripple · unclassified
+  // flow", three times, and the narrative then called the largest of them the
+  // standout anomaly. The escrow section of the same report had them correctly
+  // as Ripple releases.
+  const _isRelease = t.type === 'EscrowFinish';
+  const _isLock    = t.type === 'EscrowCreate';
+  if (_isRelease)                               { type = 'ESCROW_RELEASE';     conf = 'HIGH'; reason = 'escrow released to its destination'; }
+  else if (_isLock)                             { type = 'ESCROW_LOCK';        conf = 'HIGH'; reason = 'XRP locked into escrow'; }
+  else if (f && to)                             { type = 'WATCHLIST_INTERNAL'; conf = 'HIGH'; reason = f.label + ' → ' + to.label; }
   else if (f && f.cat === 'exchange' && !to)    { type = 'EXCHANGE_OUTFLOW';  conf = 'HIGH'; reason = 'known exchange to unknown'; }
   else if (!f && to && to.cat === 'exchange')   { type = 'EXCHANGE_INFLOW';   conf = 'HIGH'; reason = 'unknown to exchange'; }
   else if (f && f.cat === 'whale' && !to)       { type = 'WHALE_TO_UNKNOWN';  conf = 'HIGH'; reason = 'known whale to unknown'; }
@@ -1366,7 +1381,10 @@ function classify(t) {
     // which for an inbound transfer is the RECEIVER — so the report claimed
     // things like "UPBIT_1.2B → UPBIT_1.2B" for a payment from an unknown
     // third party. Fall back to the sender's own (shortened) address instead.
-    sender_label: f?.label || (t.from ? ca(t.from) : 'UNKNOWN'),
+    // On a release the funds come OUT OF THE ESCROW, not out of the finisher's
+    // balance. Naming the finisher as sender is what produced "unidentified
+    // wallet → Ripple" for a scheduled unlock. Say what it actually was.
+    sender_label: _isRelease ? 'escrow' : (f?.label || (t.from ? ca(t.from) : 'UNKNOWN')),
     receiver_label: to?.label || (t.to ? ca(t.to) : 'UNKNOWN') };
 }
 
