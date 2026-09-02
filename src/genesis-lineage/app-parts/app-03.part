@@ -1,0 +1,140 @@
+PH',`Loading shared graph ${hn.toLocaleString()} nodes…`);
+  const r=await hubAsset('checkpoint');
+  let cp;
+  const ct=(r.headers.get('content-type')||'').toLowerCase();
+  if(ct.includes('gzip')){
+    if(!('DecompressionStream' in window))throw new Error('Browser cannot decompress shared checkpoint.');
+    const stream=r.body.pipeThrough(new DecompressionStream('gzip'));
+    cp=JSON.parse(await new Response(stream).text());
+  }else cp=await r.json();
+  let g=cp?.graph;
+  if(cp?.schema==='shadowwatch.genesis-lineage-hub.visual.v1'){
+    const nodes={};
+    for(const [id,v] of Object.entries(cp.nodes||{}))nodes[id]={id,kind:v.k||'discovered',depth:Number(v.d||0),genesisBalanceXRP:v.gb??null,currentBalanceXRP:v.cb??null,genesisSequence:v.gs??null,currentSequence:v.cs??null,firstSeenYear:Number(v.y0||2013),x:Number(v.x||0),y:Number(v.y||0),traceStatus:v.s||'UNTRACED',visible:true};
+    const edges={};
+    for(const a of (cp.edges||[])){
+      const [source,target,type,classification,year,totalDrops,totalXRP,count,unknownValueCount,firstLedger,lastLedger]=a;
+      const k=edgeKey(source,target,type,year||'');
+      edges[k]={id:k,source,target,type,classification:classification||null,year:year||null,totalDrops:totalDrops||'0',totalXRP:Number(totalXRP||0),count:Number(count||0),unknownValueCount:Number(unknownValueCount||0),firstLedger:firstLedger||null,lastLedger:lastLedger||null,hashes:[]};
+    }
+    g={version:2,source:EMBEDDED.schema,createdAt:cp.savedAt||new Date().toISOString(),nodes,edges,traces:{},segmentTraces:{}};
+  }else if(cp?.schema==='shadowwatch.genesis-lineage-hub.visual.v2'){
+    const nodes={},edges={},addresses=cp.addresses||[],types=cp.types||[],classes=cp.classes||[],statuses=cp.statuses||[];
+    (cp.nodes||[]).forEach((v,i)=>{const id=addresses[i];if(!id)return;nodes[id]={id,kind:v[0]?'genesis':'discovered',depth:Number(v[1]||0),genesisBalanceXRP:v[2]??null,currentBalanceXRP:v[3]??null,genesisSequence:v[4]??null,currentSequence:v[5]??null,firstSeenYear:Number(v[6]||2013),x:Number(v[7]||0),y:Number(v[8]||0),traceStatus:statuses[v[9]]||'UNTRACED',visible:true}});
+    for(const a of (cp.edges||[])){const source=addresses[a[0]],target=addresses[a[1]],type=types[a[2]]||'Payment',classification=a[3]>=0?classes[a[3]]:null,year=a[4]||null,totalDrops=a[5]||'0',count=Number(a[6]||0),unknownValueCount=Number(a[7]||0),firstLedger=a[8]||null,lastLedger=a[9]||null;if(!source||!target)continue;const k=edgeKey(source,target,type,year||'');edges[k]={id:k,source,target,type,classification,year,totalDrops,totalXRP:Number(totalDrops)/1e6,count,unknownValueCount,firstLedger,lastLedger,hashes:[]}}
+    g={version:2,source:EMBEDDED.schema,createdAt:cp.savedAt||new Date().toISOString(),nodes,edges,traces:{},segmentTraces:{}};
+  }
+  if(!g?.nodes||!g?.edges)throw new Error('Hub checkpoint invalid.');
+  if(Object.keys(g.nodes).length>=n&&Object.keys(g.edges).length>=e){
+    graph=g;if(!graph.segmentTraces)graph.segmentTraces={};migrateGraphYears();save();fitGraph();renderInspector();
+    log(`HUB checkpoint loaded: ${Object.keys(graph.nodes).length} nodes, ${Object.keys(graph.edges).length} edges.`);
+    return true;
+  }
+  return false;
+}
+async function hubValidatedTip(){
+  await connect();
+  const r=await rpcRetry({command:'ledger',ledger_index:'validated',transactions:false,expand:false},3);
+  const n=Number(r?.ledger_index??r?.ledger?.ledger_index);
+  if(!Number.isFinite(n)||n<=0)throw new Error('validated tip unavailable');
+  return n;
+}
+async function hubAutoSync(status){
+  let manifest=status?.manifest;
+  if(!status?.writeConfigured||!manifest?.sync?.enabled||!manifest?.sync?.ready)return status;
+  const target=await hubValidatedTip();
+  const tips=manifest.sync.tipByAccount||{};
+  const tracked=manifest.sync.trackedAddresses||[];
+  const pending=tracked.filter(a=>Number(tips[a]||manifest.sync.fixedThroughLedger||0)<target);
+  if(!pending.length)return status;
+  const max=Number(manifest.sync.maxAccountsPerBatch||8);
+  setHubUi('syncing','HUB SYNC',`Hub updating ${pending.length} genesis wallets through L${target.toLocaleString()}…`);
+  for(let i=0;i<pending.length;i+=max){
+    const batch=pending.slice(i,i+max);
+    const result=await hubJson(HUB_API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'sync',accounts:batch,to:target})});
+    if(result?.delta)await applyHubDelta(result.delta);
+    setHubUi('syncing','HUB SYNC',`Hub update ${Math.min(i+batch.length,pending.length)}/${pending.length} wallets…`);
+  }
+  status=await hubJson(HUB_API);manifest=status.manifest;
+  return status;
+}
+async function hubBootstrap(){
+  setHubUi('syncing','HUB LOAD','Connecting to shared lineage hub…');
+  try{
+    let status=await hubJson(HUB_API);
+    const m=status.manifest;
+    await maybeLoadHubCheckpoint(m);
+    await importHubBaseEvidence(m);
+    await loadHubDeltas(m);
+    status=await hubAutoSync(status);
+    await loadHubDeltas(status.manifest);
+    await refreshRecoveryState();
+    const c=status.manifest?.coverage||{},s=status.manifest?.sync||{};
+    const fixed=Number(s.fixedThroughLedger||0);
+    const seal=c.sealed?'SEALED':`${c.evidenceComplete||0}/${c.requiredSegments||2448}`;
+    setHubUi('live','HUB LIVE',`Shared hub ${seal} · fixed through L${fixed.toLocaleString()} · writes ${status.writeConfigured?'enabled':'not configured'}.`);
+    preparePlayback(true).then(()=>renderPlayback(playback.events.length)).catch(()=>{});
+  }catch(e){
+    setHubUi('offline','HUB LOCAL',`Shared hub unavailable; local history retained. ${e.message}`);
+    log(`HUB bootstrap failed: ${e.message}`,'WARN');
+  }
+}
+
+
+let persistTimer=null;
+function save(){
+  try{
+    if(!graph.segmentTraces)graph.segmentTraces={};
+    localStorage.setItem(STORE_KEY,JSON.stringify(graph));
+  }catch(e){log(`Local save failed: ${e.message}`,'ERROR')}
+  clearTimeout(persistTimer);
+  persistTimer=setTimeout(()=>idbSave(),350);
+}
+function loadSaved(){
+  try{
+    const s=localStorage.getItem(STORE_KEY);
+    if(!s)return false;
+    const g=JSON.parse(s);
+    if(!g||!g.nodes||!g.edges)return false;
+    graph=g;if(!graph.segmentTraces)graph.segmentTraces={};
+    log(`Loaded localStorage graph: ${Object.keys(graph.nodes).length} nodes, ${Object.keys(graph.edges).length} edges.`);return true;
+  }catch(e){log(`Saved graph load failed: ${e.message}`,'ERROR');return false}
+}
+function seedGraph(){
+  const n=EMBEDDED.nodes.length,R=460;
+  EMBEDDED.nodes.forEach((s,i)=>{
+    const a=(Math.PI*2*i/n)-Math.PI/2;
+    graph.nodes[s.id]={...s,x:Math.cos(a)*R,y:Math.sin(a)*R,traceStatus:'UNTRACED',visible:true,firstSeenYear:2013};
+  });
+  log(`Seeded ${n} genesis wallets from ${EMBEDDED.schema}, snapshot ledger ${EMBEDDED.snapshotLedger}.`);
+}
+function initAnchors(){
+  const f=$('#fromAnchor'),t=$('#toAnchor');f.innerHTML=t.innerHTML='';
+  EMBEDDED.anchors.forEach((a,i)=>{
+    const text=`${a.date} · L${Number(a.ledger).toLocaleString()}`;
+    f.add(new Option(text,i));t.add(new Option(text,i));
+  });
+  f.value='0';t.value=String(Math.min(1,EMBEDDED.anchors.length-1));
+}
+function selectedWindow(){
+  let fi=Number($('#fromAnchor').value),ti=Number($('#toAnchor').value);
+  if(fi>ti)[fi,ti]=[ti,fi];
+  const a=EMBEDDED.anchors[fi],b=EMBEDDED.anchors[ti];
+  return {from:a.ledger,to:b.ledger,fromDate:a.date,toDate:b.date};
+}
+function setConnectionUi(state,text){
+  const pill=$('#connectionPill'),label=$('#connectionText'),conn=$('#connState');
+  if(pill){pill.classList.remove('connected','reconnecting');if(state)pill.classList.add(state)}
+  if(label)label.textContent=text||'XRPL AUTO';
+  if(conn){
+    conn.textContent=state==='connected'?'AUTO-CONNECT active · '+($('#server')?.value||'XRPL'):state==='reconnecting'?'Reconnecting automatically…':'Automatic connection waiting…';
+    conn.className='small '+(state==='connected'?'ok':state==='reconnecting'?'warn':'');
+  }
+}
+function rejectLegacyPending(reason){
+  for(const [id,p] of pending){try{p.reject(new Error(reason))}catch{}}
+  pending.clear();
+}
+function rotateEndpoint(){
+  const sel=$('#server');if(!sel||sel.options.length<2)return;
+  sel.selectedIndex=(sel.selec

@@ -1,0 +1,129 @@
+;
+  for(const [k,v] of Object.entries(graph.segmentTraces||{}))if(v.evidenceMode==='EVERY_DROP_V1')delete graph.segmentTraces[k];
+  localStorage.removeItem('SW_GENESIS_LINEAGE_HUB_BASE_SHA_V1');
+  localStorage.removeItem(HUB_APPLIED_KEY);
+  save();await refreshRecoveryState();toast('Drop evidence cleared.');log('Cleared every-drop evidence.','WARN');
+};
+
+// Hub/canonical-history hardening. These overrides run before startup bootstrap.
+// A sealed repo archive is identified by checksum, not merely by a local row count.
+const HUB_BASE_ARCHIVE_KEY='SW_GENESIS_LINEAGE_HUB_BASE_SHA_V1';
+const migrateGraphYearsBase=migrateGraphYears;
+migrateGraphYears=function(){
+  migrateGraphYearsBase();
+  let fixes=0;
+  for(const n of Object.values(graph?.nodes||{})){
+    if(n.kind==='genesis'&&Number(n.firstSeenYear)!==2013){n.firstSeenYear=2013;fixes++}
+  }
+  if(fixes){log(`Forced canonical 2013 first-seen year on ${fixes} genesis node(s).`);save()}
+};
+graphFallbackEvents=function(){
+  return Object.values(graph.edges).map(e=>({
+    ledger:Number(e.firstLedger)||0,
+    hash:(e.hashes&&e.hashes[0])||'',
+    source:e.source,target:e.target,
+    drops:isDrops(e.totalDrops)?e.totalDrops:String(Math.max(0,Math.round(Number(e.totalXRP||0)*1e6))),
+    type:e.type||'Payment',
+    year:Number(e.year)||ledgerApproxYear(e.firstLedger),
+    date:null,iso:null,approx:true
+  })).filter(e=>e.ledger>0&&bi(e.drops)>0n).sort((a,b)=>a.ledger-b.ledger||a.source.localeCompare(b.source));
+};
+importHubBaseEvidence=async function(manifest){
+  const spec=manifest?.base?.evidence;
+  const rows=await idbAllEvidence().catch(()=>[]);
+  const have=rows.filter(r=>r?.value?.evidenceMode==='EVERY_DROP_V1'&&!String(r.key).startsWith('hubdelta|')).length;
+  const need=Number(manifest?.coverage?.requiredSegments||manifest?.coverage?.evidenceComplete||0);
+  if(!spec?.available)return {imported:0,have,pendingHubArchive:true};
+  const archiveSha=String(spec.gzipSha256||spec.sha256||'');
+  const appliedSha=localStorage.getItem(HUB_BASE_ARCHIVE_KEY)||'';
+  if(have>=need&&need>0&&archiveSha&&appliedSha===archiveSha)return {imported:0,have,archiveSha};
+  if(have>=need&&need>0&&!archiveSha)return {imported:0,have};
+  setHubUi('syncing','HUB BASE',`Loading canonical Every-Drop base evidence ${have}/${need}…`);
+  const r=await hubAsset('evidence');
+  if(!('DecompressionStream' in window))throw new Error('Browser cannot decompress hub evidence gzip.');
+  const ds=new DecompressionStream('gzip');
+  const text=await new Response(r.body.pipeThrough(ds)).text();
+  const payload=JSON.parse(text);
+  if(payload?.schema!=='shadowwatch.genesis-drop-evidence.v1')throw new Error('Hub evidence schema mismatch.');
+  const result=await importDropEvidencePayload(payload);
+  if(archiveSha)localStorage.setItem(HUB_BASE_ARCHIVE_KEY,archiveSha);
+  log(`HUB canonical base evidence imported: ${result.complete} segments, ${result.effects} effects, ${result.flows} exact flows${archiveSha?' · '+archiveSha.slice(0,12):''}.`);
+  return {...result,archiveSha};
+};
+
+$('#clearSavedBtn').onclick=()=>{if(confirm('Delete locally saved lineage graph?')){localStorage.removeItem(STORE_KEY);toast('Local save deleted.')}};
+$('#menuBtn').onclick=()=>$('#drawer').classList.add('open');$('#closeDrawer').onclick=()=>$('#drawer').classList.remove('open');
+$('#copyDebug').onclick=async()=>{try{await navigator.clipboard.writeText(debugLines.join('\n'));toast('Debug copied.')}catch{toast('Clipboard blocked.')}};
+$('#downloadDebug').onclick=()=>download(`shadowwatch-lineage-debug-${new Date().toISOString().slice(0,10)}.txt`,debugLines.join('\n'),'text/plain');
+$('#clearDebug').onclick=()=>{debugLines=[];$('#debug').textContent=''};
+$('#controlsBtn').style.display='inline-block';$('#inspectBtn').style.display='inline-block'
+function closeMobileDrawers(){
+  $('#sidebar').classList.remove('mobileOpen');
+  $('#inspector').classList.remove('mobileOpen');
+}
+$('#controlsBtn').onclick=()=>{
+  const willOpen=!$('#sidebar').classList.contains('mobileOpen');
+  closeMobileDrawers();
+  if(willOpen)$('#sidebar').classList.add('mobileOpen');
+};
+$('#inspectBtn').onclick=()=>{
+  const willOpen=!$('#inspector').classList.contains('mobileOpen');
+  closeMobileDrawers();
+  if(willOpen)$('#inspector').classList.add('mobileOpen');
+};
+$('#closeControlsBtn').onclick=()=>$('#sidebar').classList.remove('mobileOpen');
+$('#closeInspectorBtn').onclick=()=>$('#inspector').classList.remove('mobileOpen');
+
+canvas.addEventListener('wheel',e=>{e.preventDefault();const r=canvas.getBoundingClientRect(),mx=e.clientX-r.left-r.width/2,my=e.clientY-r.top-r.height/2;const wx=(mx-camera.x)/camera.scale,wy=(my-camera.y)/camera.scale;const f=Math.exp(-e.deltaY*.001);const ns=Math.max(.06,Math.min(8,camera.scale*f));camera.x=mx-wx*ns;camera.y=my-wy*ns;camera.scale=ns;draw()},{passive:false});
+canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});drag={active:true,lastX:e.clientX,lastY:e.clientY,moved:false};if(pointers.size===2){const p=[...pointers.values()];pinchStart={dist:Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y),scale:camera.scale}}});
+canvas.addEventListener('pointermove',e=>{
+  if(pointers.has(e.pointerId))pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size===2&&pinchStart){const p=[...pointers.values()],d=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);camera.scale=Math.max(.06,Math.min(8,pinchStart.scale*d/pinchStart.dist));draw();return}
+  if(drag.active){const dx=e.clientX-drag.lastX,dy=e.clientY-drag.lastY;if(Math.hypot(dx,dy)>1)drag.moved=true;camera.x+=dx;camera.y+=dy;drag.lastX=e.clientX;drag.lastY=e.clientY;draw()}
+  else{const h=hitNode(e.clientX,e.clientY);hovered=h&&h.id;draw()}
+});
+canvas.addEventListener('pointerup',e=>{
+  const wasMoved=drag.moved;
+  pointers.delete(e.pointerId);
+  if(pointers.size<2)pinchStart=null;
+  drag.active=false;
+  if(!wasMoved){
+    const h=hitNode(e.clientX,e.clientY);
+    if(h)selectNode(h.id);
+    else $('#inspector').classList.remove('mobileOpen');
+  }
+});
+canvas.addEventListener('pointercancel',e=>{pointers.delete(e.pointerId);drag.active=false;pinchStart=null});
+window.addEventListener('resize',()=>{resize()});
+
+initAnchors();
+renderYearLegend();
+const hadLocal=loadSaved();
+if(!hadLocal){
+  seedGraph();
+  log('No local graph yet; seeded 136-wallet ring while shared hub loads.');
+}
+migrateGraphYears();
+resize();renderInspector();updateNavButtons();
+requestAnimationFrame(()=>requestAnimationFrame(()=>fitGraph()));
+if(!hadLocal){
+  idbLoad().then(g=>{
+    if(g&&g.nodes&&Object.keys(g.nodes).length>Object.keys(graph.nodes).length){
+      graph=g;if(!graph.segmentTraces)graph.segmentTraces={};
+      migrateGraphYears();
+      log(`Recovered newer IndexedDB workspace: ${Object.keys(graph.nodes).length} nodes, ${Object.keys(graph.edges).length} edges.`);
+      toast('Recovered newer saved workspace.');fitGraph();renderInspector();refreshRecoveryState();
+    }
+  });
+}
+window.addEventListener('beforeunload',()=>{try{localStorage.setItem(STORE_KEY,JSON.stringify(graph))}catch{}});
+$('#topStatus').textContent=`${EMBEDDED.genesisCount} genesis wallets · ${EMBEDDED.anchors.length} anchors · historical playback`;
+log(`App ready. Source created ${EMBEDDED.sourceCreatedAt}. ${EMBEDDED.genesisCount} genesis wallets, ${EMBEDDED.anchors.length} anchors.`);
+refreshRecoveryState();
+setConnectionUi('reconnecting','XRPL CONNECTING');
+connect().catch(e=>{log(`Initial auto-connect failed: ${e.message}`,'WARN');scheduleReconnect(e.message)});
+startKeepAlive();
+hubBootstrap();
+preparePlayback().then(()=>{ if(playback.events.length) renderPlayback(playback.events.length); }).catch(e=>log(`Playback prep deferred: ${e.message}`,'WARN'));
+requestAnimationFrame(()=>requestAnimationFrame(()=>fitGraph()));
+})();

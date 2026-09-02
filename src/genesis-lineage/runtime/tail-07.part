@@ -1,0 +1,70 @@
+ce,d=document.createElement('div');d.className='edgeRow';
+    d.innerHTML=`${e.source===n.id?'OUT →':'IN ←'} <b>${compactAddr(other)}</b><br>${e.type} · ${e.year||'year ?'} · ${isDrops(e.totalDrops)?dropsDisplay(e.totalDrops):fmt(e.totalXRP)} XRP · ${e.count} tx · L${e.firstLedger}-${e.lastLedger}`;
+    d.onclick=()=>selectNode(other);list.appendChild(d);
+  });
+  if(!list.children.length)list.innerHTML='<div class="edgeRow">No connected flows in the current graph.</div>';
+}
+$('#server').onchange=()=>{
+  reconnectAttempt=0;
+  try{ws&&ws.close()}catch{}
+  scheduleReconnect('endpoint changed');
+};
+$('#quickCenter').onclick=()=>centerGenesisRing();
+$('#historyPlay').onclick=togglePlayback;
+$('#historyStart').onclick=async()=>{stopPlayback();await preparePlayback();renderPlayback(0)};
+$('#historyEnd').onclick=async()=>{stopPlayback();await preparePlayback();renderPlayback(playback.events.length)};
+$('#historyRange').oninput=async e=>{stopPlayback();await preparePlayback();renderPlayback(Number(e.target.value))};
+$('#historyMode').onchange=async()=>{stopPlayback();playback.loaded=false;playback.events=[];playback.index=0;await preparePlayback(true);renderPlayback(playback.events.length)};
+$('#quickBack').onclick=navGoBack;
+$('#quickForward').onclick=navGoForward;
+$('#quickCheckpoint').onclick=()=>download(`shadowwatch-lineage-checkpoint-${new Date().toISOString().replaceAll(':','-').slice(0,19)}.json`,JSON.stringify({schema:'shadowwatch.genesis-lineage-lab.v2',savedAt:new Date().toISOString(),graph},null,2));
+$('#turboHistoryBtn').onclick=fullHistoryTurbo;
+$('#fitBtn').onclick=()=>fitGraph();
+$('#resetViewBtn').onclick=()=>{camera={x:0,y:0,scale:1};centerGenesisRing()};
+$('#traceSelectedBtn').onclick=async()=>{if(!selected)return toast('Select a wallet first.');pauseRequested=false;try{await traceWallet(selected)}catch(e){log(`Trace stopped: ${e.message}`,'ERROR');toast(e.message)}};
+$('#traceGenesisBtn').onclick=batchGenesis;
+$('#pauseBtn').onclick=()=>{pauseRequested=true;log('Pause requested.','WARN');$('#batchState').textContent='Pause requested…'};
+$('#clearEdgesBtn').onclick=()=>{if(!confirm('Clear all discovered nodes, edges and trace results? Genesis ring will remain.'))return;graph={version:2,source:EMBEDDED.schema,createdAt:new Date().toISOString(),nodes:{},edges:{},traces:{},segmentTraces:{}};seedGraph();selected=null;save();fitGraph();renderInspector()};
+$('#findBtn').onclick=()=>{const q=$('#search').value.trim().toLowerCase();if(!q)return;const n=Object.values(graph.nodes).find(n=>n.id.toLowerCase().includes(q));if(!n)return toast('Wallet not found in graph.');selectNode(n.id);const s=worldToScreen(n.x,n.y),r=canvas.getBoundingClientRect();camera.x+=r.width/2-s.x;camera.y+=r.height/2-s.y;camera.scale=Math.max(camera.scale,1.5);draw()};
+$('#showAllBtn').onclick=()=>{genesisOnly=false;draw();fitGraph()};
+$('#genesisOnlyBtn').onclick=()=>{genesisOnly=true;draw();fitGraph()};
+$('#exportGraphBtn').onclick=()=>download(`shadowwatch-genesis-lineage-${new Date().toISOString().slice(0,10)}.json`,JSON.stringify({schema:'shadowwatch.genesis-lineage-lab.v1',embeddedSource:{schema:EMBEDDED.schema,snapshotLedger:EMBEDDED.snapshotLedger,sourceCreatedAt:EMBEDDED.sourceCreatedAt},graph},null,2));
+$('#importGraphBtn').onclick=()=>$('#importFile').click();
+$('#importFile').onchange=async e=>{try{const f=e.target.files[0];if(!f)return;const j=JSON.parse(await f.text());const g=j.graph||j;if(!g.nodes||!g.edges)throw new Error('Not a lineage graph export');graph=g;if(!graph.segmentTraces)graph.segmentTraces={};migrateGraphYears();playback.loaded=false;save();fitGraph();renderInspector();refreshRecoveryState();toast('Graph imported.');log(`Imported graph ${f.name}.`)}catch(err){toast(err.message);log(err.message,'ERROR')}finally{e.target.value=''}};
+$('#reportBtn').onclick=()=>download(`shadowwatch-genesis-lineage-report-${new Date().toISOString().slice(0,10)}.txt`,reportText(),'text/plain');
+$('#importEvidenceBtn').onclick=()=>$('#importEvidenceFile').click();
+$('#importEvidenceFile').onchange=async e=>{
+  const file=e.target.files?.[0];if(!file)return;
+  try{
+    $('#recoveryState').textContent='Importing exact Every-Drop evidence…';
+    const payload=await readEvidenceImportFile(file);
+    const r=await importDropEvidencePayload(payload);
+    await refreshRecoveryState();
+    toast(`Imported ${r.complete} evidence segments.`);
+    log(`Imported drop evidence: segments=${r.imported}, complete=${r.complete}, effects=${r.effects}, flows=${r.flows}.`);
+  }catch(err){
+    log(`Drop evidence import failed: ${err.message}`,'ERROR');
+    toast(err.message);
+    await refreshRecoveryState();
+  }finally{
+    e.target.value='';
+  }
+};
+$('#exportEvidenceBtn').onclick=async()=>{
+  try{
+    toast('Building evidence export…');
+    const rows=await idbAllEvidence();
+    const payload={schema:'shadowwatch.genesis-drop-evidence.v1',exportedAt:new Date().toISOString(),source:{schema:EMBEDDED.schema,snapshotLedger:EMBEDDED.snapshotLedger},segments:rows};
+    const json=JSON.stringify(payload);
+    if('CompressionStream' in window){
+      const cs=new CompressionStream('gzip');
+      const blob=new Blob([json],{type:'application/json'}).stream().pipeThrough(cs);
+      const gz=await new Response(blob).blob();
+      const a=document.createElement('a');a.href=URL.createObjectURL(gz);a.download=`shadowwatch-genesis-drop-evidence-${new Date().toISOString().slice(0,10)}.json.gz`;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},0);
+    }else download(`shadowwatch-genesis-drop-evidence-${new Date().toISOString().slice(0,10)}.json`,json,'application/json');
+    log(`Exported drop evidence: ${rows.length} segment records.`);
+  }catch(e){log(`Evidence export failed: ${e.message}`,'ERROR');toast(e.message)}
+};
+$('#clearEvidenceBtn').onclick=async()=>{
+  if(!confirm('Delete persisted EVERY-DROP segment evidence? This does not erase the visible graph.'))return;
+  await idbClearEvidence()

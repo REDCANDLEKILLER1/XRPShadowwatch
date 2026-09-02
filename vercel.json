@@ -8,6 +8,14 @@
   ],
   "rewrites": [
     {
+      "source": "/genesis-lineage",
+      "destination": "/genesis-lineage.html"
+    },
+    {
+      "source": "/genesis",
+      "destination": "/genesis-lineage.html"
+    },
+    {
       "source": "/ladyk",
       "destination": "/ladyk.html"
     },

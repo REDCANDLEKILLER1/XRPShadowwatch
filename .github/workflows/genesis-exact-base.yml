@@ -1,0 +1,33 @@
+name: Genesis exact base seal
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/genesis-lineage-hub
+    paths:
+      - scripts/build-genesis-exact-base.js
+      - .github/workflows/genesis-exact-base.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: genesis-exact-base-seal
+  cancel-in-progress: false
+
+jobs:
+  build-and-seal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax check
+        run: node --check scripts/build-genesis-exact-base.js
+      - name: Recompute and seal exact 2448-segment base
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/build-genesis-exact-base.js

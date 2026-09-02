@@ -1,0 +1,163 @@
+.add(k);out.push(x);
+  }
+  return out;
+}
+async function resolveValidatedTip(client){
+  try{
+    const r=await client.rpcRetry({command:'ledger',ledger_index:'validated',transactions:false,expand:false},4);
+    const n=Number(r?.ledger_index ?? r?.ledger?.ledger_index);
+    if(Number.isFinite(n)&&n>0)return n;
+    throw new Error('validated ledger response did not contain a usable ledger index');
+  }catch(e){
+    log(`Validated tip lookup failed: ${e.message}`,'ERROR');
+    throw e;
+  }
+}
+async function fullHistoryTurbo(){
+  if(turboRunning||batchRunning)return;
+  if(!confirm('Start EVERY-DROP full-history evidence scan with isolated workers and heavy-range sharding? Existing evidence-complete segments are skipped.'))return;
+
+  turboRunning=true;batchRunning=true;pauseRequested=false;
+  $('#turboHistoryBtn').disabled=true;$('#traceGenesisBtn').disabled=true;
+
+  const concurrency=Math.max(1,Math.min(16,Number($('#batchConcurrency').value)||8));
+  const serverUrl=$('#server').value;
+  const clients=Array.from({length:concurrency},(_,i)=>new WorkerRpcClient(i+1,serverUrl));
+  const probe=new WorkerRpcClient('P',serverUrl);
+
+  let validatedTip=0;
+  try{
+    validatedTip=await resolveValidatedTip(probe);
+  }catch(e){
+    for(const c of clients)c.close();
+    probe.close();
+    turboRunning=false;batchRunning=false;
+    $('#turboHistoryBtn').disabled=false;$('#traceGenesisBtn').disabled=false;
+    $('#batchState').textContent='Stopped before scan: validated ledger tip could not be proven.';
+    throw e;
+  }finally{
+    probe.close();
+  }
+
+  const intervals=historyIntervals(),ids=EMBEDDED.nodes.map(n=>n.id);
+  const parentStates=new Map(),shardJobs=[];
+  let priorComplete=0;
+
+  for(const address of ids){
+    for(const seg of intervals){
+      const key=segmentKey(address,seg.from,seg.to);
+      const prior=graph.segmentTraces?.[key];
+      if(prior?.complete&&prior?.evidenceMode==='EVERY_DROP_V1'){
+        const ev=await idbGetEvidence(key).catch(()=>null);
+        if(ev?.evidenceMode==='EVERY_DROP_V1'){priorComplete++;continue}
+      }
+
+      const resolvedTo=seg.to===-1?validatedTip:Number(seg.to);
+      const shardCount=chooseShardCount(prior,Number(seg.from),resolvedTo,concurrency);
+      const pieces=splitLedgerRange(Number(seg.from),resolvedTo,shardCount);
+      const state={
+        key,address,logicalFrom:Number(seg.from),logicalTo:Number(seg.to),resolvedTo,
+        prior,shardCount,pending:pieces.length,results:new Array(pieces.length),
+        failed:false,truncated:false,finalized:false
+      };
+      parentStates.set(key,state);
+
+      const pagesHint=Math.max(1,Number(prior?.pages||0));
+      const txHint=Math.max(0,Number(prior?.txCount||0));
+      const baseWeight=Math.max(pagesHint,txHint/200,1);
+      for(const piece of pieces){
+        shardJobs.push({
+          parentKey:key,address,
+          seg:{from:piece.from,to:piece.to},
+          shardIndex:piece.index,shardCount:piece.count,
+          weight:baseWeight/pieces.length,
+          pagesHint,txHint
+        });
+      }
+    }
+  }
+
+  shardJobs.sort((a,b)=>b.weight-a.weight||(b.txHint-a.txHint)||(b.seg.to-b.seg.from)-(a.seg.to-a.seg.from));
+
+  const pendingParents=parentStates.size,totalShards=shardJobs.length;
+  let next=0,shardsDone=0,parentsDone=0,failedParents=0,truncatedParents=0,effectTotal=0,directFlowTotal=0;
+  const active=new Map();
+
+  log(`ISOLATED TURBO START: parents=${pendingParents}, shards=${totalShards}, priorComplete=${priorComplete}, workers=${concurrency}, validatedTip=L${validatedTip}.`);
+  const biggest=shardJobs.slice(0,8).map(j=>`${compactAddr(j.address)} L${j.seg.from}-${j.seg.to} w=${j.weight.toFixed(1)}`).join(' | ');
+  if(biggest)log(`Weighted queue head: ${biggest}`);
+
+  function update(){
+    const activeText=[...active.entries()].map(([wid,j])=>`W${wid}:${compactAddr(j.address)} L${j.seg.from}-${j.seg.to}`).join(' · ');
+    $('#batchState').textContent=
+      `ISOLATED EVERY-DROP TURBO\nparents sealed ${parentsDone}/${pendingParents} · shards ${shardsDone}/${totalShards} · workers ${active.size}/${concurrency} · failed parents ${failedParents} · truncated ${truncatedParents} · prior complete ${priorComplete}`+
+      (activeText?`\n${activeText}`:'');
+    $('#progress').style.width=(totalShards?shardsDone/totalShards*100:100)+'%';
+  }
+
+  async function finalizeParent(state){
+    if(state.finalized)return;
+    state.finalized=true;
+    const rs=state.results.filter(Boolean);
+    if(rs.length!==state.shardCount||state.failed){
+      failedParents++;
+      graph.segmentTraces[state.key]={
+        complete:false,truncated:false,evidenceMode:'EVERY_DROP_V1',collectorMode:'ISOLATED_SHARDED_V1',
+        evidenceSaved:false,address:state.address,from:state.logicalFrom,to:state.logicalTo,resolvedTo:state.resolvedTo,
+        shards:state.shardCount,finishedAt:new Date().toISOString(),server:serverUrl,error:'one or more shards failed'
+      };
+      return;
+    }
+    if(rs.some(r=>r.truncated||!r.complete)){
+      truncatedParents++;
+      graph.segmentTraces[state.key]={
+        complete:false,truncated:true,evidenceMode:'EVERY_DROP_V1',collectorMode:'ISOLATED_SHARDED_V1',
+        evidenceSaved:false,address:state.address,from:state.logicalFrom,to:state.logicalTo,resolvedTo:state.resolvedTo,
+        shards:state.shardCount,pages:rs.reduce((n,r)=>n+r.pages,0),txCount:rs.reduce((n,r)=>n+r.txCount,0),
+        finishedAt:new Date().toISOString(),server:serverUrl
+      };
+      return;
+    }
+
+    let flows=dedupeByHash(rs.flatMap(r=>r.flows||[]));
+    let effects=dedupeByHash(rs.flatMap(r=>r.effects||[]));
+    flows.sort((a,b)=>(a.ledger||0)-(b.ledger||0)||(a.hash||'').localeCompare(b.hash||''));
+    effects.sort((a,b)=>(a.ledger||0)-(b.ledger||0)||(a.hash||'').localeCompare(b.hash||''));
+
+    const pages=rs.reduce((n,r)=>n+r.pages,0),txCount=rs.reduce((n,r)=>n+r.txCount,0);
+    const evidence={
+      schema:'shadowwatch.genesis-drop-evidence.segment.v1',
+      evidenceMode:'EVERY_DROP_V1',collectorMode:'ISOLATED_SHARDED_V1',
+      address:state.address,from:state.logicalFrom,to:state.logicalTo,resolvedTo:state.resolvedTo,
+      server:serverUrl,finishedAt:new Date().toISOString(),
+      shards:state.shardCount,
+      shardRanges:rs.map((r,i)=>({index:i,from:r._from,to:r._to,pages:r.pages,txCount:r.txCount})),
+      pages,txCount,effectCount:effects.length,flowCount:flows.length,effects,flows
+    };
+
+    await idbPutEvidence(state.key,evidence);
+    playback.loaded=false;
+    mergeSegmentFlows(flows);
+
+    effectTotal+=effects.length;directFlowTotal+=flows.length;
+    graph.segmentTraces[state.key]={
+      complete:true,truncated:false,evidenceMode:'EVERY_DROP_V1',collectorMode:'ISOLATED_SHARDED_V1',
+      evidenceSaved:true,pages,txCount,effectCount:effects.length,flowCount:flows.length,
+      address:state.address,from:state.logicalFrom,to:state.logicalTo,resolvedTo:state.resolvedTo,
+      shards:state.shardCount,finishedAt:new Date().toISOString(),server:serverUrl
+    };
+    parentsDone++;
+    log(`PARENT SEALED ${state.address} L${state.logicalFrom}→${state.logicalTo} via ${state.shardCount} shard(s): pages=${pages}, tx=${txCount}, effects=${effects.length}, flows=${flows.length}.`);
+  }
+
+  async function worker(workerId){
+    const client=clients[workerId-1];
+    while(true){
+      if(pauseRequested)return;
+      const idx=next++;if(idx>=shardJobs.length)return;
+      const job=shardJobs[idx],state=parentStates.get(job.parentKey);
+      active.set(workerId,job);update();
+      try{
+        const r=await traceSegment(job.address,job.seg,client);
+        r._from=job.seg.from;r._to=job.seg.to;
+        state.res

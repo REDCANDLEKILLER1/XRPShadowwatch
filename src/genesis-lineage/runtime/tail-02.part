@@ -1,0 +1,140 @@
+await client.rpcRetry(req):await rpcRetry(req);
+    pages++;
+    for(const item of (r.transactions||[])){
+      txCount++;
+      const effect=normalizeAccountEffect(address,item);
+      if(effect)effects.push(effect);
+      const f=extractDirectFlow(address,item,effect);
+      if(f)flows.push(f);
+    }
+    marker=r.marker;
+    if(marker&&pages>=cap){
+      return {complete:false,truncated:true,pages,txCount,flowCount:flows.length,effectCount:effects.length,flows:[],effects:[],markerPresent:true};
+    }
+  }while(marker);
+  return {complete:true,truncated:false,pages,txCount,flowCount:flows.length,effectCount:effects.length,flows,effects};
+}
+function chooseShardCount(meta,from,to,concurrency){
+  if(to<from)return 1;
+  const pages=Number(meta?.pages||0),tx=Number(meta?.txCount||0);
+  let n=1;
+  if(pages>=256||tx>=50000)n=16;
+  else if(pages>=96||tx>=20000)n=12;
+  else if(pages>=48||tx>=10000)n=8;
+  else if(pages>=16||tx>=3000)n=4;
+  else if(pages>=5||tx>=800)n=2;
+  // Do not create microscopic ledger shards.
+  const span=to-from+1;
+  n=Math.min(n,Math.max(1,Math.floor(span/5000)));
+  return Math.max(1,n);
+}
+function splitLedgerRange(from,to,count){
+  count=Math.max(1,Math.min(count,to-from+1));
+  if(count===1)return [{from,to,index:0,count:1}];
+  const span=to-from+1,base=Math.floor(span/count),rem=span%count;
+  const out=[];let cur=from;
+  for(let i=0;i<count;i++){
+    const size=base+(i<rem?1:0),end=cur+size-1;
+    out.push({from:cur,to:end,index:i,count});cur=end+1;
+  }
+  return out;
+}
+function dedupeByHash(items){
+  const seen=new Set(),out=[];
+  for(const x of items){
+    const h=x?.hash||'';
+    const k=h||`${x.ledger}|${x.address||x.source||''}|${x.destination||x.dest||x.target||''}|${x.type||''}|${x.balanceDeltaDrops||x.drops||''}`;
+    if(seen.has(k))continue;seen.add(k);out.push(x);
+  }
+  return out;
+}
+async function resolveValidatedTip(client){
+  try{
+    const r=await client.rpcRetry({command:'ledger',ledger_index:'validated',transactions:false,expand:false},4);
+    const n=Number(r?.ledger_index ?? r?.ledger?.ledger_index);
+    if(Number.isFinite(n)&&n>0)return n;
+    throw new Error('validated ledger response did not contain a usable ledger index');
+  }catch(e){
+    log(`Validated tip lookup failed: ${e.message}`,'ERROR');
+    throw e;
+  }
+}
+async function fullHistoryTurbo(){
+  if(turboRunning||batchRunning)return;
+  if(!confirm('Start EVERY-DROP full-history evidence scan with isolated workers and heavy-range sharding? Existing evidence-complete segments are skipped.'))return;
+
+  turboRunning=true;batchRunning=true;pauseRequested=false;
+  $('#turboHistoryBtn').disabled=true;$('#traceGenesisBtn').disabled=true;
+
+  const concurrency=Math.max(1,Math.min(16,Number($('#batchConcurrency').value)||8));
+  const serverUrl=$('#server').value;
+  const clients=Array.from({length:concurrency},(_,i)=>new WorkerRpcClient(i+1,serverUrl));
+  const probe=new WorkerRpcClient('P',serverUrl);
+
+  let validatedTip=0;
+  try{
+    validatedTip=await resolveValidatedTip(probe);
+  }catch(e){
+    for(const c of clients)c.close();
+    probe.close();
+    turboRunning=false;batchRunning=false;
+    $('#turboHistoryBtn').disabled=false;$('#traceGenesisBtn').disabled=false;
+    $('#batchState').textContent='Stopped before scan: validated ledger tip could not be proven.';
+    throw e;
+  }finally{
+    probe.close();
+  }
+
+  const intervals=historyIntervals(),ids=EMBEDDED.nodes.map(n=>n.id);
+  const parentStates=new Map(),shardJobs=[];
+  let priorComplete=0;
+
+  for(const address of ids){
+    for(const seg of intervals){
+      const key=segmentKey(address,seg.from,seg.to);
+      const prior=graph.segmentTraces?.[key];
+      if(prior?.complete&&prior?.evidenceMode==='EVERY_DROP_V1'){
+        const ev=await idbGetEvidence(key).catch(()=>null);
+        if(ev?.evidenceMode==='EVERY_DROP_V1'){priorComplete++;continue}
+      }
+
+      const resolvedTo=seg.to===-1?validatedTip:Number(seg.to);
+      const shardCount=chooseShardCount(prior,Number(seg.from),resolvedTo,concurrency);
+      const pieces=splitLedgerRange(Number(seg.from),resolvedTo,shardCount);
+      const state={
+        key,address,logicalFrom:Number(seg.from),logicalTo:Number(seg.to),resolvedTo,
+        prior,shardCount,pending:pieces.length,results:new Array(pieces.length),
+        failed:false,truncated:false,finalized:false
+      };
+      parentStates.set(key,state);
+
+      const pagesHint=Math.max(1,Number(prior?.pages||0));
+      const txHint=Math.max(0,Number(prior?.txCount||0));
+      const baseWeight=Math.max(pagesHint,txHint/200,1);
+      for(const piece of pieces){
+        shardJobs.push({
+          parentKey:key,address,
+          seg:{from:piece.from,to:piece.to},
+          shardIndex:piece.index,shardCount:piece.count,
+          weight:baseWeight/pieces.length,
+          pagesHint,txHint
+        });
+      }
+    }
+  }
+
+  // Heavy shards start first so they overlap the many short jobs instead of becoming the tail.
+  shardJobs.sort((a,b)=>b.weight-a.weight||(b.txHint-a.txHint)||(b.seg.to-b.seg.from)-(a.seg.to-a.seg.from));
+
+  const pendingParents=parentStates.size,totalShards=shardJobs.length;
+  let next=0,shardsDone=0,parentsDone=0,failedParents=0,truncatedParents=0,effectTotal=0,directFlowTotal=0;
+  const active=new Map();
+
+  log(`ISOLATED TURBO START: parents=${pendingParents}, shards=${totalShards}, priorComplete=${priorComplete}, workers=${concurrency}, validatedTip=L${validatedTip}.`);
+  const biggest=shardJobs.slice(0,8).map(j=>`${compactAddr(j.address)} L${j.seg.from}-${j.seg.to} w=${j.weight.toFixed(1)}`).join(' | ');
+  if(biggest)log(`Weighted queue head: ${biggest}`);
+
+  function update(){
+    const activeText=[...active.entries()].map(([wid,j])=>`W${wid}:${compactAddr(j.address)} L${j.seg.from}-${j.seg.to}`).join(' · ');
+    $('#batchState').textContent=
+      `ISOLATED EVERY-DROP TURBO\nparents sealed ${parentsDone}/${pendingParents} · shards ${shardsDone}/${totalShards} · workers ${active.size}/${concurrency} · failed parents ${failedPa

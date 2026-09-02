@@ -1,0 +1,178 @@
+(() => {
+'use strict';
+const $=s=>document.querySelector(s);
+const STORE_KEY='SW_GENESIS_LINEAGE_LAB_V1';
+const canvas=$('#graph'),ctx=canvas.getContext('2d');
+let ws=null,rpcId=1,pending=new Map(),pauseRequested=false,batchRunning=false;
+let connectPromise=null,reconnectTimer=null,reconnectAttempt=0,autoConnectWanted=true,keepAliveTimer=null;
+let graph={version:2,source:EMBEDDED.schema,createdAt:new Date().toISOString(),nodes:{},edges:{},traces:{},segmentTraces:{}};
+let selected=null,hovered=null,genesisOnly=false;
+let navBack=[],navForward=[],suppressNavPush=false;
+let turboRunning=false,turboCompletedJobs=0;
+let playback={events:[],index:0,playing:false,raf:0,lastTs:0,acc:0,source:'none',loaded:false};
+let camera={x:0,y:0,scale:1};
+let drag={active:false,lastX:0,lastY:0,moved:false};
+let pointers=new Map(),pinchStart=null;
+let debugLines=[];
+
+function log(msg,kind='INFO'){
+  const line=`${new Date().toISOString()} [${kind}] ${msg}`;
+  debugLines.push(line); if(debugLines.length>6000)debugLines=debugLines.slice(-5000);
+  $('#debug').textContent=debugLines.join('\n'); $('#debug').scrollTop=$('#debug').scrollHeight;
+  if(kind==='ERROR')console.error(line); else console.log(line);
+}
+function toast(t){const e=$('#toast');e.textContent=t;e.style.display='block';clearTimeout(toast._t);toast._t=setTimeout(()=>e.style.display='none',2200)}
+function fmt(n){return Number(n||0).toLocaleString(undefined,{maximumFractionDigits:6})}
+function isDrops(v){return typeof v==='string' && /^\d+$/.test(v)}
+function bi(v){try{return BigInt(v||'0')}catch{return 0n}}
+function dropsToXrpString(v){
+  let n=bi(v),neg=n<0n;if(neg)n=-n;
+  const whole=n/1000000n,frac=(n%1000000n).toString().padStart(6,'0').replace(/0+$/,'');
+  return `${neg?'-':''}${whole.toString()}${frac?'.'+frac:''}`;
+}
+function dropsDisplay(v){
+  const s=dropsToXrpString(v);
+  const [w,f]=s.split('.');
+  const sign=w.startsWith('-')?'-':'';
+  const digits=sign?w.slice(1):w;
+  const grouped=digits.replace(/\B(?=(\d{3})+(?!\d))/g,',');
+  return sign+grouped+(f?'.'+f:'');
+}
+function accountBalanceDeltaDrops(meta,address){
+  let delta=0n,found=false;
+  for(const wrap of (meta?.AffectedNodes||[])){
+    const n=wrap.ModifiedNode||wrap.CreatedNode||wrap.DeletedNode;
+    if(!n||n.LedgerEntryType!=='AccountRoot')continue;
+    const f=n.FinalFields||{},p=n.PreviousFields||{},nw=n.NewFields||{};
+    const acct=f.Account||nw.Account;
+    if(acct!==address)continue;
+    if(wrap.ModifiedNode && isDrops(f.Balance) && isDrops(p.Balance)){
+      delta += bi(f.Balance)-bi(p.Balance);found=true;
+    }else if(wrap.CreatedNode && isDrops(nw.Balance)){
+      delta += bi(nw.Balance);found=true;
+    }else if(wrap.DeletedNode && isDrops(f.Balance)){
+      delta -= bi(f.Balance);found=true;
+    }
+  }
+  return found?delta:null;
+}
+function normalizeAccountEffect(address,item){
+  if(!successful(item))return null;
+  const tx=txObj(item),meta=txMeta(item);
+  const delta=accountBalanceDeltaDrops(meta,address);
+  if(delta===null||delta===0n)return null;
+  const fee=(tx.Account===address && isDrops(tx.Fee))?bi(tx.Fee):0n;
+  let out=delta<0n?(-delta-fee):0n;if(out<0n)out=0n;
+  const inflow=delta>0n?delta:0n;
+  return {
+    address,hash:tx.hash||item.hash||'',ledger:Number(item.ledger_index||tx.ledger_index||0),
+    year:rippleYear(tx.date)||ledgerApproxYear(item.ledger_index||tx.ledger_index||0),
+    type:tx.TransactionType||'UNKNOWN',txAccount:tx.Account||null,destination:tx.Destination||null,
+    balanceDeltaDrops:delta.toString(),feeDrops:fee.toString(),
+    outflowDrops:out.toString(),inflowDrops:inflow.toString()
+  };
+}
+
+const YEAR_MIN=2013,YEAR_MAX=new Date().getUTCFullYear();
+function yearColor(year,alpha=1){
+  const y=Math.max(YEAR_MIN,Math.min(YEAR_MAX,Number(year)||YEAR_MIN));
+  const span=Math.max(1,YEAR_MAX-YEAR_MIN);
+  const hue=120 + ((y-YEAR_MIN)/span)*230;
+  return alpha===1?`hsl(${hue.toFixed(1)} 88% 60%)`:`hsla(${hue.toFixed(1)} 88% 60% / ${alpha})`;
+}
+function rippleYear(sec){
+  if(sec==null)return null;
+  return new Date((Number(sec)+946684800)*1000).getUTCFullYear();
+}
+function ledgerApproxYear(ledger){
+  const L=Number(ledger)||0;
+  let best=EMBEDDED.anchors[0];
+  for(const a of EMBEDDED.anchors){if(Number(a.ledger)<=L)best=a;else break}
+  return Number((best.date||'2013').slice(0,4))||2013;
+}
+function renderYearLegend(){
+  const e=$('#yearLegend');e.innerHTML='';
+  for(let y=YEAR_MIN;y<=YEAR_MAX;y++){
+    const d=document.createElement('div');d.className='legendYear';
+    d.innerHTML=`<span class="dot" style="background:${yearColor(y)}"></span><span>${y}</span>`;
+    e.appendChild(d);
+  }
+}
+function migrateGraphYears(){
+  if(!graph||!graph.nodes||!graph.edges)return;
+  let edgeFixes=0,nodeFixes=0;
+  for(const e of Object.values(graph.edges)){
+    if(!e.year){
+      e.year=ledgerApproxYear(e.firstLedger||e.lastLedger||EMBEDDED.snapshotLedger);
+      edgeFixes++;
+    }
+  }
+  for(const n of Object.values(graph.nodes)){
+    if(n.kind==='genesis'){
+      if(!n.firstSeenYear){n.firstSeenYear=2013;nodeFixes++}
+      continue;
+    }
+    if(!n.firstSeenYear){
+      let yr=null;
+      for(const e of Object.values(graph.edges)){
+        if(e.source===n.id||e.target===n.id){
+          const ey=Number(e.year)||ledgerApproxYear(e.firstLedger||e.lastLedger);
+          if(ey && (!yr||ey<yr))yr=ey;
+        }
+      }
+      if(yr){n.firstSeenYear=yr;nodeFixes++}
+    }
+  }
+  if(edgeFixes||nodeFixes){
+    log(`Migrated saved graph years: ${edgeFixes} edges, ${nodeFixes} nodes.`);
+    save();
+  }
+}
+function compactAddr(a){return a?`${a.slice(0,6)}…${a.slice(-5)}`:''}
+function cloneRecoveryGraph(){return null}
+
+
+function edgeKey(a,b,type,year=''){return `${a}|${b}|${type}|${year||''}`}
+function download(name,text,type='application/json'){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},0)}
+const IDB_NAME='SW_GENESIS_LINEAGE_DB_V1',IDB_STORE='workspace',IDB_EVIDENCE='evidence';
+const HUB_API=(location.protocol==='http:'||location.protocol==='https:')?'/api/lineage-hub':'https://shadowwatch.xyz/api/lineage-hub';
+const HUB_APPLIED_KEY='SW_GENESIS_LINEAGE_HUB_APPLIED_V1';
+function openDB(){
+  return new Promise((resolve,reject)=>{
+    if(!('indexedDB' in window))return reject(new Error('IndexedDB unavailable'));
+    const req=indexedDB.open(IDB_NAME,2);
+    req.onupgradeneeded=()=>{
+      const db=req.result;
+      if(!db.objectStoreNames.contains(IDB_STORE))db.createObjectStore(IDB_STORE);
+      if(!db.objectStoreNames.contains(IDB_EVIDENCE))db.createObjectStore(IDB_EVIDENCE);
+    };
+    req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error||new Error('IndexedDB open failed'));
+  });
+}
+async function idbSave(){
+  try{
+    const db=await openDB();
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(IDB_STORE,'readwrite');
+      tx.objectStore(IDB_STORE).put(graph,'latest');
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error||new Error('IndexedDB save failed'));
+    });
+    db.close();
+  }catch(e){log(`IndexedDB mirror failed: ${e.message}`,'WARN')}
+}
+async function idbLoad(){
+  try{
+    const db=await openDB();
+    const value=await new Promise((resolve,reject)=>{
+      const tx=db.transaction(IDB_STORE,'readonly');
+      const req=tx.objectStore(IDB_STORE).get('latest');
+      req.onsuccess=()=>resolve(req.result||null);req.onerror=()=>reject(req.error);
+    });
+    db.close();return value;
+  }catch(e){log(`IndexedDB recovery unavailable: ${e.message}`,'WARN');return null}
+}
+async function idbPutEvidence(key,value){
+  const db=await openDB();
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction(IDB_EVIDENCE,'readwrite');
+    tx.objectStore(I

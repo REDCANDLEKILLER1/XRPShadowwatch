@@ -1,0 +1,174 @@
+DB_EVIDENCE).put(value,key);
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error||new Error('evidence save failed'));
+  });
+  db.close();
+}
+async function idbGetEvidence(key){
+  const db=await openDB();
+  const v=await new Promise((resolve,reject)=>{
+    const tx=db.transaction(IDB_EVIDENCE,'readonly');
+    const req=tx.objectStore(IDB_EVIDENCE).get(key);
+    req.onsuccess=()=>resolve(req.result||null);req.onerror=()=>reject(req.error);
+  });
+  db.close();return v;
+}
+async function idbClearEvidence(){
+  const db=await openDB();
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction(IDB_EVIDENCE,'readwrite');
+    const req=tx.objectStore(IDB_EVIDENCE).clear();
+    req.onsuccess=resolve;req.onerror=()=>reject(req.error);
+  });
+  db.close();
+}
+async function idbAllEvidence(){
+  const db=await openDB();
+  const rows=await new Promise((resolve,reject)=>{
+    const tx=db.transaction(IDB_EVIDENCE,'readonly');
+    const store=tx.objectStore(IDB_EVIDENCE),req=store.openCursor(),out=[];
+    req.onsuccess=()=>{const c=req.result;if(!c)return resolve(out);out.push({key:c.key,value:c.value});c.continue()};
+    req.onerror=()=>reject(req.error);
+  });
+  db.close();return rows;
+}
+async function readEvidenceImportFile(file){
+  let bytes=await file.arrayBuffer();
+  const name=(file.name||'').toLowerCase();
+  let text;
+  if(name.endsWith('.gz')){
+    if(!('DecompressionStream' in window))throw new Error('This browser cannot decompress .gz evidence. Export/import JSON instead.');
+    const ds=new DecompressionStream('gzip');
+    const stream=new Blob([bytes]).stream().pipeThrough(ds);
+    text=await new Response(stream).text();
+  }else{
+    text=new TextDecoder().decode(bytes);
+  }
+  const payload=JSON.parse(text);
+  if(payload?.schema!=='shadowwatch.genesis-drop-evidence.v1'||!Array.isArray(payload.segments)){
+    throw new Error('Not a ShadowWatch drop-evidence export.');
+  }
+  return payload;
+}
+async function importDropEvidencePayload(payload){
+  let imported=0,complete=0,flows=0,effects=0;
+  for(const row of payload.segments){
+    if(!row||typeof row.key!=='string'||!row.value)continue;
+    const v=row.value;
+    if(v.evidenceMode!=='EVERY_DROP_V1')continue;
+    await idbPutEvidence(row.key,v);
+    imported++;
+    flows+=Number(v.flowCount||v.flows?.length||0);
+    effects+=Number(v.effectCount||v.effects?.length||0);
+    if(v.complete!==false){
+      complete++;
+      graph.segmentTraces[row.key]={
+        complete:true,truncated:false,evidenceMode:'EVERY_DROP_V1',
+        collectorMode:v.collectorMode||'IMPORTED_EVIDENCE',
+        evidenceSaved:true,pages:Number(v.pages||0),txCount:Number(v.txCount||0),
+        effectCount:Number(v.effectCount||v.effects?.length||0),
+        flowCount:Number(v.flowCount||v.flows?.length||0),
+        address:v.address,from:v.from,to:v.to,resolvedTo:v.resolvedTo,
+        shards:Number(v.shards||1),finishedAt:v.finishedAt||new Date().toISOString(),
+        server:v.server||'imported'
+      };
+    }
+  }
+  playback.loaded=false;
+  save();
+  return {imported,complete,flows,effects};
+}
+async function refreshRecoveryState(){
+  let evCount=0,evComplete=0;
+  try{
+    const rows=await idbAllEvidence();
+    evCount=rows.filter(r=>r?.value?.evidenceMode==='EVERY_DROP_V1').length;
+    evComplete=rows.filter(r=>r?.value?.evidenceMode==='EVERY_DROP_V1'&&r.value.complete!==false).length;
+  }catch{}
+  const nodes=Object.keys(graph.nodes||{}).length,edges=Object.keys(graph.edges||{}).length;
+  const segs=Object.values(graph.segmentTraces||{}).filter(s=>s.evidenceMode==='EVERY_DROP_V1').length;
+  $('#recoveryState').textContent=`Loaded graph: ${nodes.toLocaleString()} nodes · ${edges.toLocaleString()} edges · graph metadata ${segs}/2448 Every-Drop segments · local evidence ${evComplete}/2448`;
+}
+
+function setHubUi(state,text,detail){
+  const pill=$('#hubPill'),label=$('#hubText'),box=$('#hubState');
+  if(pill){pill.classList.remove('live','syncing','offline');pill.classList.add(state||'offline')}
+  if(label)label.textContent=text||'HUB';
+  if(box)box.textContent=detail||text||'Shared hub';
+}
+function hubApplied(){
+  try{return new Set(JSON.parse(localStorage.getItem(HUB_APPLIED_KEY)||'[]'))}catch{return new Set()}
+}
+function saveHubApplied(set){
+  try{localStorage.setItem(HUB_APPLIED_KEY,JSON.stringify([...set]))}catch{}
+}
+async function hubJson(url,options){
+  const r=await fetch(url,options||{});
+  if(!r.ok){let d='';try{d=(await r.text()).slice(0,300)}catch{};throw new Error(`Hub HTTP ${r.status}${d?': '+d:''}`)}
+  return r.json();
+}
+async function hubAsset(name){
+  const r=await fetch(`${HUB_API}?asset=${encodeURIComponent(name)}`);
+  if(!r.ok)throw new Error(`Hub asset ${name} HTTP ${r.status}`);
+  return r;
+}
+async function hubDelta(path){
+  return hubJson(`${HUB_API}?delta=${encodeURIComponent(path)}`);
+}
+async function importHubBaseEvidence(manifest){
+  const rows=await idbAllEvidence().catch(()=>[]);
+  const have=rows.filter(r=>r?.value?.evidenceMode==='EVERY_DROP_V1'&&!String(r.key).startsWith('hubdelta|')).length;
+  const need=Number(manifest?.coverage?.evidenceComplete||0);
+  if(manifest?.base?.evidence?.available===false)return {imported:0,have,pendingHubArchive:true};
+  if(have>=need||need<=0)return {imported:0,have};
+  setHubUi('syncing','HUB BASE',`Loading canonical Every-Drop base evidence ${have}/${need}…`);
+  const r=await hubAsset('evidence');
+  let text;
+  if('DecompressionStream' in window){
+    const ds=new DecompressionStream('gzip');
+    text=await new Response(r.body.pipeThrough(ds)).text();
+  }else{
+    throw new Error('Browser cannot decompress hub evidence gzip.');
+  }
+  const payload=JSON.parse(text);
+  if(payload?.schema!=='shadowwatch.genesis-drop-evidence.v1')throw new Error('Hub evidence schema mismatch.');
+  const result=await importDropEvidencePayload(payload);
+  log(`HUB base evidence imported: ${result.complete} segments, ${result.effects} effects, ${result.flows} exact flows.`);
+  return result;
+}
+async function applyHubDelta(delta){
+  if(!delta||delta.schema!=='shadowwatch.genesis-lineage-hub.delta.v1')throw new Error('Hub delta schema mismatch.');
+  const applied=hubApplied();
+  if(applied.has(delta.id))return false;
+  let effects=0,flows=0;
+  for(const r of (delta.records||[])){
+    const fs=Array.isArray(r.flows)?r.flows:[];
+    mergeSegmentFlows(fs);flows+=fs.length;effects+=Number(r.effectCount||r.effects?.length||0);
+    const key=`hubdelta|${delta.id}|${r.address}`;
+    await idbPutEvidence(key,{
+      schema:'shadowwatch.genesis-drop-evidence.segment.v1',evidenceMode:'EVERY_DROP_V1',collectorMode:'HUB_DELTA_V1',
+      complete:true,truncated:false,address:r.address,from:r.from,to:r.to,resolvedTo:r.to,
+      server:delta.server||'hub',finishedAt:delta.createdAt,pages:r.pages||0,txCount:r.txCount||0,
+      effectCount:r.effectCount||r.effects?.length||0,flowCount:r.flowCount||fs.length,effects:r.effects||[],flows:fs
+    });
+  }
+  applied.add(delta.id);saveHubApplied(applied);playback.loaded=false;save();draw();renderInspector();
+  log(`HUB delta applied ${delta.id}: effects=${effects}, flows=${flows}.`);
+  return true;
+}
+async function loadHubDeltas(manifest){
+  const applied=hubApplied();
+  const list=manifest?.sync?.deltas||[];
+  let loaded=0;
+  for(const d of list){
+    if(!d?.id||!d?.path||applied.has(d.id))continue;
+    setHubUi('syncing','HUB DELTA',`Applying shared update ${loaded+1}…`);
+    const delta=await hubDelta(d.path);
+    if(await applyHubDelta(delta))loaded++;
+  }
+  return loaded;
+}
+async function maybeLoadHubCheckpoint(manifest){
+  const n=Object.keys(graph.nodes||{}).length,e=Object.keys(graph.edges||{}).length;
+  const hn=Number(manifest?.coverage?.graphNodes||0),he=Number(manifest?.coverage?.graphEdges||0);
+  if(n>=hn&&e>=he)return false;
+  setHubUi('syncing','HUB GRA

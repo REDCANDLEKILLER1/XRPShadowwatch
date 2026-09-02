@@ -1,0 +1,128 @@
+&&!force)return playback.events;
+  $('#historyReadout').textContent='Loading historical playback…';
+  let events=[],source='graph';
+  if($('#historyMode').value!=='graph'){
+    try{events=await loadExactPlaybackEvents()}catch(e){log(`Exact playback evidence load failed: ${e.message}`,'WARN')}
+  }
+  if(events.length){
+    source='exact';
+  }else{
+    events=graphFallbackEvents();
+    source='graph';
+  }
+  playback.events=events;playback.source=source;playback.loaded=true;
+  playback.index=Math.min(playback.index,events.length);
+  $('#historyRange').max=String(Math.max(1,events.length));
+  $('#historyRange').value=String(playback.index||events.length);
+  if(!playback.index)playback.index=events.length;
+  renderPlayback(playback.index);
+  log(`Playback prepared: ${events.length} ${source==='exact'?'exact flow':'graph-fallback'} events.`);
+  return events;
+}
+function playbackVisibleSet(index){
+  const evs=playback.events;
+  const visibleEdges=new Set(),visibleNodes=new Set(EMBEDDED.nodes.map(n=>n.id));
+  for(let i=0;i<index&&i<evs.length;i++){
+    const e=evs[i];
+    visibleNodes.add(e.source);visibleNodes.add(e.target);
+    // Match graph edge bucket if available.
+    const k=edgeKey(e.source,e.target,e.type,e.year);
+    if(graph.edges[k])visibleEdges.add(k);
+    else{
+      for(const [ek,ge] of Object.entries(graph.edges)){
+        if(ge.source===e.source&&ge.target===e.target&&ge.type===e.type&&Number(ge.firstLedger)<=e.ledger)visibleEdges.add(ek);
+      }
+    }
+  }
+  return {visibleEdges,visibleNodes};
+}
+function drawPlayback(index){
+  const r=canvas.getBoundingClientRect();ctx.clearRect(0,0,r.width,r.height);
+  const sets=playbackVisibleSet(index);
+  ctx.save();ctx.translate(r.width/2+camera.x,r.height/2+camera.y);ctx.scale(camera.scale,camera.scale);
+
+  for(const [ek,e] of Object.entries(graph.edges)){
+    if(!sets.visibleEdges.has(ek))continue;
+    const a=graph.nodes[e.source],b=graph.nodes[e.target];if(!a||!b||!nodeVisible(a)||!nodeVisible(b))continue;
+    const w=Math.max(.45,Math.min(6,Math.log10((e.totalXRP||0)+10)-.3));
+    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
+    ctx.lineWidth=w/camera.scale*.8;ctx.strokeStyle=e.type==='AccountDelete'?'rgba(255,209,102,.42)':yearColor(e.year||ledgerApproxYear(e.firstLedger),.34);ctx.stroke();
+  }
+
+  for(const n of Object.values(graph.nodes)){
+    if(!sets.visibleNodes.has(n.id)||!nodeVisible(n))continue;
+    const isSel=n.id===selected,isHover=n.id===hovered;
+    const radius=n.kind==='genesis'?5.3:4.4;
+    ctx.beginPath();ctx.arc(n.x,n.y,isSel?radius*1.8:isHover?radius*1.4:radius,0,Math.PI*2);
+    ctx.fillStyle=isSel?'#ffd166':yearColor(n.firstSeenYear||2013);ctx.fill();
+    if((isSel||isHover)&&camera.scale>.25){
+      ctx.font=`${11/camera.scale}px ui-monospace,monospace`;ctx.fillStyle='#eaffef';ctx.textAlign='center';
+      ctx.fillText(compactAddr(n.id),n.x,n.y-12/camera.scale);
+    }
+  }
+
+  // Flash current event.
+  if(index>0&&index<=playback.events.length){
+    const e=playback.events[index-1],a=graph.nodes[e.source],b=graph.nodes[e.target];
+    if(a&&b){
+      ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
+      ctx.lineWidth=3/camera.scale;ctx.strokeStyle='#ffd166';ctx.stroke();
+      ctx.beginPath();ctx.arc(b.x,b.y,8/camera.scale,0,Math.PI*2);ctx.strokeStyle='#ffd166';ctx.lineWidth=2/camera.scale;ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+function playbackLabel(index){
+  if(!playback.events.length)return 'No playback events available.';
+  if(index<=0)return `START · Ledger ${Number(EMBEDDED.snapshotLedger).toLocaleString()} · 136 genesis wallets`;
+  const e=playback.events[Math.min(index,playback.events.length)-1];
+  const when=e.iso?e.iso.slice(0,10):String(e.year||ledgerApproxYear(e.ledger));
+  return `${when} · L${Number(e.ledger).toLocaleString()} · ${index.toLocaleString()}/${playback.events.length.toLocaleString()} · ${dropsDisplay(e.drops)} XRP · ${playback.source==='exact'?'EXACT':'FALLBACK'}`;
+}
+function renderPlayback(index){
+  playback.index=Math.max(0,Math.min(Number(index)||0,playback.events.length));
+  $('#historyRange').value=String(playback.index);
+  $('#historyReadout').textContent=playbackLabel(playback.index);
+  drawPlayback(playback.index);
+}
+function stopPlayback(){
+  playback.playing=false;
+  $('#historyPlay').textContent='▶ PLAY';
+  if(playback.raf)cancelAnimationFrame(playback.raf);
+  playback.raf=0;playback.lastTs=0;playback.acc=0;
+}
+function playbackStep(ts){
+  if(!playback.playing)return;
+  if(!playback.lastTs)playback.lastTs=ts;
+  const dt=Math.max(0,Math.min(100,ts-playback.lastTs));playback.lastTs=ts;
+  const speed=Number($('#historySpeed').value)||1;
+  // Base 18 events/sec, scaled. High speeds batch events while keeping UI responsive.
+  playback.acc += dt*(18*speed/1000);
+  let steps=Math.floor(playback.acc);
+  if(steps>0){
+    playback.acc-=steps;
+    playback.index=Math.min(playback.events.length,playback.index+steps);
+    renderPlayback(playback.index);
+  }
+  if(playback.index>=playback.events.length){stopPlayback();return}
+  playback.raf=requestAnimationFrame(playbackStep);
+}
+async function togglePlayback(){
+  if(playback.playing){stopPlayback();return}
+  await preparePlayback();
+  if(!playback.events.length)return toast('No historical flow events available yet.');
+  if(playback.index>=playback.events.length)renderPlayback(0);
+  playback.playing=true;$('#historyPlay').textContent='⏸ PAUSE';
+  playback.raf=requestAnimationFrame(playbackStep);
+}
+function leavePlaybackAtCurrentGraph(){
+  stopPlayback();
+  playback.index=playback.events.length;
+  if(playback.loaded)renderPlayback(playback.index);else draw();
+}
+
+function resize(){
+  const r=canvas.getBoundingClientRect(),dpr=Math.min(2,window.devicePixelRatio||1);
+  canvas.width=Math.max(1,Math.floor(r.width*dpr));canvas.height=Math.max(1,Math.floor(r.height*dpr));ctx.setTransform(dpr,0,0,dpr,0,0);draw();
+}
+function screenToWorld(x,y){const r=canvas.getBoundingClientRect();return{x:(x-r.width/2-camera.x)/camera.scale,y:(y-r
