@@ -13520,31 +13520,11 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         var txt = (typeof canonicalMorningStory === 'function')
           ? (canonicalMorningStory() || '')
           : ((typeof state !== 'undefined' && state.morningStoryReport) || '');
-        var sources = MRF._copyLastSources || [];
-        var pack    = MRF._copyLastPack   || (typeof state !== 'undefined' && state.pack) || {};
         if (!txt) return _origDownload();
-        // download mode = 'compact' — only append if governor publicly cleared news
+        // The NEWS USED block used to be built HERE, which is precisely why the
+        // downloaded file and the embedded copy were not the same bytes. It now
+        // comes from canonicalMorningStory, so this export adds nothing.
         var body = txt;
-        var publicSourcesCleared = false;
-        try {
-          if (window.MORNING_NEWS_GOVERNOR && typeof window.MORNING_NEWS_GOVERNOR.publicSourcesCleared === 'function') {
-            publicSourcesCleared = window.MORNING_NEWS_GOVERNOR.publicSourcesCleared(pack);
-          }
-        } catch (_) {}
-        if (publicSourcesCleared && Array.isArray(sources) && sources.length > 0) {
-          // Only include sources whose headlines are governor-cleared (strong/medium)
-          var clean = window.MORNING_NEWS_GOVERNOR
-            ? window.MORNING_NEWS_GOVERNOR.dedupeSources(
-                window.MORNING_NEWS_GOVERNOR.filterClearedSources(sources, pack))
-            : sources;
-          if (clean.length > 0) {
-            body += '\n\nNEWS USED:\n';
-            clean.slice(0, 10).forEach(function(s, i) {
-              body += '[' + (i + 1) + '] ' + (s.source || s.name || '?') +
-                      (s.title ? ' \u2014 ' + s.title : '') + '\n';
-            });
-          }
-        }
         var fname = 'MorningReport_' + new Date().toISOString().slice(0, 10) + '.txt';
         if (typeof downloadTextFile === 'function') {
           downloadTextFile(fname, body);
@@ -15957,8 +15937,45 @@ function canonicalMorningStory(pack, opts) {
       t = window.SW_DAILY_GATE.gateDelivery(t, p);
     }
   } catch (_) {}
+  // NEWS USED IS PART OF THE STORY, NOT AN EXPORT DECORATION.
+  // It used to be appended inside MRF.download only, so the downloaded file
+  // carried a provenance block the embedded copy did not — SW-20260902-76DY2
+  // shipped exactly that, and "one run, one story" failed on it even after the
+  // renderer was unified. Building it HERE means every consumer gets the same
+  // bytes: embed, standalone, download. A surface may select and format; it may
+  // not add facts the canonical text does not have.
+  try {
+    if (t && !/\nNEWS USED:/.test(t)) t += _canonicalNewsUsedBlock(p);
+  } catch (_) {}
   try { if (t && typeof state !== 'undefined') state.morningStoryReport = t; } catch (_) {}
   return t;
+}
+
+// The governor decides whether news may be cited at all; this only formats what
+// it cleared. Returns '' when nothing is cleared, so a quiet news day produces
+// no block rather than an empty heading.
+function _canonicalNewsUsedBlock(pack) {
+  try {
+    const G = (typeof window !== 'undefined') && window.MORNING_NEWS_GOVERNOR;
+    if (!G || typeof G.publicSourcesCleared !== 'function') return '';
+    if (!G.publicSourcesCleared(pack)) return '';
+    let sources = [];
+    try {
+      const MRF = (typeof window !== 'undefined') && window.MORNING_REPORT_FLOAT;
+      sources = (MRF && MRF._copyLastSources) || [];
+    } catch (_) {}
+    if (!Array.isArray(sources) || !sources.length) return '';
+    const clean = (typeof G.dedupeSources === 'function' && typeof G.filterClearedSources === 'function')
+      ? G.dedupeSources(G.filterClearedSources(sources, pack))
+      : sources;
+    if (!clean || !clean.length) return '';
+    let b = '\n\nNEWS USED:\n';
+    clean.slice(0, 10).forEach(function (s, i) {
+      b += '[' + (i + 1) + '] ' + (s.source || s.name || '?') +
+           (s.title ? ' \u2014 ' + s.title : '') + '\n';
+    });
+    return b;
+  } catch (_) { return ''; }
 }
 if (typeof window !== 'undefined') window.canonicalMorningStory = canonicalMorningStory;
 
@@ -28435,25 +28452,44 @@ function shadowWatchPublicSourceGovernorCleanupSmokeTest() {
     let capturedBody = null;
     const _origDownload = window.downloadTextFile;
     window.downloadTextFile = function(fname, body) { capturedBody = body; };
-    // 1. Usable pack with cleared sources → NEWS USED block appears
+    // 1. Usable pack with cleared sources → NEWS USED block appears.
+    //
+    // THIS PROPERTY MOVED HOUSE. It used to be asserted on the download body,
+    // because MRF.download built the NEWS USED block itself. That is exactly
+    // what made the downloaded file differ from the embedded copy on
+    // SW-20260902-76DY2. The block is now built once by canonicalMorningStory,
+    // so the property lives there and is asserted there — with {rebuild:true},
+    // since the canonical text is cached per run and a cached story must NOT
+    // change just because a drawer was shown with different sources.
     MRF.show('REPORT BODY 1', [
       { source: 'NewsBTC', title: 'XRP ETFs Pull in Biggest Inflow Yet', url: 'https://newsbtc.com/a' }
     ], usablePack);
+    var _canonCleared = (typeof canonicalMorningStory === 'function')
+      ? (canonicalMorningStory(usablePack, { rebuild: true }) || '') : '';
+    check('Canonical story with cleared news contains "NEWS USED:"',
+      /NEWS USED:/.test(_canonCleared));
+    check('Canonical story with cleared news contains the XRP ETF source line',
+      /XRP ETFs Pull in Biggest Inflow/.test(_canonCleared));
+    // And the download is that canonical text, byte for byte — the invariant
+    // that replaces the old per-export construction.
     MRF.download();
-    check('Download with cleared news: body contains "NEWS USED:"',
-      capturedBody && /NEWS USED:/.test(capturedBody));
-    check('Download with cleared news: body contains the XRP ETF source line',
-      capturedBody && /XRP ETFs Pull in Biggest Inflow/.test(capturedBody));
-    // 2. Weak pack (governor not cleared) → no NEWS USED block
+    check('Download body IS the canonical story, byte for byte',
+      capturedBody === _canonCleared);
+    // 2. Weak pack (governor not cleared) → no NEWS USED block.
+    // Asserted on the canonical renderer for the same reason as (1): the story
+    // is rendered once per run, so a drawer shown with a weak pack must not be
+    // able to re-render it. The property that matters — uncleared news never
+    // reaches the published text — is unchanged and still enforced here.
     capturedBody = null;
     MRF.show('REPORT BODY 2', [
       { source: 'Reuters', title: 'Ethereum ETF launches new product', url: 'https://reuters.com/eth' }
     ], weakPack);
-    MRF.download();
-    check('Download with WEAK news: body has NO "NEWS USED:" block',
-      capturedBody && !/NEWS USED:/.test(capturedBody));
-    check('Download with WEAK news: body has NO Ethereum source leaked',
-      capturedBody && !/Ethereum ETF/i.test(capturedBody));
+    var _canonWeak = (typeof canonicalMorningStory === 'function')
+      ? (canonicalMorningStory(weakPack, { rebuild: true }) || '') : '';
+    check('Canonical story with WEAK news has NO "NEWS USED:" block',
+      !/NEWS USED:/.test(_canonWeak));
+    check('Canonical story with WEAK news leaks NO Ethereum source',
+      !/Ethereum ETF/i.test(_canonWeak));
     window.downloadTextFile = _origDownload;
     MRF.hide();
   }

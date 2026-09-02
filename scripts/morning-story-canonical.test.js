@@ -134,6 +134,27 @@ const check = (name, ok, detail) => {
     const standalone = canonicalMorningStory();
     out.standaloneLen = (standalone || '').length;
 
+    // THE REAL DOWNLOAD BODY, not the accessor it is supposed to use.
+    // Comparing canonicalMorningStory() against itself is what let
+    // SW-20260902-76DY2 ship a downloaded file carrying a NEWS USED footer the
+    // embedded copy did not have: this suite passed while the actual artifacts
+    // differed, because it never invoked MRF.download at all. Capture what
+    // downloadTextFile would receive and compare THAT.
+    try {
+      const MRF = window.MORNING_REPORT_FLOAT;
+      if (MRF && typeof MRF.download === 'function') {
+        let body = null;
+        const realDl = window.downloadTextFile;
+        window.downloadTextFile = function (fname, b) { body = b; };
+        try { MRF.download(); } finally { window.downloadTextFile = realDl; }
+        out.downloadCaptured = body != null;
+        out.downloadLen = (body || '').length;
+        out.downloadEqualsCanonical = body === canonical;
+        out.downloadHasNewsUsedIffCanonical =
+          /\nNEWS USED:/.test(String(body || '')) === /\nNEWS USED:/.test(String(canonical || ''));
+      } else { out.downloadErr = 'MORNING_REPORT_FLOAT.download unavailable'; }
+    } catch (e) { out.downloadErr = String(e && e.message); }
+
     out.embeddedEqualsCanonical   = embedded === canonical;
     out.standaloneEqualsCanonical = standalone === canonical;
     out.allThreeAgree = out.embeddedEqualsCanonical && out.standaloneEqualsCanonical;
@@ -193,6 +214,12 @@ const check = (name, ok, detail) => {
   console.log('\n2. every export carries the same story, byte for byte');
   check('TOTAL REPORT / TOTAL DEBUG embed == canonical', r.embeddedEqualsCanonical);
   check('standalone download == canonical', r.standaloneEqualsCanonical);
+  check('the real download body was captured (not a vacuous pass)',
+        r.downloadCaptured, r.downloadErr);
+  check('MRF.download() body == canonical, byte for byte',
+        r.downloadEqualsCanonical, { canonical: r.canonicalLen, download: r.downloadLen });
+  check('NEWS USED appears in the download iff it is in the canonical text',
+        r.downloadHasNewsUsedIffCanonical);
   check('all three agree', r.allThreeAgree);
 
   console.log('\n3. the exports carry the same SECTIONS, not just the same length');

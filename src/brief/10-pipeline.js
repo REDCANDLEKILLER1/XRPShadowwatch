@@ -289,7 +289,15 @@ function summarizeLargeMoves(pack){
     var top=sorted[0];
     if(!top||!_num(top.amount)) return _blank();
     var amt=_xrpFmt(_num(top.amount));
-    var senderInfo=_entityName(top.from||top.sender,pack,'a large private holder');
+    // "a large private holder" ASSERTS AN IDENTITY THE EVIDENCE DOES NOT HAVE.
+    // On SW-20260902-76DY2 the Morning Story said "1B XRP moved from a large
+    // private holder to Bitfinex" while the structured report, for the same
+    // hash, said "unidentified wallet rswtXJ…nNAv → Bitfinex". One run, one
+    // transaction, two identity claims — and the confident one was the one read
+    // aloud. Nothing in the evidence package established a private holder.
+    // Flagged, not identified: describe the size, never invent the owner. The
+    // receiver fallback below already got this right.
+    var senderInfo=_entityName(top.from||top.sender,pack,'an unidentified high-value wallet');
     var recvInfo=_entityName(top.to||top.receiver,pack,'an unidentified wallet');
     var senderName=_plain(senderInfo.name, senderInfo.provenance);
     var recvName=_plain(recvInfo.name, recvInfo.provenance);

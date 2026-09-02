@@ -214,5 +214,28 @@ check('neither escrow hash is cited as movement evidence',
 check('the real third-party hash IS cited',
       (esc.source_refs || []).some(r => r.id === '3'.repeat(64)), esc.source_refs);
 
+console.log('\n8. an unidentified sender is never given an identity');
+// SW-20260902-76DY2: the Morning Story said "1B XRP moved from a large private
+// holder to Bitfinex" while the structured report, for the SAME hash, said
+// "unidentified wallet rswtXJ…nNAv → Bitfinex". One run, one transaction, two
+// identity claims — and the confident one was the one read aloud on air.
+// Nothing in the evidence established a private holder. Flagged, not identified.
+const STRANGER = 'rStrangerJJJJJJJJJJJJJJJJJJJJJJJJJJ';
+const anon = load(IDENT2).summarizeLargeMoves({
+  large_transfers: [
+    { from: STRANGER, to: COINBASE, amount: 1000000000, hash: '9'.repeat(64),
+      classification: 'EXCHANGE_INFLOW', receiver_label: 'Coinbase' }
+  ]
+});
+console.log('  headline: ' + JSON.stringify(anon.headline));
+check('the unidentified sender is not called a private holder',
+      !/private holder/i.test(anon.headline), anon.headline);
+check('it is described as unidentified',
+      /unidentified/i.test(anon.headline), anon.headline);
+check('the identified counterparty is still named',
+      /Coinbase/.test(anon.headline), anon.headline);
+check('the move itself is still reported',
+      /1B XRP|1\.00B XRP|1000(\.00)?M XRP/.test(anon.headline), anon.headline);
+
 console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' CHECKS PASS'));
 process.exit(fail ? 1 : 0);
