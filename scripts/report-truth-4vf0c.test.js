@@ -67,7 +67,26 @@ const check = (name, ok, detail) => {
   await page.route('**/*', r =>
     r.request().url().startsWith('http://127.0.0.1:' + PORT) ? r.continue() : r.abort());
   await page.goto('http://127.0.0.1:' + PORT + '/brief-console.html', { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(9000);
+  // READINESS GATE, not a sleep. Layer 17 is injected asynchronously by
+  // 14-identity-lookup.js:280, and it is 17 that wraps buildPublicReport /
+  // buildMasterPaste with the coverage logic these checks exercise. On a slow
+  // load an unconditional sleep would test the UNWRAPPED core functions and
+  // every coverage assertion below would pass vacuously — the exact failure
+  // mode this suite exists to catch. Wait for the install marker instead.
+  //
+  // NOT keyed on buildPublicReport._swTxCompleteness20260819. That marker is
+  // real but does not survive: 15-report-hotfix-20260814.js:237 re-wraps
+  // buildPublicReport AFTER 17 installs, and its wrapper does not copy the
+  // property — so the marker is absent even though 17's logic is still in the
+  // chain and running. Gate on both layers' install globals, which do survive,
+  // and prove the chain FUNCTIONALLY in check 5 instead.
+  await page.waitForFunction(() =>
+    typeof window.buildPublicReport === 'function' &&
+    typeof window.buildMasterPaste === 'function' &&
+    !!window.SW_REPORT_SCAN_TUNING_20260816 &&
+    !!window.SW_REPORT_HOTFIX_20260814,
+    null, { timeout: 60000 });
+  await page.waitForTimeout(2000);
 
   console.log('REPORT TRUTH — SW-20260831-4VF0C\n');
 
@@ -244,6 +263,100 @@ const check = (name, ok, detail) => {
     out.lcUnreadPhase = lc && lc.lifecycle_phase;
     out.lcUnreadRationale = lc && lc.rationale;
 
+    // ── 5. WINDOW TRUTH ────────────────────────────────────────────────
+    // A 72h Monday window whose count must not be called "24h".
+    const WIN = 'LAST 72H \u00b7 MONDAY WEEKEND SWEEP';
+    const basePack = {
+      date: '2026-08-31', data_as_of_utc: '2026-08-31T12:00:00Z',
+      scan_target: 'WATCHLIST (3)',
+      tx_window: { label: WIN, hours: 72, custom: false },
+      wallets_checked: 3, watchlist_total: 3, tx_24h_count: 153826,
+      shadow_volume_xrp: 0, total_balance_delta_xrp: 0,
+      large_transfers: [], receiver_followthrough: [], top_signals: [],
+      xrp_price: 1.0, xrp_delta_24h_pct: 0, xrp_volume_24h: 1e9,
+      support: 0.9, resistance: 1.1,
+      evidence_quality: { grade: 'B', score: 78 },
+      risk_score: { score: 10, label: 'GREEN / QUIET', drivers: [] },
+      tx_scan_coverage: { full_window_complete: true, target_wallets: 3,
+                          complete_wallets: 3, failed_wallets: 0, truncated_wallets: 0 }
+    };
+    const incompletePack = Object.assign({}, basePack, {
+      tx_scan_coverage: { full_window_complete: false, target_wallets: 3,
+                          complete_wallets: 1, failed_wallets: 1, truncated_wallets: 1 }
+    });
+    const txLine = t => (String(t).split('\n')
+      .find(l => /^Transactions in scan window/.test(l) || /24h transactions/i.test(l)) || '');
+
+    out.win17Loaded = !!window.SW_REPORT_SCAN_TUNING_20260816;
+    try {
+      const complete = String(window.buildPublicReport(basePack) || '');
+      const partial  = String(window.buildPublicReport(incompletePack) || '');
+      out.winHasCoverageLine = /Transaction Window Coverage:/.test(complete);
+      out.winCompleteLine = txLine(complete);
+      out.winPartialLine  = txLine(partial);
+      out.winNamesWindow  = out.winCompleteLine ===
+        'Transactions in scan window (' + WIN + '): 153826';
+      out.winNo24hAnywhere = !/24h transactions/i.test(complete) &&
+                             !/24h transactions/i.test(partial);
+      out.winCaveatOnLine = out.winPartialLine ===
+        'Transactions in scan window (' + WIN + '): 153826 observed (partial transaction coverage)';
+      // control: proves qualifyIncompleteText ran at all, so a caveat failure
+      // above means the regex desynced rather than the wrapper never firing.
+      out.winWrapperRan = /NONE OBSERVED IN PARTIAL COVERAGE/.test(partial) ||
+                          /partial transaction scan/.test(partial);
+      // control: proves the caveat is NOT applied unconditionally.
+      out.winCompleteHasNoCaveat = !/partial transaction coverage/.test(complete);
+      out.winHeaderLabel = (String(complete).split('\n')
+        .find(l => /^Scan Target:/.test(l)) || '');
+    } catch (e) { out.winErr = String(e && e.message); }
+
+    // Unresolvable window: assert NOTHING rather than a false 24H.
+    try {
+      const noWin = Object.assign({}, basePack); delete noWin.tx_window;
+      const realGTW = window.getTxWindow;
+      window.getTxWindow = function () { return {}; };
+      let bare;
+      try { bare = String(window.buildPublicReport(noWin) || ''); }
+      finally { window.getTxWindow = realGTW; }
+      out.winBareLine = txLine(bare);
+      out.winBareAssertsNothing =
+        out.winBareLine === 'Transactions in scan window: 153826' &&
+        !/24\s*H/i.test(out.winBareLine);
+      out.winBareHeader = (String(bare).split('\n')
+        .find(l => /^Scan Target:/.test(l)) || '');
+      out.winBareHeaderNo24h = !/LAST 24H/i.test(out.winBareHeader);
+    } catch (e) { out.winBareErr = String(e && e.message); }
+
+    // A CUSTOM window label is toLocaleString() + ' \u2192 ' + toLocaleString()
+    // (02-core.js:853) and therefore CONTAINS COLONS. The layer-17 rewrite uses
+    // a lazy [^\n]*? that does not exclude ':' precisely so it can backtrack
+    // past them to the final ": <digits>". A colon-excluding class would pass
+    // every test above and silently fail on operator-chosen windows only — so
+    // the colon case is asserted here rather than left to a code comment.
+    try {
+      const CUSTOM = '8/31/2026, 3:04:05 PM \u2192 9/1/2026, 3:04:05 PM';
+      const cp = Object.assign({}, incompletePack, {
+        tx_window: { label: CUSTOM, hours: 24, custom: true } });
+      const ct = String(window.buildPublicReport(cp) || '');
+      out.winCustomLine = txLine(ct);
+      out.winCustomCaveat = out.winCustomLine ===
+        'Transactions in scan window (' + CUSTOM + '): 153826 observed (partial transaction coverage)';
+    } catch (e) { out.winCustomErr = String(e && e.message); }
+
+    // ── 6. TX_WINDOW ON THE LLM INSTRUCTION SURFACE ────────────────────
+    // buildMasterPaste tells a model "Treat ledger data as scanned evidence",
+    // so a false TX_WINDOW there is laundered into the on-air report.
+    try {
+      const mpLine = t => (String(t).split('\n')
+        .find(l => /^TX_WINDOW=/.test(l)) || '');
+      out.mpReal = mpLine(window.buildMasterPaste(basePack));
+      const noWin2 = Object.assign({}, basePack); delete noWin2.tx_window;
+      out.mpBare = mpLine(window.buildMasterPaste(noWin2));
+      out.mpPreservesReal = out.mpReal === 'TX_WINDOW=' + WIN;
+      out.mpBareUnrecorded = out.mpBare === 'TX_WINDOW=UNRECORDED';
+      out.mpNever24h = !/^TX_WINDOW=LAST 24H$/.test(out.mpBare);
+    } catch (e) { out.mpErr = String(e && e.message); }
+
     return out;
   });
 
@@ -288,6 +401,41 @@ const check = (name, ok, detail) => {
   check('the lifecycle classifier is reachable', r.lcReachable, r.lcErr);
   check('null balance yields UNKNOWN, not DORMANT', r.lcUnreadIsUnknown,
         { phase: r.lcUnreadPhase, why: r.lcUnreadRationale });
+
+  console.log('\n5. the transactions count names the window it was taken over');
+  console.log('     complete: ' + JSON.stringify(r.winCompleteLine));
+  console.log('     partial : ' + JSON.stringify(r.winPartialLine));
+  console.log('     header  : ' + JSON.stringify(r.winHeaderLabel));
+  check('layer 17 is loaded', r.win17Loaded, r.winErr);
+  check("17's coverage wrapper is IN the chain (Transaction Window Coverage line present)",
+        r.winHasCoverageLine, r.winErr);
+  check('the transactions line names the real window', r.winNamesWindow, r.winCompleteLine);
+  check('no "24h transactions" claim survives, complete or partial',
+        r.winNo24hAnywhere, [r.winCompleteLine, r.winPartialLine]);
+  check('the header names the real window, not a hardcoded 24H',
+        /LAST 72H/.test(r.winHeaderLabel), r.winHeaderLabel);
+  check('CONTROL: qualifyIncompleteText ran on the incomplete pack',
+        r.winWrapperRan, r.winPartialLine);
+  check('the partial-coverage caveat reaches the transactions line',
+        r.winCaveatOnLine, r.winPartialLine);
+  check('CONTROL: a complete run carries no partial-coverage caveat',
+        r.winCompleteHasNoCaveat, r.winCompleteLine);
+  console.log('     unresolvable: ' + JSON.stringify(r.winBareLine));
+  check('an unresolvable window asserts no duration at all',
+        r.winBareAssertsNothing, r.winBareLine || r.winBareErr);
+  check('the header does not fall back to a false LAST 24H',
+        r.winBareHeaderNo24h, r.winBareHeader);
+
+  console.log('     custom (colons): ' + JSON.stringify(r.winCustomLine));
+  check('a colon-bearing custom window label still gets the caveat',
+        r.winCustomCaveat, r.winCustomLine || r.winCustomErr);
+
+  console.log('\n6. TX_WINDOW on the ChatGPT instruction surface');
+  console.log('     real: ' + JSON.stringify(r.mpReal) + '   bare: ' + JSON.stringify(r.mpBare));
+  check('a real 72h window is preserved verbatim', r.mpPreservesReal, r.mpReal || r.mpErr);
+  check('a missing window produces TX_WINDOW=UNRECORDED', r.mpBareUnrecorded, r.mpBare);
+  check('TX_WINDOW never claims LAST 24H unless 24h was recorded',
+        r.mpNever24h, r.mpBare);
 
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 

@@ -3156,6 +3156,27 @@ function buildPublicReport(p) {
     : '\nNo operator-supplied world-news context.';
   const headerMode = $('inHeaderMode')?.value || 'xrpman';
 
+  // WHICH WINDOW THE COUNT COVERS.
+  // The scan window is not always a day: _DAY_LOOKBACK_H widens the default to
+  // 48h Saturday, 60h Sunday, 72h Monday, and a missed run widens it further.
+  // p.tx_24h_count is state.txs.length — the whole window — so on 2026-08-31
+  // this report printed "Window: LAST 72H" and, ten lines down, called the same
+  // three-day figure "24h transactions". Name the window the count was actually
+  // taken over. If none can be resolved, print NO window claim: silence is true,
+  // "24H" would not be.
+  let txWinLbl = '';
+  try {
+    if (p.tx_window && p.tx_window.label) txWinLbl = String(p.tx_window.label);
+    else if (typeof getTxWindow === 'function') {
+      const gw = getTxWindow();
+      if (gw && gw.label) txWinLbl = String(gw.label);
+    }
+  } catch (_) {}
+  const txWinSuffix = txWinLbl ? ' (' + txWinLbl + ')' : '';
+  // LITERAL CONTRACT: 17-report-scan-tuning-20260816.js rewrites the
+  // "Transactions in scan window" line below to add the partial-coverage
+  // caveat. Change the wording here and that regex must change with it.
+
   // v3.3: branded Unicode header for xrpman mode, plain text for legacy mode.
   const header = headerMode === 'xrpman'
     ? buildBrandedHeader()
@@ -3163,7 +3184,7 @@ function buildPublicReport(p) {
 
   let report = `${header}
 DATE: ${p.date} | ${p.data_as_of_utc}
-Scan Target: ${p.scan_target} | Window: ${p.tx_window?.label || 'LAST 24H'}
+Scan Target: ${p.scan_target} | Window: ${txWinLbl || 'WINDOW NOT RECORDED'}
 Evidence Grade: ${q.grade || '—'} / ${q.score || 0}/100
 
 MARKET
@@ -3173,7 +3194,7 @@ Native DEX 24h: ${usd(p.xrpl_dex_volume_24h_usd)} | EVM DEX: ${usd(p.xrpl_evm_de
 
 FORENSIC SNAPSHOT
 Wallets scored: ${p.wallets_checked}/${p.watchlist_total}
-24h transactions: ${p.tx_24h_count}
+Transactions in scan window${txWinSuffix}: ${p.tx_24h_count}
 Shadow volume (>1M transfers): ${p.shadow_volume_xrp > 0 ? fmt(p.shadow_volume_xrp, 0) + ' XRP' : 'NONE FLAGGED'}
 Net watchlist balance delta: ${p.total_balance_delta_xrp > 0 ? '+' : ''}${fmt(p.total_balance_delta_xrp, 0)} XRP
 Large transfers flagged: ${(p.large_transfers || []).length}
@@ -17499,7 +17520,7 @@ ${sealBlock}
 DATE=${p.date}
 AS_OF_UTC=${p.data_as_of_utc}
 SCAN_TARGET=${p.scan_target}
-TX_WINDOW=${p.tx_window?.label || 'LAST 24H'}
+TX_WINDOW=${p.tx_window?.label || 'UNRECORDED'}
 PRICE=$${p.xrp_price} (${pct(p.xrp_delta_24h_pct)} 24h)
 VOLUME_USD=${p.xrp_volume_24h}
 WALLETS_SCORED=${p.wallets_checked}/${p.watchlist_total}

@@ -39,7 +39,9 @@ const SUITES = [
   ['developer-language',     'developer-language.test.js',       8207],
   ['prayer-scripture',       'prayer-scripture.test.js',         8208],
   ['source-relevance',       'source-relevance.test.js',         8209],
-  ['in-page-smoke',          'in-page-smoke.test.js',            8210]
+  ['in-page-smoke',          'in-page-smoke.test.js',            8210],
+  ['morning-story-canonical','morning-story-canonical.test.js',  8211],
+  ['report-truth-4vf0c',     'report-truth-4vf0c.test.js',       8212]
 ];
 
 const only = (() => {
