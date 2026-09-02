@@ -1116,7 +1116,7 @@ function pageDepthFor(label) {
 }
 
 async function scanWallets(ws) {
-  state.wallets = []; state.txs = []; state.flags = []; state.large = []; state.frags = [];
+  state.wallets = []; state.txs = []; state.flags = []; state.large = []; state.escrowLarge = []; state.frags = [];
   const prev = JSON.parse(localStorage.getItem(STORE) || '{}');
   const tw = getTxWindow();
   const limit = Math.max(20, Math.min(400, n($('inTxLimit').value) || 200));
@@ -1388,8 +1388,31 @@ function classify(t) {
     receiver_label: to?.label || (t.to ? ca(t.to) : 'UNKNOWN') };
 }
 
+// IS THIS AN ESCROW LEDGER EVENT? Tested on TRANSACTION TYPE, never on
+// classification. `classify()` assigns ESCROW_FLOW (:1377) to an ORDINARY
+// Payment sent from a wallet whose watchlist category happens to be `escrow` —
+// that is a real payment and must stay in ordinary movement. 10-pipeline's
+// `_isEscrowMove` sweeps ESCROW_FLOW in; reusing it here would silently delete
+// real payments from movement, shadow volume, discovery and the blackbox.
+// Discovery and the live surfaces must still see escrow rows. Splitting them
+// out of `large_transfers` cleans the RISK INPUT; it must not cost forensic
+// reach. The destination of an EscrowCreate is the escrow object's Destination
+// (:1227), so a lock into a fresh unknown wallet is exactly the pattern this
+// system exists to catch — and it is non-Ripple escrow (the "Flare Core Vault"
+// class) that the !KNOWN[] gates do not already exclude.
+function _movementAndEscrow(pack) {
+  const a = (pack && pack.large_transfers) || (typeof state !== 'undefined' && state.large) || [];
+  const b = (pack && pack.escrow_transfers) || (typeof state !== 'undefined' && state.escrowLarge) || [];
+  return (Array.isArray(a) ? a : []).concat(Array.isArray(b) ? b : []);
+}
+
+function _isEscrowLedgerType(t) {
+  const ty = t && t.type;
+  return ty === 'EscrowCreate' || ty === 'EscrowFinish' || ty === 'EscrowCancel';
+}
+
 function analyzeFlags() {
-  const flags = [], large = [], frags = [];
+  const flags = [], large = [], escrowLarge = [], frags = [];
   const threshold = n($('inLargeThreshold').value) || 1000000;
   // XRP total supply is ~100B. Any single "XRP" amount at/above this ceiling is a
   // data artifact (e.g. an unresolved partial-payment sentinel), never a real
@@ -1401,7 +1424,16 @@ function analyzeFlags() {
       continue;
     }
     if (t.currency === 'XRP' && t.amount >= threshold) {
-      const c = classify(t); large.push(c);
+      // ESCROW IS NOT ORDINARY MOVEMENT. A scheduled lock or unlock is the most
+      // predictable event on the ledger, and it was being counted as whale
+      // activity: on SW-20260902-76DY2 two EscrowCreates worth 210,000,000 XRP
+      // sat inside a 59-row large_transfers set totalling 1,861,898,167, and the
+      // risk engine reads that array's length and that sum as scoring drivers.
+      // Split at the source so risk is clean BY CONSTRUCTION rather than by yet
+      // another filter at each consumer. The rows are kept, not dropped —
+      // discovery and the live feed read both lists.
+      const c = classify(t);
+      (_isEscrowLedgerType(t) ? escrowLarge : large).push(c);
       flags.push(`${c.confidence} ${c.classification}: ${c.sender_label} → ${ca(c.to)} ${fmt(c.amount, 0)} XRP ${c.hash}`);
     }
     if (t.type === 'EscrowFinish' || t.type === 'EscrowCreate')
@@ -1454,14 +1486,14 @@ function analyzeFlags() {
   } catch (_) { /* the signing watch must never break a scan */ }
 
   if (!flags.length) flags.push('No 24h tx/delta anomaly detected. Scan-based, not filler.');
-  state.flags = flags; state.large = large; state.frags = frags;
+  state.flags = flags; state.large = large; state.escrowLarge = escrowLarge; state.frags = frags;
   if ($('flagsBox')) $('flagsBox').textContent = flags.join('\n');
 }
 
 async function scanReceivers(ws) {
   state.receivers = [];
   const seen = new Map();
-  for (const t of state.large) {
+  for (const t of _movementAndEscrow(null)) {
     if (t.to && !KNOWN[t.to] && !seen.has(t.to) && BASE58_RE.test(t.to)) seen.set(t.to, t);
   }
   const limit = Math.max(5, Math.min(80, n($('inHopLimit').value) || 60));
@@ -3029,7 +3061,8 @@ function buildPack(v) {
     wallet_results: state.wallets, tx_24h_count: state.txs.length,
     total_tx_xrp: totalTxXRP(), active_wallets: activeWalletCount(),
     shadow_volume_xrp: shadowVolumeXRP(), total_balance_delta_xrp: totalDeltaXRP(),
-    large_transfers: state.large, fragmentation_flags: state.frags,
+    large_transfers: state.large, escrow_transfers: state.escrowLarge || [],
+    fragmentation_flags: state.frags,
     top_signals: state.flags.slice(0, 5),
     receiver_followthrough: state.receivers,
     xrpl_evm_tvl_usd: n($('inTvl')?.value),
@@ -5041,8 +5074,9 @@ function collectDiscoveryCandidates(pack) {
     }
   }
 
-  // 1. Large-transfer receivers (>1M XRP)
-  (pack.large_transfers || []).forEach(t => {
+  // 1. Large-transfer receivers (>1M XRP) — ordinary movement AND escrow.
+  // Escrow is excluded from risk, not from investigation.
+  _movementAndEscrow(pack).forEach(t => {
     if (t.to) {
       bump(t.to, 'large_transfer', {
         reason: 'destination of large transfer (' + fmt(n(t.amount), 0) + ' XRP) from ' +
@@ -9322,7 +9356,9 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
 
     function _pEvidence(ev){
       var p=_livePack(), h='';
-      var large=(p&&p.large_transfers)||(typeof state!=='undefined'&&state.large)||[];
+      // Both lists — see _swRenderFeed. Visibility is not the thing being fixed.
+      var large=(typeof _movementAndEscrow==='function')?_movementAndEscrow(p)
+               :((p&&p.large_transfers)||(typeof state!=='undefined'&&state.large)||[]);
       if (large&&large.length){
         large.slice(0,10).forEach(function(t){
           var amt=_num(t.amount!=null?t.amount:t.amt);
@@ -13066,7 +13102,10 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       });
 
       // — Large transfer unknown receivers
-      var transfers = (pack && Array.isArray(pack.large_transfers)) ? pack.large_transfers : [];
+      // Both lists, matching collectDiscoveryCandidates — if these two paths
+      // disagree the two inboxes disagree.
+      var transfers = (typeof _movementAndEscrow === 'function') ? _movementAndEscrow(pack)
+        : ((pack && Array.isArray(pack.large_transfers)) ? pack.large_transfers : []);
       transfers.forEach(function(t) {
         var addr = t.to_address||t.to;
         if (!addr || addr.length < 25) return;
@@ -15209,13 +15248,29 @@ function updateWalletMemory(pack) {
     }
   });
 
-  // Large transfers — update sender/receiver wallet memory
+  // Large transfers — update sender/receiver wallet memory.
+  //
+  // MOVEMENT BASIS, AND WHY IT IS STAMPED.
+  // pack.large_transfers is now ordinary movement only; escrow locks and
+  // releases are carried separately and deliberately not folded in here — a
+  // 200,000,000 XRP lock was being added to the owner's total_out_xrp and the
+  // destination's total_in_xrp as though it were a spend and a receipt, and it
+  // set largest_transfer_xrp to that figure.
+  //
+  // Unlike the blackbox (30 snapshots) and pattern memory (100), THIS STORE HAS
+  // NO EXPIRY — it is cumulative, so records written before this change will
+  // never self-correct. Rather than reset real history to fix a subset of it,
+  // every record touched from here on is stamped with the basis that produced
+  // its totals. A record with no stamp predates the split and its
+  // total_in_xrp / total_out_xrp / largest_transfer_xrp may include escrow.
+  const MOVEMENT_BASIS = 'ordinary_movement_escrow_excluded';
   (pack.large_transfers || []).forEach(t => {
     const amt = n(t.amount);
     // Sender
     if (t.from && mem.wallets[t.from]) {
       const s = mem.wallets[t.from];
       s.total_out_xrp += amt;
+      s.movement_basis = MOVEMENT_BASIS;
       if (amt > s.largest_transfer_xrp) s.largest_transfer_xrp = amt;
       if (t.to) {
         s.common_counterparties[t.to] = (s.common_counterparties[t.to] || 0) + 1;
@@ -15231,12 +15286,14 @@ function updateWalletMemory(pack) {
           largest_transfer_xrp: amt,
           common_counterparties: {}, destination_tags: {},
           archetype_history: [], source_types: ['large_transfer_dest'],
-          last_classification: t.classification || null
+          last_classification: t.classification || null,
+          movement_basis: MOVEMENT_BASIS
         };
       } else {
         const r = mem.wallets[t.to];
         r.last_seen = now; r.times_seen++;
         r.total_in_xrp += amt;
+        r.movement_basis = MOVEMENT_BASIS;
         if (amt > r.largest_transfer_xrp) r.largest_transfer_xrp = amt;
         if (!r.source_types.includes('large_transfer_dest'))
           r.source_types.push('large_transfer_dest');
@@ -19305,7 +19362,7 @@ function collectExplicitOfferCandidates() {
     add(addr, 40, 'next-hop receiver from a large transfer', 'next_hop');
   }
   // 2. Large-transfer destinations
-  for (const t of (state.large || [])) {
+  for (const t of _movementAndEscrow(null)) {
     if (n(t.amount) >= 1_000_000 && t.to) {
       add(t.to, 35, 'destination of >1M XRP large transfer', 'large_transfer');
     }
@@ -21566,8 +21623,11 @@ function _swRenderLog() {
 var _SW_FEED_SIG = null;
 function _swRenderFeed(p, force) {
   var el = document.getElementById('swFeedList'); if (!el) return;
-  var large = (typeof state !== 'undefined' && Array.isArray(state.large) && state.large.length) ? state.large
-            : ((p && Array.isArray(p.large_transfers)) ? p.large_transfers : []);
+  // BOTH lists. Escrow leaves the risk input, not the operator's screen — the
+  // two largest rows of a scan are often the escrow locks, and there is no
+  // escrow-aware live feed to replace them.
+  var large = (typeof _movementAndEscrow === 'function') ? _movementAndEscrow(p) : [];
+  if (!large.length) large = (p && Array.isArray(p.large_transfers)) ? p.large_transfers : [];
   var scanning = _swScanning();
   var sig = large.length + '|' + (large.length ? String(large[0].hash || large[0].amount || '') : '') + '|' + scanning;
   if (!force && sig === _SW_FEED_SIG) return;      // nothing changed — leave the DOM alone
