@@ -80,6 +80,53 @@ const check = (name, ok, detail) => {
     out.hasCanonical = typeof canonicalMorningStory === 'function';
     if (!out.hasCanonical) return out;
 
+    // ══ 0. PROVENANCE AUTHORITY, IN PRODUCTION ORDER ═══════════════════════
+    // This section runs FIRST and deliberately does NOT call MRF.show() before
+    // rendering, because production does not: run() renders the canonical story
+    // at 02-core.js:20305 and the drawer is only shown from the sealed handler
+    // (:9507) ~300ms later. An earlier version of this suite called show() first
+    // and so asserted a property of the test's own ordering, not the app's — the
+    // NEWS USED block was sourced from the drawer and this suite could not see it.
+    //
+    // MRF._copyLastSources is poisoned with a stale, XRP-shaped headline that
+    // WOULD clear the governor if it were consulted — so if the canonical block
+    // still reads the drawer, the poison lands in the story and is caught.
+    const STALE = 'XRP ETFs Pull in Biggest Inflow Yet';
+    const FRESH = 'XRP Ledger Hits Record High Wallet Growth Numbers';
+    const newsPack = {
+      date: '2026-09-02', wallets_checked: 251, watchlist_total: 251,
+      shadow_volume_xrp: 610490000, large_transfers_count: 171,
+      total_balance_delta_xrp: -234730, xrp_price: 1.33, xrp_delta_24h_pct: -0.1,
+      xrp_volume_24h: 1930000000, support: 1.2, resistance: 1.5,
+      large_transfers: [], receiver_followthrough: [], top_signals: [],
+      evidence_quality: { grade: 'B', score: 78 },
+      risk_score: { score: 40, label: 'AMBER', drivers: [] },
+      // publicSourcesCleared reads news_articles (via _extractArticles);
+      // getNewsSources reads news_intel.top_headlines. Both must carry the SAME
+      // headlines or the gate opens on a list the report never prints.
+      news_articles: [{ title: FRESH }, { title: 'XRP Ledger validator set expands again' }],
+      news_intel: { top_headlines: [
+        { title: FRESH, source: 'coindesk', url: 'https://example.test/fresh' },
+        { title: 'XRP Ledger validator set expands again', source: 'u.today',
+          url: 'https://example.test/fresh2' }
+      ] }
+    };
+    try {
+      const MRF0 = window.MORNING_REPORT_FLOAT;
+      out.provDrawerExists = !!MRF0;
+      if (MRF0) MRF0._copyLastSources = [
+        { title: STALE, source: 'stale-outlet', url: 'https://example.test/stale' }
+      ];
+      // No MRF.show() here. This is the production sequence.
+      const canonNews = String(canonicalMorningStory(newsPack, { rebuild: true }) || '');
+      out.provHasBlock   = /\nNEWS USED:/.test(canonNews);
+      out.provHasFresh   = canonNews.indexOf(FRESH) > -1;
+      out.provNoStale    = canonNews.indexOf(STALE) === -1;
+      const nu = (canonNews.split('\nNEWS USED:')[1] || '');
+      out.provBlockNoStale = nu.indexOf(STALE) === -1;
+      out.provBlockSample  = nu.split('\n').filter(Boolean).slice(0, 3);
+    } catch (e) { out.provErr = String(e && e.message); }
+
     // A pack with enough substance that the wrapper chain actually engages —
     // the REAL NEWS injection and baseline repair both no-op on an empty pack,
     // and an empty pack would make every comparison below trivially equal.
@@ -207,6 +254,18 @@ const check = (name, ok, detail) => {
   console.log('  standalone: ' + r.standaloneLen + ' chars\n');
 
   console.log('1. the comparison is not vacuous');
+  console.log('0. provenance authority, in production order');
+  console.log('     NEWS USED sample: ' + JSON.stringify(r.provBlockSample));
+  check('the drawer exists to be poisoned (setup is real)', r.provDrawerExists, r.provErr);
+  check('a NEWS USED block is produced with NO prior MRF.show()',
+        r.provHasBlock, r.provErr);
+  check('it carries the CURRENT pack\u2019s headline', r.provHasFresh, r.provErr);
+  check('the stale drawer headline does not appear anywhere in the story',
+        r.provNoStale, r.provBlockSample);
+  check('and specifically not inside the NEWS USED block',
+        r.provBlockNoStale, r.provBlockSample);
+
+  console.log('');
   check('the canonical story has real content', r.canonicalNonTrivial, r.canonicalLen);
   check('no export path returned an empty string', r.notEmpty,
         { canonical: r.canonicalLen, embedded: r.embeddedLen, standalone: r.standaloneLen });

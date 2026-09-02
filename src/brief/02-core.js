@@ -15959,10 +15959,40 @@ function _canonicalNewsUsedBlock(pack) {
     const G = (typeof window !== 'undefined') && window.MORNING_NEWS_GOVERNOR;
     if (!G || typeof G.publicSourcesCleared !== 'function') return '';
     if (!G.publicSourcesCleared(pack)) return '';
+    // SOURCES COME FROM THE PACK, NOT FROM THE DRAWER.
+    //
+    // This block used to read MORNING_REPORT_FLOAT._copyLastSources, which is
+    // what MRF.download read before the block moved up here. That was correct
+    // for the download — download only happens after the drawer is on screen —
+    // and wrong the moment the block moved upstream of it. Production order:
+    //
+    //   :20305  canonicalMorningStory(p, { rebuild: true })   <- we are HERE
+    //   :20309  buildEvidenceSeal(...)
+    //   :9545   emits 'shadow.report.sealed'
+    //   :9499   sources = buildMorningStorySources(pack)
+    //   :9507   MORNING_REPORT_FLOAT.show(...)   (inside setTimeout 300ms)
+    //   :13584  MRF._copyLastSources finally written
+    //
+    // So the read landed on a field written six steps and ~300ms later. And it
+    // never self-corrects: :20305 is the ONLY production call passing
+    // {rebuild:true}, so run #1's block-less text is what every consumer reads
+    // for the rest of the session. _copyLastSources is also never cleared, so
+    // run #2 would stamp today's story with the previous run's headlines —
+    // classifyNewsStrength only regexes title/summary and never reads the pack,
+    // so stale-but-XRP-shaped headlines pass the filter unchanged.
+    //
+    // buildMorningStorySources(pack) is the authority the sealed handler at
+    // :9499 already uses. Call the WRAPPED global: the news governor rebinds it
+    // at :13636 to apply dedupeSources, the same discipline canonicalMorningStory
+    // uses for buildMorningStoryText.
     let sources = [];
     try {
-      const MRF = (typeof window !== 'undefined') && window.MORNING_REPORT_FLOAT;
-      sources = (MRF && MRF._copyLastSources) || [];
+      const bms = (typeof window !== 'undefined' && typeof window.buildMorningStorySources === 'function')
+        ? window.buildMorningStorySources
+        : ((typeof buildMorningStorySources === 'function') ? buildMorningStorySources : null);
+      if (bms) sources = bms(pack) || [];
+      else if (typeof rankNewsItems === 'function' && typeof getNewsSources === 'function')
+        sources = rankNewsItems(getNewsSources(pack)).slice(0, 8);
     } catch (_) {}
     if (!Array.isArray(sources) || !sources.length) return '';
     const clean = (typeof G.dedupeSources === 'function' && typeof G.filterClearedSources === 'function')
@@ -28300,15 +28330,26 @@ function shadowWatchPublicSourceGovernorCleanupSmokeTest() {
   check('GOV.filterClearedSources is fn', typeof GOV.filterClearedSources === 'function');
 
   // Pack with 2 STRONG articles → cleared
+  // NOTE ON SHAPE. The governor's gate reads news_articles (via
+  // _extractArticles); the SOURCES / NEWS USED lists read
+  // news_intel.top_headlines (via getNewsSources). A production pack carries
+  // news_intel — run() sets it at :20142/:20229 — and never sets news_articles,
+  // which only the hotfix-patched _extractArticles reaches. A fixture with just
+  // news_articles therefore opens the gate on a list nothing prints, which is
+  // not a shape production can produce. Both fields, same headlines.
+  const usableHeadlines = [
+    { title: 'XRP ETFs Pull in Biggest Inflow Yet', source: 'newsbtc',
+      url: 'https://example.test/etf' },
+    { title: 'XRP Ledger Hits Record High Wallet Growth Numbers', source: 'u.today',
+      url: 'https://example.test/growth' }
+  ];
   const usablePack = {
     wallets_checked: 50, large_transfers_count: 5, shadow_volume_xrp: 9_890_000,
     total_balance_delta_xrp: 749_070,
     xrp_price: 1.4386, xrp_delta_24h_pct: -0.10, xrp_volume_24h: 1_930_000_000,
     support: 1.3523, resistance: 1.5249,
-    news_articles: [
-      { title: 'XRP ETFs Pull in Biggest Inflow Yet' },
-      { title: 'XRP Ledger Hits Record High Wallet Growth Numbers' }
-    ]
+    news_articles: usableHeadlines.map(function (h) { return { title: h.title }; }),
+    news_intel: { top_headlines: usableHeadlines.slice() }
   };
   check('publicSourcesCleared TRUE when 2 STRONG present',
     GOV.publicSourcesCleared(usablePack) === true);
@@ -28475,6 +28516,29 @@ function shadowWatchPublicSourceGovernorCleanupSmokeTest() {
     MRF.download();
     check('Download body IS the canonical story, byte for byte',
       capturedBody === _canonCleared);
+    // THE GATE AND THE LIST READ DIFFERENT PACK FIELDS. publicSourcesCleared
+    // reads news_articles; the NEWS USED list reads news_intel via
+    // getNewsSources, so a pack can open the gate while the list is empty. The
+    // correct behaviour is NO block — citing provenance the report did not use
+    // would restore the two-authorities defect this change removes.
+    //
+    // Placed AFTER the byte-equality check on purpose: {rebuild:true} rewrites
+    // the cached state.morningStoryReport, so rendering another pack before the
+    // download check makes the download disagree with _canonCleared. That is
+    // exactly the ordering artifact this work exists to remove, and putting this
+    // block earlier reproduced it.
+    var _gateOnlyPack = {
+      wallets_checked: 50, xrp_price: 1.4386,
+      news_articles: [{ title: 'XRP ETFs Pull in Biggest Inflow Yet' },
+                      { title: 'XRP Ledger Hits Record High Wallet Growth Numbers' }]
+    };
+    var _gateOnly = '', _gateOnlyThrew = false;
+    try {
+      _gateOnly = (typeof canonicalMorningStory === 'function')
+        ? (canonicalMorningStory(_gateOnlyPack, { rebuild: true }) || '') : '';
+    } catch (_) { _gateOnlyThrew = true; }
+    check('gate open but no printable sources: no NEWS USED block, no throw',
+      !_gateOnlyThrew && !/NEWS USED:/.test(_gateOnly));
     // 2. Weak pack (governor not cleared) → no NEWS USED block.
     // Asserted on the canonical renderer for the same reason as (1): the story
     // is rendered once per run, so a drawer shown with a weak pack must not be
