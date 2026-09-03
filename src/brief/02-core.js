@@ -574,6 +574,8 @@ const _SW_CLS_PHRASE = {
   EXCHANGE_INFLOW:                'exchange inflow',
   WHALE_TO_UNKNOWN:               'whale to unidentified wallet',
   ESCROW_FLOW:                    'escrow flow',
+  ESCROW_RELEASE:                 'escrow release (scheduled unlock)',
+  ESCROW_LOCK:                    'escrow lock',
   FRESH_ACCOUNT_RECEIVER:         'brand-new account taking size',
   NEXT_HOP_HOLDING:               'holding',
   NEXT_HOP_FORWARDING_DETECTED:   'forwarding onward',
@@ -1355,7 +1357,20 @@ function _ageText(h) {
 function classify(t) {
   const f = KNOWN[t.from], to = KNOWN[t.to];
   let type = 'UNKNOWN_FLOW', conf = 'MEDIUM', reason = 'receiver not in watchlist';
-  if (f && to)                                  { type = 'WATCHLIST_INTERNAL'; conf = 'HIGH'; reason = f.label + ' → ' + to.label; }
+  // AN ESCROW TRANSACTION IS ESCROW MOVEMENT, whatever the counterparties look
+  // like. This used to classify purely on sender/receiver, and on an
+  // EscrowFinish `from` is the account that SUBMITTED the finish — on the XRPL
+  // anyone may finish a matured escrow, so the finisher is not the source of the
+  // funds. On SW-20260901-Y7BFX that rendered Ripple's own scheduled 500M, 400M
+  // and 100M monthly unlocks as "unidentified wallet → Ripple · unclassified
+  // flow", three times, and the narrative then called the largest of them the
+  // standout anomaly. The escrow section of the same report had them correctly
+  // as Ripple releases.
+  const _isRelease = t.type === 'EscrowFinish';
+  const _isLock    = t.type === 'EscrowCreate';
+  if (_isRelease)                               { type = 'ESCROW_RELEASE';     conf = 'HIGH'; reason = 'escrow released to its destination'; }
+  else if (_isLock)                             { type = 'ESCROW_LOCK';        conf = 'HIGH'; reason = 'XRP locked into escrow'; }
+  else if (f && to)                             { type = 'WATCHLIST_INTERNAL'; conf = 'HIGH'; reason = f.label + ' → ' + to.label; }
   else if (f && f.cat === 'exchange' && !to)    { type = 'EXCHANGE_OUTFLOW';  conf = 'HIGH'; reason = 'known exchange to unknown'; }
   else if (!f && to && to.cat === 'exchange')   { type = 'EXCHANGE_INFLOW';   conf = 'HIGH'; reason = 'unknown to exchange'; }
   else if (f && f.cat === 'whale' && !to)       { type = 'WHALE_TO_UNKNOWN';  conf = 'HIGH'; reason = 'known whale to unknown'; }
@@ -1366,7 +1381,10 @@ function classify(t) {
     // which for an inbound transfer is the RECEIVER — so the report claimed
     // things like "UPBIT_1.2B → UPBIT_1.2B" for a payment from an unknown
     // third party. Fall back to the sender's own (shortened) address instead.
-    sender_label: f?.label || (t.from ? ca(t.from) : 'UNKNOWN'),
+    // On a release the funds come OUT OF THE ESCROW, not out of the finisher's
+    // balance. Naming the finisher as sender is what produced "unidentified
+    // wallet → Ripple" for a scheduled unlock. Say what it actually was.
+    sender_label: _isRelease ? 'escrow' : (f?.label || (t.from ? ca(t.from) : 'UNKNOWN')),
     receiver_label: to?.label || (t.to ? ca(t.to) : 'UNKNOWN') };
 }
 
@@ -3138,6 +3156,27 @@ function buildPublicReport(p) {
     : '\nNo operator-supplied world-news context.';
   const headerMode = $('inHeaderMode')?.value || 'xrpman';
 
+  // WHICH WINDOW THE COUNT COVERS.
+  // The scan window is not always a day: _DAY_LOOKBACK_H widens the default to
+  // 48h Saturday, 60h Sunday, 72h Monday, and a missed run widens it further.
+  // p.tx_24h_count is state.txs.length — the whole window — so on 2026-08-31
+  // this report printed "Window: LAST 72H" and, ten lines down, called the same
+  // three-day figure "24h transactions". Name the window the count was actually
+  // taken over. If none can be resolved, print NO window claim: silence is true,
+  // "24H" would not be.
+  let txWinLbl = '';
+  try {
+    if (p.tx_window && p.tx_window.label) txWinLbl = String(p.tx_window.label);
+    else if (typeof getTxWindow === 'function') {
+      const gw = getTxWindow();
+      if (gw && gw.label) txWinLbl = String(gw.label);
+    }
+  } catch (_) {}
+  const txWinSuffix = txWinLbl ? ' (' + txWinLbl + ')' : '';
+  // LITERAL CONTRACT: 17-report-scan-tuning-20260816.js rewrites the
+  // "Transactions in scan window" line below to add the partial-coverage
+  // caveat. Change the wording here and that regex must change with it.
+
   // v3.3: branded Unicode header for xrpman mode, plain text for legacy mode.
   const header = headerMode === 'xrpman'
     ? buildBrandedHeader()
@@ -3145,7 +3184,7 @@ function buildPublicReport(p) {
 
   let report = `${header}
 DATE: ${p.date} | ${p.data_as_of_utc}
-Scan Target: ${p.scan_target} | Window: ${p.tx_window?.label || 'LAST 24H'}
+Scan Target: ${p.scan_target} | Window: ${txWinLbl || 'WINDOW NOT RECORDED'}
 Evidence Grade: ${q.grade || '—'} / ${q.score || 0}/100
 
 MARKET
@@ -3155,7 +3194,7 @@ Native DEX 24h: ${usd(p.xrpl_dex_volume_24h_usd)} | EVM DEX: ${usd(p.xrpl_evm_de
 
 FORENSIC SNAPSHOT
 Wallets scored: ${p.wallets_checked}/${p.watchlist_total}
-24h transactions: ${p.tx_24h_count}
+Transactions in scan window${txWinSuffix}: ${p.tx_24h_count}
 Shadow volume (>1M transfers): ${p.shadow_volume_xrp > 0 ? fmt(p.shadow_volume_xrp, 0) + ' XRP' : 'NONE FLAGGED'}
 Net watchlist balance delta: ${p.total_balance_delta_xrp > 0 ? '+' : ''}${fmt(p.total_balance_delta_xrp, 0)} XRP
 Large transfers flagged: ${(p.large_transfers || []).length}
@@ -7243,9 +7282,19 @@ if (typeof window !== 'undefined') {
       rationale = hasPatternMemory
         ? 'Holding high balance across multiple scans — accumulation pattern.'
         : 'Holding high balance — possible accumulation or reserve.';
-    } else if (!stillHolding && seenCount < 2) {
+    } else if (currentBalance != null && !stillHolding && seenCount < 2) {
+      // `currentBalance != null` is the whole fix. stillHolding is
+      // `currentBalance != null && currentBalance > 0`, so it is ALSO false when
+      // the balance was never read — and this branch then reported a wallet
+      // nobody measured as "dormant or closed account". That is absence of data
+      // published as a finding, and it reached the on-air report:
+      // SW-20260831-4VF0C carried DORMANT for candidates whose balance was null.
+      // A measured zero is a finding; an unread balance is not.
       phase = LIFECYCLE_PHASES.dormant;
-      rationale = 'Zero balance or only seen once — dormant or closed account.';
+      rationale = 'Balance read as zero and seen only once — dormant or closed account.';
+    } else if (currentBalance == null) {
+      phase = LIFECYCLE_PHASES.unknown;
+      rationale = 'Balance not read this scan — lifecycle cannot be determined.';
     } else {
       phase = LIFECYCLE_PHASES.unknown;
       rationale = 'Insufficient scan history to determine lifecycle phase.';
@@ -8390,9 +8439,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         }
         var text = '';
         var sources = [];
-        if (typeof buildMorningStoryText === 'function') {
-          try { text = buildMorningStoryText(pack) || ''; } catch (_) {}
-        }
+        // Reads the canonical render — does not produce a second one.
+        try { text = canonicalMorningStory(pack) || ''; } catch (_) {}
         if (typeof buildMorningStorySources === 'function') {
           try { sources = buildMorningStorySources(pack) || []; } catch (_) {}
         }
@@ -9410,9 +9458,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         var pack = (typeof state !== 'undefined' && state.pack) ? state.pack : {};
         var reportText = '';
         var sources    = [];
-        if (typeof buildMorningStoryText === 'function') {
-          try { reportText = buildMorningStoryText(pack) || ''; } catch (_) {}
-        }
+        // Reads the canonical render — does not produce a second one.
+        try { reportText = canonicalMorningStory(pack) || ''; } catch (_) {}
         if (typeof buildMorningStorySources === 'function') {
           try { sources = buildMorningStorySources(pack) || []; } catch (_) {}
         } else if (pack && Array.isArray(pack.news_headlines)) {
@@ -13468,33 +13515,16 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     var _origDownload = MRF.download.bind(MRF);
     MRF.download = function() {
       try {
-        var txt = MRF._copyLastReport ||
-                  (typeof state !== 'undefined' && state.morningStoryReport) || '';
-        var sources = MRF._copyLastSources || [];
-        var pack    = MRF._copyLastPack   || (typeof state !== 'undefined' && state.pack) || {};
+        // Was: MRF._copyLastReport || state.morningStoryReport — two different
+        // renders, and this preferred the one the Total Report does NOT embed.
+        var txt = (typeof canonicalMorningStory === 'function')
+          ? (canonicalMorningStory() || '')
+          : ((typeof state !== 'undefined' && state.morningStoryReport) || '');
         if (!txt) return _origDownload();
-        // download mode = 'compact' — only append if governor publicly cleared news
+        // The NEWS USED block used to be built HERE, which is precisely why the
+        // downloaded file and the embedded copy were not the same bytes. It now
+        // comes from canonicalMorningStory, so this export adds nothing.
         var body = txt;
-        var publicSourcesCleared = false;
-        try {
-          if (window.MORNING_NEWS_GOVERNOR && typeof window.MORNING_NEWS_GOVERNOR.publicSourcesCleared === 'function') {
-            publicSourcesCleared = window.MORNING_NEWS_GOVERNOR.publicSourcesCleared(pack);
-          }
-        } catch (_) {}
-        if (publicSourcesCleared && Array.isArray(sources) && sources.length > 0) {
-          // Only include sources whose headlines are governor-cleared (strong/medium)
-          var clean = window.MORNING_NEWS_GOVERNOR
-            ? window.MORNING_NEWS_GOVERNOR.dedupeSources(
-                window.MORNING_NEWS_GOVERNOR.filterClearedSources(sources, pack))
-            : sources;
-          if (clean.length > 0) {
-            body += '\n\nNEWS USED:\n';
-            clean.slice(0, 10).forEach(function(s, i) {
-              body += '[' + (i + 1) + '] ' + (s.source || s.name || '?') +
-                      (s.title ? ' \u2014 ' + s.title : '') + '\n';
-            });
-          }
-        }
         var fname = 'MorningReport_' + new Date().toISOString().slice(0, 10) + '.txt';
         if (typeof downloadTextFile === 'function') {
           downloadTextFile(fname, body);
@@ -15859,6 +15889,126 @@ function _patchBuildBundleForV321() {
 //    - Risk label BLACK / EXTREME is never silently downgraded.
 // ══════════════════════════════════════════════════════════════════════
 
+// ── ONE MORNING STORY PER RUN ────────────────────────────────────────────
+// buildMorningStoryText(pack) was being called independently THREE times in a
+// single run — once during the scan (02-core ~20123, which then also piped the
+// result through SW_DAILY_GATE), once from the UI path (~8394) and once on the
+// shadow.report.sealed event (~9414) — and two different results were kept:
+//
+//   state.morningStoryReport   → what TOTAL REPORT / TOTAL DEBUG embed
+//   MRF._copyLastReport        → what the standalone download preferred
+//
+// Those two are produced at different moments, against a wrapper chain that is
+// still being installed (four separate modules reassign
+// window.buildMorningStoryText), and only the scan's copy passes through the
+// daily gate. So one run published two materially different Morning Stories.
+// SW-20260831-4VF0C shipped a standalone file carrying "Under the Surface",
+// "How to Read It", mid-size flow and clustered flow, while the copy embedded
+// in the Total Report had none of them and worded the same escrow fact
+// differently ("coverage 20/20 public owners" vs "registry check 20/20 known
+// Ripple-labeled addresses").
+//
+// This is the single renderer. It produces the text once, stores it once, and
+// every export reads it. It is deliberately NOT a synchroniser between two
+// renderers — there is only one, and the stored value IS the canonical text.
+function canonicalMorningStory(pack, opts) {
+  opts = opts || {};
+  try {
+    const cached = (typeof state !== 'undefined' && state.morningStoryReport) || '';
+    if (!opts.rebuild && cached && cached.length > 50) return cached;
+  } catch (_) {}
+  const p = pack || (typeof state !== 'undefined' && state.pack) || {};
+  let t = '';
+  try {
+    // Always the WRAPPED global: four modules layer onto it (REAL NEWS
+    // injection, baseline repair, governor). Calling an unwrapped reference
+    // is how one consumer ended up with fewer sections than another.
+    const fn = (typeof window !== 'undefined' && typeof window.buildMorningStoryText === 'function')
+      ? window.buildMorningStoryText
+      : ((typeof buildMorningStoryText === 'function') ? buildMorningStoryText : null);
+    if (fn) t = fn(p) || '';
+  } catch (_) {}
+  // The daily gate is part of PRODUCING the canonical text, not a per-consumer
+  // step. Applied here it applies once; applied by one caller only, the popup
+  // and the downloaded file disagree about which brief the day actually has.
+  try {
+    if (t && typeof window !== 'undefined' && window.SW_DAILY_GATE &&
+        typeof window.SW_DAILY_GATE.gateDelivery === 'function') {
+      t = window.SW_DAILY_GATE.gateDelivery(t, p);
+    }
+  } catch (_) {}
+  // NEWS USED IS PART OF THE STORY, NOT AN EXPORT DECORATION.
+  // It used to be appended inside MRF.download only, so the downloaded file
+  // carried a provenance block the embedded copy did not — SW-20260902-76DY2
+  // shipped exactly that, and "one run, one story" failed on it even after the
+  // renderer was unified. Building it HERE means every consumer gets the same
+  // bytes: embed, standalone, download. A surface may select and format; it may
+  // not add facts the canonical text does not have.
+  try {
+    if (t && !/\nNEWS USED:/.test(t)) t += _canonicalNewsUsedBlock(p);
+  } catch (_) {}
+  try { if (t && typeof state !== 'undefined') state.morningStoryReport = t; } catch (_) {}
+  return t;
+}
+
+// The governor decides whether news may be cited at all; this only formats what
+// it cleared. Returns '' when nothing is cleared, so a quiet news day produces
+// no block rather than an empty heading.
+function _canonicalNewsUsedBlock(pack) {
+  try {
+    const G = (typeof window !== 'undefined') && window.MORNING_NEWS_GOVERNOR;
+    if (!G || typeof G.publicSourcesCleared !== 'function') return '';
+    if (!G.publicSourcesCleared(pack)) return '';
+    // SOURCES COME FROM THE PACK, NOT FROM THE DRAWER.
+    //
+    // This block used to read MORNING_REPORT_FLOAT._copyLastSources, which is
+    // what MRF.download read before the block moved up here. That was correct
+    // for the download — download only happens after the drawer is on screen —
+    // and wrong the moment the block moved upstream of it. Production order:
+    //
+    //   :20305  canonicalMorningStory(p, { rebuild: true })   <- we are HERE
+    //   :20309  buildEvidenceSeal(...)
+    //   :9545   emits 'shadow.report.sealed'
+    //   :9499   sources = buildMorningStorySources(pack)
+    //   :9507   MORNING_REPORT_FLOAT.show(...)   (inside setTimeout 300ms)
+    //   :13584  MRF._copyLastSources finally written
+    //
+    // So the read landed on a field written six steps and ~300ms later. And it
+    // never self-corrects: :20305 is the ONLY production call passing
+    // {rebuild:true}, so run #1's block-less text is what every consumer reads
+    // for the rest of the session. _copyLastSources is also never cleared, so
+    // run #2 would stamp today's story with the previous run's headlines —
+    // classifyNewsStrength only regexes title/summary and never reads the pack,
+    // so stale-but-XRP-shaped headlines pass the filter unchanged.
+    //
+    // buildMorningStorySources(pack) is the authority the sealed handler at
+    // :9499 already uses. Call the WRAPPED global: the news governor rebinds it
+    // at :13636 to apply dedupeSources, the same discipline canonicalMorningStory
+    // uses for buildMorningStoryText.
+    let sources = [];
+    try {
+      const bms = (typeof window !== 'undefined' && typeof window.buildMorningStorySources === 'function')
+        ? window.buildMorningStorySources
+        : ((typeof buildMorningStorySources === 'function') ? buildMorningStorySources : null);
+      if (bms) sources = bms(pack) || [];
+      else if (typeof rankNewsItems === 'function' && typeof getNewsSources === 'function')
+        sources = rankNewsItems(getNewsSources(pack)).slice(0, 8);
+    } catch (_) {}
+    if (!Array.isArray(sources) || !sources.length) return '';
+    const clean = (typeof G.dedupeSources === 'function' && typeof G.filterClearedSources === 'function')
+      ? G.dedupeSources(G.filterClearedSources(sources, pack))
+      : sources;
+    if (!clean || !clean.length) return '';
+    let b = '\n\nNEWS USED:\n';
+    clean.slice(0, 10).forEach(function (s, i) {
+      b += '[' + (i + 1) + '] ' + (s.source || s.name || '?') +
+           (s.title ? ' \u2014 ' + s.title : '') + '\n';
+    });
+    return b;
+  } catch (_) { return ''; }
+}
+if (typeof window !== 'undefined') window.canonicalMorningStory = canonicalMorningStory;
+
 // ─── MODULE A — MORNING STORY REPORT ENGINE ───────────────────────────
 
 // Extract all narrative inputs from the current pack into a flat object
@@ -17417,7 +17567,7 @@ ${sealBlock}
 DATE=${p.date}
 AS_OF_UTC=${p.data_as_of_utc}
 SCAN_TARGET=${p.scan_target}
-TX_WINDOW=${p.tx_window?.label || 'LAST 24H'}
+TX_WINDOW=${p.tx_window?.label || 'UNRECORDED'}
 PRICE=$${p.xrp_price} (${pct(p.xrp_delta_24h_pct)} 24h)
 VOLUME_USD=${p.xrp_volume_24h}
 WALLETS_SCORED=${p.wallets_checked}/${p.watchlist_total}
@@ -17714,7 +17864,9 @@ function _resolveReportSource(kind) {
       return { text: txt, ext: 'txt', ok: !!(txt && txt.length > 20) };
     }
     case 'morning-story': {
-      const ms = state.morningStoryReport || '';
+      const ms = (typeof canonicalMorningStory === 'function')
+        ? (canonicalMorningStory() || '')
+        : (state.morningStoryReport || '');
       return { text: ms, ext: 'txt', ok: !!(ms && ms.length > 50) };
     }
     case 'news-source-strategy': {
@@ -20119,18 +20271,11 @@ async function run() {
 
     // v3.23/v3.24: Morning Story built AFTER intelligence — uses live discovery + pattern memory
     try {
-      if (typeof buildMorningStoryText === 'function') {
-        state.morningStoryReport = buildMorningStoryText(p);
-        // DAILY BRIEF GATE (source): one fresh brief per 24h. When locked, this
-        // swaps in today's logged brief so BOTH the popup and the full-screen
-        // report show the same governed brief — no surface can leak a fresh one.
-        // Also archives the day's brief for the "on this day" history.
-        try {
-          if (window.SW_DAILY_GATE && typeof window.SW_DAILY_GATE.gateDelivery === 'function') {
-            state.morningStoryReport = window.SW_DAILY_GATE.gateDelivery(state.morningStoryReport, p);
-          }
-        } catch (_) {}
-      }
+      // The scan is the one place that RENDERS; every other consumer reads
+      // what this produced. The daily-brief gate is applied inside
+      // canonicalMorningStory so the popup and the file can never disagree
+      // about which brief the day has.
+      state.morningStoryReport = canonicalMorningStory(p, { rebuild: true });
     } catch (e) { elog('v3.24 morning story build', e); }
 
     bundle = buildBundle(p, null);
@@ -28185,15 +28330,26 @@ function shadowWatchPublicSourceGovernorCleanupSmokeTest() {
   check('GOV.filterClearedSources is fn', typeof GOV.filterClearedSources === 'function');
 
   // Pack with 2 STRONG articles → cleared
+  // NOTE ON SHAPE. The governor's gate reads news_articles (via
+  // _extractArticles); the SOURCES / NEWS USED lists read
+  // news_intel.top_headlines (via getNewsSources). A production pack carries
+  // news_intel — run() sets it at :20142/:20229 — and never sets news_articles,
+  // which only the hotfix-patched _extractArticles reaches. A fixture with just
+  // news_articles therefore opens the gate on a list nothing prints, which is
+  // not a shape production can produce. Both fields, same headlines.
+  const usableHeadlines = [
+    { title: 'XRP ETFs Pull in Biggest Inflow Yet', source: 'newsbtc',
+      url: 'https://example.test/etf' },
+    { title: 'XRP Ledger Hits Record High Wallet Growth Numbers', source: 'u.today',
+      url: 'https://example.test/growth' }
+  ];
   const usablePack = {
     wallets_checked: 50, large_transfers_count: 5, shadow_volume_xrp: 9_890_000,
     total_balance_delta_xrp: 749_070,
     xrp_price: 1.4386, xrp_delta_24h_pct: -0.10, xrp_volume_24h: 1_930_000_000,
     support: 1.3523, resistance: 1.5249,
-    news_articles: [
-      { title: 'XRP ETFs Pull in Biggest Inflow Yet' },
-      { title: 'XRP Ledger Hits Record High Wallet Growth Numbers' }
-    ]
+    news_articles: usableHeadlines.map(function (h) { return { title: h.title }; }),
+    news_intel: { top_headlines: usableHeadlines.slice() }
   };
   check('publicSourcesCleared TRUE when 2 STRONG present',
     GOV.publicSourcesCleared(usablePack) === true);
@@ -28337,25 +28493,67 @@ function shadowWatchPublicSourceGovernorCleanupSmokeTest() {
     let capturedBody = null;
     const _origDownload = window.downloadTextFile;
     window.downloadTextFile = function(fname, body) { capturedBody = body; };
-    // 1. Usable pack with cleared sources → NEWS USED block appears
+    // 1. Usable pack with cleared sources → NEWS USED block appears.
+    //
+    // THIS PROPERTY MOVED HOUSE. It used to be asserted on the download body,
+    // because MRF.download built the NEWS USED block itself. That is exactly
+    // what made the downloaded file differ from the embedded copy on
+    // SW-20260902-76DY2. The block is now built once by canonicalMorningStory,
+    // so the property lives there and is asserted there — with {rebuild:true},
+    // since the canonical text is cached per run and a cached story must NOT
+    // change just because a drawer was shown with different sources.
     MRF.show('REPORT BODY 1', [
       { source: 'NewsBTC', title: 'XRP ETFs Pull in Biggest Inflow Yet', url: 'https://newsbtc.com/a' }
     ], usablePack);
+    var _canonCleared = (typeof canonicalMorningStory === 'function')
+      ? (canonicalMorningStory(usablePack, { rebuild: true }) || '') : '';
+    check('Canonical story with cleared news contains "NEWS USED:"',
+      /NEWS USED:/.test(_canonCleared));
+    check('Canonical story with cleared news contains the XRP ETF source line',
+      /XRP ETFs Pull in Biggest Inflow/.test(_canonCleared));
+    // And the download is that canonical text, byte for byte — the invariant
+    // that replaces the old per-export construction.
     MRF.download();
-    check('Download with cleared news: body contains "NEWS USED:"',
-      capturedBody && /NEWS USED:/.test(capturedBody));
-    check('Download with cleared news: body contains the XRP ETF source line',
-      capturedBody && /XRP ETFs Pull in Biggest Inflow/.test(capturedBody));
-    // 2. Weak pack (governor not cleared) → no NEWS USED block
+    check('Download body IS the canonical story, byte for byte',
+      capturedBody === _canonCleared);
+    // THE GATE AND THE LIST READ DIFFERENT PACK FIELDS. publicSourcesCleared
+    // reads news_articles; the NEWS USED list reads news_intel via
+    // getNewsSources, so a pack can open the gate while the list is empty. The
+    // correct behaviour is NO block — citing provenance the report did not use
+    // would restore the two-authorities defect this change removes.
+    //
+    // Placed AFTER the byte-equality check on purpose: {rebuild:true} rewrites
+    // the cached state.morningStoryReport, so rendering another pack before the
+    // download check makes the download disagree with _canonCleared. That is
+    // exactly the ordering artifact this work exists to remove, and putting this
+    // block earlier reproduced it.
+    var _gateOnlyPack = {
+      wallets_checked: 50, xrp_price: 1.4386,
+      news_articles: [{ title: 'XRP ETFs Pull in Biggest Inflow Yet' },
+                      { title: 'XRP Ledger Hits Record High Wallet Growth Numbers' }]
+    };
+    var _gateOnly = '', _gateOnlyThrew = false;
+    try {
+      _gateOnly = (typeof canonicalMorningStory === 'function')
+        ? (canonicalMorningStory(_gateOnlyPack, { rebuild: true }) || '') : '';
+    } catch (_) { _gateOnlyThrew = true; }
+    check('gate open but no printable sources: no NEWS USED block, no throw',
+      !_gateOnlyThrew && !/NEWS USED:/.test(_gateOnly));
+    // 2. Weak pack (governor not cleared) → no NEWS USED block.
+    // Asserted on the canonical renderer for the same reason as (1): the story
+    // is rendered once per run, so a drawer shown with a weak pack must not be
+    // able to re-render it. The property that matters — uncleared news never
+    // reaches the published text — is unchanged and still enforced here.
     capturedBody = null;
     MRF.show('REPORT BODY 2', [
       { source: 'Reuters', title: 'Ethereum ETF launches new product', url: 'https://reuters.com/eth' }
     ], weakPack);
-    MRF.download();
-    check('Download with WEAK news: body has NO "NEWS USED:" block',
-      capturedBody && !/NEWS USED:/.test(capturedBody));
-    check('Download with WEAK news: body has NO Ethereum source leaked',
-      capturedBody && !/Ethereum ETF/i.test(capturedBody));
+    var _canonWeak = (typeof canonicalMorningStory === 'function')
+      ? (canonicalMorningStory(weakPack, { rebuild: true }) || '') : '';
+    check('Canonical story with WEAK news has NO "NEWS USED:" block',
+      !/NEWS USED:/.test(_canonWeak));
+    check('Canonical story with WEAK news leaks NO Ethereum source',
+      !/Ethereum ETF/i.test(_canonWeak));
     window.downloadTextFile = _origDownload;
     MRF.hide();
   }

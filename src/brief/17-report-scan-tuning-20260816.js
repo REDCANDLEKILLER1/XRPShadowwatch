@@ -383,7 +383,17 @@
     out = out.replace(/No anomalies flagged\./g,
       'No anomalies observed in the partial transaction scan; the requested window is incomplete.');
     out = out.replace(/NONE FLAGGED/g, 'NONE OBSERVED IN PARTIAL COVERAGE');
-    out = out.replace(/24h transactions:\s*(\d+)/g, '24h transactions observed: $1 (partial transaction coverage)');
+    // LITERAL CONTRACT with buildPublicReport (src/brief/02-core.js, the line
+    // beginning "Transactions in scan window"). Change one, change both — the
+    // guard is scripts/report-truth-4vf0c.test.js, which fails if either side
+    // is reverted alone. Anchored ^…$ because the wording is now generic enough
+    // that an unanchored match could reach "Transaction Window Coverage:".
+    // [^\n]*? is LAZY and does not exclude ':' — a custom window label is
+    // toLocaleString() + ' → ' + toLocaleString() and contains colons, so a
+    // colon-excluding class would silently fail on operator-chosen windows.
+    // [ \t]* not \s*, because \s matches \n and could straddle a line break.
+    out = out.replace(/^(Transactions in scan window[^\n]*?):[ \t]*(\d+)$/gm,
+                      '$1: $2 observed (partial transaction coverage)');
     out = out.replace(/(Large transfers flagged:\s*0)(?![^\n]*partial)/g, '$1 observed; incomplete transaction window');
     out = out.replace(/\b0 transfers above threshold\b/g, '0 transfers above threshold observed in partial coverage');
     return out;
