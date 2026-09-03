@@ -78,7 +78,9 @@ const check = (name, ok, detail) => {
     const out = {};
     const LOCK_DEST_A = 'rEscrowDestAAAAAAAAAAAAAAAAAAAAAAA';
     const LOCK_DEST_B = 'rEscrowDestBBBBBBBBBBBBBBBBBBBBBBB';
-    const PLAIN_DEST  = 'rPlainDestCCCCCCCCCCCCCCCCCCCCCCCC';
+    // NOTE: no lowercase 'l', no '0', 'O' or 'I' — BASE58_RE rejects them and
+    // _isValidDiscoveryAddress would drop this address before discovery saw it.
+    const PLAIN_DEST  = 'rPaidDestCCCCCCCCCCCCCCCCCCCCCCCCC';
     const ESC_CAT_SND = 'rEscrowCatSenderDDDDDDDDDDDDDDDDDD';
     const iso = new Date().toISOString();
 
@@ -140,6 +142,31 @@ const check = (name, ok, detail) => {
         }
       }
 
+      // ── ESCROW MUST NOT REACH RISK BY ANY ROAD ────────────────────────
+      // Splitting escrow out of large_transfers closed one road into the score.
+      // buildClusters (:2746) filters state.txs directly for escrow types and
+      // emits TREASURY_ROTATION_CLUSTER, whose weight fed clusterRisk ->
+      // comp.cluster -> the score, plus a 'cluster risk' driver. That fires
+      // every month on Ripple's schedule. The cluster is still built; it must
+      // carry NO weight.
+      state.txs = TXS.slice();
+      analyzeFlags();
+      try {
+        const cl = (typeof buildClusters === 'function') ? (buildClusters({}) || []) : [];
+        const treasury = cl.filter(c => c && c.type === 'TREASURY_ROTATION_CLUSTER');
+        out.treasuryClusterBuilt = treasury.length === 1;
+        out.treasuryClusterTotal = treasury.length ? Number(treasury[0].total_xrp) : null;
+        // The weight table is the thing under test: read the score's own view.
+        const rs = (typeof buildRiskScore === 'function')
+          ? buildRiskScore({ large_transfers: state.large,
+                             escrow_transfers: state.escrowLarge,
+                             shadow_volume_xrp: 0, total_balance_delta_xrp: 0 })
+          : null;
+        out.riskDrivers = rs && rs.drivers ? rs.drivers.slice() : null;
+        out.noClusterRiskDriver = !!(rs && Array.isArray(rs.drivers) &&
+          rs.drivers.indexOf('cluster risk') === -1);
+      } catch (e) { out.clusterErr = String(e && e.message); }
+
       // ── DISCOVERY MUST STILL REACH THE ESCROW DESTINATION ─────────────
       state.txs = TXS.slice();
       analyzeFlags();
@@ -149,6 +176,80 @@ const check = (name, ok, detail) => {
       out.dualReadHasEscrowDest =
         both.some(t => t.to === LOCK_DEST_A) && both.some(t => t.to === LOCK_DEST_B);
       out.dualReadHasOrdinary = both.some(t => t.to === PLAIN_DEST);
+
+      // ── AN ESCROW LOCK DESTINATION HAS NOT BEEN PAID ──────────────────
+      // It must stay discoverable, but crediting it with the locked amount
+      // published "this wallet received 200M XRP" about a wallet that received
+      // nothing — the funds sit in an escrow object until a finish releases them.
+      try {
+        state.pack = { large_transfers: state.large, escrow_transfers: state.escrowLarge };
+        const cands = (typeof collectDiscoveryCandidates === 'function')
+          ? (collectDiscoveryCandidates(state.pack) || []) : [];
+        const find = a => cands.find(c => c && c.address === a) || null;
+        const lockCand = find(LOCK_DEST_A);
+        const plainCand = find(PLAIN_DEST);
+        out.lockStillDiscovered = !!lockCand;
+        out.lockNotCredited = !!lockCand && Number(lockCand.max_value_xrp) === 0 &&
+                                            Number(lockCand.total_value_xrp) === 0;
+        out.lockNotCalledReceiver = !!lockCand &&
+          String(lockCand.classification || '') !== 'LARGE_TRANSFER_RECEIVER';
+        out.lockReason = !!lockCand && (lockCand.reasons || []).join(' | ');
+        out.lockSaysNotReleased = !!lockCand &&
+          /NOT yet released/i.test((lockCand.reasons || []).join(' '));
+        // the ordinary whale receiver is unaffected
+        out.plainStillCredited = !!plainCand && Number(plainCand.max_value_xrp) === 1651898167;
+      } catch (e) { out.discErr = String(e && e.message); }
+      // ── THE STAMP MAY NOT CLAIM WHAT IT CANNOT PROVE ──────────────────
+      // updateWalletMemory's store is cumulative with no expiry, so a record
+      // that existed before the split still carries escrow inside its
+      // total_in_xrp / total_out_xrp / largest_transfer_xrp. Marking such a
+      // record "escrow excluded" asserts a cleanliness that is not true. Only a
+      // record CREATED under the new basis has provably clean totals.
+      try {
+        const LEGACY = 'rLegacySenderEEEEEEEEEEEEEEEEEEEEE';
+        const FRESHRX = 'rFreshReceiverFFFFFFFFFFFFFFFFFFFF';
+        const mem0 = getPatternMemory();
+        // a record from before the split: real totals, no basis stamp
+        mem0.wallets[LEGACY] = {
+          address: LEGACY, label: 'LEGACY', first_seen: iso, last_seen: iso,
+          times_seen: 5, total_in_xrp: 900000000, total_out_xrp: 900000000,
+          largest_transfer_xrp: 200000000, common_counterparties: {},
+          destination_tags: {}, archetype_history: [], source_types: [],
+          last_classification: null
+        };
+        delete mem0.wallets[FRESHRX];
+        savePatternMemory(mem0);
+
+        updateWalletMemory({
+          wallet_results: [],
+          large_transfers: [{ from: LEGACY, to: FRESHRX, amount: 3000000,
+            hash: 'E'.repeat(64), date: iso, classification: 'WATCHLIST_INTERNAL',
+            receiver_label: '' }]
+        });
+
+        const mem1 = getPatternMemory();
+        const lg = mem1.wallets[LEGACY] || {};
+        const fr = mem1.wallets[FRESHRX] || {};
+        out.legacyStamped        = lg.movement_basis === 'ordinary_movement_escrow_excluded';
+        out.legacyFlaggedImpure  = lg.totals_predate_basis === true;
+        out.legacyHasSince       = !!lg.movement_basis_since;
+        out.freshCreatedClean    = fr.totals_predate_basis === false;
+        out.freshHasSince        = !!fr.movement_basis_since;
+        // The boundary is set ONCE, not moved by a later scan.
+        // Comparing two `new Date().toISOString()` values taken milliseconds
+        // apart is not a test — they can be the identical string, and the
+        // assertion then passes no matter what the code does. Plant a sentinel
+        // the running code would never produce and check it survives.
+        const SENTINEL = '1999-01-01T00:00:00.000Z';
+        const memS = getPatternMemory();
+        memS.wallets[LEGACY].movement_basis_since = SENTINEL;
+        savePatternMemory(memS);
+        updateWalletMemory({ wallet_results: [], large_transfers: [
+          { from: LEGACY, to: FRESHRX, amount: 1000000, hash: 'F'.repeat(64),
+            date: iso, classification: 'WATCHLIST_INTERNAL', receiver_label: '' }] });
+        out.sinceIsStable = (getPatternMemory().wallets[LEGACY] || {}).movement_basis_since === SENTINEL;
+      } catch (e) { out.memErr = String(e && e.message); }
+
     } catch (e) {
       out.err = String(e && e.message);
     } finally {
@@ -183,6 +284,33 @@ const check = (name, ok, detail) => {
   check('the dual read returns every row', r.dualReadCount === 3, r.dualReadCount);
   check('BOTH escrow destinations remain discoverable', r.dualReadHasEscrowDest);
   check('the ordinary destination is still there', r.dualReadHasOrdinary);
+
+  console.log('\n5. escrow reaches risk by no road');
+  console.log('     drivers: ' + JSON.stringify(r.riskDrivers));
+  check('the treasury cluster is still BUILT (information kept)',
+        r.treasuryClusterBuilt, r.clusterErr);
+  check('it reports the real escrow total', r.treasuryClusterTotal === 210000000,
+        r.treasuryClusterTotal);
+  check('but it contributes NO cluster-risk driver',
+        r.noClusterRiskDriver, r.riskDrivers);
+
+  console.log('\n6. an escrow LOCK destination is discoverable but not paid');
+  console.log('     reason: ' + JSON.stringify(r.lockReason));
+  check('the lock destination is still discovered', r.lockStillDiscovered, r.discErr);
+  check('it is credited ZERO value \u2014 the XRP is locked, not received',
+        r.lockNotCredited, { max: r.lockReason });
+  check('it is not classified LARGE_TRANSFER_RECEIVER', r.lockNotCalledReceiver);
+  check('and the reason says the funds are not yet released', r.lockSaysNotReleased, r.lockReason);
+  check('the ordinary whale receiver is still credited in full', r.plainStillCredited);
+
+  console.log('\n7. cumulative wallet memory is stamped honestly');
+  check('a pre-split record is stamped with the new basis', r.legacyStamped, r.memErr);
+  check('and explicitly flagged: its totals PREDATE the basis',
+        r.legacyFlaggedImpure, r.memErr);
+  check('it records when the basis began', r.legacyHasSince, r.memErr);
+  check('a record CREATED under the basis is not flagged', r.freshCreatedClean, r.memErr);
+  check('and carries the same boundary field', r.freshHasSince, r.memErr);
+  check('the boundary is set once, not moved by a later scan', r.sinceIsStable, r.memErr);
 
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 

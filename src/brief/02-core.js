@@ -2597,10 +2597,21 @@ function buildRiskScore(pack) {
   const clusters = state.clusters || [], profiles = state.walletProfiles || [];
   const receiverFwd = (pack.receiver_followthrough || []).filter(r => n(r.forwarded_large_count) > 0).length;
   const dust = (pack.fragmentation_flags || []).length;
-  const clusterRisk = clusters.reduce((a, c) => a + ({
+  // TREASURY_ROTATION_CLUSTER is 0 ON PURPOSE. It fires whenever any escrow type
+  // appears in state.txs (:2746) — i.e. every month, on schedule, for Ripple's
+  // unlock. Splitting escrow out of large_transfers closed one road into the
+  // score and left this one open: a HIGH-confidence cluster plus a 'cluster
+  // risk' driver for the most predictable event on the ledger. The cluster is
+  // still BUILT and still shown; it just carries no anomaly weight.
+  //
+  // `??` NOT `||`. The unknown-cluster default is 4, and `0 || 4` is 4 — so
+  // writing the weight as 0 with `||` would have left the escrow cluster
+  // scoring 4 points while the table said 0. Only nullish falls through.
+  const CLUSTER_WEIGHTS = {
     WHALE_TO_UNKNOWN_CLUSTER: 20, EXCHANGE_ROUTING_CLUSTER: 14,
-    DUST_TAG_CLUSTER: 8, TREASURY_ROTATION_CLUSTER: 10, QUIET_CLUSTER: -5
-  }[c.type] || 4), 0);
+    DUST_TAG_CLUSTER: 8, TREASURY_ROTATION_CLUSTER: 0, QUIET_CLUSTER: -5
+  };
+  const clusterRisk = clusters.reduce((a, c) => a + (CLUSTER_WEIGHTS[c.type] ?? 4), 0);
   const profileRisk = profiles.reduce((a, p) => a + ({
     WHALE_DISTRIBUTOR: 8, OTC_ROUTER: 8, DUST_RECEIVER: 5, EXCHANGE_HOT_FLOW: 3, FAILED_SCAN: 2
   }[p.archetype] || 0), 0);
@@ -5074,9 +5085,8 @@ function collectDiscoveryCandidates(pack) {
     }
   }
 
-  // 1. Large-transfer receivers (>1M XRP) — ordinary movement AND escrow.
-  // Escrow is excluded from risk, not from investigation.
-  _movementAndEscrow(pack).forEach(t => {
+  // 1. Large-transfer receivers (>1M XRP).
+  (pack.large_transfers || []).forEach(t => {
     if (t.to) {
       bump(t.to, 'large_transfer', {
         reason: 'destination of large transfer (' + fmt(n(t.amount), 0) + ' XRP) from ' +
@@ -5092,6 +5102,39 @@ function collectDiscoveryCandidates(pack) {
       });
     }
   });
+
+  // 1b. ESCROW DESTINATIONS — DISCOVERABLE, BUT THEY HAVE NOT BEEN PAID.
+  // The destination of an EscrowCreate is a real address worth investigating —
+  // a lock into a fresh unknown wallet is exactly what this system exists to
+  // catch — so it must not vanish from discovery. But it has NOT received the
+  // XRP: the funds sit in an escrow object until an EscrowFinish releases them,
+  // which may be years away or never (EscrowCancel returns them to the owner).
+  //
+  // Feeding these through the 'large_transfer' bump credited the destination
+  // with value_xrp it cannot spend, which accumulates into total_value_xrp /
+  // max_value_xrp (:5053) and then classifies it LARGE_TRANSFER_RECEIVER
+  // (:5288) — publishing "this wallet received 200M XRP" about a wallet that
+  // received nothing. Distinct source, no value credited, and a reason that
+  // says what actually happened.
+  ((pack && pack.escrow_transfers) || (typeof state !== 'undefined' && state.escrowLarge) || [])
+    .forEach(t => {
+      if (!t.to) return;
+      const _rel = t.type === 'EscrowFinish';
+      bump(t.to, 'escrow_destination', {
+        reason: _rel
+          ? ('destination of an escrow RELEASE (' + fmt(n(t.amount), 0) + ' XRP received) from ' +
+             (t.sender_label === 'escrow' ? 'escrow' : (t.sender_label || 'an escrow owner')))
+          : ('named destination of an escrow LOCK (' + fmt(n(t.amount), 0) +
+             ' XRP locked, NOT yet released) by ' +
+             (t.from ? _swWho(t.from, t.sender_label, { bare: true }) : (t.sender_label || 'unknown owner'))),
+        // A release genuinely delivers; a lock does not. Only credit the former.
+        value_xrp: _rel ? n(t.amount) : 0,
+        tx_count: 1,
+        last_seen: t.ts || t.timestamp,
+        active_last_24h: true,
+        related_watched: t.from ? [_swWho(t.from, t.sender_label, { bare: true })] : []
+      });
+    });
 
   // 2. Receiver followthrough addresses
   (pack.receiver_followthrough || []).forEach(r => {
@@ -15263,14 +15306,38 @@ function updateWalletMemory(pack) {
   // every record touched from here on is stamped with the basis that produced
   // its totals. A record with no stamp predates the split and its
   // total_in_xrp / total_out_xrp / largest_transfer_xrp may include escrow.
+  // WHAT THIS STAMP MAY AND MAY NOT CLAIM.
+  // An earlier version wrote movement_basis: 'ordinary_movement_escrow_excluded'
+  // onto every record it touched. That asserts the record's totals are clean.
+  // They are not: this store is cumulative with no expiry, so total_in_xrp,
+  // total_out_xrp and largest_transfer_xrp on an existing record still contain
+  // whatever escrow was folded in before the split. Stamping them clean is the
+  // same defect this whole PR exists to remove — publishing a claim the
+  // evidence does not support.
+  //
+  // So the stamp records WHEN the new basis began for this record, and says
+  // nothing about the history before it. A record with no `since` predates the
+  // split entirely; a record with one may still carry escrow in the portion
+  // accumulated before that timestamp. It is set ONCE and never overwritten,
+  // because the first scan under the new rule is the only honest boundary.
   const MOVEMENT_BASIS = 'ordinary_movement_escrow_excluded';
+  const _stampBasis = (rec) => {
+    if (!rec) return;
+    if (!rec.movement_basis_since) {
+      rec.movement_basis = MOVEMENT_BASIS;
+      rec.movement_basis_since = now;
+      // Only a record created fresh under the new basis has provably clean
+      // totals. An existing one is explicitly marked as carrying older history.
+      rec.totals_predate_basis = !rec._createdUnderBasis;
+    }
+  };
   (pack.large_transfers || []).forEach(t => {
     const amt = n(t.amount);
     // Sender
     if (t.from && mem.wallets[t.from]) {
       const s = mem.wallets[t.from];
       s.total_out_xrp += amt;
-      s.movement_basis = MOVEMENT_BASIS;
+      _stampBasis(s);
       if (amt > s.largest_transfer_xrp) s.largest_transfer_xrp = amt;
       if (t.to) {
         s.common_counterparties[t.to] = (s.common_counterparties[t.to] || 0) + 1;
@@ -15287,13 +15354,17 @@ function updateWalletMemory(pack) {
           common_counterparties: {}, destination_tags: {},
           archetype_history: [], source_types: ['large_transfer_dest'],
           last_classification: t.classification || null,
-          movement_basis: MOVEMENT_BASIS
+          // Created under the new basis: these totals really are escrow-free.
+          _createdUnderBasis: true,
+          movement_basis: MOVEMENT_BASIS,
+          movement_basis_since: now,
+          totals_predate_basis: false
         };
       } else {
         const r = mem.wallets[t.to];
         r.last_seen = now; r.times_seen++;
         r.total_in_xrp += amt;
-        r.movement_basis = MOVEMENT_BASIS;
+        _stampBasis(r);
         if (amt > r.largest_transfer_xrp) r.largest_transfer_xrp = amt;
         if (!r.source_types.includes('large_transfer_dest'))
           r.source_types.push('large_transfer_dest');
