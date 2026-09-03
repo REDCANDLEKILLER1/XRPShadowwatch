@@ -1116,7 +1116,7 @@ function pageDepthFor(label) {
 }
 
 async function scanWallets(ws) {
-  state.wallets = []; state.txs = []; state.flags = []; state.large = []; state.frags = [];
+  state.wallets = []; state.txs = []; state.flags = []; state.large = []; state.escrowLarge = []; state.frags = [];
   const prev = JSON.parse(localStorage.getItem(STORE) || '{}');
   const tw = getTxWindow();
   const limit = Math.max(20, Math.min(400, n($('inTxLimit').value) || 200));
@@ -1196,7 +1196,7 @@ async function scanWallets(ws) {
       for (const item of txRows) {
         const t = item.tx_json || item.tx || {}, iso = t.date ? rip(t.date) : '';
         if (!iso) continue;
-        let amt = 0, cur = 'XRP', escrowDest = '';
+        let amt = 0, cur = 'XRP', escrowDest = '', escrowOwner = '';
         // v16.9 units fix: a partial payment carries a huge SENTINEL in `Amount`
         // (the max, often ~1e17 drops ≈ 100B+ XRP) while the REAL moved amount is
         // in meta.delivered_amount. Reading Amount produced impossible "103B XRP"
@@ -1208,17 +1208,10 @@ async function scanWallets(ws) {
         if (typeof amtSrc === 'string') amt = drops(amtSrc);
         else if (amtSrc && typeof amtSrc === 'object') { cur = amtSrc.currency || 'TOKEN'; amt = n(amtSrc.value || 0); }
         else if (t.TransactionType === 'EscrowFinish' || t.TransactionType === 'EscrowCreate') {
-          // Released/locked XRP lives in metadata (the created/deleted Escrow node), not t.Amount.
-          const meta = item.meta || item.metaData || {};
-          for (const nd of (meta.AffectedNodes || [])) {
-            const en = nd.DeletedNode || nd.CreatedNode;
-            if (en && en.LedgerEntryType === 'Escrow') {
-              const ff = en.FinalFields || en.NewFields || {};
-              if (typeof ff.Amount === 'string') amt = drops(ff.Amount);
-              if (ff.Destination) escrowDest = ff.Destination;
-              break;
-            }
-          }
+          const _ef = escrowFactsFromMeta(item);
+          if (_ef.amount != null) amt = _ef.amount;
+          if (_ef.destination) escrowDest = _ef.destination;
+          if (_ef.owner) escrowOwner = _ef.owner;
           if (!amt && typeof t.Amount === 'string') amt = drops(t.Amount);
         }
         const _sig = _sigMode(t);
@@ -1227,6 +1220,10 @@ async function scanWallets(ws) {
           type: t.TransactionType, hash: t.hash || item.hash || '',
           date: iso, from: t.Account || '', to: escrowDest || t.Destination || '',
           amount: amt, currency: cur, destination_tag: t.DestinationTag ?? '',
+          // Empty for non-escrow rows, and for an escrow row whose ledger node
+          // could not be read — in which case ownership is UNKNOWN and must not
+          // be guessed from the submitter.
+          escrow_owner: escrowOwner || '',
           // Who authorised this — see _sigMode.
           sig_mode: _sig.mode, signer_count: _sig.count
         });
@@ -1368,8 +1365,13 @@ function classify(t) {
   // as Ripple releases.
   const _isRelease = t.type === 'EscrowFinish';
   const _isLock    = t.type === 'EscrowCreate';
+  // EscrowCancel returns the funds to the OWNER; nothing reaches a destination.
+  // _isEscrowLedgerType already routes it out of ordinary movement, so leaving
+  // classify() without a branch for it was a split brain waiting to surface.
+  const _isCancel  = t.type === 'EscrowCancel';
   if (_isRelease)                               { type = 'ESCROW_RELEASE';     conf = 'HIGH'; reason = 'escrow released to its destination'; }
   else if (_isLock)                             { type = 'ESCROW_LOCK';        conf = 'HIGH'; reason = 'XRP locked into escrow'; }
+  else if (_isCancel)                           { type = 'ESCROW_CANCEL';      conf = 'HIGH'; reason = 'escrow cancelled — XRP returned to its owner'; }
   else if (f && to)                             { type = 'WATCHLIST_INTERNAL'; conf = 'HIGH'; reason = f.label + ' → ' + to.label; }
   else if (f && f.cat === 'exchange' && !to)    { type = 'EXCHANGE_OUTFLOW';  conf = 'HIGH'; reason = 'known exchange to unknown'; }
   else if (!f && to && to.cat === 'exchange')   { type = 'EXCHANGE_INFLOW';   conf = 'HIGH'; reason = 'unknown to exchange'; }
@@ -1388,8 +1390,93 @@ function classify(t) {
     receiver_label: to?.label || (t.to ? ca(t.to) : 'UNKNOWN') };
 }
 
+// THE ESCROW LEDGER NODE — amount, destination and OWNER, read once.
+// Released/locked XRP lives in metadata (the created/deleted Escrow node), not
+// in tx.Amount. So does the owner: the Escrow object's own Account.
+//
+// tx.Account is only the SUBMITTER, and on an EscrowFinish anyone may submit —
+// so attributing a release by submitter credits it to whoever finished it.
+// Ripple-vs-other is decided on exactly that field (26-…:69
+// isRippleOwner(e.owner)), so the mistake folded a stranger's escrow into
+// "Ripple escrow" and Ripple's into "other", in both directions.
+//
+// Named and exported so the extraction itself is testable: seeding a row's
+// escrow_owner in a test proves escrowFromTxs, not this.
+function escrowFactsFromMeta(item) {
+  const out = { amount: null, destination: '', owner: '' };
+  try {
+    const meta = (item && (item.meta || item.metaData)) || {};
+    for (const nd of (meta.AffectedNodes || [])) {
+      const en = nd && (nd.DeletedNode || nd.CreatedNode);
+      if (en && en.LedgerEntryType === 'Escrow') {
+        const ff = en.FinalFields || en.NewFields || {};
+        if (typeof ff.Amount === 'string') out.amount = drops(ff.Amount);
+        if (ff.Destination) out.destination = ff.Destination;
+        if (ff.Account) out.owner = ff.Account;
+        break;
+      }
+    }
+  } catch (_) {}
+  return out;
+}
+
+// IS THIS AN ESCROW LEDGER EVENT? Tested on TRANSACTION TYPE, never on
+// classification. `classify()` assigns ESCROW_FLOW (:1377) to an ORDINARY
+// Payment sent from a wallet whose watchlist category happens to be `escrow` —
+// that is a real payment and must stay in ordinary movement. 10-pipeline's
+// `_isEscrowMove` sweeps ESCROW_FLOW in; reusing it here would silently delete
+// real payments from movement, shadow volume, discovery and the blackbox.
+// Discovery and the live surfaces must still see escrow rows. Splitting them
+// out of `large_transfers` cleans the RISK INPUT; it must not cost forensic
+// reach. The destination of an EscrowCreate is the escrow object's Destination
+// (:1227), so a lock into a fresh unknown wallet is exactly the pattern this
+// system exists to catch — and it is non-Ripple escrow (the "Flare Core Vault"
+// class) that the !KNOWN[] gates do not already exclude.
+// ROLE MATTERS. `_movementAndEscrow` answered one question — "which addresses
+// are worth looking at" — and callers silently used it to answer a second:
+// "who received money". Those differ for a lock. An EscrowCreate destination is
+// worth investigating and has received NOTHING; the XRP sits in an escrow
+// object until a finish releases it, which may never happen (a cancel returns
+// it to the owner). Feeding locks through funded-receiver semantics recreated
+// the same defect in scanReceivers, the offer-candidate scan and the helper
+// queue after it had been fixed in collectDiscoveryCandidates.
+//
+// So the split is by ROLE, not by "escrow or not":
+//   _ordinaryMovement  ordinary large transfers
+//   _escrowReleases    EscrowFinish — funds genuinely delivered to `to`
+//   _escrowNonDelivery EscrowCreate / EscrowCancel — nothing delivered to `to`
+function _ordinaryMovement(pack) {
+  const a = (pack && pack.large_transfers) || (typeof state !== 'undefined' && state.large) || [];
+  return Array.isArray(a) ? a : [];
+}
+function _escrowRows(pack) {
+  const b = (pack && pack.escrow_transfers) || (typeof state !== 'undefined' && state.escrowLarge) || [];
+  return Array.isArray(b) ? b : [];
+}
+function _escrowReleases(pack) {
+  return _escrowRows(pack).filter(t => t && t.type === 'EscrowFinish');
+}
+function _escrowNonDelivery(pack) {
+  return _escrowRows(pack).filter(t => t && t.type !== 'EscrowFinish');
+}
+// Everything that actually DELIVERED XRP to `to`. This is the set that may be
+// treated as a receipt: ordinary transfers plus escrow releases.
+function _deliveredToReceiver(pack) {
+  return _ordinaryMovement(pack).concat(_escrowReleases(pack));
+}
+// Every address worth investigating, delivery or not. Display and candidacy
+// only — never receipt semantics.
+function _movementAndEscrow(pack) {
+  return _ordinaryMovement(pack).concat(_escrowRows(pack));
+}
+
+function _isEscrowLedgerType(t) {
+  const ty = t && t.type;
+  return ty === 'EscrowCreate' || ty === 'EscrowFinish' || ty === 'EscrowCancel';
+}
+
 function analyzeFlags() {
-  const flags = [], large = [], frags = [];
+  const flags = [], large = [], escrowLarge = [], frags = [];
   const threshold = n($('inLargeThreshold').value) || 1000000;
   // XRP total supply is ~100B. Any single "XRP" amount at/above this ceiling is a
   // data artifact (e.g. an unresolved partial-payment sentinel), never a real
@@ -1401,15 +1488,30 @@ function analyzeFlags() {
       continue;
     }
     if (t.currency === 'XRP' && t.amount >= threshold) {
-      const c = classify(t); large.push(c);
+      // ESCROW IS NOT ORDINARY MOVEMENT. A scheduled lock or unlock is the most
+      // predictable event on the ledger, and it was being counted as whale
+      // activity: on SW-20260902-76DY2 two EscrowCreates worth 210,000,000 XRP
+      // sat inside a 59-row large_transfers set totalling 1,861,898,167, and the
+      // risk engine reads that array's length and that sum as scoring drivers.
+      // Split at the source so risk is clean BY CONSTRUCTION rather than by yet
+      // another filter at each consumer. The rows are kept, not dropped —
+      // discovery and the live feed read both lists.
+      const c = classify(t);
+      (_isEscrowLedgerType(t) ? escrowLarge : large).push(c);
       flags.push(`${c.confidence} ${c.classification}: ${c.sender_label} → ${ca(c.to)} ${fmt(c.amount, 0)} XRP ${c.hash}`);
     }
     if (t.type === 'EscrowFinish' || t.type === 'EscrowCreate')
       flags.push(`HIGH ESCROW_${t.type}: ${t.label} ${fmt(t.amount)} XRP ${t.hash}`);
   }
-  // Dust groups
+  // Dust groups.
+  // ECONOMIC ROWS ONLY. frags becomes pack.fragmentation_flags, which
+  // buildRiskScore counts as `dust` into comp.dust_flags. Five small
+  // escrow-class rows sharing a destination would otherwise raise a
+  // fragmentation flag and with it the anomaly score — escrow reaching risk by
+  // a road that has nothing to do with large_transfers.
   const groups = {};
   for (const t of state.txs) {
+    if (_isEscrowLedgerType(t)) continue;
     if (t.currency === 'XRP' && t.amount > 0 && t.amount <= 50 && t.to) {
       const k = t.to + '|' + (t.destination_tag || 'none');
       if (!groups[k]) groups[k] = { to: t.to, tag: t.destination_tag || '', count: 0, total: 0, froms: new Set() };
@@ -1454,14 +1556,26 @@ function analyzeFlags() {
   } catch (_) { /* the signing watch must never break a scan */ }
 
   if (!flags.length) flags.push('No 24h tx/delta anomaly detected. Scan-based, not filler.');
-  state.flags = flags; state.large = large; state.frags = frags;
+  state.flags = flags; state.large = large; state.escrowLarge = escrowLarge; state.frags = frags;
   if ($('flagsBox')) $('flagsBox').textContent = flags.join('\n');
 }
 
 async function scanReceivers(ws) {
   state.receivers = [];
   const seen = new Map();
-  for (const t of state.large) {
+  // DELIVERED ONLY. This scan asks "did the receiver hold or forward what it
+  // received", and records source_amount_xrp = src.amount as the sum that
+  // arrived. For an EscrowCreate nothing arrived, so every answer it produces
+  // is about money the address never had — RECEIVER_STILL_HOLDING_SIZE,
+  // NEXT_HOP_FORWARDING_DETECTED, FRESH_ACCOUNT_RECEIVER. Worse, the result
+  // feeds receiver_fwd into the risk score and WHALE_TO_UNKNOWN_CLUSTER off
+  // source_amount_xrp, so a lock could manufacture ordinary whale-routing risk
+  // from XRP it never delivered.
+  //
+  // An EscrowFinish DID deliver and belongs here. A lock is still investigated
+  // — collectDiscoveryCandidates carries it, credited zero — just not through
+  // funded-receiver semantics.
+  for (const t of _deliveredToReceiver(null)) {
     if (t.to && !KNOWN[t.to] && !seen.has(t.to) && BASE58_RE.test(t.to)) seen.set(t.to, t);
   }
   const limit = Math.max(5, Math.min(80, n($('inHopLimit').value) || 60));
@@ -2522,6 +2636,34 @@ function validate() {
 
 const shadowVolumeXRP = () => state.large.reduce((a, t) => a + n(t.amount), 0);
 const totalDeltaXRP = () => state.wallets.filter(w => w.status === 'CHECKED').reduce((a, w) => a + n(w.delta_xrp), 0);
+// ESCROW MOVES A BALANCE WITHOUT BEING ORDINARY FLOW.
+// Locking XRP into escrow really does reduce the owner's spendable balance, so
+// the measured delta really does change — which meant escrow could still push
+// comp.net_delta even after its transaction row had been split out of
+// large_transfers. The balance snapshot was a road nobody had closed.
+//
+// The raw figure stays exactly as measured and keeps its name: it was read off
+// the ledger and it is evidence. This computes the ESCROW-ATTRIBUTABLE part of
+// it so risk can score the remainder. A lock is added back (the balance fell by
+// that amount); a release into a watched wallet is subtracted (it rose).
+// A finisher is not adjusted — submitting an EscrowFinish does not move the
+// finisher's own balance; the funds come out of the escrow object.
+const escrowDeltaAdjustXRP = () => {
+  const watched = new Set((state.wallets || [])
+    .filter(w => w.status === 'CHECKED').map(w => w.address));
+  let adj = 0;
+  for (const t of (state.txs || [])) {
+    if (!_isEscrowLedgerType(t)) continue;
+    const amt = n(t.amount);
+    if (!(amt > 0)) continue;
+    if (t.type === 'EscrowCreate' && watched.has(t.from)) adj += amt;
+    else if (t.type === 'EscrowFinish' && watched.has(t.to)) adj -= amt;
+  }
+  return adj;
+};
+// What ordinary movement alone did to the watched balances. This is the risk
+// input; total_balance_delta_xrp remains the measured evidence.
+const ordinaryDeltaXRP = () => totalDeltaXRP() + escrowDeltaAdjustXRP();
 // Wide-shot activity across the watched wallets (ALL sizes, not just the ≥1M
 // whale moves). Shadow Volume stays the spotlight; these are the full totals.
 // XRP-currency payments only; the >=100B guard excludes partial-payment artifacts.
@@ -2565,10 +2707,21 @@ function buildRiskScore(pack) {
   const clusters = state.clusters || [], profiles = state.walletProfiles || [];
   const receiverFwd = (pack.receiver_followthrough || []).filter(r => n(r.forwarded_large_count) > 0).length;
   const dust = (pack.fragmentation_flags || []).length;
-  const clusterRisk = clusters.reduce((a, c) => a + ({
+  // TREASURY_ROTATION_CLUSTER is 0 ON PURPOSE. It fires whenever any escrow type
+  // appears in state.txs (:2746) — i.e. every month, on schedule, for Ripple's
+  // unlock. Splitting escrow out of large_transfers closed one road into the
+  // score and left this one open: a HIGH-confidence cluster plus a 'cluster
+  // risk' driver for the most predictable event on the ledger. The cluster is
+  // still BUILT and still shown; it just carries no anomaly weight.
+  //
+  // `??` NOT `||`. The unknown-cluster default is 4, and `0 || 4` is 4 — so
+  // writing the weight as 0 with `||` would have left the escrow cluster
+  // scoring 4 points while the table said 0. Only nullish falls through.
+  const CLUSTER_WEIGHTS = {
     WHALE_TO_UNKNOWN_CLUSTER: 20, EXCHANGE_ROUTING_CLUSTER: 14,
-    DUST_TAG_CLUSTER: 8, TREASURY_ROTATION_CLUSTER: 10, QUIET_CLUSTER: -5
-  }[c.type] || 4), 0);
+    DUST_TAG_CLUSTER: 8, TREASURY_ROTATION_CLUSTER: 0, QUIET_CLUSTER: -5
+  };
+  const clusterRisk = clusters.reduce((a, c) => a + (CLUSTER_WEIGHTS[c.type] ?? 4), 0);
   const profileRisk = profiles.reduce((a, p) => a + ({
     WHALE_DISTRIBUTOR: 8, OTC_ROUTER: 8, DUST_RECEIVER: 5, EXCHANGE_HOT_FLOW: 3, FAILED_SCAN: 2
   }[p.archetype] || 0), 0);
@@ -2598,7 +2751,10 @@ function buildRiskScore(pack) {
   };
   const largeN = (pack.large_transfers || []).length;
   const shadowV = Math.abs(n(pack.shadow_volume_xrp));
-  const deltaV = Math.abs(n(pack.total_balance_delta_xrp));
+  // Ordinary movement only — see escrowDeltaAdjustXRP. Falls back to the raw
+  // delta for packs built before this field existed (stored snapshots, fixtures).
+  const deltaV = Math.abs(n(pack.ordinary_balance_delta_xrp != null
+    ? pack.ordinary_balance_delta_xrp : pack.total_balance_delta_xrp));
   // Ledger weights deliberately sum to 90, ABOVE riskBand's BLACK threshold of
   // 75, so severe on-chain activity alone can still reach BLACK / EXTREME.
   // (An earlier pass summed them to exactly 75; because soft saturation only
@@ -2658,7 +2814,19 @@ function buildWalletProfiles(pack) {
   pack = pack || {};
   const txs = state.txs || [];
   const profiles = (pack.wallet_results || pack.wallets || state.wallets || []).map(w => {
-    const mine = txs.filter(t => t.from === w.address || t.to === w.address);
+    // ESCROW IS NOT ECONOMIC MOVEMENT HERE EITHER.
+    // Every archetype below feeds profileRisk in buildRiskScore, so EVERY
+    // feature that decides an archetype has to come from the economic subset —
+    // not just largeOut/largeIn. Excluding escrow from those two alone still
+    // let it move risk three other ways: `mine.length` crosses the
+    // EXCHANGE_HOT_FLOW threshold (>=10) and the WHALE_ACCUMULATOR one (<=5),
+    // and small escrow rows count toward DUST_RECEIVER (smallIn >= 5).
+    //
+    // The RAW count is kept separately for display: how many ledger events
+    // touched this wallet is a true fact and stays visible. It just may not
+    // decide an anomaly archetype.
+    const rawMine  = txs.filter(t => t.from === w.address || t.to === w.address);
+    const mine = rawMine.filter(t => !_isEscrowLedgerType(t));
     const outs = mine.filter(t => t.from === w.address);
     const ins  = mine.filter(t => t.to === w.address);
     const largeOut = outs.filter(t => n(t.amount) >= 1000000).length;
@@ -2675,7 +2843,9 @@ function buildWalletProfiles(pack) {
     else if (smallIn >= 5) { archetype = 'DUST_RECEIVER'; reasons.push('many small incoming'); }
     return { label: w.label, address: w.address, category: w.cat,
       balance_xrp: n(w.balance_xrp), delta_xrp: n(w.delta_xrp),
-      tx_count_24h: mine.length, large_out_count: largeOut, large_in_count: largeIn,
+      tx_count_24h: mine.length, tx_count_24h_raw: rawMine.length,
+      escrow_event_count: rawMine.length - mine.length,
+      large_out_count: largeOut, large_in_count: largeIn,
       archetype, reasons, confidence: mine.length || w.status === 'FAILED' ? 'MEDIUM' : 'LOW' };
   });
   state.walletProfiles = profiles;
@@ -2711,12 +2881,24 @@ function buildClusters(pack) {
       type: 'DUST_TAG_CLUSTER', confidence: n(f.count) >= 10 ? 'HIGH' : 'MEDIUM',
       total_xrp: n(f.total), reason: '5+ small payments share destination tag' });
   }
-  const esc = (state.txs || []).filter(t => /EscrowFinish|EscrowCreate/.test(t.type || ''));
+  const esc = (state.txs || []).filter(t => _isEscrowLedgerType(t));
   if (esc.length) clusters.push({ id: 'treasury-' + today(), type: 'TREASURY_ROTATION_CLUSTER',
     confidence: 'HIGH', total_xrp: esc.reduce((a, t) => a + n(t.amount), 0),
+    // INFORMATIONAL: reported, carries no risk weight, and — see below — does
+    // not count as "something happened" when deciding whether the scan was quiet.
+    informational: true,
     reason: 'escrow-class transaction types detected' });
-  if (!clusters.length) clusters.push({ id: 'quiet-' + today(), type: 'QUIET_CLUSTER',
-    confidence: 'MEDIUM', total_xrp: 0, reason: 'No major cluster rule triggered' });
+  // QUIET_CLUSTER must be decided on RISK-BEARING clusters only.
+  // Zeroing the treasury weight stopped escrow ADDING risk but not escrow
+  // REMOVING a suppressor: with an escrow row present `clusters.length` was
+  // non-zero, so the quiet cluster never fired, and its -5 weight (a -2
+  // suppression) silently vanished. A scheduled lock therefore raised the score
+  // by 2 while every component stayed identical — invisible to any check that
+  // only compares components. A scan whose sole event is an escrow lock IS
+  // quiet, economically.
+  if (!clusters.some(c => !c.informational)) clusters.push({ id: 'quiet-' + today(),
+    type: 'QUIET_CLUSTER', confidence: 'MEDIUM', total_xrp: 0,
+    reason: 'No major cluster rule triggered' });
   state.clusters = clusters;
   if ($('clusterBox')) $('clusterBox').textContent = clusters.map(c =>
     `${c.confidence} ${c.type} | total=${fmt(c.total_xrp, 0)} XRP\nReason: ${c.reason}`).join('\n\n');
@@ -3029,7 +3211,12 @@ function buildPack(v) {
     wallet_results: state.wallets, tx_24h_count: state.txs.length,
     total_tx_xrp: totalTxXRP(), active_wallets: activeWalletCount(),
     shadow_volume_xrp: shadowVolumeXRP(), total_balance_delta_xrp: totalDeltaXRP(),
-    large_transfers: state.large, fragmentation_flags: state.frags,
+    // The measured delta with the escrow-attributable part removed, and the
+    // adjustment itself so the two reconcile in the debug pack.
+    ordinary_balance_delta_xrp: ordinaryDeltaXRP(),
+    escrow_balance_adjust_xrp: escrowDeltaAdjustXRP(),
+    large_transfers: state.large, escrow_transfers: state.escrowLarge || [],
+    fragmentation_flags: state.frags,
     top_signals: state.flags.slice(0, 5),
     receiver_followthrough: state.receivers,
     xrpl_evm_tvl_usd: n($('inTvl')?.value),
@@ -3265,7 +3452,17 @@ function escrowFromTxs(byHash) {
   (state.txs || []).forEach(t => {
     if (/Escrow(Finish|Create)/.test(t.type || '') && t.amount > 0 && t.hash && !byHash[t.hash])
       byHash[t.hash] = { hash: t.hash, type: /Finish/.test(t.type) ? 'UNLOCK' : 'LOCK', xrp: Math.floor(t.amount),
-        owner: t.from, dest: t.to || null, ts: t.date ? new Date(t.date).getTime() : Date.now(), ledger: null };
+        // OWNER, NOT SUBMITTER. Ripple-vs-other is decided on this field
+        // (26-…:69 isRippleOwner(e.owner)), so using t.from meant a third party
+        // finishing Ripple's escrow landed in "other", and a Ripple address
+        // finishing someone else's landed under "Ripple escrow". The fold-in
+        // ran in both directions. An EscrowCreate's submitter IS its owner, so
+        // that case is unchanged; an EscrowFinish's is not.
+        owner: t.escrow_owner || (t.type === 'EscrowCreate' ? t.from : null),
+        // Recorded so a surface can say "ownership unresolved" instead of
+        // silently defaulting an unattributable release to non-Ripple.
+        owner_attributed: !!(t.escrow_owner || t.type === 'EscrowCreate'),
+        dest: t.to || null, ts: t.date ? new Date(t.date).getTime() : Date.now(), ledger: null };
   });
 }
 
@@ -5041,7 +5238,7 @@ function collectDiscoveryCandidates(pack) {
     }
   }
 
-  // 1. Large-transfer receivers (>1M XRP)
+  // 1. Large-transfer receivers (>1M XRP).
   (pack.large_transfers || []).forEach(t => {
     if (t.to) {
       bump(t.to, 'large_transfer', {
@@ -5058,6 +5255,39 @@ function collectDiscoveryCandidates(pack) {
       });
     }
   });
+
+  // 1b. ESCROW DESTINATIONS — DISCOVERABLE, BUT THEY HAVE NOT BEEN PAID.
+  // The destination of an EscrowCreate is a real address worth investigating —
+  // a lock into a fresh unknown wallet is exactly what this system exists to
+  // catch — so it must not vanish from discovery. But it has NOT received the
+  // XRP: the funds sit in an escrow object until an EscrowFinish releases them,
+  // which may be years away or never (EscrowCancel returns them to the owner).
+  //
+  // Feeding these through the 'large_transfer' bump credited the destination
+  // with value_xrp it cannot spend, which accumulates into total_value_xrp /
+  // max_value_xrp (:5053) and then classifies it LARGE_TRANSFER_RECEIVER
+  // (:5288) — publishing "this wallet received 200M XRP" about a wallet that
+  // received nothing. Distinct source, no value credited, and a reason that
+  // says what actually happened.
+  ((pack && pack.escrow_transfers) || (typeof state !== 'undefined' && state.escrowLarge) || [])
+    .forEach(t => {
+      if (!t.to) return;
+      const _rel = t.type === 'EscrowFinish';
+      bump(t.to, 'escrow_destination', {
+        reason: _rel
+          ? ('destination of an escrow RELEASE (' + fmt(n(t.amount), 0) + ' XRP received) from ' +
+             (t.sender_label === 'escrow' ? 'escrow' : (t.sender_label || 'an escrow owner')))
+          : ('named destination of an escrow LOCK (' + fmt(n(t.amount), 0) +
+             ' XRP locked, NOT yet released) by ' +
+             (t.from ? _swWho(t.from, t.sender_label, { bare: true }) : (t.sender_label || 'unknown owner'))),
+        // A release genuinely delivers; a lock does not. Only credit the former.
+        value_xrp: _rel ? n(t.amount) : 0,
+        tx_count: 1,
+        last_seen: t.ts || t.timestamp,
+        active_last_24h: true,
+        related_watched: t.from ? [_swWho(t.from, t.sender_label, { bare: true })] : []
+      });
+    });
 
   // 2. Receiver followthrough addresses
   (pack.receiver_followthrough || []).forEach(r => {
@@ -9322,7 +9552,9 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
 
     function _pEvidence(ev){
       var p=_livePack(), h='';
-      var large=(p&&p.large_transfers)||(typeof state!=='undefined'&&state.large)||[];
+      // Both lists — see _swRenderFeed. Visibility is not the thing being fixed.
+      var large=(typeof _movementAndEscrow==='function')?_movementAndEscrow(p)
+               :((p&&p.large_transfers)||(typeof state!=='undefined'&&state.large)||[]);
       if (large&&large.length){
         large.slice(0,10).forEach(function(t){
           var amt=_num(t.amount!=null?t.amount:t.amt);
@@ -13066,12 +13298,25 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       });
 
       // — Large transfer unknown receivers
-      var transfers = (pack && Array.isArray(pack.large_transfers)) ? pack.large_transfers : [];
-      transfers.forEach(function(t) {
+      // Delivered vs merely named — the same distinction collectDiscoveryCandidates
+      // and collectExplicitOfferCandidates make. Calling a lock destination a
+      // LARGE_TRANSFER_RECEIVER here while the canonical path calls it a
+      // not-yet-released escrow destination is exactly the split the one-truth
+      // model forbids.
+      var delivered = (typeof _deliveredToReceiver === 'function') ? _deliveredToReceiver(pack)
+        : ((pack && Array.isArray(pack.large_transfers)) ? pack.large_transfers : []);
+      delivered.forEach(function(t) {
         var addr = t.to_address||t.to;
         if (!addr || addr.length < 25) return;
         addCandidate(addr, 'HIGH', 'LARGE_TRANSFER_RECEIVER',
-                     'large_transfer_receiver '+(t.amount_xrp||t.xrp_amount||'?')+'XRP');
+                     'large_transfer_receiver '+(Number(t.amount)||0)+'XRP');
+      });
+      var locked = (typeof _escrowNonDelivery === 'function') ? _escrowNonDelivery(pack) : [];
+      locked.forEach(function(t) {
+        var addr = t.to_address||t.to;
+        if (!addr || addr.length < 25) return;
+        addCandidate(addr, 'MEDIUM', 'ESCROW_LOCK_DESTINATION',
+                     'escrow_lock_destination '+(Number(t.amount)||0)+'XRP locked, not yet released');
       });
 
       // Sort CRITICAL first — use inline map to avoid closure scope issues
@@ -15209,13 +15454,53 @@ function updateWalletMemory(pack) {
     }
   });
 
-  // Large transfers — update sender/receiver wallet memory
+  // Large transfers — update sender/receiver wallet memory.
+  //
+  // MOVEMENT BASIS, AND WHY IT IS STAMPED.
+  // pack.large_transfers is now ordinary movement only; escrow locks and
+  // releases are carried separately and deliberately not folded in here — a
+  // 200,000,000 XRP lock was being added to the owner's total_out_xrp and the
+  // destination's total_in_xrp as though it were a spend and a receipt, and it
+  // set largest_transfer_xrp to that figure.
+  //
+  // Unlike the blackbox (30 snapshots) and pattern memory (100), THIS STORE HAS
+  // NO EXPIRY — it is cumulative, so records written before this change will
+  // never self-correct. Rather than reset real history to fix a subset of it,
+  // every record touched from here on is stamped with the basis that produced
+  // its totals. A record with no stamp predates the split and its
+  // total_in_xrp / total_out_xrp / largest_transfer_xrp may include escrow.
+  // WHAT THIS STAMP MAY AND MAY NOT CLAIM.
+  // An earlier version wrote movement_basis: 'ordinary_movement_escrow_excluded'
+  // onto every record it touched. That asserts the record's totals are clean.
+  // They are not: this store is cumulative with no expiry, so total_in_xrp,
+  // total_out_xrp and largest_transfer_xrp on an existing record still contain
+  // whatever escrow was folded in before the split. Stamping them clean is the
+  // same defect this whole PR exists to remove — publishing a claim the
+  // evidence does not support.
+  //
+  // So the stamp records WHEN the new basis began for this record, and says
+  // nothing about the history before it. A record with no `since` predates the
+  // split entirely; a record with one may still carry escrow in the portion
+  // accumulated before that timestamp. It is set ONCE and never overwritten,
+  // because the first scan under the new rule is the only honest boundary.
+  const MOVEMENT_BASIS = 'ordinary_movement_escrow_excluded';
+  const _stampBasis = (rec) => {
+    if (!rec) return;
+    if (!rec.movement_basis_since) {
+      rec.movement_basis = MOVEMENT_BASIS;
+      rec.movement_basis_since = now;
+      // Only a record created fresh under the new basis has provably clean
+      // totals. An existing one is explicitly marked as carrying older history.
+      rec.totals_predate_basis = !rec._createdUnderBasis;
+    }
+  };
   (pack.large_transfers || []).forEach(t => {
     const amt = n(t.amount);
     // Sender
     if (t.from && mem.wallets[t.from]) {
       const s = mem.wallets[t.from];
       s.total_out_xrp += amt;
+      _stampBasis(s);
       if (amt > s.largest_transfer_xrp) s.largest_transfer_xrp = amt;
       if (t.to) {
         s.common_counterparties[t.to] = (s.common_counterparties[t.to] || 0) + 1;
@@ -15231,12 +15516,18 @@ function updateWalletMemory(pack) {
           largest_transfer_xrp: amt,
           common_counterparties: {}, destination_tags: {},
           archetype_history: [], source_types: ['large_transfer_dest'],
-          last_classification: t.classification || null
+          last_classification: t.classification || null,
+          // Created under the new basis: these totals really are escrow-free.
+          _createdUnderBasis: true,
+          movement_basis: MOVEMENT_BASIS,
+          movement_basis_since: now,
+          totals_predate_basis: false
         };
       } else {
         const r = mem.wallets[t.to];
         r.last_seen = now; r.times_seen++;
         r.total_in_xrp += amt;
+        _stampBasis(r);
         if (amt > r.largest_transfer_xrp) r.largest_transfer_xrp = amt;
         if (!r.source_types.includes('large_transfer_dest'))
           r.source_types.push('large_transfer_dest');
@@ -19305,9 +19596,17 @@ function collectExplicitOfferCandidates() {
     add(addr, 40, 'next-hop receiver from a large transfer', 'next_hop');
   }
   // 2. Large-transfer destinations
-  for (const t of (state.large || [])) {
+  for (const t of _deliveredToReceiver(null)) {
     if (n(t.amount) >= 1_000_000 && t.to) {
       add(t.to, 35, 'destination of >1M XRP large transfer', 'large_transfer');
+    }
+  }
+  // A lock destination is still a candidate, but it did not receive >1M XRP —
+  // so it gets neither the large-transfer source nor its score bonus. One truth
+  // model: every discovery surface must describe this the same way.
+  for (const t of _escrowNonDelivery(null)) {
+    if (t.to) {
+      add(t.to, 10, 'named destination of an escrow lock (not yet released)', 'escrow_destination');
     }
   }
   return out;
@@ -21566,8 +21865,11 @@ function _swRenderLog() {
 var _SW_FEED_SIG = null;
 function _swRenderFeed(p, force) {
   var el = document.getElementById('swFeedList'); if (!el) return;
-  var large = (typeof state !== 'undefined' && Array.isArray(state.large) && state.large.length) ? state.large
-            : ((p && Array.isArray(p.large_transfers)) ? p.large_transfers : []);
+  // BOTH lists. Escrow leaves the risk input, not the operator's screen — the
+  // two largest rows of a scan are often the escrow locks, and there is no
+  // escrow-aware live feed to replace them.
+  var large = (typeof _movementAndEscrow === 'function') ? _movementAndEscrow(p) : [];
+  if (!large.length) large = (p && Array.isArray(p.large_transfers)) ? p.large_transfers : [];
   var scanning = _swScanning();
   var sig = large.length + '|' + (large.length ? String(large[0].hash || large[0].amount || '') : '') + '|' + scanning;
   if (!force && sig === _SW_FEED_SIG) return;      // nothing changed — leave the DOM alone
