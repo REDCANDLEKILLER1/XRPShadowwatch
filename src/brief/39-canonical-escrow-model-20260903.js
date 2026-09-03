@@ -215,14 +215,28 @@
     var m = model || get();
     var R = m.ripple, O = m.other_observed, L = [];
     L.push('ESCROW DIAGNOSTICS');
-    L.push('Ripple monthly-release escrow locked: ' +
-      (R.locked_xrp != null ? compactXrp(R.locked_xrp) + ' XRP'
-        : 'WITHHELD — registry sweep incomplete (' + R.rpc_responses_received + '/' +
-          R.registry_addresses_checked + ' addresses answered)'));
-    L.push('Active Ripple escrow objects: ' + (R.active_escrow_objects != null ? R.active_escrow_objects : '—'));
-    L.push('Active Ripple escrow owners: ' + (R.active_escrow_owners != null ? R.active_escrow_owners : '—'));
-    L.push('Ripple registry addresses checked: ' + (R.registry_addresses_checked != null ? R.registry_addresses_checked : '—') +
-      ' · responses received: ' + (R.rpc_responses_received != null ? R.rpc_responses_received : '—'));
+    // "Ripple escrow: 31.70B" can be read as "all Ripple-controlled escrow
+    // everywhere". It is not: it is what a validated-ledger object scan of the
+    // published registry OBSERVED. So the heading carries source, scope and
+    // coverage, and the figure sits under it rather than in a sentence that
+    // could be quoted alone.
+    L.push('Ripple-associated escrow observed:');
+    // The amount line names Ripple even though the heading already does.
+    // The heading protects a reader; it does not protect a QUOTED LINE. This
+    // artifact is sliced — the X export has a 4,000-character ceiling and cuts,
+    // and single lines get pasted — so a bare "31.70B XRP locked" can travel
+    // without its heading. Every line carrying a figure states whose it is.
+    L.push('  ' + (R.locked_xrp != null
+        ? 'Ripple-associated locked: ' + compactXrp(R.locked_xrp) + ' XRP'
+        : 'Ripple-associated locked: WITHHELD — registry sweep incomplete'));
+    L.push('  ' + (R.active_escrow_objects != null ? R.active_escrow_objects : '—') +
+      ' active escrow objects (ledger objects, not owner wallets)');
+    L.push('  ' + (R.active_escrow_owners != null ? R.active_escrow_owners : '—') +
+      ' owner wallet(s) currently holding escrow');
+    L.push('  ' + (R.rpc_responses_received != null ? R.rpc_responses_received : '—') + '/' +
+      (R.registry_addresses_checked != null ? R.registry_addresses_checked : '—') +
+      ' public owner coverage (registry addresses answered)');
+    L.push('  source: validated-ledger account_objects over the published Ripple registry');
     L.push('Ripple escrow activity, last ' + m.window_hours + 'h: ' +
       R.activity.releases + ' release' + (R.activity.releases === 1 ? '' : 's') + ' · ' +
       R.activity.locks + ' new lock' + (R.activity.locks === 1 ? '' : 's'));

@@ -158,10 +158,13 @@ const check = (name, ok, detail) => {
       const lines = M.diagnosticsLines(m);
       out.diag = lines.slice();
       const joined = lines.join('\n');
-      out.diagNamesRipple = /Ripple monthly-release escrow locked/.test(joined);
-      out.diagHasObjects  = /Active Ripple escrow objects: 3/.test(joined);
-      out.diagHasOwners   = /Active Ripple escrow owners: 2/.test(joined);
-      out.diagSeparatesChecked = /addresses checked: 20 · responses received: 20/.test(joined);
+      // The heading must carry SOURCE, SCOPE and COVERAGE — "Ripple escrow:
+      // 31.70B" alone can be quoted as "all Ripple-controlled escrow".
+      out.diagNamesRipple = /Ripple-associated escrow observed:/.test(joined);
+      out.diagHasSource   = /source: validated-ledger account_objects over the published Ripple registry/.test(joined);
+      out.diagHasObjects  = /3 active escrow objects \(ledger objects, not owner wallets\)/.test(joined);
+      out.diagHasOwners   = /2 owner wallet\(s\) currently holding escrow/.test(joined);
+      out.diagSeparatesChecked = /20\/20 public owner coverage \(registry addresses answered\)/.test(joined);
       out.diagOtherObserved = /Other XRPL escrow observed in this scan/.test(joined) &&
                               /not a sweep of XRPL escrow/.test(joined);
       out.diagNoGenericTotal = !/Total XRPL escrow/i.test(joined);
@@ -216,7 +219,8 @@ const check = (name, ok, detail) => {
 
   console.log('\n6. the diagnostics block, model-owned');
   (r.diag || []).forEach(l => console.log('     | ' + l));
-  check('Ripple’s locked total is named as Ripple’s', r.diagNamesRipple, r.diag);
+  check('the heading says Ripple-ASSOCIATED and OBSERVED', r.diagNamesRipple, r.diag);
+  check('the block states its source', r.diagHasSource, r.diag);
   check('the locked figure never appears unattributed to Ripple', r.lockedAlwaysNamed, r.diag);
   check('active escrow OBJECTS are shown', r.diagHasObjects, r.diag);
   check('active escrow OWNERS are shown, separately', r.diagHasOwners, r.diag);
