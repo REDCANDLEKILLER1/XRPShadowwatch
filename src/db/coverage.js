@@ -52,7 +52,18 @@ const PROOF_STATUS = {
   FAILED:    'FAILED'
 };
 
+// NULL is not zero. `Number(null)` is 0 and `Number('')` is 0, so a naive
+// Number() coercion turns every unset column of a never-scanned wallet into
+// ledger 0 — and then hasProof() answers TRUE, proven_start compares
+// `0 <= windowStart` and answers TRUE, and windowServability reports
+// EDGE_ONLY / served_from_index for a wallet nothing was ever read for. That
+// is a coverage claim asserted with no proof behind it, on a surface that is
+// read aloud on air. A database returns a ROW OF NULLS for an unscanned
+// wallet; nothing but a real number may become one here.
 function _int(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'string' && v.trim() === '') return null;
+  if (typeof v === 'boolean') return null;
   const n = Number(v);
   return Number.isFinite(n) ? Math.trunc(n) : null;
 }
@@ -126,6 +137,7 @@ function windowServability(input) {
     window_end_ms: endMs,
     proven_start: false,
     evidence_covers_start: false,
+    evidence_covers_proof_edge: false,
     served_from_index: false,
     // null means "we cannot bound this in ledger space — walk back by date".
     fetch_from_ledger: null,
@@ -146,17 +158,35 @@ function windowServability(input) {
   // Does the retained EVIDENCE reach back to the start of the window? Proof
   // without evidence is the pruning trap: the range is proven, the rows are
   // gone, and a naive query returns zero rows that read as "nothing happened".
+  //
+  // The test is the CLOSE TIME against the window start, and nothing else.
+  // An earlier version also required `evidence_retained_from <=
+  // scan_coverage_from`, which contradicted the schema's own CHECK
+  // (`evidence_retained_from >= scan_coverage_from`, since retained evidence
+  // is a subset of proven coverage). Only equality satisfied both, so the day
+  // retention first pruned anything, EVERY window fell back to a full XRPL
+  // walk and the index stopped helping at all — the exact cost it exists to
+  // remove. Retention prunes the old end; whether it has moved past the
+  // proof's lower bound is irrelevant. What matters is only whether the rows
+  // the window needs are still here.
   base.evidence_covers_start =
     c.evidence_retained_from !== null &&
     c.evidence_retained_from_close_ms !== null &&
-    c.evidence_retained_from_close_ms <= startMs &&
-    c.evidence_retained_from <= c.scan_coverage_from;
+    c.evidence_retained_from_close_ms <= startMs;
+
+  // And is there a HOLE between the retained evidence and the proof edge?
+  // Time-based retention prunes from the old end, so this should hold; if it
+  // ever does not, rows are missing from the middle of a range we call proven,
+  // and serving that window would under-report. Refuse rather than trust it.
+  base.evidence_covers_proof_edge =
+    c.evidence_retained_through !== null &&
+    c.evidence_retained_through >= c.scan_coverage_through;
 
   if (!base.proven_start) {
     base.reason = REASON.PROOF_GAP_AT_START;
     return base;                       // date-bounded fallback, nothing served
   }
-  if (!base.evidence_covers_start) {
+  if (!base.evidence_covers_start || !base.evidence_covers_proof_edge) {
     base.reason = REASON.EVIDENCE_PRUNED;
     return base;                       // same fallback, different cause
   }
@@ -221,6 +251,17 @@ function checkpointAdvance(input) {
     return refuse('PROOF_RANGE_MALFORMED');
   }
 
+  // A checkpoint without close times is a checkpoint no window can ever be
+  // decided against: windowServability compares the window start against
+  // scan_coverage_from_close_ms, and a null there means proven_start is always
+  // false. Writing one would record an advance in coverage_advances that reads
+  // as progress while the wallet silently falls back to a full walk forever.
+  // Refuse it here, where the reason is visible.
+  const fromClose = hasProof(c) ? c.scan_coverage_from_close_ms : _int(p.from_close_ms);
+  if (fromClose === null || _int(p.through_close_ms) === null) {
+    return refuse('PROOF_MISSING_CLOSE_TIMES');
+  }
+
   // Never claim coverage of ledgers this run did not read. A gap between the
   // existing checkpoint and the proven range would be exactly that.
   if (hasProof(c) && from > c.scan_coverage_through + 1) {
@@ -248,7 +289,7 @@ function checkpointAdvance(input) {
     // the SQL side must compare with IS NULL, not `= NULL`.
     expected_prior: hasProof(c) ? c.scan_coverage_through : null,
     next_from: hasProof(c) ? c.scan_coverage_from : from,
-    next_from_close_ms: hasProof(c) ? c.scan_coverage_from_close_ms : _int(p.from_close_ms),
+    next_from_close_ms: fromClose,
     next_through: through,
     next_through_close_ms: _int(p.through_close_ms)
   };
@@ -265,12 +306,19 @@ function checkpointAdvance(input) {
 function sealable(perWallet) {
   const list = Array.isArray(perWallet) ? perWallet : [];
   const target = list.length;
-  let complete = 0, failed = 0, truncated = 0, unproven_start = 0;
+  let complete = 0, failed = 0, truncated = 0, unproven_start = 0, unknown = 0;
 
   for (const w of list) {
     const st = String((w && w.status) || PROOF_STATUS.FAILED);
     if (st === PROOF_STATUS.FAILED) { failed++; continue; }
     if (st === PROOF_STATUS.TRUNCATED) { truncated++; continue; }
+    // Fail CLOSED on anything that is not literally COMPLETE. An earlier
+    // version tested only for FAILED and TRUNCATED and let everything else
+    // fall through to be counted complete, so a status of 'RUNNING', or a
+    // typo, or a future fourth state would have been certified as proven.
+    // "Never claim what was not proven this run" has to survive an
+    // unrecognised input, not just the three we thought of.
+    if (st !== PROOF_STATUS.COMPLETE) { unknown++; continue; }
     if (w && w.covers_window_start !== true) { unproven_start++; continue; }
     complete++;
   }
@@ -285,8 +333,14 @@ function sealable(perWallet) {
     // `oldest <= startMs` break can never fire, so every wallet would report
     // COMPLETE for a run that read one hour of twenty-four.
     unproven_start_wallets: unproven_start,
+    // Wallets whose proof status was not one of the three known values. Kept
+    // as its own count rather than folded into failed: a diagnostic that says
+    // "we do not understand this wallet's state" is different from "the scan
+    // failed", and the difference is what gets the bug found.
+    unknown_status_wallets: unknown,
     full_window_complete: target > 0 && complete === target &&
-                          failed === 0 && truncated === 0 && unproven_start === 0
+                          failed === 0 && truncated === 0 &&
+                          unproven_start === 0 && unknown === 0
   };
 }
 

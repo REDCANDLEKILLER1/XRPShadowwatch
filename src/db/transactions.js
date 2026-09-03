@@ -46,7 +46,16 @@ const XRPL_EPOCH_OFFSET_MS = 946684800000;   // 2000-01-01T00:00:00Z, the ripple
 
 function _s(v) { return (v === null || v === undefined) ? null : String(v); }
 
+// NULL is not zero, and here that is a forensic distinction rather than a
+// tidiness one. `Number(null)` is 0, so a naive coercion would store an absent
+// DestinationTag as tag 0 — and 0 is a real, meaningful tag that exchanges
+// actually use. "No tag" and "tag 0" are different facts about a transaction,
+// and conflating them would put a destination tag on a payment that never
+// carried one. Same for SourceTag, Sequence and Flags.
 function _intOrNull(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'string' && v.trim() === '') return null;
+  if (typeof v === 'boolean') return null;
   const n = Number(v);
   return Number.isFinite(n) ? Math.trunc(n) : null;
 }

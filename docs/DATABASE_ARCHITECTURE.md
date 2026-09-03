@@ -135,6 +135,12 @@ the split, a pruned window returns zero rows and reads as *"nothing happened"*.
 serve it — we fall back to XRPL, or we say the window is incomplete. **Silence
 is never rendered as a zero.**
 
+The evidence test is the retained **close time** against the window start, and
+nothing else. Whether pruning has moved past the proof's lower bound is
+irrelevant: retention prunes the old end, and what matters is only whether the
+rows the window needs are still here. A separate check refuses a **hole**
+between the retained evidence and the proof edge.
+
 Five outcomes, each named so a log line and a test can say which happened:
 
 | Reason | Meaning | Served? |
@@ -295,7 +301,7 @@ Follow-ups, smallest first:
 
 ## 9. How this is tested with no database
 
-`scripts/db-foundation.test.js` — **121 checks, no database, no browser, no
+`scripts/db-foundation.test.js` — **146 checks, no database, no browser, no
 network**, registered in `scripts/run-tests.js`.
 
 Every decision that governs what the Report may claim is a **pure function**:
@@ -316,11 +322,48 @@ Two structural guards worth naming:
   first — so a column that exists only inside a comment cannot satisfy the
   check. Drift is a build failure, not a surprise in production.
 - **Every guard is sabotage-tested.** Reverting it must turn the suite red
-  *naming the right defect*. Nine were verified for this PR, including: serving
-  a pruned window, letting `TRUNCATED` advance, dropping the contiguity
-  requirement, attributing an `EscrowFinish` to its submitter, reading the
-  partial-payment sentinel instead of `delivered_amount`, coercing drops
-  through a JS number, and ignoring `covers_window_start` in the seal gate.
+  *naming the right defect*. Fifteen were verified for this PR, including:
+  serving a pruned window, letting `TRUNCATED` advance, dropping the
+  contiguity requirement, attributing an `EscrowFinish` to its submitter,
+  reading the partial-payment sentinel instead of `delivered_amount`, coercing
+  drops through a JS number, ignoring `covers_window_start` in the seal gate,
+  restoring `Number(null) == 0`, and shifting the ripple epoch by a day.
+
+### Four defects the sabotage pass found in this PR's own code
+
+Recorded because each was a live bug in code that already had a green suite,
+and three of the four were hidden by a fixture that made the code correct by
+construction.
+
+1. **`NULL` is not zero, and it claimed coverage that did not exist.**
+   `Number(null)` is `0`, so every unset column of a never-scanned wallet
+   normalized to ledger 0. `hasProof()` then answered TRUE, `proven_start`
+   compared `0 <= windowStart` and answered TRUE, and `windowServability()`
+   returned `EDGE_ONLY` with `served_from_index` for a wallet nothing had ever
+   been read for — a coverage claim with no proof behind it, on the surface
+   that gets read aloud. Every "no coverage" fixture used a missing row or
+   `undefined` fields; a database returns a **row of NULLs**, the one shape
+   nothing tested.
+2. **Retention would have disabled the index entirely.** The evidence check
+   also required `evidence_retained_from <= scan_coverage_from`, contradicting
+   the schema's own `evidence_retained_from >= scan_coverage_from` CHECK. Only
+   equality satisfied both, so the day retention first pruned anything, every
+   window fell back to a full XRPL walk. The report would still have been
+   correct — it would just have stopped being fast, invisibly. The fixture hid
+   it by pruning to a boundary *after* the window start, where the correct
+   time test and the buggy ledger test agree.
+3. **`sealable()` failed open.** It tested only for `FAILED` and `TRUNCATED`
+   and let everything else fall through to be counted complete, so `RUNNING`,
+   a typo, or a future fourth state would have been certified as proven.
+4. **A checkpoint could advance with no close times,** producing a row that
+   logs as progress in `coverage_advances` while `proven_start` stays
+   permanently false and the wallet silently falls back forever.
+
+And one **vacuous check** the pass caught in the suite itself: the absent-tag
+test passed whether the guard existed or not, because `Number(undefined)` is
+already `NaN`. Only an explicit `null` becomes `0`, and that case is now
+asserted — "no destination tag" and "destination tag 0" are different facts,
+and 0 is a tag exchanges really use.
 
 ---
 

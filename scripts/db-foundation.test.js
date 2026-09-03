@@ -193,9 +193,17 @@ const PARTIAL = {
 };
 const partial = TX.rowFromAccountTx(PARTIAL, { observedVia: 'rTo', scanId: 's1', rosterVersion: 'v16.7.1' });
 check('ledger_index is captured', partial.ledger_index === 98765432, partial.ledger_index);
+// Hardcoded, NOT recomputed from the module's own constant. Asserting against
+// `new Date(date*1000 + XRPL_EPOCH_OFFSET_MS)` would move both sides together
+// if the epoch offset were wrong, and every stored close time in the database
+// would be silently shifted while the check stayed green.
+// ripple epoch 2000-01-01T00:00:00Z + 800,000,000s = 2025-05-08T06:13:20Z.
 check('close time is derived from the ripple epoch',
-      partial.close_time_iso === new Date(800000000 * 1000 + 946684800000).toISOString(),
+      partial.close_time_iso === '2025-05-08T06:13:20.000Z',
       partial.close_time_iso);
+check('the ripple epoch offset itself is the documented value',
+      TX.XRPL_EPOCH_OFFSET_MS === Date.parse('2000-01-01T00:00:00Z'),
+      TX.XRPL_EPOCH_OFFSET_MS);
 check('the DELIVERED amount is stored, not the sentinel',
       partial.amount_drops === '12000000', partial.amount_drops);
 check('the overridden sentinel is preserved as evidence',
@@ -210,6 +218,45 @@ check('balance deltas are kept — the only independent check on a claimed amoun
       partial.evidence.balance_deltas);
 check('destination_tag and source_tag survive',
       partial.destination_tag === 7 && partial.source_tag === 4);
+// "No tag" and "tag 0" are different facts, and 0 is a tag exchanges really
+// use. Number(null) is 0, so a naive coercion would put a destination tag on a
+// payment that never carried one.
+const untagged = TX.rowFromAccountTx({
+  ledger_index: 1, tx_json: { TransactionType: 'Payment', hash: 'H_NOTAG',
+    Account: 'rA', Destination: 'rB', Amount: '1000000', date: 800000000 },
+  meta: { TransactionResult: 'tesSUCCESS' } }, {});
+check('an absent destination tag stays NULL, it does not become tag 0',
+      untagged.destination_tag === null && untagged.source_tag === null,
+      { d: untagged.destination_tag, s: untagged.source_tag });
+check('an absent Sequence and Flags stay NULL too',
+      untagged.sequence === null && untagged.tx_flags === null);
+// The case an ABSENT field does not exercise. `Number(undefined)` is already
+// NaN, so a naive coercion handles a missing key by accident; only an explicit
+// null becomes 0. That is the shape a row round-tripped through Postgres, or
+// arriving from any non-account_tx source, actually has — and the first
+// version of this check tested only the absent case, so it passed whether the
+// guard was there or not.
+const explicitNulls = TX.rowFromAccountTx({
+  ledger_index: 1, tx_json: { TransactionType: 'Payment', hash: 'H_NULLS',
+    Account: 'rA', Destination: 'rB', Amount: '1000000', date: 800000000,
+    DestinationTag: null, SourceTag: null, Sequence: null, Flags: null },
+  meta: { TransactionResult: 'tesSUCCESS', TransactionIndex: null } }, {});
+check('an explicitly NULL tag stays NULL, it does not become tag 0',
+      explicitNulls.destination_tag === null && explicitNulls.source_tag === null,
+      { d: explicitNulls.destination_tag, s: explicitNulls.source_tag });
+check('explicitly NULL Sequence, Flags and TransactionIndex stay NULL',
+      explicitNulls.sequence === null && explicitNulls.tx_flags === null &&
+      explicitNulls.transaction_index === null,
+      { seq: explicitNulls.sequence, f: explicitNulls.tx_flags, ti: explicitNulls.transaction_index });
+// ...while a real tag 0 must survive as 0, not be flattened back to null.
+const tagZero = TX.rowFromAccountTx({
+  ledger_index: 1, tx_json: { TransactionType: 'Payment', hash: 'H_TAG0',
+    Account: 'rA', Destination: 'rB', Amount: '1000000',
+    DestinationTag: 0, Flags: 0, date: 800000000 },
+  meta: { TransactionResult: 'tesSUCCESS' } }, {});
+check('an explicit destination tag of 0 is preserved as 0',
+      tagZero.destination_tag === 0 && tagZero.tx_flags === 0,
+      { d: tagZero.destination_tag, f: tagZero.tx_flags });
 check('fee, sequence, flags and transaction_index survive',
       partial.fee_drops === '12' && partial.sequence === 9 &&
       partial.tx_flags === 131072 && partial.transaction_index === 3,
@@ -416,6 +463,44 @@ check('nothing is served for it', cold.served_from_index === false);
 check('it cannot be bounded in ledger space, so it falls back to a date walk',
       cold.fetch_from_ledger === null && cold.range_bound_proven === false);
 
+// THE SHAPE A DATABASE ACTUALLY RETURNS. A never-scanned wallet is a row of
+// NULL columns, not a missing row and not a row of undefined fields — and
+// every "no coverage" fixture above uses one of those two instead, so none of
+// them exercises this path.
+//
+// It matters because `Number(null)` is 0. With a naive coercion every unset
+// column became ledger 0, hasProof() answered TRUE, proven_start compared
+// `0 <= windowStart` and answered TRUE, and this returned EDGE_ONLY with
+// served_from_index true and proven_start true for a wallet nothing had ever
+// been read for. A coverage claim with no proof behind it, on the surface that
+// gets read aloud.
+const PG_NULL_ROW = {
+  address: 'rNeverScanned',
+  scan_coverage_from: null, scan_coverage_through: null,
+  scan_coverage_from_close_ms: null, scan_coverage_through_close_ms: null,
+  evidence_retained_from: null, evidence_retained_through: null,
+  evidence_retained_from_close_ms: null, last_observed_tx_ledger: null
+};
+const nullRow = COV.normalizeCoverage(PG_NULL_ROW);
+check('a NULL ledger column normalizes to null, never to ledger 0',
+      nullRow.scan_coverage_through === null && nullRow.scan_coverage_from === null,
+      nullRow);
+check('a row of NULLs has no proof', COV.hasProof(nullRow) === false);
+const coldPg = COV.windowServability({ coverage: PG_NULL_ROW, windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+check('a row of NULLs is NO_COVERAGE, not EDGE_ONLY',
+      coldPg.reason === COV.REASON.NO_COVERAGE, coldPg.reason);
+check('and claims nothing: not served, not proven at the start',
+      coldPg.served_from_index === false && coldPg.proven_start === false &&
+      coldPg.range_bound_proven === false, coldPg);
+check('an empty-string column is also not ledger 0',
+      COV.normalizeCoverage({ scan_coverage_through: '' }).scan_coverage_through === null);
+check('a boolean is not a ledger index',
+      COV.normalizeCoverage({ scan_coverage_through: true }).scan_coverage_through === null);
+// A numeric string IS a real value — Postgres returns BIGINT as a string in
+// several drivers, so rejecting those would break every real read.
+check('a numeric string is still accepted — drivers return BIGINT as text',
+      COV.normalizeCoverage({ scan_coverage_through: '98790000' }).scan_coverage_through === 98790000);
+
 // The window reaches back before anything was proven.
 const frontGap = COV.windowServability({
   coverage: Object.assign({}, provenCov, { scan_coverage_from_close_ms: T('2026-09-02T12:00:00Z') }),
@@ -438,6 +523,42 @@ check('the proof is still acknowledged', pruned.proven_start === true);
 check('but the evidence is reported as not covering the start',
       pruned.evidence_covers_start === false);
 check('and nothing is served from the index', pruned.served_from_index === false);
+
+// THE CASE THE FIRST VERSION OF THIS SUITE HID. The fixture above prunes to
+// 18:00, AFTER the window start, so a correct time test and a buggy ledger
+// test both say "pruned" and agree for the wrong reason. Here retention has
+// pruned to Aug 15 — well BEFORE a window starting Sep 2 — so the evidence
+// genuinely covers the window while `evidence_retained_from` has still moved
+// above `scan_coverage_from`.
+//
+// The original code also required `evidence_retained_from <=
+// scan_coverage_from`, which contradicts the schema's own CHECK
+// (`evidence_retained_from >= scan_coverage_from`). Only equality satisfied
+// both, so the day retention first pruned ANYTHING, every window fell back to
+// a full XRPL walk and the index stopped helping — the exact cost it exists to
+// remove, and invisible because the report would still have been correct.
+const prunedOldOnly = COV.windowServability({
+  coverage: Object.assign({}, provenCov, {
+    evidence_retained_from: 98500000,
+    evidence_retained_from_close_ms: T('2026-08-15T00:00:00Z') }),
+  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+check('pruning OLDER than the window still serves the window',
+      prunedOldOnly.reason === COV.REASON.EDGE_ONLY, prunedOldOnly.reason);
+check('and the evidence is reported as covering the start',
+      prunedOldOnly.evidence_covers_start === true);
+check('and only the edge is still fetched',
+      prunedOldOnly.fetch_from_ledger === 98790001);
+
+// A hole between the retained evidence and the proof edge. Time-based
+// retention prunes the old end, so this should not arise — but if it ever
+// does, rows are missing from the middle of a range we call proven, and
+// serving it would under-report.
+const holed = COV.windowServability({
+  coverage: Object.assign({}, provenCov, { evidence_retained_through: 98700000 }),
+  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+check('a hole below the proof edge is refused, not served',
+      holed.reason === COV.REASON.EVIDENCE_PRUNED &&
+      holed.evidence_covers_proof_edge === false, holed.reason);
 
 // An anchor is not optional: without one, a concurrent catch-up advancing the
 // shared index mid-run would let wallet 3 and wallet 200 describe different
@@ -533,6 +654,38 @@ check('a malformed range is refused',
 check('checkpointAdvance also requires an anchor',
       /anchorLedger/.test(threw(() => COV.checkpointAdvance({ coverage: provenCov, proof: okProof })) || ''));
 
+// A checkpoint with no close times is one no window can ever be decided
+// against: windowServability compares the window start against
+// scan_coverage_from_close_ms, so a null there makes proven_start permanently
+// false. Writing it would log an advance in coverage_advances that reads as
+// progress while the wallet silently falls back to a full walk forever.
+const noClose = COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR,
+  proof: { status: 'COMPLETE', from_ledger: 98700000, through_ledger: ANCHOR,
+           range_bound_proven: true, rows_stored: 3 } });
+check('a proof with no close times never advances',
+      noClose.advance === false && noClose.reason === 'PROOF_MISSING_CLOSE_TIMES',
+      noClose.reason);
+check('a missing THROUGH close time alone is enough to refuse',
+      COV.checkpointAdvance(Object.assign({}, base, {
+        proof: Object.assign({}, okProof, { through_close_ms: null }) })).reason
+        === 'PROOF_MISSING_CLOSE_TIMES');
+// The round trip that matters: an advance must produce a checkpoint that the
+// NEXT run can actually serve a window from. Asserting the fields exist is not
+// the same as asserting they work, so feed the advance straight back in.
+const roundTrip = COV.windowServability({
+  coverage: {
+    address: 'rRound',
+    scan_coverage_from: adv.next_from, scan_coverage_through: adv.next_through,
+    scan_coverage_from_close_ms: adv.next_from_close_ms,
+    scan_coverage_through_close_ms: adv.next_through_close_ms,
+    evidence_retained_from: adv.next_from, evidence_retained_through: adv.next_through,
+    evidence_retained_from_close_ms: adv.next_from_close_ms
+  },
+  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+check('a checkpoint an advance produced is servable by the next run',
+      roundTrip.served_from_index === true &&
+      roundTrip.reason === COV.REASON.FULLY_SERVABLE, roundTrip.reason);
+
 // ── the seal gate ─────────────────────────────────────────────────────────
 // coverageFrom (17-report-scan-tuning-20260816.js:199) computes the rendered
 // claim from target/complete/failed/truncated. A run served from the index may
@@ -559,6 +712,22 @@ check('a failed wallet stays in the DENOMINATOR — dropping it would flatter th
       COV.sealable([W('COMPLETE', true), W('FAILED', false)]).target_wallets === 2);
 check('zero wallets is never "complete"',
       COV.sealable([]).full_window_complete === false);
+
+// FAIL CLOSED on a status nobody recognises. The first version tested only for
+// FAILED and TRUNCATED and let everything else fall through to be counted
+// complete — so 'RUNNING', a typo, or a future fourth state would have been
+// certified as proven and read on air. "Never claim what was not proven this
+// run" has to survive an unrecognised input, not only the three we thought of.
+const weird = COV.sealable([W('COMPLETE', true), W('RUNNING', true)]);
+check('an unrecognised proof status is never counted as complete',
+      weird.complete_wallets === 1 && weird.unknown_status_wallets === 1, weird);
+check('and it blocks the seal', weird.full_window_complete === false);
+check('a missing status is treated as FAILED, not as complete',
+      COV.sealable([{ covers_window_start: true }]).failed_wallets === 1);
+check('an empty-string status blocks the seal',
+      COV.sealable([W('', true)]).full_window_complete === false);
+check('lowercase "complete" is not COMPLETE',
+      COV.sealable([W('complete', true)]).full_window_complete === false);
 
 // A partial run keeps what it proved. Making it pay for that work again
 // tomorrow is the exact behaviour this project exists to remove.
