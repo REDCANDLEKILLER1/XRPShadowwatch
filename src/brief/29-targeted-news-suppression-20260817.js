@@ -193,6 +193,19 @@
   } catch (_) {}
 })();
 
+// Canonical escrow model: one escrow truth layer upstream of report, risk and
+// UI. Loaded AFTER 25 (which produces the position sweep it reads) and after
+// 33, so the model's own terminology is the last word.
+(function () {
+  try {
+    var s = document.createElement('script');
+    s.src = '/src/brief/39-canonical-escrow-model-20260903.js?v=20260903.1';
+    s.async = false;
+    s.setAttribute('data-sw-canonical-escrow-model', '2026-09-03.1');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();
+
 // NA2TM combined acceptance cleanup: one report-approved wallet promotion and
 // two presentation-only text repairs from the verified PR #28 runtime output.
 (function () {
