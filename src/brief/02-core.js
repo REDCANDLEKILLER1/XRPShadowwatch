@@ -1368,8 +1368,13 @@ function classify(t) {
   // as Ripple releases.
   const _isRelease = t.type === 'EscrowFinish';
   const _isLock    = t.type === 'EscrowCreate';
+  // EscrowCancel returns the funds to the OWNER; nothing reaches a destination.
+  // _isEscrowLedgerType already routes it out of ordinary movement, so leaving
+  // classify() without a branch for it was a split brain waiting to surface.
+  const _isCancel  = t.type === 'EscrowCancel';
   if (_isRelease)                               { type = 'ESCROW_RELEASE';     conf = 'HIGH'; reason = 'escrow released to its destination'; }
   else if (_isLock)                             { type = 'ESCROW_LOCK';        conf = 'HIGH'; reason = 'XRP locked into escrow'; }
+  else if (_isCancel)                           { type = 'ESCROW_CANCEL';      conf = 'HIGH'; reason = 'escrow cancelled — XRP returned to its owner'; }
   else if (f && to)                             { type = 'WATCHLIST_INTERNAL'; conf = 'HIGH'; reason = f.label + ' → ' + to.label; }
   else if (f && f.cat === 'exchange' && !to)    { type = 'EXCHANGE_OUTFLOW';  conf = 'HIGH'; reason = 'known exchange to unknown'; }
   else if (!f && to && to.cat === 'exchange')   { type = 'EXCHANGE_INFLOW';   conf = 'HIGH'; reason = 'unknown to exchange'; }
@@ -1400,10 +1405,42 @@ function classify(t) {
 // (:1227), so a lock into a fresh unknown wallet is exactly the pattern this
 // system exists to catch — and it is non-Ripple escrow (the "Flare Core Vault"
 // class) that the !KNOWN[] gates do not already exclude.
-function _movementAndEscrow(pack) {
+// ROLE MATTERS. `_movementAndEscrow` answered one question — "which addresses
+// are worth looking at" — and callers silently used it to answer a second:
+// "who received money". Those differ for a lock. An EscrowCreate destination is
+// worth investigating and has received NOTHING; the XRP sits in an escrow
+// object until a finish releases it, which may never happen (a cancel returns
+// it to the owner). Feeding locks through funded-receiver semantics recreated
+// the same defect in scanReceivers, the offer-candidate scan and the helper
+// queue after it had been fixed in collectDiscoveryCandidates.
+//
+// So the split is by ROLE, not by "escrow or not":
+//   _ordinaryMovement  ordinary large transfers
+//   _escrowReleases    EscrowFinish — funds genuinely delivered to `to`
+//   _escrowNonDelivery EscrowCreate / EscrowCancel — nothing delivered to `to`
+function _ordinaryMovement(pack) {
   const a = (pack && pack.large_transfers) || (typeof state !== 'undefined' && state.large) || [];
+  return Array.isArray(a) ? a : [];
+}
+function _escrowRows(pack) {
   const b = (pack && pack.escrow_transfers) || (typeof state !== 'undefined' && state.escrowLarge) || [];
-  return (Array.isArray(a) ? a : []).concat(Array.isArray(b) ? b : []);
+  return Array.isArray(b) ? b : [];
+}
+function _escrowReleases(pack) {
+  return _escrowRows(pack).filter(t => t && t.type === 'EscrowFinish');
+}
+function _escrowNonDelivery(pack) {
+  return _escrowRows(pack).filter(t => t && t.type !== 'EscrowFinish');
+}
+// Everything that actually DELIVERED XRP to `to`. This is the set that may be
+// treated as a receipt: ordinary transfers plus escrow releases.
+function _deliveredToReceiver(pack) {
+  return _ordinaryMovement(pack).concat(_escrowReleases(pack));
+}
+// Every address worth investigating, delivery or not. Display and candidacy
+// only — never receipt semantics.
+function _movementAndEscrow(pack) {
+  return _ordinaryMovement(pack).concat(_escrowRows(pack));
 }
 
 function _isEscrowLedgerType(t) {
@@ -1493,7 +1530,19 @@ function analyzeFlags() {
 async function scanReceivers(ws) {
   state.receivers = [];
   const seen = new Map();
-  for (const t of _movementAndEscrow(null)) {
+  // DELIVERED ONLY. This scan asks "did the receiver hold or forward what it
+  // received", and records source_amount_xrp = src.amount as the sum that
+  // arrived. For an EscrowCreate nothing arrived, so every answer it produces
+  // is about money the address never had — RECEIVER_STILL_HOLDING_SIZE,
+  // NEXT_HOP_FORWARDING_DETECTED, FRESH_ACCOUNT_RECEIVER. Worse, the result
+  // feeds receiver_fwd into the risk score and WHALE_TO_UNKNOWN_CLUSTER off
+  // source_amount_xrp, so a lock could manufacture ordinary whale-routing risk
+  // from XRP it never delivered.
+  //
+  // An EscrowFinish DID deliver and belongs here. A lock is still investigated
+  // — collectDiscoveryCandidates carries it, credited zero — just not through
+  // funded-receiver semantics.
+  for (const t of _deliveredToReceiver(null)) {
     if (t.to && !KNOWN[t.to] && !seen.has(t.to) && BASE58_RE.test(t.to)) seen.set(t.to, t);
   }
   const limit = Math.max(5, Math.min(80, n($('inHopLimit').value) || 60));
@@ -2704,8 +2753,16 @@ function buildWalletProfiles(pack) {
     const mine = txs.filter(t => t.from === w.address || t.to === w.address);
     const outs = mine.filter(t => t.from === w.address);
     const ins  = mine.filter(t => t.to === w.address);
-    const largeOut = outs.filter(t => n(t.amount) >= 1000000).length;
-    const largeIn  = ins.filter(t => n(t.amount) >= 1000000).length;
+    // ESCROW IS NOT ECONOMIC MOVEMENT HERE EITHER.
+    // largeOut/largeIn drive the archetype, and WHALE_DISTRIBUTOR carries
+    // positive profile risk in buildRiskScore. Counting an EscrowCreate as a
+    // large outflow let a scheduled lock turn an ordinary watched wallet into a
+    // whale distributor and raise the score — the same road the treasury
+    // cluster took, one function over. Locking or releasing your own escrow is
+    // not distributing to the market.
+    const _econ = t => !_isEscrowLedgerType(t);
+    const largeOut = outs.filter(t => _econ(t) && n(t.amount) >= 1000000).length;
+    const largeIn  = ins.filter(t => _econ(t) && n(t.amount) >= 1000000).length;
     const smallIn  = ins.filter(t => n(t.amount) > 0 && n(t.amount) <= 50).length;
     let archetype = 'QUIET_HOLDER', reasons = [];
     if (w.status === 'FAILED' || w.status === 'INVALID_ADDR') { archetype = 'FAILED_SCAN'; reasons.push('scan failed'); }
@@ -2754,12 +2811,24 @@ function buildClusters(pack) {
       type: 'DUST_TAG_CLUSTER', confidence: n(f.count) >= 10 ? 'HIGH' : 'MEDIUM',
       total_xrp: n(f.total), reason: '5+ small payments share destination tag' });
   }
-  const esc = (state.txs || []).filter(t => /EscrowFinish|EscrowCreate/.test(t.type || ''));
+  const esc = (state.txs || []).filter(t => _isEscrowLedgerType(t));
   if (esc.length) clusters.push({ id: 'treasury-' + today(), type: 'TREASURY_ROTATION_CLUSTER',
     confidence: 'HIGH', total_xrp: esc.reduce((a, t) => a + n(t.amount), 0),
+    // INFORMATIONAL: reported, carries no risk weight, and — see below — does
+    // not count as "something happened" when deciding whether the scan was quiet.
+    informational: true,
     reason: 'escrow-class transaction types detected' });
-  if (!clusters.length) clusters.push({ id: 'quiet-' + today(), type: 'QUIET_CLUSTER',
-    confidence: 'MEDIUM', total_xrp: 0, reason: 'No major cluster rule triggered' });
+  // QUIET_CLUSTER must be decided on RISK-BEARING clusters only.
+  // Zeroing the treasury weight stopped escrow ADDING risk but not escrow
+  // REMOVING a suppressor: with an escrow row present `clusters.length` was
+  // non-zero, so the quiet cluster never fired, and its -5 weight (a -2
+  // suppression) silently vanished. A scheduled lock therefore raised the score
+  // by 2 while every component stayed identical — invisible to any check that
+  // only compares components. A scan whose sole event is an escrow lock IS
+  // quiet, economically.
+  if (!clusters.some(c => !c.informational)) clusters.push({ id: 'quiet-' + today(),
+    type: 'QUIET_CLUSTER', confidence: 'MEDIUM', total_xrp: 0,
+    reason: 'No major cluster rule triggered' });
   state.clusters = clusters;
   if ($('clusterBox')) $('clusterBox').textContent = clusters.map(c =>
     `${c.confidence} ${c.type} | total=${fmt(c.total_xrp, 0)} XRP\nReason: ${c.reason}`).join('\n\n');
@@ -13145,15 +13214,25 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       });
 
       // — Large transfer unknown receivers
-      // Both lists, matching collectDiscoveryCandidates — if these two paths
-      // disagree the two inboxes disagree.
-      var transfers = (typeof _movementAndEscrow === 'function') ? _movementAndEscrow(pack)
+      // Delivered vs merely named — the same distinction collectDiscoveryCandidates
+      // and collectExplicitOfferCandidates make. Calling a lock destination a
+      // LARGE_TRANSFER_RECEIVER here while the canonical path calls it a
+      // not-yet-released escrow destination is exactly the split the one-truth
+      // model forbids.
+      var delivered = (typeof _deliveredToReceiver === 'function') ? _deliveredToReceiver(pack)
         : ((pack && Array.isArray(pack.large_transfers)) ? pack.large_transfers : []);
-      transfers.forEach(function(t) {
+      delivered.forEach(function(t) {
         var addr = t.to_address||t.to;
         if (!addr || addr.length < 25) return;
         addCandidate(addr, 'HIGH', 'LARGE_TRANSFER_RECEIVER',
-                     'large_transfer_receiver '+(t.amount_xrp||t.xrp_amount||'?')+'XRP');
+                     'large_transfer_receiver '+(Number(t.amount)||0)+'XRP');
+      });
+      var locked = (typeof _escrowNonDelivery === 'function') ? _escrowNonDelivery(pack) : [];
+      locked.forEach(function(t) {
+        var addr = t.to_address||t.to;
+        if (!addr || addr.length < 25) return;
+        addCandidate(addr, 'MEDIUM', 'ESCROW_LOCK_DESTINATION',
+                     'escrow_lock_destination '+(Number(t.amount)||0)+'XRP locked, not yet released');
       });
 
       // Sort CRITICAL first — use inline map to avoid closure scope issues
@@ -19433,9 +19512,17 @@ function collectExplicitOfferCandidates() {
     add(addr, 40, 'next-hop receiver from a large transfer', 'next_hop');
   }
   // 2. Large-transfer destinations
-  for (const t of _movementAndEscrow(null)) {
+  for (const t of _deliveredToReceiver(null)) {
     if (n(t.amount) >= 1_000_000 && t.to) {
       add(t.to, 35, 'destination of >1M XRP large transfer', 'large_transfer');
+    }
+  }
+  // A lock destination is still a candidate, but it did not receive >1M XRP —
+  // so it gets neither the large-transfer source nor its score bonus. One truth
+  // model: every discovery surface must describe this the same way.
+  for (const t of _escrowNonDelivery(null)) {
+    if (t.to) {
+      add(t.to, 10, 'named destination of an escrow lock (not yet released)', 'escrow_destination');
     }
   }
   return out;

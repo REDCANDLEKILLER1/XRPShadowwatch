@@ -199,6 +199,85 @@ const check = (name, ok, detail) => {
         // the ordinary whale receiver is unaffected
         out.plainStillCredited = !!plainCand && Number(plainCand.max_value_xrp) === 1651898167;
       } catch (e) { out.discErr = String(e && e.message); }
+      // ── PROFILE RISK: AN ESCROW LOCK IS NOT DISTRIBUTION ──────────────
+      // buildWalletProfiles counted any >=1M row as largeOut, so a watched
+      // wallet whose ONLY activity was locking its own escrow became a
+      // WHALE_DISTRIBUTOR — which carries positive profile risk.
+      try {
+        const SOLO = (typeof WATCHLIST !== 'undefined' && WATCHLIST[1])
+          ? WATCHLIST[1].address : 'rSoloOwnerGGGGGGGGGGGGGGGGGGGGGGG';
+        state.txs = [{ account: SOLO, label: 'SOLO', type: 'EscrowCreate',
+          hash: '3'.repeat(64), date: iso, from: SOLO, to: LOCK_DEST_B,
+          amount: 800000000, currency: 'XRP', destination_tag: '' }];
+        analyzeFlags();
+        const pk2 = { wallet_results: [{ address: SOLO, label: 'SOLO', cat: 'whale',
+          balance_xrp: 900000000, delta_xrp: -800000000, status: 'CHECKED' }] };
+        const profs = (typeof buildWalletProfiles === 'function')
+          ? (buildWalletProfiles(pk2) || []) : [];
+        const sp = profs.find(x => x.address === SOLO) || {};
+        out.soloArchetype   = sp.archetype;
+        out.soloLargeOut    = sp.large_out_count;
+        out.soloNotWhaleDist = sp.archetype !== 'WHALE_DISTRIBUTOR';
+        out.soloNoLargeOut   = Number(sp.large_out_count) === 0;
+      } catch (e) { out.profErr = String(e && e.message); }
+
+      // ── END-TO-END RISK ISOLATION ─────────────────────────────────────
+      // The real property, stated once: adding ONLY an EscrowCreate to a scan
+      // must not move the risk score, its components, or its drivers. Each
+      // individual road was patched separately (large_transfers, the treasury
+      // cluster, wallet profiles, receiver follow-through); this asserts the
+      // sum, so a NEW road opened later fails here even if nobody thinks to
+      // test it directly.
+      try {
+        const WATCHED = (typeof WATCHLIST !== 'undefined' && WATCHLIST[0])
+          ? WATCHLIST[0].address : 'rOwner1';
+        const baseTx = [{ account: WATCHED, label: 'BASE', type: 'Payment',
+          hash: '1'.repeat(64), date: iso, from: WATCHED, to: PLAIN_DEST,
+          amount: 4000000, currency: 'XRP', destination_tag: '' }];
+        const escrowTx = { account: WATCHED, label: 'BASE', type: 'EscrowCreate',
+          hash: '2'.repeat(64), date: iso, from: WATCHED, to: LOCK_DEST_A,
+          amount: 900000000, currency: 'XRP', destination_tag: '' };
+
+        const measure = (txs) => {
+          state.txs = txs.slice();
+          analyzeFlags();
+          const pk = { large_transfers: state.large,
+                       escrow_transfers: state.escrowLarge,
+                       shadow_volume_xrp: state.large.reduce((a,t)=>a+Number(t.amount||0),0),
+                       total_balance_delta_xrp: 0,
+                       wallet_results: [{ address: WATCHED, label: 'BASE', cat: 'whale',
+                                          balance_xrp: 5000000, delta_xrp: -2000000,
+                                          status: 'CHECKED' }],
+                       receiver_followthrough: [], fragmentation_flags: [] };
+          if (typeof buildWalletProfiles === 'function') buildWalletProfiles(pk);
+          if (typeof buildClusters === 'function') buildClusters(pk);
+          const rs = (typeof buildRiskScore === 'function') ? buildRiskScore(pk) : null;
+          const prof = (state.walletProfiles || []).find(x => x.address === WATCHED) || {};
+          return {
+            score: rs && rs.score, drivers: rs && (rs.drivers || []).slice().sort(),
+            // adjustments carries suppression/clamping/rounding — the escrow row
+            // first showed up ONLY there (components identical, score +2),
+            // so comparing components alone would have missed it.
+            comp: rs ? JSON.stringify({ c: rs.components, a: rs.adjustments }) : null,
+            archetype: prof.archetype, largeOut: prof.large_out_count
+          };
+        };
+
+        const A = measure(baseTx);
+        const B = measure(baseTx.concat([escrowTx]));
+        out.isoBaselineScore  = A.score;
+        out.isoEscrowScore    = B.score;
+        out.isoScoreSame      = A.score === B.score;
+        out.isoDriversSame    = JSON.stringify(A.drivers) === JSON.stringify(B.drivers);
+        out.isoComponentsSame = A.comp === B.comp;
+        out.isoArchetypeSame  = A.archetype === B.archetype;
+        out.isoLargeOutSame   = A.largeOut === B.largeOut;
+        out.isoDrivers        = B.drivers;
+        out.isoArchetype      = B.archetype;
+        // anti-vacuity: the escrow row really was ingested
+        out.isoEscrowIngested = (state.escrowLarge || []).length === 1;
+      } catch (e) { out.isoErr = String(e && e.message); }
+
       // ── THE STAMP MAY NOT CLAIM WHAT IT CANNOT PROVE ──────────────────
       // updateWalletMemory's store is cumulative with no expiry, so a record
       // that existed before the split still carries escrow inside its
@@ -258,6 +337,76 @@ const check = (name, ok, detail) => {
     return out;
   });
 
+  // ── SECOND PASS: the paths that need async / RPC stubbing ────────────────
+  const r2 = await page.evaluate(async () => {
+    const out = {};
+    // BASE58 EXCLUDES 0, O, I and l. An earlier version of this fixture used
+    // rOrdDest… (capital O) and rRelDest… (lowercase l); both were rejected by
+    // BASE58_RE before any code under test saw them, so the "lock is not
+    // scanned" assertion passed because NOTHING was scanned. The guard below
+    // makes that failure loud instead of silent.
+    const ORD_DEST  = 'rPrdDestHHHHHHHHHHHHHHHHHHHHHHHHHH';
+    const REL_DEST  = 'rRezDestJJJJJJJJJJJJJJJJJJJJJJJJJJ';
+    const LOK_DEST  = 'rLokDestKKKKKKKKKKKKKKKKKKKKKKKKKK';
+    out.fixturesValid = (typeof BASE58_RE !== 'undefined')
+      ? [ORD_DEST, REL_DEST, LOK_DEST].every(a => BASE58_RE.test(a))
+      : null;
+    const iso = new Date().toISOString();
+    const mk = (type, to, amount, hash) => ({
+      account: 'rSrc', label: 'SRC', type, hash, date: iso, from: 'rSrc', to,
+      amount, currency: 'XRP', destination_tag: '', classification: 'X', sender_label: 'SRC'
+    });
+    const realLarge = state.large, realEsc = state.escrowLarge, realRx = state.receivers;
+    const realXrpl = window.xrpl;
+    try {
+      state.large      = [mk('Payment', ORD_DEST, 5000000, '4'.repeat(64))];
+      state.escrowLarge = [mk('EscrowFinish', REL_DEST, 6000000, '5'.repeat(64)),
+                           mk('EscrowCreate', LOK_DEST, 7000000, '6'.repeat(64))];
+
+      // ── scanReceivers must scan DELIVERIES only ──────────────────────
+      const asked = [];
+      window.xrpl = async function (ws, cmd) {
+        asked.push(cmd.account);
+        if (cmd.command === 'account_info') return { account_data: { Balance: '1000000000' } };
+        return { transactions: [] };
+      };
+      await scanReceivers(null);
+      const scanned = (state.receivers || []).map(r => r.address);
+      out.rxScanned        = scanned.slice();
+      out.rxHasOrdinary    = scanned.indexOf(ORD_DEST) > -1;
+      out.rxHasRelease     = scanned.indexOf(REL_DEST) > -1;
+      out.rxExcludesLock   = scanned.indexOf(LOK_DEST) === -1;
+      // anti-vacuity: the scan really ran
+      out.rxDidWork        = asked.length > 0;
+    } catch (e) { out.rxErr = String(e && e.message); }
+    finally { window.xrpl = realXrpl; }
+
+    try {
+      // ── offer candidates: one truth about what a lock destination is ──
+      const m = (typeof collectExplicitOfferCandidates === 'function')
+        ? collectExplicitOfferCandidates() : new Map();
+      const g = a => { const c = m.get(a); return c
+        ? { score: c.score, sources: Array.from(c.sources), reasons: c.reasons } : null; };
+      out.offOrdinary = g(ORD_DEST);
+      out.offRelease  = g(REL_DEST);
+      out.offLock     = g(LOK_DEST);
+      out.offLockPresent   = !!out.offLock;
+      out.offLockNotLarge  = !!out.offLock && out.offLock.sources.indexOf('large_transfer') === -1;
+      out.offLockOwnSource = !!out.offLock && out.offLock.sources.indexOf('escrow_destination') > -1;
+      out.offLockNoBonus   = !!out.offLock && out.offLock.score < 35;
+      // NOT `=== 35`: add() takes Math.max and this address is also a next_hop
+      // candidate from the scanReceivers run above, so it legitimately scores 40.
+      // The property is that it carries the ordinary source and its bonus.
+      out.offOrdinaryKeeps = !!out.offOrdinary &&
+        out.offOrdinary.sources.indexOf('large_transfer') > -1 &&
+        out.offOrdinary.score >= 35;
+    } catch (e) { out.offErr = String(e && e.message); }
+    finally {
+      state.large = realLarge; state.escrowLarge = realEsc; state.receivers = realRx;
+    }
+    return out;
+  });
+
   console.log('1. the split itself');
   console.log('     ordinary: ' + r.largeCount + ' rows / ' + r.largeTotal + ' XRP');
   console.log('     escrow  : ' + r.escrowCount + ' rows / ' + r.escrowTotal + ' XRP');
@@ -303,7 +452,26 @@ const check = (name, ok, detail) => {
   check('and the reason says the funds are not yet released', r.lockSaysNotReleased, r.lockReason);
   check('the ordinary whale receiver is still credited in full', r.plainStillCredited);
 
-  console.log('\n7. cumulative wallet memory is stamped honestly');
+  console.log('\n6b. an escrow lock is not whale distribution');
+  console.log('     archetype: ' + r.soloArchetype + '  largeOut: ' + r.soloLargeOut);
+  check('a wallet whose only act is an EscrowCreate is NOT a WHALE_DISTRIBUTOR',
+        r.soloNotWhaleDist, r.soloArchetype || r.profErr);
+  check('and the lock is not counted as a large outflow',
+        r.soloNoLargeOut, r.soloLargeOut);
+
+  console.log('\n7. END-TO-END: an EscrowCreate moves no risk, by any road');
+  console.log('     score ' + r.isoBaselineScore + ' -> ' + r.isoEscrowScore +
+              '   archetype: ' + r.isoArchetype + '   drivers: ' + JSON.stringify(r.isoDrivers));
+  check('the escrow row really was ingested (not a vacuous pass)',
+        r.isoEscrowIngested, r.isoErr);
+  check('the risk SCORE is unchanged', r.isoScoreSame,
+        { base: r.isoBaselineScore, withEscrow: r.isoEscrowScore });
+  check('every risk COMPONENT is unchanged', r.isoComponentsSame, r.isoErr);
+  check('the DRIVER list is unchanged', r.isoDriversSame, r.isoDrivers);
+  check('the wallet ARCHETYPE is unchanged', r.isoArchetypeSame, r.isoArchetype);
+  check('its large-outflow count is unchanged', r.isoLargeOutSame);
+
+  console.log('\n8. cumulative wallet memory is stamped honestly');
   check('a pre-split record is stamped with the new basis', r.legacyStamped, r.memErr);
   check('and explicitly flagged: its totals PREDATE the basis',
         r.legacyFlaggedImpure, r.memErr);
@@ -311,6 +479,25 @@ const check = (name, ok, detail) => {
   check('a record CREATED under the basis is not flagged', r.freshCreatedClean, r.memErr);
   check('and carries the same boundary field', r.freshHasSince, r.memErr);
   check('the boundary is set once, not moved by a later scan', r.sinceIsStable, r.memErr);
+
+  console.log('\n9. receiver follow-through scans DELIVERIES only');
+  console.log('     scanned: ' + JSON.stringify(r2.rxScanned));
+  check('every fixture address is valid base58 (else nothing is under test)',
+        r2.fixturesValid === true, r2.fixturesValid);
+  check('the receiver scan actually ran (not a vacuous pass)', r2.rxDidWork, r2.rxErr);
+  check('an ordinary large-transfer destination IS scanned', r2.rxHasOrdinary, r2.rxScanned);
+  check('an escrow RELEASE destination IS scanned (funds arrived)',
+        r2.rxHasRelease, r2.rxScanned);
+  check('an escrow LOCK destination is NOT scanned as a funded receiver',
+        r2.rxExcludesLock, r2.rxScanned);
+
+  console.log('\n10. every discovery surface says the same thing about a lock');
+  console.log('     lock: ' + JSON.stringify(r2.offLock));
+  check('the lock destination is still an offer candidate', r2.offLockPresent, r2.offErr);
+  check('it is NOT sourced as large_transfer', r2.offLockNotLarge, r2.offLock);
+  check('it carries the escrow_destination source', r2.offLockOwnSource, r2.offLock);
+  check('and gets no ordinary large-transfer score bonus', r2.offLockNoBonus, r2.offLock);
+  check('the ordinary destination keeps its 35', r2.offOrdinaryKeeps, r2.offOrdinary);
 
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 
