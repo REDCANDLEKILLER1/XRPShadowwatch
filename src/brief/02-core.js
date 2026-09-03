@@ -1196,7 +1196,7 @@ async function scanWallets(ws) {
       for (const item of txRows) {
         const t = item.tx_json || item.tx || {}, iso = t.date ? rip(t.date) : '';
         if (!iso) continue;
-        let amt = 0, cur = 'XRP', escrowDest = '';
+        let amt = 0, cur = 'XRP', escrowDest = '', escrowOwner = '';
         // v16.9 units fix: a partial payment carries a huge SENTINEL in `Amount`
         // (the max, often ~1e17 drops ≈ 100B+ XRP) while the REAL moved amount is
         // in meta.delivered_amount. Reading Amount produced impossible "103B XRP"
@@ -1208,17 +1208,10 @@ async function scanWallets(ws) {
         if (typeof amtSrc === 'string') amt = drops(amtSrc);
         else if (amtSrc && typeof amtSrc === 'object') { cur = amtSrc.currency || 'TOKEN'; amt = n(amtSrc.value || 0); }
         else if (t.TransactionType === 'EscrowFinish' || t.TransactionType === 'EscrowCreate') {
-          // Released/locked XRP lives in metadata (the created/deleted Escrow node), not t.Amount.
-          const meta = item.meta || item.metaData || {};
-          for (const nd of (meta.AffectedNodes || [])) {
-            const en = nd.DeletedNode || nd.CreatedNode;
-            if (en && en.LedgerEntryType === 'Escrow') {
-              const ff = en.FinalFields || en.NewFields || {};
-              if (typeof ff.Amount === 'string') amt = drops(ff.Amount);
-              if (ff.Destination) escrowDest = ff.Destination;
-              break;
-            }
-          }
+          const _ef = escrowFactsFromMeta(item);
+          if (_ef.amount != null) amt = _ef.amount;
+          if (_ef.destination) escrowDest = _ef.destination;
+          if (_ef.owner) escrowOwner = _ef.owner;
           if (!amt && typeof t.Amount === 'string') amt = drops(t.Amount);
         }
         const _sig = _sigMode(t);
@@ -1227,6 +1220,10 @@ async function scanWallets(ws) {
           type: t.TransactionType, hash: t.hash || item.hash || '',
           date: iso, from: t.Account || '', to: escrowDest || t.Destination || '',
           amount: amt, currency: cur, destination_tag: t.DestinationTag ?? '',
+          // Empty for non-escrow rows, and for an escrow row whose ledger node
+          // could not be read — in which case ownership is UNKNOWN and must not
+          // be guessed from the submitter.
+          escrow_owner: escrowOwner || '',
           // Who authorised this — see _sigMode.
           sig_mode: _sig.mode, signer_count: _sig.count
         });
@@ -1391,6 +1388,36 @@ function classify(t) {
     // wallet → Ripple" for a scheduled unlock. Say what it actually was.
     sender_label: _isRelease ? 'escrow' : (f?.label || (t.from ? ca(t.from) : 'UNKNOWN')),
     receiver_label: to?.label || (t.to ? ca(t.to) : 'UNKNOWN') };
+}
+
+// THE ESCROW LEDGER NODE — amount, destination and OWNER, read once.
+// Released/locked XRP lives in metadata (the created/deleted Escrow node), not
+// in tx.Amount. So does the owner: the Escrow object's own Account.
+//
+// tx.Account is only the SUBMITTER, and on an EscrowFinish anyone may submit —
+// so attributing a release by submitter credits it to whoever finished it.
+// Ripple-vs-other is decided on exactly that field (26-…:69
+// isRippleOwner(e.owner)), so the mistake folded a stranger's escrow into
+// "Ripple escrow" and Ripple's into "other", in both directions.
+//
+// Named and exported so the extraction itself is testable: seeding a row's
+// escrow_owner in a test proves escrowFromTxs, not this.
+function escrowFactsFromMeta(item) {
+  const out = { amount: null, destination: '', owner: '' };
+  try {
+    const meta = (item && (item.meta || item.metaData)) || {};
+    for (const nd of (meta.AffectedNodes || [])) {
+      const en = nd && (nd.DeletedNode || nd.CreatedNode);
+      if (en && en.LedgerEntryType === 'Escrow') {
+        const ff = en.FinalFields || en.NewFields || {};
+        if (typeof ff.Amount === 'string') out.amount = drops(ff.Amount);
+        if (ff.Destination) out.destination = ff.Destination;
+        if (ff.Account) out.owner = ff.Account;
+        break;
+      }
+    }
+  } catch (_) {}
+  return out;
 }
 
 // IS THIS AN ESCROW LEDGER EVENT? Tested on TRANSACTION TYPE, never on
@@ -3425,7 +3452,17 @@ function escrowFromTxs(byHash) {
   (state.txs || []).forEach(t => {
     if (/Escrow(Finish|Create)/.test(t.type || '') && t.amount > 0 && t.hash && !byHash[t.hash])
       byHash[t.hash] = { hash: t.hash, type: /Finish/.test(t.type) ? 'UNLOCK' : 'LOCK', xrp: Math.floor(t.amount),
-        owner: t.from, dest: t.to || null, ts: t.date ? new Date(t.date).getTime() : Date.now(), ledger: null };
+        // OWNER, NOT SUBMITTER. Ripple-vs-other is decided on this field
+        // (26-…:69 isRippleOwner(e.owner)), so using t.from meant a third party
+        // finishing Ripple's escrow landed in "other", and a Ripple address
+        // finishing someone else's landed under "Ripple escrow". The fold-in
+        // ran in both directions. An EscrowCreate's submitter IS its owner, so
+        // that case is unchanged; an EscrowFinish's is not.
+        owner: t.escrow_owner || (t.type === 'EscrowCreate' ? t.from : null),
+        // Recorded so a surface can say "ownership unresolved" instead of
+        // silently defaulting an unattributable release to non-Ripple.
+        owner_attributed: !!(t.escrow_owner || t.type === 'EscrowCreate'),
+        dest: t.to || null, ts: t.date ? new Date(t.date).getTime() : Date.now(), ledger: null };
   });
 }
 

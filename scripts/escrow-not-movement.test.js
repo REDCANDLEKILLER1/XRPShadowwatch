@@ -221,6 +221,88 @@ const check = (name, ok, detail) => {
         out.soloNoLargeOut   = Number(sp.large_out_count) === 0;
       } catch (e) { out.profErr = String(e && e.message); }
 
+      // ── AN ESCROW EVENT BELONGS TO ITS OWNER, NOT ITS SUBMITTER ───────
+      // Ripple-vs-other is decided by isRippleOwner(e.owner) at 26-…:69. The
+      // scan path set owner = t.from, the SUBMITTER — and anyone may submit an
+      // EscrowFinish. So a third party finishing Ripple's escrow was filed under
+      // "other", and a Ripple address finishing someone else's was filed under
+      // "Ripple escrow". Both directions are tested, against the REAL registry.
+      try {
+        const reg = window.SW_RIPPLE_ESCROW_REGISTRY;
+        const RIPPLE_ADDR = reg && reg.addresses && reg.addresses[0];
+        const OUTSIDER = 'rNotRippleOwnerPPPPPPPPPPPPPPPPPPP';
+        const FINISHER = 'rThirdPartyFinisherQQQQQQQQQQQQQQQ';
+        out.oaRegistryLoaded = !!RIPPLE_ADDR;
+        out.oaRippleAddrIsRipple = !!(typeof window.SW_PUBLIC_ESCROW_STORY_20260816 !== 'undefined') || true;
+
+        // (a) a stranger finishes RIPPLE's escrow -> must still be Ripple's
+        // (b) a RIPPLE address finishes a stranger's escrow -> must NOT be Ripple's
+        state.txs = [
+          { account: 'rScan', label: 'S', type: 'EscrowFinish', hash: '7'.repeat(64),
+            date: iso, from: FINISHER, to: 'rDestAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+            amount: 500000000, currency: 'XRP', destination_tag: '',
+            escrow_owner: RIPPLE_ADDR },
+          { account: 'rScan', label: 'S', type: 'EscrowFinish', hash: '8'.repeat(64),
+            date: iso, from: RIPPLE_ADDR, to: 'rDestBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+            amount: 40000000, currency: 'XRP', destination_tag: '',
+            escrow_owner: OUTSIDER }
+        ];
+        const byHash = {};
+        escrowFromTxs(byHash);
+        const rows = Object.values(byHash);
+        const a = rows.find(r => r.hash === '7'.repeat(64)) || {};
+        const b = rows.find(r => r.hash === '8'.repeat(64)) || {};
+        out.oaRippleOwned   = a.owner === RIPPLE_ADDR;
+        out.oaNotFinisher   = a.owner !== FINISHER;
+        out.oaOutsiderOwned = b.owner === OUTSIDER;
+        out.oaNotRippleFold = b.owner !== RIPPLE_ADDR;
+        out.oaAttributed    = a.owner_attributed === true && b.owner_attributed === true;
+
+        // (c) an EscrowFinish whose ledger node could not be read must be marked
+        // unattributed rather than credited to whoever submitted it
+        state.txs = [{ account: 'rScan', label: 'S', type: 'EscrowFinish',
+          hash: '9'.repeat(64), date: iso, from: RIPPLE_ADDR,
+          to: 'rDestCCCCCCCCCCCCCCCCCCCCCCCCCCCCC',
+          amount: 1000000, currency: 'XRP', destination_tag: '', escrow_owner: '' }];
+        const bh2 = {}; escrowFromTxs(bh2);
+        const c = Object.values(bh2)[0] || {};
+        out.oaUnknownNotGuessed = c.owner == null && c.owner_attributed === false;
+
+        // (c2) THE INGEST EXTRACTION ITSELF.
+        // Seeding escrow_owner on a row proves escrowFromTxs, not the code that
+        // fills it. Deleting the capture in txOne would leave every real scan
+        // with escrow_owner:'' and every release unattributed — and the checks
+        // above would not notice. Exercise the extraction directly, on the meta
+        // shape account_tx actually returns.
+        const META_ITEM = { meta: { AffectedNodes: [
+          { ModifiedNode: { LedgerEntryType: 'AccountRoot' } },
+          { DeletedNode: { LedgerEntryType: 'Escrow', FinalFields: {
+              Account: RIPPLE_ADDR, Destination: 'rDestAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+              Amount: '500000000000000' } } }
+        ] } };
+        const facts = (typeof escrowFactsFromMeta === 'function')
+          ? escrowFactsFromMeta(META_ITEM) : null;
+        out.oaFactsOwner = facts && facts.owner;
+        out.oaFactsDest  = facts && facts.destination;
+        out.oaFactsAmt   = facts && facts.amount;
+        out.oaExtractsOwner = !!facts && facts.owner === RIPPLE_ADDR;
+        out.oaExtractsAmt   = !!facts && Number(facts.amount) === 500000000;
+        // no Escrow node at all -> nothing invented
+        const bare = (typeof escrowFactsFromMeta === 'function')
+          ? escrowFactsFromMeta({ meta: { AffectedNodes: [
+              { ModifiedNode: { LedgerEntryType: 'AccountRoot' } } ] } }) : null;
+        out.oaBareInventsNothing = !!bare && bare.owner === '' && bare.amount == null;
+
+        // (d) an EscrowCreate's submitter IS its owner — unchanged
+        state.txs = [{ account: 'rScan', label: 'S', type: 'EscrowCreate',
+          hash: 'a'.repeat(64), date: iso, from: OUTSIDER,
+          to: 'rDestDDDDDDDDDDDDDDDDDDDDDDDDDDDDD',
+          amount: 2000000, currency: 'XRP', destination_tag: '', escrow_owner: '' }];
+        const bh3 = {}; escrowFromTxs(bh3);
+        const d = Object.values(bh3)[0] || {};
+        out.oaCreateOwner = d.owner === OUTSIDER && d.owner_attributed === true;
+      } catch (e) { out.oaErr = String(e && e.message); }
+
       // ── SMALL ESCROW MUST NOT CROSS ORDINARY THRESHOLDS ───────────────
       // One big lock does not exercise the count-based rules. These are the
       // thresholds escrow could cross without ever touching largeOut:
@@ -522,6 +604,27 @@ const check = (name, ok, detail) => {
         r.soloNotWhaleDist, r.soloArchetype || r.profErr);
   check('and the lock is not counted as a large outflow',
         r.soloNoLargeOut, r.soloLargeOut);
+
+  console.log('\n6a. an escrow event belongs to its OWNER, not its submitter');
+  check('the real Ripple registry is loaded (not a vacuous pass)',
+        r.oaRegistryLoaded, r.oaErr);
+  check('a stranger finishing Ripple\u2019s escrow stays attributed to Ripple',
+        r.oaRippleOwned, r.oaErr);
+  check('it is not attributed to the finisher', r.oaNotFinisher, r.oaErr);
+  check('a Ripple address finishing a stranger\u2019s escrow is NOT folded into Ripple',
+        r.oaNotRippleFold, r.oaErr);
+  check('it stays attributed to the actual outside owner', r.oaOutsiderOwned, r.oaErr);
+  check('both are marked attributed', r.oaAttributed, r.oaErr);
+  check('an unreadable escrow node yields UNKNOWN, never the submitter',
+        r.oaUnknownNotGuessed, r.oaErr);
+  check('an EscrowCreate is still owned by its creator', r.oaCreateOwner, r.oaErr);
+  console.log('     extracted owner: ' + r.oaFactsOwner + '  amount: ' + r.oaFactsAmt);
+  check('the INGEST extraction reads the owner off the Escrow ledger node',
+        r.oaExtractsOwner, r.oaFactsOwner || r.oaErr);
+  check('and reads the locked amount from the same node',
+        r.oaExtractsAmt, r.oaFactsAmt);
+  check('meta with no Escrow node invents nothing',
+        r.oaBareInventsNothing, r.oaErr);
 
   console.log('\n6c. small escrow cannot cross ordinary count thresholds');
   console.log('     exchange archetype: ' + r.thrExchArchetype +
