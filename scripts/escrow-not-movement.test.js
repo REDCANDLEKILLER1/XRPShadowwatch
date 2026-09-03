@@ -221,6 +221,49 @@ const check = (name, ok, detail) => {
         out.soloNoLargeOut   = Number(sp.large_out_count) === 0;
       } catch (e) { out.profErr = String(e && e.message); }
 
+      // ── SMALL ESCROW MUST NOT CROSS ORDINARY THRESHOLDS ───────────────
+      // One big lock does not exercise the count-based rules. These are the
+      // thresholds escrow could cross without ever touching largeOut:
+      //   dust grouping   >= 5 small rows sharing a destination -> frag flag
+      //   DUST_RECEIVER   smallIn >= 5
+      //   EXCHANGE_HOT    mine.length >= 10  (vs COLD below it)
+      try {
+        const DUSTEE = 'rDusteeMMMMMMMMMMMMMMMMMMMMMMMMMMM';
+        const EXCH   = 'rExchWalletNNNNNNNNNNNNNNNNNNNNNNN';
+        const small = [];
+        for (let i = 0; i < 8; i++) {
+          small.push({ account: EXCH, label: 'EX', type: 'EscrowCreate',
+            hash: ('a' + i).padEnd(64, 'b'), date: iso, from: EXCH, to: DUSTEE,
+            amount: 10, currency: 'XRP', destination_tag: '' });
+        }
+        // four ordinary rows: below the hot-flow threshold on their own
+        for (let i = 0; i < 4; i++) {
+          small.push({ account: EXCH, label: 'EX', type: 'Payment',
+            hash: ('c' + i).padEnd(64, 'd'), date: iso, from: EXCH, to: PLAIN_DEST,
+            amount: 2000, currency: 'XRP', destination_tag: '' });
+        }
+        state.txs = small;
+        state.wallets = [];
+        analyzeFlags();
+        out.thrFragCount = (state.frags || []).length;
+        out.thrNoDustFlag = (state.frags || []).length === 0;
+
+        const pk3 = { wallet_results: [
+          { address: EXCH,   label: 'EX',  cat: 'exchange', balance_xrp: 1e6, delta_xrp: 0, status: 'CHECKED' },
+          { address: DUSTEE, label: 'DST', cat: 'unknown',  balance_xrp: 1e3, delta_xrp: 0, status: 'CHECKED' }
+        ] };
+        const pr3 = (typeof buildWalletProfiles === 'function') ? (buildWalletProfiles(pk3) || []) : [];
+        const ex = pr3.find(x => x.address === EXCH) || {};
+        const du = pr3.find(x => x.address === DUSTEE) || {};
+        out.thrExchArchetype = ex.archetype;
+        out.thrExchEconCount = ex.tx_count_24h;
+        out.thrExchRawCount  = ex.tx_count_24h_raw;
+        out.thrExchNotHot    = ex.archetype !== 'EXCHANGE_HOT_FLOW';
+        out.thrRawWouldHaveCrossed = Number(ex.tx_count_24h_raw) >= 10;  // anti-vacuity
+        out.thrDusteeArchetype = du.archetype;
+        out.thrDusteeNotDust   = du.archetype !== 'DUST_RECEIVER';
+      } catch (e) { out.thrErr = String(e && e.message); }
+
       // ── END-TO-END RISK ISOLATION ─────────────────────────────────────
       // The real property, stated once: adding ONLY an EscrowCreate to a scan
       // must not move the risk score, its components, or its drivers. Each
@@ -238,22 +281,38 @@ const check = (name, ok, detail) => {
           hash: '2'.repeat(64), date: iso, from: WATCHED, to: LOCK_DEST_A,
           amount: 900000000, currency: 'XRP', destination_tag: '' };
 
-        const measure = (txs) => {
+        // THE BALANCE MUST MOVE THE WAY A REAL LOCK MOVES IT.
+        // The earlier version hardcoded total_balance_delta_xrp: 0 in BOTH arms,
+        // so it could not have detected escrow reaching risk through the balance
+        // snapshot — and net_delta was exactly such a road. The escrow arm now
+        // carries the balance drop an EscrowCreate actually causes, and the pack
+        // fields are computed by the PRODUCTION helpers rather than written by
+        // hand, so the test exercises the real isolation instead of asserting a
+        // number I chose.
+        const ORDINARY_DELTA = -2000000;
+        const measure = (txs, extraDelta) => {
           state.txs = txs.slice();
+          state.wallets = [{ address: WATCHED, label: 'BASE', cat: 'whale',
+                             balance_xrp: 5000000,
+                             delta_xrp: ORDINARY_DELTA + (extraDelta || 0),
+                             status: 'CHECKED' }];
           analyzeFlags();
           const pk = { large_transfers: state.large,
                        escrow_transfers: state.escrowLarge,
                        shadow_volume_xrp: state.large.reduce((a,t)=>a+Number(t.amount||0),0),
-                       total_balance_delta_xrp: 0,
-                       wallet_results: [{ address: WATCHED, label: 'BASE', cat: 'whale',
-                                          balance_xrp: 5000000, delta_xrp: -2000000,
-                                          status: 'CHECKED' }],
-                       receiver_followthrough: [], fragmentation_flags: [] };
+                       total_balance_delta_xrp: totalDeltaXRP(),
+                       ordinary_balance_delta_xrp: ordinaryDeltaXRP(),
+                       escrow_balance_adjust_xrp: escrowDeltaAdjustXRP(),
+                       wallet_results: state.wallets,
+                       receiver_followthrough: [], fragmentation_flags: state.frags || [] };
           if (typeof buildWalletProfiles === 'function') buildWalletProfiles(pk);
           if (typeof buildClusters === 'function') buildClusters(pk);
           const rs = (typeof buildRiskScore === 'function') ? buildRiskScore(pk) : null;
           const prof = (state.walletProfiles || []).find(x => x.address === WATCHED) || {};
           return {
+            rawDelta: pk.total_balance_delta_xrp,
+            ordDelta: pk.ordinary_balance_delta_xrp,
+            fragCount: (state.frags || []).length,
             score: rs && rs.score, drivers: rs && (rs.drivers || []).slice().sort(),
             // adjustments carries suppression/clamping/rounding — the escrow row
             // first showed up ONLY there (components identical, score +2),
@@ -263,8 +322,13 @@ const check = (name, ok, detail) => {
           };
         };
 
-        const A = measure(baseTx);
-        const B = measure(baseTx.concat([escrowTx]));
+        const A = measure(baseTx, 0);
+        // a 900M lock really does take 900M out of the spendable balance
+        const B = measure(baseTx.concat([escrowTx]), -900000000);
+        out.isoRawDeltaMoved = A.rawDelta !== B.rawDelta;   // the input DID change
+        out.isoOrdDeltaSame  = A.ordDelta === B.ordDelta;   // the risk input did not
+        out.isoRawA = A.rawDelta; out.isoRawB = B.rawDelta;
+        out.isoOrdA = A.ordDelta; out.isoOrdB = B.ordDelta;
         out.isoBaselineScore  = A.score;
         out.isoEscrowScore    = B.score;
         out.isoScoreSame      = A.score === B.score;
@@ -459,11 +523,30 @@ const check = (name, ok, detail) => {
   check('and the lock is not counted as a large outflow',
         r.soloNoLargeOut, r.soloLargeOut);
 
+  console.log('\n6c. small escrow cannot cross ordinary count thresholds');
+  console.log('     exchange archetype: ' + r.thrExchArchetype +
+              '   economic tx ' + r.thrExchEconCount + ' / raw ' + r.thrExchRawCount +
+              '   frags ' + r.thrFragCount);
+  check('raw counts WOULD have crossed the threshold (not a vacuous pass)',
+        r.thrRawWouldHaveCrossed, r.thrExchRawCount);
+  check('8 small escrow rows to one destination raise NO dust/fragmentation flag',
+        r.thrNoDustFlag, r.thrFragCount);
+  check('escrow rows do not push an exchange into EXCHANGE_HOT_FLOW',
+        r.thrExchNotHot, r.thrExchArchetype);
+  check('and do not make a destination a DUST_RECEIVER',
+        r.thrDusteeNotDust, r.thrDusteeArchetype);
+
   console.log('\n7. END-TO-END: an EscrowCreate moves no risk, by any road');
   console.log('     score ' + r.isoBaselineScore + ' -> ' + r.isoEscrowScore +
               '   archetype: ' + r.isoArchetype + '   drivers: ' + JSON.stringify(r.isoDrivers));
   check('the escrow row really was ingested (not a vacuous pass)',
         r.isoEscrowIngested, r.isoErr);
+  console.log('     raw delta ' + r.isoRawA + ' -> ' + r.isoRawB +
+              '   ordinary ' + r.isoOrdA + ' -> ' + r.isoOrdB);
+  check('the MEASURED balance delta really moved (the input changed)',
+        r.isoRawDeltaMoved, { a: r.isoRawA, b: r.isoRawB });
+  check('but the ORDINARY delta that risk scores is unchanged',
+        r.isoOrdDeltaSame, { a: r.isoOrdA, b: r.isoOrdB });
   check('the risk SCORE is unchanged', r.isoScoreSame,
         { base: r.isoBaselineScore, withEscrow: r.isoEscrowScore });
   check('every risk COMPONENT is unchanged', r.isoComponentsSame, r.isoErr);

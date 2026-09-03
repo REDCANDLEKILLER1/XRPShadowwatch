@@ -1476,9 +1476,15 @@ function analyzeFlags() {
     if (t.type === 'EscrowFinish' || t.type === 'EscrowCreate')
       flags.push(`HIGH ESCROW_${t.type}: ${t.label} ${fmt(t.amount)} XRP ${t.hash}`);
   }
-  // Dust groups
+  // Dust groups.
+  // ECONOMIC ROWS ONLY. frags becomes pack.fragmentation_flags, which
+  // buildRiskScore counts as `dust` into comp.dust_flags. Five small
+  // escrow-class rows sharing a destination would otherwise raise a
+  // fragmentation flag and with it the anomaly score — escrow reaching risk by
+  // a road that has nothing to do with large_transfers.
   const groups = {};
   for (const t of state.txs) {
+    if (_isEscrowLedgerType(t)) continue;
     if (t.currency === 'XRP' && t.amount > 0 && t.amount <= 50 && t.to) {
       const k = t.to + '|' + (t.destination_tag || 'none');
       if (!groups[k]) groups[k] = { to: t.to, tag: t.destination_tag || '', count: 0, total: 0, froms: new Set() };
@@ -2603,6 +2609,34 @@ function validate() {
 
 const shadowVolumeXRP = () => state.large.reduce((a, t) => a + n(t.amount), 0);
 const totalDeltaXRP = () => state.wallets.filter(w => w.status === 'CHECKED').reduce((a, w) => a + n(w.delta_xrp), 0);
+// ESCROW MOVES A BALANCE WITHOUT BEING ORDINARY FLOW.
+// Locking XRP into escrow really does reduce the owner's spendable balance, so
+// the measured delta really does change — which meant escrow could still push
+// comp.net_delta even after its transaction row had been split out of
+// large_transfers. The balance snapshot was a road nobody had closed.
+//
+// The raw figure stays exactly as measured and keeps its name: it was read off
+// the ledger and it is evidence. This computes the ESCROW-ATTRIBUTABLE part of
+// it so risk can score the remainder. A lock is added back (the balance fell by
+// that amount); a release into a watched wallet is subtracted (it rose).
+// A finisher is not adjusted — submitting an EscrowFinish does not move the
+// finisher's own balance; the funds come out of the escrow object.
+const escrowDeltaAdjustXRP = () => {
+  const watched = new Set((state.wallets || [])
+    .filter(w => w.status === 'CHECKED').map(w => w.address));
+  let adj = 0;
+  for (const t of (state.txs || [])) {
+    if (!_isEscrowLedgerType(t)) continue;
+    const amt = n(t.amount);
+    if (!(amt > 0)) continue;
+    if (t.type === 'EscrowCreate' && watched.has(t.from)) adj += amt;
+    else if (t.type === 'EscrowFinish' && watched.has(t.to)) adj -= amt;
+  }
+  return adj;
+};
+// What ordinary movement alone did to the watched balances. This is the risk
+// input; total_balance_delta_xrp remains the measured evidence.
+const ordinaryDeltaXRP = () => totalDeltaXRP() + escrowDeltaAdjustXRP();
 // Wide-shot activity across the watched wallets (ALL sizes, not just the ≥1M
 // whale moves). Shadow Volume stays the spotlight; these are the full totals.
 // XRP-currency payments only; the >=100B guard excludes partial-payment artifacts.
@@ -2690,7 +2724,10 @@ function buildRiskScore(pack) {
   };
   const largeN = (pack.large_transfers || []).length;
   const shadowV = Math.abs(n(pack.shadow_volume_xrp));
-  const deltaV = Math.abs(n(pack.total_balance_delta_xrp));
+  // Ordinary movement only — see escrowDeltaAdjustXRP. Falls back to the raw
+  // delta for packs built before this field existed (stored snapshots, fixtures).
+  const deltaV = Math.abs(n(pack.ordinary_balance_delta_xrp != null
+    ? pack.ordinary_balance_delta_xrp : pack.total_balance_delta_xrp));
   // Ledger weights deliberately sum to 90, ABOVE riskBand's BLACK threshold of
   // 75, so severe on-chain activity alone can still reach BLACK / EXTREME.
   // (An earlier pass summed them to exactly 75; because soft saturation only
@@ -2750,19 +2787,23 @@ function buildWalletProfiles(pack) {
   pack = pack || {};
   const txs = state.txs || [];
   const profiles = (pack.wallet_results || pack.wallets || state.wallets || []).map(w => {
-    const mine = txs.filter(t => t.from === w.address || t.to === w.address);
+    // ESCROW IS NOT ECONOMIC MOVEMENT HERE EITHER.
+    // Every archetype below feeds profileRisk in buildRiskScore, so EVERY
+    // feature that decides an archetype has to come from the economic subset —
+    // not just largeOut/largeIn. Excluding escrow from those two alone still
+    // let it move risk three other ways: `mine.length` crosses the
+    // EXCHANGE_HOT_FLOW threshold (>=10) and the WHALE_ACCUMULATOR one (<=5),
+    // and small escrow rows count toward DUST_RECEIVER (smallIn >= 5).
+    //
+    // The RAW count is kept separately for display: how many ledger events
+    // touched this wallet is a true fact and stays visible. It just may not
+    // decide an anomaly archetype.
+    const rawMine  = txs.filter(t => t.from === w.address || t.to === w.address);
+    const mine = rawMine.filter(t => !_isEscrowLedgerType(t));
     const outs = mine.filter(t => t.from === w.address);
     const ins  = mine.filter(t => t.to === w.address);
-    // ESCROW IS NOT ECONOMIC MOVEMENT HERE EITHER.
-    // largeOut/largeIn drive the archetype, and WHALE_DISTRIBUTOR carries
-    // positive profile risk in buildRiskScore. Counting an EscrowCreate as a
-    // large outflow let a scheduled lock turn an ordinary watched wallet into a
-    // whale distributor and raise the score — the same road the treasury
-    // cluster took, one function over. Locking or releasing your own escrow is
-    // not distributing to the market.
-    const _econ = t => !_isEscrowLedgerType(t);
-    const largeOut = outs.filter(t => _econ(t) && n(t.amount) >= 1000000).length;
-    const largeIn  = ins.filter(t => _econ(t) && n(t.amount) >= 1000000).length;
+    const largeOut = outs.filter(t => n(t.amount) >= 1000000).length;
+    const largeIn  = ins.filter(t => n(t.amount) >= 1000000).length;
     const smallIn  = ins.filter(t => n(t.amount) > 0 && n(t.amount) <= 50).length;
     let archetype = 'QUIET_HOLDER', reasons = [];
     if (w.status === 'FAILED' || w.status === 'INVALID_ADDR') { archetype = 'FAILED_SCAN'; reasons.push('scan failed'); }
@@ -2775,7 +2816,9 @@ function buildWalletProfiles(pack) {
     else if (smallIn >= 5) { archetype = 'DUST_RECEIVER'; reasons.push('many small incoming'); }
     return { label: w.label, address: w.address, category: w.cat,
       balance_xrp: n(w.balance_xrp), delta_xrp: n(w.delta_xrp),
-      tx_count_24h: mine.length, large_out_count: largeOut, large_in_count: largeIn,
+      tx_count_24h: mine.length, tx_count_24h_raw: rawMine.length,
+      escrow_event_count: rawMine.length - mine.length,
+      large_out_count: largeOut, large_in_count: largeIn,
       archetype, reasons, confidence: mine.length || w.status === 'FAILED' ? 'MEDIUM' : 'LOW' };
   });
   state.walletProfiles = profiles;
@@ -3141,6 +3184,10 @@ function buildPack(v) {
     wallet_results: state.wallets, tx_24h_count: state.txs.length,
     total_tx_xrp: totalTxXRP(), active_wallets: activeWalletCount(),
     shadow_volume_xrp: shadowVolumeXRP(), total_balance_delta_xrp: totalDeltaXRP(),
+    // The measured delta with the escrow-attributable part removed, and the
+    // adjustment itself so the two reconcile in the debug pack.
+    ordinary_balance_delta_xrp: ordinaryDeltaXRP(),
+    escrow_balance_adjust_xrp: escrowDeltaAdjustXRP(),
     large_transfers: state.large, escrow_transfers: state.escrowLarge || [],
     fragmentation_flags: state.frags,
     top_signals: state.flags.slice(0, 5),
