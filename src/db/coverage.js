@@ -295,6 +295,45 @@ function checkpointAdvance(input) {
   };
 }
 
+// ── Decision 2b: zero rows came back. What may be said about that? ────────
+//
+// This is the single most dangerous question in the whole design, because
+// every one of these states produces an EMPTY RESULT SET and they do not mean
+// the same thing:
+//
+//   proven, retained, nothing there   ->  "nothing happened"      TRUE
+//   never scanned                     ->  "nothing happened"      A LIE
+//   proven but pruned                 ->  "nothing happened"      A LIE
+//   scan truncated at a page ceiling  ->  "nothing happened"      A LIE
+//   index unreachable                 ->  "nothing happened"      A LIE
+//
+// A caller holding an empty array cannot tell these apart, and the Report is
+// read aloud on air. So the decision is made here, from the coverage facts,
+// and it is a function rather than a rule in a comment that someone has to
+// remember. `rowCount` is passed in only so the honest case can be named; a
+// non-zero count is never "quiet" regardless of coverage.
+function mayReportQuiet(decision, rowCount) {
+  const d = decision || {};
+  const n = _int(rowCount);
+  if (n === null || n < 0) return { quiet: false, reason: 'ROW_COUNT_UNKNOWN' };
+  if (n > 0) return { quiet: false, reason: 'ROWS_PRESENT' };
+  // Zero rows. Only a window the index fully owns may be called quiet, and
+  // only once the edge has actually been fetched.
+  if (!d.served_from_index) {
+    return { quiet: false, reason: d.reason || REASON.NO_COVERAGE };
+  }
+  if (d.complete_without_fetch === true) {
+    return { quiet: true, reason: 'PROVEN_QUIET' };
+  }
+  if (d.edge_fetch_complete === true) {
+    return { quiet: true, reason: 'PROVEN_QUIET' };
+  }
+  // Served from history, but the edge between the last checkpoint and this
+  // run's anchor has not been proven yet. The quiet part is quiet; the new
+  // part is unknown.
+  return { quiet: false, reason: 'EDGE_NOT_YET_PROVEN' };
+}
+
 // ── Decision 3: may the Report seal this window as complete? ───────────────
 //
 // coverageFrom (17-report-scan-tuning-20260816.js:199) already computes the
@@ -350,6 +389,7 @@ module.exports = {
   normalizeCoverage,
   hasProof,
   windowServability,
+  mayReportQuiet,
   checkpointAdvance,
   sealable
 };

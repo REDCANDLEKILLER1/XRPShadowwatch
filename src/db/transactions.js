@@ -282,18 +282,122 @@ function participantsOf(row) {
   add(row.escrow_owner, ROLE.ESCROW_OWNER);
   add(row.escrow_destination, ROLE.ESCROW_DEST);
   add(row.issuer, ROLE.ISSUER);
-  add(row.observed_via, ROLE.OBSERVED_VIA);
+  // After mergeSightings this is an array: every wallet whose walk saw this
+  // transaction, not just the first. Each becomes its own provenance row.
+  for (const o of _observers(row)) add(o, ROLE.OBSERVED_VIA);
   const signers = (row.evidence && row.evidence.signer_accounts) || [];
   for (const s of signers) add(s, ROLE.SIGNER);
   return out;
 }
 
-// ── One transaction, counted once ──────────────────────────────────────────
-// A watched-to-watched transfer is returned by BOTH wallets' account_tx walks
-// and produces two `observed_via` rows. Every report query across watched
-// wallets must therefore collapse to a distinct hash set before summing
-// anything, or the index inflates both volume and transaction count. Order is
-// preserved (first sighting wins) so a result set stays deterministic.
+// ── Exact arithmetic on drops ──────────────────────────────────────────────
+// Drops are integers up to 1e17 (the XRP supply), which is beyond the exact
+// range of a double. Any `Number()` on the way to a total silently rounds
+// evidence, and any lexicographic sort of the strings orders "9" above "100".
+// So totals and comparisons go through BigInt and come back as strings.
+//
+// These exist so that no caller ever has an excuse to reach for `Number()`.
+function sumDrops(values) {
+  let total = 0n;
+  for (const v of (Array.isArray(values) ? values : [])) {
+    const s = _dropsString(v);
+    if (s === null) continue;      // absent or malformed contributes nothing
+    total += BigInt(s);
+  }
+  return total.toString();
+}
+
+// -1 / 0 / 1, exact at any magnitude. A null sorts below every real value.
+function dropsCompare(a, b) {
+  const sa = _dropsString(a), sb = _dropsString(b);
+  if (sa === null && sb === null) return 0;
+  if (sa === null) return -1;
+  if (sb === null) return 1;
+  const ba = BigInt(sa), bb = BigInt(sb);
+  return ba < bb ? -1 : (ba > bb ? 1 : 0);
+}
+
+// ── One transaction, counted once — WITHOUT losing a role ──────────────────
+// A watched-to-watched transfer is returned by BOTH wallets' account_tx walks.
+// The same hash can also arrive from three different fetch paths in one run:
+// the Phase 2 wallet walk, escrowBackfill's own account_tx calls, and
+// scanReceivers'. Each sighting is a separate observation of the same event.
+//
+// The rule, and it is not the same rule twice:
+//
+//   DEDUPLICATE TRANSACTIONS.  DO NOT DEDUPLICATE EVIDENCE ROLES.
+//
+// Counting one transfer twice inflates volume. But collapsing the sightings by
+// keeping the first row and dropping the rest destroys the second wallet's
+// provenance — which is the exact structural loss `transaction_accounts` was
+// created to fix, reintroduced one layer higher. One transaction legitimately
+// produces several evidence outputs at once: an escrow event, a destination
+// movement, a discovery candidate. Those are different facts, not duplicates.
+//
+// So: one row per hash, and the UNION of every role every sighting observed.
+function mergeSightings(rows) {
+  const byHash = new Map();
+  for (const r of (Array.isArray(rows) ? rows : [])) {
+    const h = r && r.hash;
+    if (!h) continue;                       // a row with no hash is not evidence
+    const prior = byHash.get(h);
+    if (!prior) {
+      const merged = Object.assign({}, r);
+      merged.observed_via = _observers(r);
+      merged.sightings = 1;
+      merged.conflicts = [];
+      byHash.set(h, merged);
+      continue;
+    }
+    prior.sightings++;
+    for (const o of _observers(r)) {
+      if (prior.observed_via.indexOf(o) < 0) prior.observed_via.push(o);
+    }
+    // A later sighting may carry escrow facts the first one could not read —
+    // escrowBackfill reads ledger nodes the wallet walk did not. Fill gaps;
+    // never overwrite a value already established.
+    for (const k of ['escrow_owner', 'escrow_destination', 'escrow_amount_drops',
+                     'to_account', 'issuer', 'destination_tag', 'source_tag',
+                     'ledger_index', 'close_time_ms', 'close_time_iso', 'tx_result']) {
+      if ((prior[k] === null || prior[k] === undefined) &&
+          r[k] !== null && r[k] !== undefined) prior[k] = r[k];
+    }
+    // Two sightings of one hash disagreeing on a core fact is not something to
+    // resolve by picking one. It means a server returned inconsistent data, or
+    // the mapping is wrong. Record it so a reader can see it happened.
+    for (const k of ['tx_type', 'amount_drops', 'amount_value', 'currency',
+                     'from_account', 'ledger_index', 'tx_result',
+                     // Two sightings naming DIFFERENT escrow owners is the most
+                     // forensically loaded disagreement there is — it decides
+                     // whether a release is attributed to Ripple or to someone
+                     // else. Never resolve it by picking one.
+                     'escrow_owner', 'escrow_destination', 'escrow_amount_drops']) {
+      const a = prior[k], b = r[k];
+      if (a === null || a === undefined || b === null || b === undefined) continue;
+      if (String(a) !== String(b)) {
+        prior.conflicts.push({ field: k, kept: String(a), also_seen: String(b) });
+      }
+    }
+    const sigs = (prior.evidence && prior.evidence.signer_accounts) || [];
+    const more = (r.evidence && r.evidence.signer_accounts) || [];
+    if (more.length) {
+      prior.evidence = Object.assign({}, prior.evidence);
+      prior.evidence.signer_accounts = sigs.concat(more.filter(s => sigs.indexOf(s) < 0));
+    }
+  }
+  return Array.from(byHash.values());
+}
+
+function _observers(r) {
+  const v = r && r.observed_via;
+  if (Array.isArray(v)) return v.filter(Boolean).slice();
+  return v ? [v] : [];
+}
+
+// Kept for callers that genuinely want only the distinct hashes and no role
+// information at all — a COUNT, or a hash set to join on. It DISCARDS the
+// extra sightings, so it must never be used to build evidence rows: use
+// mergeSightings for that.
 function dedupeByHash(rows) {
   const out = [];
   const seen = new Set();
@@ -311,7 +415,10 @@ module.exports = {
   XRPL_EPOCH_OFFSET_MS,
   rowFromAccountTx,
   participantsOf,
+  mergeSightings,
   dedupeByHash,
+  sumDrops,
+  dropsCompare,
   // Exported for the suite. These are the points where a silent coercion would
   // fabricate a ledger value, so they are asserted directly rather than only
   // through a built row.

@@ -405,16 +405,126 @@ check('A\'s sighting records A as the observer',
       pA.some(p => p.address === 'rWatchedA' && p.role === 'observed_via'));
 check('B\'s sighting records B as the observer — provenance kept, not destroyed',
       pB.some(p => p.address === 'rWatchedB' && p.role === 'observed_via'));
-const deduped = TX.dedupeByHash([seenByA, seenByB]);
-check('the two sightings collapse to ONE transaction', deduped.length === 1, deduped.length);
-const total = deduped.reduce((a, r) => a + Number(r.amount_drops || 0), 0);
-check('the amount is counted once, not twice', total === 900000000000, total);
-check('dedupe is order-stable — first sighting wins',
-      TX.dedupeByHash([seenByB, seenByA])[0].observed_via === 'rWatchedB');
+// DEDUPLICATE TRANSACTIONS. DO NOT DEDUPLICATE EVIDENCE ROLES.
+// Collapsing the sightings by keeping the first row and dropping the rest
+// would destroy the second wallet's provenance — the exact structural loss
+// transaction_accounts exists to fix, reintroduced one layer higher.
+const merged = TX.mergeSightings([seenByA, seenByB]);
+check('the two sightings collapse to ONE transaction', merged.length === 1, merged.length);
+check('and the merge records that it saw two', merged[0].sightings === 2);
+check('BOTH observers survive the merge — no role is deduplicated',
+      merged[0].observed_via.length === 2 &&
+      merged[0].observed_via.indexOf('rWatchedA') >= 0 &&
+      merged[0].observed_via.indexOf('rWatchedB') >= 0, merged[0].observed_via);
+const mp = TX.participantsOf(merged[0]);
+const observers = mp.filter(p => p.role === 'observed_via').map(p => p.address).sort();
+check('the merged row yields a provenance row per observer',
+      JSON.stringify(observers) === JSON.stringify(['rWatchedA', 'rWatchedB']), observers);
+check('merging is order-independent',
+      JSON.stringify(TX.mergeSightings([seenByB, seenByA])[0].observed_via.slice().sort()) ===
+      JSON.stringify(['rWatchedA', 'rWatchedB']));
+
+// Totals go through BigInt, never Number. Asserting "counted once" via a float
+// sum would verify the right fact through the exact path that must never touch
+// drops — and it would keep passing right up until an amount got large enough
+// to matter.
+check('the amount is counted once, not twice',
+      TX.sumDrops(merged.map(r => r.amount_drops)) === '900000000000',
+      TX.sumDrops(merged.map(r => r.amount_drops)));
+check('un-merged sightings would have DOUBLED it — the bug this prevents',
+      TX.sumDrops([seenByA, seenByB].map(r => r.amount_drops)) === '1800000000000');
+
+// The magnitude where a float total stops being evidence.
+const HUGE = ['90000000000000000', '10000000000000001'];   // sums to 1.0000...01e17
+check('a total beyond MAX_SAFE_INTEGER is exact',
+      TX.sumDrops(HUGE) === '100000000000000001', TX.sumDrops(HUGE));
+check('the float path would have got that wrong',
+      String(HUGE.reduce((a, v) => a + Number(v), 0)) !== '100000000000000001');
+check('sumDrops ignores absent and malformed values rather than coercing them',
+      TX.sumDrops([null, undefined, '', 'abc', '12.5', '5']) === '5');
+
+// Lexicographic ordering of drop strings puts "9" above "100".
+check('dropsCompare orders by magnitude, not lexicographically',
+      TX.dropsCompare('9', '100') === -1 && TX.dropsCompare('100', '9') === 1);
+check('and is exact beyond MAX_SAFE_INTEGER',
+      TX.dropsCompare('100000000000000001', '100000000000000000') === 1);
+check('a naive string sort would have disagreed', '9' > '100');
+check('equal values compare equal', TX.dropsCompare('42', '42') === 0);
+check('an absent amount sorts below every real one',
+      TX.dropsCompare(null, '0') === -1);
+
+// A later sighting may carry escrow facts the wallet walk could not read —
+// escrowBackfill reads ledger nodes Phase 2 never touched. Gaps fill; values
+// already established are never overwritten.
+const thin = TX.rowFromAccountTx({
+  ledger_index: 98765440,
+  tx_json: { TransactionType: 'EscrowFinish', hash: 'H_LATE', Account: 'rBot', date: 800000800 },
+  meta: { TransactionResult: 'tesSUCCESS', AffectedNodes: [] }
+}, { observedVia: 'rWalk' });
+const rich = TX.rowFromAccountTx({
+  ledger_index: 98765440,
+  tx_json: { TransactionType: 'EscrowFinish', hash: 'H_LATE', Account: 'rBot', date: 800000800 },
+  meta: { TransactionResult: 'tesSUCCESS', AffectedNodes: [{ DeletedNode: {
+    LedgerEntryType: 'Escrow',
+    FinalFields: { Account: 'rRealOwner', Destination: 'rRealDest', Amount: '7000000' } } }] }
+}, { observedVia: 'rBackfill' });
+check('the thin sighting genuinely has no owner (the gap being filled is real)',
+      thin.escrow_owner === null);
+const filled = TX.mergeSightings([thin, rich])[0];
+check('a later sighting fills a gap the first could not read',
+      filled.escrow_owner === 'rRealOwner' && filled.escrow_amount_drops === '7000000');
+check('multi-object evidence is preserved, not deduplicated away',
+      TX.participantsOf(filled).some(p => p.address === 'rRealDest' && p.role === 'escrow_dest'));
+// This needs a second sighting carrying a DIFFERENT non-null owner. Asserting
+// it against `thin` (whose owner is null) proves nothing: the null guard would
+// block the overwrite even if the precedence rule were deleted. A sabotage
+// caught exactly that — the fixture made the code correct by construction.
+const rival = TX.rowFromAccountTx({
+  ledger_index: 98765440,
+  tx_json: { TransactionType: 'EscrowFinish', hash: 'H_LATE', Account: 'rBot', date: 800000800 },
+  meta: { TransactionResult: 'tesSUCCESS', AffectedNodes: [{ DeletedNode: {
+    LedgerEntryType: 'Escrow',
+    FinalFields: { Account: 'rIMPOSTOR', Destination: 'rOtherDest', Amount: '9999999' } } }] }
+}, { observedVia: 'rThird' });
+check('the rival sighting really does carry a different owner (the fixture bites)',
+      rival.escrow_owner === 'rIMPOSTOR' && rich.escrow_owner === 'rRealOwner');
+const contested = TX.mergeSightings([rich, rival])[0];
+check('an established escrow owner is never overwritten by a later sighting',
+      contested.escrow_owner === 'rRealOwner', contested.escrow_owner);
+// Attributing a release to the wrong owner is the difference between "Ripple
+// released this" and naming an unrelated wallet on air. A disagreement here is
+// never resolved by picking one.
+check('and the disagreement about ownership is RECORDED',
+      contested.conflicts.some(c => c.field === 'escrow_owner' &&
+                                    c.kept === 'rRealOwner' && c.also_seen === 'rIMPOSTOR'),
+      contested.conflicts);
+check('the contested amount is recorded too',
+      contested.conflicts.some(c => c.field === 'escrow_amount_drops'));
+check('a still-null owner is filled rather than treated as a conflict',
+      TX.mergeSightings([thin, rich])[0].conflicts.length === 0);
+
+// Two sightings disagreeing on a core fact is a server inconsistency or a
+// mapping bug. Recording it beats silently picking one.
+const forkA = TX.rowFromAccountTx({ ledger_index: 1, tx_json: { TransactionType: 'Payment',
+  hash: 'H_FORK', Account: 'rX', Amount: '100', date: 1 }, meta: { TransactionResult: 'tesSUCCESS' } }, {});
+const forkB = TX.rowFromAccountTx({ ledger_index: 1, tx_json: { TransactionType: 'Payment',
+  hash: 'H_FORK', Account: 'rX', Amount: '999', date: 1 }, meta: { TransactionResult: 'tesSUCCESS' } }, {});
+const forked = TX.mergeSightings([forkA, forkB])[0];
+check('conflicting sightings are recorded, not silently resolved',
+      forked.conflicts.length === 1 && forked.conflicts[0].field === 'amount_drops',
+      forked.conflicts);
+check('agreeing sightings record no conflict', merged[0].conflicts.length === 0);
+
 check('a row with no hash is never counted',
-      TX.dedupeByHash([{ hash: '' }, { hash: null }, seenByA]).length === 1);
+      TX.mergeSightings([{ hash: '' }, { hash: null }, seenByA]).length === 1);
 check('three distinct transactions stay three',
-      TX.dedupeByHash([partial, failedRow, fin]).length === 3);
+      TX.mergeSightings([partial, failedRow, fin]).length === 3);
+// dedupeByHash still exists for callers that want only a hash set. It DISCARDS
+// sightings, so it is asserted to be the lossy one — a future reader reaching
+// for it should see the difference stated.
+check('dedupeByHash is the lossy variant and is documented as such',
+      TX.dedupeByHash([seenByA, seenByB]).length === 1 &&
+      TX.dedupeByHash([seenByA, seenByB])[0].observed_via === 'rWatchedA');
 
 // ════════════════════════════════════════════════════════════════════════════
 console.log('\n4. when a window may be served out of the index');
@@ -567,6 +677,91 @@ check('a missing anchor is refused',
       /anchorLedger/.test(threw(() => COV.windowServability({ coverage: provenCov, windowStartMs: WIN_START, windowEndMs: WIN_END })) || ''));
 check('an inverted window is refused',
       /window/i.test(threw(() => COV.windowServability({ coverage: provenCov, windowStartMs: WIN_END, windowEndMs: WIN_START, anchorLedger: ANCHOR })) || ''));
+
+// ════════════════════════════════════════════════════════════════════════════
+console.log('\n4b. zero rows came back — what may be SAID about that');
+// Every state below produces an EMPTY RESULT SET, and they do not mean the
+// same thing. A caller holding an empty array cannot tell them apart, and the
+// Report is read aloud on air. So the distinction is a tested function, not a
+// rule in a comment somebody has to remember.
+const fetched = (d) => Object.assign({}, d, { edge_fetch_complete: true });
+
+// The one honest "nothing happened".
+check('proven, retained, edge fetched, zero rows -> QUIET is allowed',
+      COV.mayReportQuiet(fetched(edge), 0).quiet === true &&
+      COV.mayReportQuiet(fetched(edge), 0).reason === 'PROVEN_QUIET');
+check('a catch-up past the anchor needs no fetch and is quiet on zero rows',
+      COV.mayReportQuiet(ahead, 0).quiet === true);
+
+// Every lie, each refused by name.
+check('never scanned + zero rows is NOT quiet',
+      COV.mayReportQuiet(cold, 0).quiet === false &&
+      COV.mayReportQuiet(cold, 0).reason === COV.REASON.NO_COVERAGE);
+check('a Postgres row of NULLs + zero rows is NOT quiet',
+      COV.mayReportQuiet(coldPg, 0).quiet === false);
+check('proven-but-pruned + zero rows is NOT quiet',
+      COV.mayReportQuiet(pruned, 0).quiet === false &&
+      COV.mayReportQuiet(pruned, 0).reason === COV.REASON.EVIDENCE_PRUNED);
+check('a window predating proven history + zero rows is NOT quiet',
+      COV.mayReportQuiet(frontGap, 0).quiet === false);
+check('history served but the EDGE not yet fetched is NOT quiet',
+      COV.mayReportQuiet(edge, 0).quiet === false &&
+      COV.mayReportQuiet(edge, 0).reason === 'EDGE_NOT_YET_PROVEN');
+check('an unreachable index (no decision at all) is NOT quiet',
+      COV.mayReportQuiet(null, 0).quiet === false);
+check('an unknown row count is NOT quiet, even on perfect coverage',
+      COV.mayReportQuiet(fetched(edge), null).quiet === false &&
+      COV.mayReportQuiet(fetched(edge), undefined).reason === 'ROW_COUNT_UNKNOWN');
+check('rows present is never "quiet", whatever the coverage says',
+      COV.mayReportQuiet(fetched(edge), 3).quiet === false &&
+      COV.mayReportQuiet(fetched(edge), 3).reason === 'ROWS_PRESENT');
+
+// ── the rest of the auditor's required matrix ─────────────────────────────
+// PARTIAL HISTORY: coverage that starts inside the window. The index owns none
+// of it — a partial answer rendered as a whole one is the failure.
+const partialHist = COV.windowServability({
+  coverage: Object.assign({}, provenCov, {
+    scan_coverage_from: 98700000,
+    scan_coverage_from_close_ms: T('2026-09-02T06:00:00Z') }),   // 6h into a 24h window
+  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+check('coverage starting INSIDE the window is not servable',
+      partialHist.served_from_index === false &&
+      partialHist.reason === COV.REASON.PROOF_GAP_AT_START, partialHist.reason);
+check('and a partial window is never reported quiet',
+      COV.mayReportQuiet(partialHist, 0).quiet === false);
+
+// STALE CHECKPOINT: proven weeks ago. Still servable for history, but the edge
+// is enormous and must be fetched — never silently treated as current.
+const stale = COV.windowServability({
+  coverage: Object.assign({}, provenCov, {
+    scan_coverage_through: 98000500,
+    scan_coverage_through_close_ms: T('2026-08-01T00:10:00Z') }),
+  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+check('a stale checkpoint still yields EDGE_ONLY, not FULLY_SERVABLE',
+      stale.reason === COV.REASON.EDGE_ONLY, stale.reason);
+check('and the edge it demands spans the whole gap',
+      stale.fetch_from_ledger === 98000501 && stale.fetch_to_ledger === ANCHOR,
+      { from: stale.fetch_from_ledger, to: stale.fetch_to_ledger });
+check('a stale checkpoint is not complete without that fetch',
+      stale.complete_without_fetch === false &&
+      COV.mayReportQuiet(stale, 0).quiet === false);
+check('once its edge IS proven, it may be reported quiet',
+      COV.mayReportQuiet(fetched(stale), 0).quiet === true);
+
+// EMPTY HISTORY: a wallet proven over a range that genuinely contained
+// nothing. This is the case the whole design exists to make cheap, and it must
+// stay distinguishable from "never looked".
+const emptyButProven = COV.checkpointAdvance({
+  coverage: provenCov, anchorLedger: ANCHOR,
+  proof: { status: 'COMPLETE', from_ledger: 98790001, through_ledger: ANCHOR,
+           range_bound_proven: true, rows_stored: 0,
+           from_close_ms: T('2026-09-02T23:00:01Z'),
+           through_close_ms: T('2026-09-03T00:00:00Z') } });
+check('an empty range that was walked to exhaustion still advances coverage',
+      emptyButProven.advance === true &&
+      emptyButProven.reason === 'EMPTY_RANGE_EXHAUSTED');
+check('which is a DIFFERENT fact from never having scanned',
+      COV.mayReportQuiet(cold, 0).reason !== COV.mayReportQuiet(fetched(edge), 0).reason);
 
 // ════════════════════════════════════════════════════════════════════════════
 console.log('\n5. when coverage may advance — and when it may not');
