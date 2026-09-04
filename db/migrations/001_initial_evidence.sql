@@ -45,6 +45,17 @@ CREATE TABLE IF NOT EXISTS transactions (
   tx_flags            BIGINT,
   transaction_index   INTEGER,
   roster_version      TEXT,
+  -- THE EVIDENCE OF RECORD. The complete public ledger payload, verbatim.
+  -- Normalized columns above are for fast querying; these are the forensic
+  -- source of truth. Without them the index answers only the questions we
+  -- thought to normalize, and any future classifier needing something else
+  -- would force a rescan of the history this index exists to stop rescanning.
+  -- Public transaction evidence only: no seed, no key, no signing material.
+  raw_tx              JSONB       NOT NULL,
+  raw_meta            JSONB       NOT NULL,
+  -- Derived conclusions and compact projections, NOT a second copy of the
+  -- payload (delivered-amount override, escrow node count, signer list,
+  -- AccountRoot balance deltas).
   evidence            JSONB       NOT NULL DEFAULT '{}'::jsonb,
   first_seen_scan_id  TEXT,
   ingested_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -184,7 +195,7 @@ CREATE INDEX IF NOT EXISTS coverage_advances_scan_idx    ON coverage_advances (s
 CREATE TABLE IF NOT EXISTS scan_runs (
   scan_id           TEXT        PRIMARY KEY,
   anchor_ledger     BIGINT      NOT NULL,
-  anchor_close_time TIMESTAMPTZ,
+  anchor_close_time TIMESTAMPTZ NOT NULL,
   window_start      TIMESTAMPTZ NOT NULL,
   window_end        TIMESTAMPTZ NOT NULL,
   window_label      TEXT,
@@ -197,6 +208,11 @@ CREATE TABLE IF NOT EXISTS scan_runs (
   finished_at       TIMESTAMPTZ,
   CONSTRAINT scan_runs_anchor_positive CHECK (anchor_ledger > 0),
   CONSTRAINT scan_runs_window_ordered  CHECK (window_end >= window_start),
+  -- A run may not claim time its own validated-ledger anchor did not
+  -- cover. Without this the final seconds of a window can fall after the
+  -- anchor closed, so the Report asserts a period no ledger it read was
+  -- inside. Cap window_end to anchor_close_time before persisting.
+  CONSTRAINT scan_runs_window_within_anchor CHECK (window_end <= anchor_close_time),
   CONSTRAINT scan_runs_status CHECK (
     status IN ('RUNNING', 'COMPLETE', 'PARTIAL', 'FAILED')
   )

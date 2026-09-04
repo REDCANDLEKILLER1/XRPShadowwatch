@@ -103,6 +103,12 @@ for each of 251 wallets:
     never scanned?            →  full date-bounded walk  (first run only)
 ```
 
+**"First run only" is a promise the code has to keep.** A wallet with no
+checkpoint can only be walked by *date* — there is no ledger floor to bound it
+with yet. So if a date walk could never establish a checkpoint, a never-scanned
+wallet would stay never-scanned and pay the full walk every morning, forever,
+and none of the above would ever happen. See § 5a.
+
 A quiet wallet costs one page that comes back **empty** — and an exhausted
 empty range **proves** nothing happened. That is a *stronger* statement than
 skipping the wallet because its balance looked unchanged. A busy wallet pays
@@ -153,6 +159,40 @@ Five outcomes, each named so a log line and a test can say which happened:
 
 `FULLY_SERVABLE` is the "second report takes seconds" case.
 
+### 5a. Bootstrap — how a wallet gets its FIRST checkpoint
+
+A date-bounded walk **may** establish a checkpoint, but only on positive
+evidence of a ledger floor. Two ways to get one:
+
+| Signal | Meaning | Floor |
+|---|---|---|
+| `boundary_reached` | the walk read past the window start and saw an older transaction | oldest ledger index observed |
+| `history_exhausted` | the server returned no further marker | oldest ledger index observed |
+
+Either way the floor is a value that was **read**, never one derived by
+interpolating an average close interval.
+
+Two details that are not incidental:
+
+**Exhaustion reaches back past any window start.** On `history_exhausted` the
+recorded `scan_coverage_from_close` is the beginning of time, not the oldest
+transaction's close time. An account created yesterday, whose entire history
+postdates the window, is still *fully* covered — recording its oldest close
+time instead would make `proven_start` false on the next run and send it back
+to a full walk, which is the bug this bootstrap exists to remove.
+
+**An empty exhausted account is refused.** With no transactions there is no
+ledger to read a floor from, and "the server had no more pages" is also what a
+*partial-history* server says. Claiming a floor there would be inventing a
+ledger value. It refuses with `NO_LEDGER_FLOOR_OBSERVED` and costs one empty
+page next run — the cheapest thing in the system.
+
+`TRUNCATED` and `FAILED` still never bootstrap. A safety ceiling is not a proof.
+
+The acceptance test: `NO_COVERAGE` → a successful boundary/exhaustion walk →
+checkpoint established → the immediate second run returns `EDGE_ONLY`, not
+another full-history walk.
+
 ### Why close times are stored next to the ledger bounds
 
 The Report's window arrives in **time** (`[startMs, endMs]`); the fetch has to
@@ -171,6 +211,18 @@ an explicit numeric `ledger_index_max` on every request. A concurrent
 server-side catch-up may advance the shared index mid-run; the running Report
 still queries only `<= its anchor`, so all 251 wallets and every derived metric
 describe **one ledger state**.
+
+`anchor_close_time` is `NOT NULL` — half an anchor is not an anchor. A ledger
+index with no close time cannot be compared against a report window at all.
+
+**A run may not claim time its anchor did not cover.** The window is frozen at
+page load (`02-core.js:877-890`) while the anchor is fetched at scan start, so
+a window end sitting *after* the last ledger the run read is routine, not
+exotic. The migration enforces `window_end <= anchor_close_time`, but a `CHECK`
+only fires at INSERT — by then the narrative has already been built from the
+uncapped window. So `windowServability()` caps it in the decision layer, before
+any number is derived, and surfaces the overshoot (`claimed_beyond_anchor_ms`)
+rather than swallowing it.
 
 Today everything uses `-1`, resolved per request. That is why no index can
 currently mean *"I scanned up to here"*, and it is a prerequisite for
@@ -258,6 +310,17 @@ recomputed on read.
 to catch a wallet up. It can never say *"trust me, wallet X is complete through
 ledger 105000"*. The server reads XRPL itself, stores the evidence, proves the
 range, and advances the checkpoint transactionally.
+
+**Every row keeps the complete payload.** `raw_tx` and `raw_meta` are
+`NOT NULL` and hold exactly what XRPL returned. An earlier version of this
+design kept an *allowlist* of about eleven fields while claiming nothing was
+discarded — which an allowlist does by definition, permanently, and the only
+way to recover a field nobody thought to list would be re-walking the history
+this index exists to stop re-walking. Normalized columns are for querying;
+`raw_tx`/`raw_meta` are the forensic source of truth, and the derived
+`evidence` object holds only conclusions the payload does not state. Public
+ledger evidence only: `TxnSignature` and `SigningPubKey` are on-chain fields
+anyone can read, not credentials.
 
 **Amounts are exact.** XRP is denominated in drops and the 100,000,000,000 XRP
 supply is 1e17 drops — beyond the exact range of an IEEE-754 double

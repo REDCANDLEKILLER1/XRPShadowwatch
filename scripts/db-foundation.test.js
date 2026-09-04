@@ -96,6 +96,48 @@ function columnsOf(body) {
     .map(s => (s.match(/^"?(\w+)"?/) || [])[1])
     .filter(Boolean);
 }
+// name -> normalized declaration (type + NOT NULL + DEFAULT), whitespace
+// collapsed. Comparing these is what makes a type change visible.
+function columnDefsOf(body) {
+  const out = {};
+  const parts = [];
+  let depth = 0, cur = '';
+  for (const ch of body) {
+    if (ch === '(') { depth++; cur += ch; continue; }
+    if (ch === ')') { depth--; cur += ch; continue; }
+    if (ch === ',' && depth === 0) { parts.push(cur); cur = ''; continue; }
+    cur += ch;
+  }
+  parts.push(cur);
+  for (const raw of parts) {
+    const t = raw.trim();
+    if (!t) continue;
+    if (/^(CONSTRAINT|PRIMARY\s+KEY|UNIQUE|CHECK|FOREIGN\s+KEY|EXCLUDE)\b/i.test(t)) continue;
+    const m = t.match(/^"?(\w+)"?\s+([\s\S]+)$/);
+    if (!m) continue;
+    out[m[1]] = m[2].replace(/\s+/g, ' ').trim().toUpperCase();
+  }
+  return out;
+}
+
+// name -> the CHECK expression that follows it, whitespace collapsed.
+function constraintExprs(sql) {
+  const out = {};
+  const src = stripComments(sql);
+  const re = /CONSTRAINT\s+(\w+)\s+CHECK\s*\(/gi;
+  let m;
+  while ((m = re.exec(src))) {
+    let depth = 1, i = re.lastIndex;
+    while (i < src.length && depth > 0) {
+      if (src[i] === '(') depth++;
+      else if (src[i] === ')') depth--;
+      i++;
+    }
+    out[m[1]] = src.slice(re.lastIndex, i - 1).replace(/\s+/g, ' ').trim().toUpperCase();
+  }
+  return out;
+}
+
 function namesOf(sql, re) {
   const out = new Set();
   let m; const src = stripComments(sql);
@@ -132,6 +174,37 @@ for (const t of Object.keys(schemaTables)) {
 }
 check('every table has the same columns in both', colDrift.length === 0, colDrift);
 
+// Names alone are not parity. Comparing only names let `amount_drops FLOAT8`
+// sit in the migration while the reference said NUMERIC(21,0) — the two files
+// disagreeing about the most safety-critical type in the schema, with the
+// drift check green. Compare the DECLARED DEFINITION: type, NOT NULL, DEFAULT.
+let typeDrift = [];
+for (const t of Object.keys(schemaTables)) {
+  if (!migrationTables[t]) continue;
+  const a = columnDefsOf(schemaTables[t]);
+  const b = columnDefsOf(migrationTables[t]);
+  for (const col of Object.keys(a)) {
+    if (b[col] !== undefined && a[col] !== b[col]) {
+      typeDrift.push({ table: t, column: col, schema: a[col], migration: b[col] });
+    }
+  }
+}
+check('every column has the same TYPE and nullability in both',
+      typeDrift.length === 0, typeDrift);
+
+// Same hole one level down: constraint parity compared NAMES, so two files
+// could declare scan_runs_window_within_anchor with opposite operators and the
+// suite called them identical.
+const schemaCons = constraintExprs(SCHEMA_SQL), migCons = constraintExprs(MIGRATION_SQL);
+let consDrift = [];
+for (const name of Object.keys(schemaCons)) {
+  if (migCons[name] !== undefined && schemaCons[name] !== migCons[name]) {
+    consDrift.push({ constraint: name, schema: schemaCons[name], migration: migCons[name] });
+  }
+}
+check('every named constraint has the same EXPRESSION in both',
+      consDrift.length === 0, consDrift);
+
 const CONSTRAINT_RE = /CONSTRAINT\s+(\w+)/;
 const INDEX_RE      = /CREATE INDEX IF NOT EXISTS\s+(\w+)/;
 check('the same named constraints exist in both',
@@ -150,9 +223,15 @@ check('the migration is wrapped in a transaction',
       /^\s*BEGIN\s*;/mi.test(MIGRATION_SQL) && /^\s*COMMIT\s*;/mi.test(MIGRATION_SQL));
 check('the migration records its own version',
       /INSERT INTO schema_migrations/i.test(MIGRATION_SQL));
+// The literal-only form matched neither `CREATE UNIQUE INDEX` (text between
+// CREATE and INDEX defeats the lookahead) nor VIEW / SEQUENCE / TYPE, so an
+// unguarded unique index would abort the whole transaction on re-run while
+// this check stayed green — against a file whose header promises "safe to
+// re-run". CREATE OR REPLACE FUNCTION and the DROP TRIGGER IF EXISTS + CREATE
+// TRIGGER pair are idempotent by their own construction and are exempted.
 check('the migration is idempotent — every create is guarded',
-      !/CREATE TABLE(?! IF NOT EXISTS)/i.test(stripComments(MIGRATION_SQL)) &&
-      !/CREATE INDEX(?! IF NOT EXISTS)/i.test(stripComments(MIGRATION_SQL)));
+      !/CREATE\s+(?:UNIQUE\s+|MATERIALIZED\s+)?(TABLE|INDEX|VIEW|SEQUENCE|TYPE)\b(?!\s+IF NOT EXISTS)/i
+        .test(stripComments(MIGRATION_SQL)));
 
 // ── ledger_index is the prerequisite, not a nice-to-have ──────────────────
 // state.txs rows (02-core.js:1218-1229) carry no ledger index at all. Without
@@ -160,21 +239,71 @@ check('the migration is idempotent — every create is guarded',
 // would let coverage claim ledgers nobody read.
 check('transactions.ledger_index exists and is NOT NULL',
       /ledger_index\s+BIGINT\s+NOT NULL/i.test(stripComments(migrationTables.transactions || '')));
+// This used to match `/may not decrease/` against the RAW migration text, so
+// the phrase appearing in an SQL COMMENT satisfied it — the guard could be
+// deleted entirely, replaced by a comment saying it lives in the application,
+// and the check stayed green. Assert the comparison EXPRESSION inside the
+// function body, on comment-stripped text.
+const _fnBody = (stripComments(MIGRATION_SQL)
+  .split(/CREATE OR REPLACE FUNCTION wallet_coverage_monotonic\(\)/i)[1] || '')
+  .split(/\$\$\s*LANGUAGE/i)[0] || '';
+check('the monotonic guard is a real expression, not a comment about one',
+      /NEW\.scan_coverage_through\s*<\s*OLD\.scan_coverage_through\s+THEN/i.test(_fnBody) &&
+      /RAISE\s+EXCEPTION/i.test(_fnBody), _fnBody.slice(0, 120));
 check('a checkpoint can never be moved backwards by an UPDATE',
-      /may not decrease/i.test(MIGRATION_SQL) && /BEFORE UPDATE ON wallet_coverage/i.test(MIGRATION_SQL));
+      /BEFORE UPDATE ON wallet_coverage/i.test(stripComments(MIGRATION_SQL)));
+// A text match can never prove plpgsql semantics. Saying so here rather than
+// letting the check's name overclaim.
+check('the clearing guard is also a real expression',
+      /NEW\.scan_coverage_through\s+IS\s+NULL\s+THEN/i.test(_fnBody));
+// The complete payload is the forensic source of truth, so it may not be
+// optional. A nullable raw column is an allowlist with extra steps.
+check('raw_tx and raw_meta are NOT NULL',
+      /raw_tx\s+JSONB\s+NOT NULL/i.test(stripComments(migrationTables.transactions || '')) &&
+      /raw_meta\s+JSONB\s+NOT NULL/i.test(stripComments(migrationTables.transactions || '')));
+// Half an anchor is not an anchor: a ledger index with no close time cannot be
+// compared against a report window at all.
+check('scan_runs.anchor_close_time is NOT NULL',
+      /anchor_close_time\s+TIMESTAMPTZ\s+NOT NULL/i.test(stripComments(migrationTables.scan_runs || '')));
+// Without this a run can claim a window whose final seconds fall after its own
+// anchor closed — asserting a period no ledger it read was inside.
+// The unanchored form matched any CHECK merely BEGINNING with that comparison,
+// so `window_end <= anchor_close_time + INTERVAL '1 day'` — a plausible "clock
+// skew" edit letting a Report claim a full day its anchor never covered — kept
+// it green. Assert the whole expression, scoped to the scan_runs body.
+check('a run cannot claim time past its own anchor',
+      /CONSTRAINT\s+scan_runs_window_within_anchor\s+CHECK\s*\(\s*window_end\s*<=\s*anchor_close_time\s*\)/i
+        .test(stripComments(migrationTables.scan_runs || '')));
 check('proof and retained evidence are separate columns',
       /scan_coverage_through/i.test(MIGRATION_SQL) && /evidence_retained_through/i.test(MIGRATION_SQL));
+// Two holes in one line, both verified: `/amount_drops\s+NUMERIC/` matched the
+// SUBSTRING inside `escrow_amount_drops NUMERIC(21,0)`, so amount_drops itself
+// could be FLOAT8 and pass; and `\bFLOAT\b` never matches FLOAT8 because 8 is
+// a word character. The single most safety-critical type in the schema could
+// become an actual double with this green.
+const _txBody = stripComments(migrationTables.transactions || '');
 check('amounts are NUMERIC, never floating point',
-      /amount_drops\s+NUMERIC/i.test(MIGRATION_SQL) &&
-      !/\b(REAL|DOUBLE PRECISION|FLOAT)\b/i.test(stripComments(MIGRATION_SQL)));
+      /(^|,|\s)amount_drops\s+NUMERIC\(21,0\)/im.test(_txBody) &&
+      /(^|,|\s)escrow_amount_drops\s+NUMERIC\(21,0\)/im.test(_txBody) &&
+      /(^|,|\s)fee_drops\s+NUMERIC\(21,0\)/im.test(_txBody) &&
+      /(^|,|\s)amount_value\s+NUMERIC/im.test(_txBody) &&
+      !/\b(REAL|DOUBLE\s+PRECISION|FLOAT\d*)\b/i.test(stripComments(MIGRATION_SQL)));
 // XRPL access is read-only and no signing material exists in this project.
 const secretish = Object.keys(migrationTables)
   .flatMap(t => columnsOf(migrationTables[t]))
   .filter(c => CONN.SECRET_KEYS.test(c));
 check('no column could hold key material', secretish.length === 0, secretish);
+// The name claimed a general property; the body forbade two spellings. The
+// statements that actually destroy forensic rows in a migration are DELETE FROM
+// and DROP COLUMN, and neither was mentioned — a "retention" DELETE would run on
+// every re-application of an intentionally re-runnable migration. Retention
+// belongs in application code, in the same transaction that narrows
+// evidence_retained_*, never in a migration.
+const _m = stripComments(MIGRATION_SQL);
 check('no migration destroys evidence',
-      !/\bDROP\s+TABLE\b/i.test(stripComments(MIGRATION_SQL)) &&
-      !/\bTRUNCATE\b/i.test(stripComments(MIGRATION_SQL)));
+      !/\bDROP\s+TABLE\b/i.test(_m) && !/\bTRUNCATE\b/i.test(_m) &&
+      !/\bDELETE\s+FROM\b/i.test(_m) && !/\bDROP\s+COLUMN\b/i.test(_m) &&
+      !/\bALTER\s+TABLE\b[\s\S]{0,200}?\bDROP\b/i.test(_m));
 
 // ════════════════════════════════════════════════════════════════════════════
 console.log('\n2. ingest is non-lossy, and never fabricates a ledger value');
@@ -307,8 +436,8 @@ check('the submitter is NOT promoted to owner',
 check('the escrow destination and amount come off the node',
       fin.escrow_destination === 'rRippleDest' && fin.escrow_amount_drops === '500000000000000');
 check('EscrowFinish Owner and OfferSequence are preserved',
-      fin.evidence.Owner === 'rRippleOwner' && fin.evidence.OfferSequence === 42);
-check('the crypto-condition fulfillment is preserved', fin.evidence.Fulfillment === 'A0');
+      fin.raw_tx.Owner === 'rRippleOwner' && fin.raw_tx.OfferSequence === 42);
+check('the crypto-condition fulfillment is preserved', fin.raw_tx.Fulfillment === 'A0');
 
 // Flagged, not identified: an unreadable node means ownership is UNKNOWN.
 const FINISH_BLIND = {
@@ -330,7 +459,7 @@ const CREATE = {
 const cre = TX.rowFromAccountTx(CREATE, { observedVia: 'rOwnerSelf' });
 check('an EscrowCreate is attributed to its submitter — the one safe case',
       cre.escrow_owner === 'rOwnerSelf', cre.escrow_owner);
-check('its condition is preserved', cre.evidence.Condition === 'BEEF');
+check('its condition is preserved', cre.raw_tx.Condition === 'BEEF');
 
 // A multi-escrow transaction: 02-core.js:1217 breaks after the first node and
 // loses the rest silently. Record that it happened so a reader can tell.
@@ -368,7 +497,7 @@ check('an arbitrary-precision IOU value is not rounded',
 check('an IOU row carries no drops value (they are mutually exclusive)',
       msig.amount_drops === null);
 check('SendMax and Memos are preserved',
-      !!msig.evidence.SendMax && !!msig.evidence.Memos);
+      !!msig.raw_tx.SendMax && !!msig.raw_tx.Memos);
 
 // Roster-derived fields are views, not columns. Freezing a label forks an
 // identity: saveBlackboxSnapshot persists sender_label verbatim
@@ -383,6 +512,85 @@ const schemaCols = Object.keys(migrationTables).flatMap(t => columnsOf(migration
 check('no schema column freezes a roster label',
       !schemaCols.some(c => /^(label|sender_label|classification|cat|category)$/i.test(c)),
       schemaCols.filter(c => /label|classif|categ/i.test(c)));
+
+// ── the evidence of record: the COMPLETE payload, not an allowlist ────────
+// _evidence() used to copy out about eleven named fields while the header
+// claimed "nothing the response carried is discarded". An allowlist discards
+// by definition, and the only way to recover a field nobody listed would be
+// re-walking the history this index exists to stop re-walking.
+// These compared the stored payload against the SAME OBJECT it was taken from
+// — rowFromAccountTx assigns raw_tx by reference, so the assertion reduced to
+// JSON.stringify(x) === JSON.stringify(x), a tautology. An in-place redaction
+// moved both sides together and stayed green while destroying SigningPubKey,
+// TxnSignature and Paths permanently. Compare against a PRE-INGEST snapshot so
+// the two sides cannot move together.
+const PARTIAL_BEFORE = JSON.parse(JSON.stringify(PARTIAL));
+check('the complete transaction payload is stored verbatim',
+      JSON.stringify(partial.raw_tx) === JSON.stringify(PARTIAL_BEFORE.tx_json));
+check('the complete metadata is stored verbatim',
+      JSON.stringify(partial.raw_meta) === JSON.stringify(PARTIAL_BEFORE.meta));
+// A key-set assertion catches ANY dropped field, not the handful someone
+// thought to name — which is the whole difference between an allowlist and a
+// complete payload.
+check('raw_tx keeps every key the response carried',
+      JSON.stringify(Object.keys(partial.raw_tx).sort()) ===
+      JSON.stringify(Object.keys(PARTIAL_BEFORE.tx_json).sort()),
+      Object.keys(partial.raw_tx).sort());
+check('raw_meta keeps every key the response carried',
+      JSON.stringify(Object.keys(partial.raw_meta).sort()) ===
+      JSON.stringify(Object.keys(PARTIAL_BEFORE.meta).sort()));
+
+// The real test of "non-lossy": a field that NO normalized column and NO
+// derived evidence key carries must still be recoverable.
+const EXOTIC = {
+  ledger_index: 98765500,
+  tx_json: { TransactionType: 'AMMDeposit', hash: 'H_EXOTIC', Account: 'rLP',
+             date: 800001000,
+             // None of these exist as a column or an evidence key. A classifier
+             // written next month may need every one of them.
+             Asset: { currency: 'XRP' },
+             Asset2: { currency: 'TST', issuer: 'rIss' },
+             TradingFee: 42,
+             NetworkID: 1,
+             TicketSequence: 77,
+             SomeFutureAmendmentField: { nested: ['a', 'b'] } },
+  meta: { TransactionResult: 'tesSUCCESS',
+          AffectedNodes: [{ ModifiedNode: { LedgerEntryType: 'AMM',
+            FinalFields: { TradingFee: 42, VoteSlots: [{ VoteEntry: { Account: 'rV' } }] } } }] }
+};
+const EXOTIC_BEFORE = JSON.parse(JSON.stringify(EXOTIC));
+const exotic = TX.rowFromAccountTx(EXOTIC, { observedVia: 'rLP' });
+const exoticCols = Object.keys(exotic).filter(k => k !== 'raw_tx' && k !== 'raw_meta');
+const flatNoRaw = JSON.stringify(exoticCols.map(k => exotic[k]));
+check('the exotic fields are genuinely absent from every column and from evidence',
+      !/TradingFee|TicketSequence|SomeFutureAmendmentField|VoteSlots/.test(flatNoRaw));
+// "every one of them" asserted four of the six planted fields; Asset and
+// NetworkID were named nowhere in the suite, so a denylist dropping exactly
+// those stayed green. Compare the WHOLE payload against a pre-ingest clone.
+check('but every one of them is recoverable from raw_tx',
+      JSON.stringify(exotic.raw_tx) === JSON.stringify(EXOTIC_BEFORE.tx_json) &&
+      exotic.raw_tx.TradingFee === 42 && exotic.raw_tx.NetworkID === 1 &&
+      !!exotic.raw_tx.Asset && exotic.raw_tx.TicketSequence === 77 &&
+      exotic.raw_tx.SomeFutureAmendmentField.nested[1] === 'b');
+check('and raw_meta survives whole too',
+      JSON.stringify(exotic.raw_meta) === JSON.stringify(EXOTIC_BEFORE.meta));
+check('and the untouched ledger nodes are recoverable from raw_meta',
+      exotic.raw_meta.AffectedNodes[0].ModifiedNode.FinalFields.VoteSlots[0].VoteEntry.Account === 'rV');
+check('an unrecognised transaction type is still stored, not dropped',
+      exotic.hash === 'H_EXOTIC' && exotic.tx_type === 'AMMDeposit');
+// The passthrough copies are gone — raw carries them, so duplicating them in
+// `evidence` would store the same bytes twice.
+check('evidence no longer duplicates what raw_tx already holds',
+      !('SendMax' in msig.evidence) && !('Memos' in msig.evidence) &&
+      !('Signers' in msig.evidence) && !('Owner' in fin.evidence),
+      Object.keys(msig.evidence));
+check('and those fields are still there, in raw_tx',
+      !!msig.raw_tx.SendMax && !!msig.raw_tx.Memos && msig.raw_tx.Signers.length === 3 &&
+      fin.raw_tx.Owner === 'rRippleOwner' && fin.raw_tx.OfferSequence === 42);
+check('evidence keeps only DERIVED conclusions',
+      partial.evidence.delivered_amount_used === true &&
+      partial.evidence.raw_amount_overridden === '100000000000000000' &&
+      Array.isArray(partial.evidence.balance_deltas));
 
 // ════════════════════════════════════════════════════════════════════════════
 console.log('\n3. one transaction, counted once');
@@ -670,6 +878,44 @@ check('a hole below the proof edge is refused, not served',
       holed.reason === COV.REASON.EVIDENCE_PRUNED &&
       holed.evidence_covers_proof_edge === false, holed.reason);
 
+// ── the window may not outrun the anchor ──────────────────────────────────
+// The migration's CHECK (window_end <= anchor_close_time) only fires at
+// INSERT — by then the narrative has already been built from the uncapped
+// window. The window is frozen at page load (02-core.js:877-890) while the
+// anchor is fetched at scan start, so an end past the anchor is routine, not
+// exotic. Capping in the decision layer is what makes the constraint real.
+const ANCHOR_CLOSE = T('2026-09-02T23:45:00Z');   // 15 min BEFORE the window end
+const capped = COV.windowServability({
+  coverage: provenCov, windowStartMs: WIN_START, windowEndMs: WIN_END,
+  anchorLedger: ANCHOR, anchorCloseMs: ANCHOR_CLOSE });
+check('a window reaching past the anchor is capped to it',
+      capped.window_capped_to_anchor === true &&
+      capped.window_end_ms === ANCHOR_CLOSE, capped.window_end_ms);
+check('and the overshoot is surfaced, not swallowed',
+      capped.claimed_beyond_anchor_ms === 15 * 60 * 1000, capped.claimed_beyond_anchor_ms);
+const uncapped = COV.windowServability({
+  coverage: provenCov, windowStartMs: WIN_START, windowEndMs: WIN_END,
+  anchorLedger: ANCHOR, anchorCloseMs: T('2026-09-03T02:00:00Z') });
+// Every cap assertion passed an EXPLICIT anchorCloseMs, so the DEFAULT path —
+// the one every other fixture in this suite takes — was never asserted. A
+// `Number(input.anchorCloseMs) || 0` coercion (the exact Number(null)===0 trap
+// this module is written to prevent) collapsed every uncapped window to 1 Jan
+// 1970 with the suite still green.
+check('a decision made with no anchor close time does not cap the window',
+      edge.window_end_ms === WIN_END && edge.window_capped_to_anchor === false &&
+      edge.claimed_beyond_anchor_ms === 0, edge.window_end_ms);
+check('a one-millisecond overshoot is still capped',
+      COV.capWindowToAnchor({ windowEndMs: WIN_END, anchorCloseMs: WIN_END - 1 }).capped === true);
+check('capWindowToAnchor refuses a missing window end',
+      /windowEndMs/.test(threw(() => COV.capWindowToAnchor({ anchorCloseMs: WIN_END })) || ''));
+check('a window inside the anchor is left alone',
+      uncapped.window_capped_to_anchor === false &&
+      uncapped.window_end_ms === WIN_END && uncapped.claimed_beyond_anchor_ms === 0);
+check('capWindowToAnchor refuses a missing anchor close time',
+      /half an anchor/.test(threw(() => COV.capWindowToAnchor({ windowEndMs: WIN_END })) || ''));
+check('an exactly-equal end is not treated as an overshoot',
+      COV.capWindowToAnchor({ windowEndMs: WIN_END, anchorCloseMs: WIN_END }).capped === false);
+
 // An anchor is not optional: without one, a concurrent catch-up advancing the
 // shared index mid-run would let wallet 3 and wallet 200 describe different
 // ledger states inside one Report.
@@ -799,11 +1045,149 @@ check('FAILED never advances', failedAdv.advance === false);
 check('a refusal leaves the checkpoint exactly where it was',
       failedAdv.next_through === 98790000);
 
+// ── BOOTSTRAP: how a never-scanned wallet gets its FIRST checkpoint ────────
+// This block replaces a check that used to read "a date-bounded fallback walk
+// never advances a ledger checkpoint" and asserted it as correct. It was not a
+// guard, it was the bug: a wallet with no checkpoint can only be walked by
+// DATE (there is no ledger floor to bound it with), so a date walk that can
+// never establish a checkpoint means a never-scanned wallet stays
+// never-scanned and pays the full walk every morning, forever. The suite
+// encoded the contradiction instead of catching it.
+const WIN_START_L = 98700000;   // ledger roughly at the window start
+const bootProof = {
+  status: 'COMPLETE', range_bound_proven: false,
+  boundary_reached: true, history_exhausted: false,
+  oldest_ledger_index: WIN_START_L - 500,
+  oldest_close_ms: T('2026-09-01T23:00:00Z'),   // older than the window start
+  through_ledger: ANCHOR, through_close_ms: T('2026-09-03T00:00:00Z'),
+  rows_stored: 9
+};
+const boot = COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof: bootProof });
+check('a first-scan date walk that reached the boundary DOES establish coverage',
+      boot.advance === true && boot.reason === 'BOOTSTRAP_BOUNDARY_REACHED', boot);
+check('it is marked as a bootstrap, distinguishable from a ledger-bounded proof',
+      boot.bootstrap === true);
+check('its floor is the oldest ledger actually READ, not an interpolated one',
+      boot.next_from === WIN_START_L - 500, boot.next_from);
+// The CLOSE TIME must be pinned too. Nothing asserted it, and the acceptance
+// test below could not tell an honest floor from a fabricated 0: both are
+// <= the window start, so both yield proven_start=true and EDGE_ONLY. A
+// bootstrap silently writing 0 would then report a January window as
+// FULLY_SERVABLE and PROVEN_QUIET — eight months nobody ever scanned, asserted
+// on air. That is the exact failure class this file exists to prevent.
+check('a boundary bootstrap starts at the close time it actually READ',
+      boot.next_from_close_ms === T('2026-09-01T23:00:00Z'), boot.next_from_close_ms);
+check('its expected_prior is NULL — the SQL must compare with IS NULL',
+      boot.expected_prior === null);
+
+// The whole point: the SECOND run must not walk history again.
+const afterBoot = COV.windowServability({
+  coverage: { address: 'rBooted',
+    scan_coverage_from: boot.next_from, scan_coverage_through: boot.next_through,
+    scan_coverage_from_close_ms: boot.next_from_close_ms,
+    scan_coverage_through_close_ms: boot.next_through_close_ms,
+    evidence_retained_from: boot.next_from, evidence_retained_through: boot.next_through,
+    evidence_retained_from_close_ms: boot.next_from_close_ms },
+  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR + 4000 });
+check('THE ACCEPTANCE TEST — the second run is EDGE_ONLY, not another full walk',
+      afterBoot.reason === COV.REASON.EDGE_ONLY, afterBoot.reason);
+check('and it fetches only the edge past the bootstrapped checkpoint',
+      afterBoot.fetch_from_ledger === ANCHOR + 1, afterBoot.fetch_from_ledger);
+check('the second run is ledger-bounded, unlike the first',
+      afterBoot.range_bound_proven === true);
+
+// The round trip that actually distinguishes an honest floor from a fabricated
+// one: a window starting BEFORE the ledger the bootstrap read. A boundary
+// bootstrap proves coverage only back to what it saw, so this must refuse.
+const bootedCov = {
+  address: 'rBooted',
+  scan_coverage_from: boot.next_from, scan_coverage_through: boot.next_through,
+  scan_coverage_from_close_ms: boot.next_from_close_ms,
+  scan_coverage_through_close_ms: boot.next_through_close_ms,
+  evidence_retained_from: boot.next_from, evidence_retained_through: boot.next_through,
+  evidence_retained_from_close_ms: boot.next_from_close_ms };
+const beforeFloor = COV.windowServability({
+  coverage: bootedCov, windowStartMs: T('2026-08-01T00:00:00Z'),
+  windowEndMs: WIN_END, anchorLedger: ANCHOR });
+check('a window predating the bootstrap floor is NOT served from the index',
+      beforeFloor.reason === COV.REASON.PROOF_GAP_AT_START &&
+      beforeFloor.served_from_index === false, beforeFloor.reason);
+check('and it may never be reported quiet',
+      COV.mayReportQuiet(beforeFloor, 0).quiet === false);
+
+// A bootstrap on a wallet that ALREADY has coverage — the retention-fallback
+// case. Nothing exercised it, and there the existing row supplies fromClose
+// while the proof supplies the floor, so only contiguity stands between it and
+// a false claim.
+const bootOnExisting = COV.checkpointAdvance({
+  coverage: provenCov, anchorLedger: ANCHOR,
+  proof: Object.assign({}, bootProof, { oldest_ledger_index: 98790001 }) });
+check('a date walk on an ALREADY-covered wallet keeps the original floor',
+      bootOnExisting.advance === true &&
+      bootOnExisting.next_from === provenCov.scan_coverage_from &&
+      bootOnExisting.next_from_close_ms === provenCov.scan_coverage_from_close_ms,
+      { from: bootOnExisting.next_from, close: bootOnExisting.next_from_close_ms });
+check('and a non-contiguous one on that wallet is still refused',
+      COV.checkpointAdvance({ coverage: provenCov, anchorLedger: ANCHOR,
+        proof: Object.assign({}, bootProof, { oldest_ledger_index: 98795000 })
+      }).reason === 'PROOF_RANGE_NOT_CONTIGUOUS');
+
+// Exhausting history bootstraps too, and reaches back past ANY window start:
+// an account created yesterday whose whole history postdates the window is
+// still fully covered. Recording its oldest close time instead would make
+// proven_start false next run and send it back to a full walk.
+const bootExh = COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof: {
+  status: 'COMPLETE', range_bound_proven: false,
+  boundary_reached: false, history_exhausted: true,
+  oldest_ledger_index: 98799000,
+  oldest_close_ms: T('2026-09-02T22:00:00Z'),   // INSIDE the window — deliberately
+  through_ledger: ANCHOR, through_close_ms: T('2026-09-03T00:00:00Z'),
+  rows_stored: 2 } });
+check('exhausted history bootstraps as well', bootExh.advance === true &&
+      bootExh.reason === 'BOOTSTRAP_HISTORY_EXHAUSTED', bootExh.reason);
+check('and its coverage reaches back past any window start',
+      bootExh.next_from_close_ms === 0, bootExh.next_from_close_ms);
+const exhServ = COV.windowServability({
+  coverage: { address: 'rNew',
+    scan_coverage_from: bootExh.next_from, scan_coverage_through: bootExh.next_through,
+    scan_coverage_from_close_ms: bootExh.next_from_close_ms,
+    scan_coverage_through_close_ms: bootExh.next_through_close_ms,
+    evidence_retained_from: bootExh.next_from, evidence_retained_through: bootExh.next_through,
+    evidence_retained_from_close_ms: bootExh.next_from_close_ms },
+  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+check('a young account is fully covered rather than re-walked',
+      exhServ.reason === COV.REASON.FULLY_SERVABLE, exhServ.reason);
+
+// The bootstrap does NOT open a hole. Each refusal is its own reason.
+check('a walk that stopped for no stated reason still never bootstraps',
+      COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof:
+        Object.assign({}, bootProof, { boundary_reached: false, history_exhausted: false })
+      }).reason === 'RANGE_NOT_LEDGER_BOUND');
+check('exhausting an EMPTY account claims no floor it never read',
+      COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof:
+        Object.assign({}, bootProof, { boundary_reached: false, history_exhausted: true,
+          oldest_ledger_index: null, rows_stored: 0 })
+      }).reason === 'NO_LEDGER_FLOOR_OBSERVED');
+check('a TRUNCATED first scan never bootstraps',
+      COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof:
+        Object.assign({}, bootProof, { status: 'TRUNCATED' }) }).advance === false);
+check('a FAILED first scan never bootstraps',
+      COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof:
+        Object.assign({}, bootProof, { status: 'FAILED' }) }).advance === false);
+check('a bootstrap still may not reach past the run anchor',
+      COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof:
+        Object.assign({}, bootProof, { through_ledger: ANCHOR + 1 })
+      }).reason === 'PROOF_EXCEEDS_ANCHOR');
+check('a boundary-reached bootstrap with no close time is refused',
+      COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof:
+        Object.assign({}, bootProof, { oldest_close_ms: null })
+      }).reason === 'PROOF_MISSING_CLOSE_TIMES');
+
 // A date-bounded fallback walk (the retention retry with ledger_index_min: -1)
 // still yields usable evidence, but it cannot prove a ledger RANGE.
 const dateBound = COV.checkpointAdvance(Object.assign({}, base, {
   proof: Object.assign({}, okProof, { range_bound_proven: false }) }));
-check('a date-bounded fallback walk never advances a ledger checkpoint',
+check('a date walk with NO floor evidence never advances a ledger checkpoint',
       dateBound.advance === false && dateBound.reason === 'RANGE_NOT_LEDGER_BOUND', dateBound.reason);
 
 // A gap between the checkpoint and the proven range would claim coverage of

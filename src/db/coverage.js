@@ -93,6 +93,43 @@ function hasProof(c) {
          c.scan_coverage_through >= c.scan_coverage_from;
 }
 
+// ── Decision 0: the window may not outrun the anchor ──────────────────────
+//
+// Every Report owns one immutable validated-ledger anchor. The window,
+// however, is computed in the browser and frozen at page load
+// (02-core.js:877-890), so its end can easily sit AFTER the last ledger the
+// run actually read. Those final seconds were never inside any ledger this run
+// validated, and a Report that claims them is asserting a period it did not
+// observe — on a surface read aloud on air.
+//
+// The migration enforces `window_end <= anchor_close_time`, but a CHECK only
+// fires at INSERT. By then the narrative has already been built from the
+// uncapped window. So the cap happens here, in the decision layer, before any
+// number is derived from it.
+//
+// anchorCloseMs is required, not optional: a ledger index with no close time
+// cannot be compared against a window at all. Half an anchor is not an anchor.
+function capWindowToAnchor(input) {
+  const endMs = _int(input && input.windowEndMs);
+  const anchorCloseMs = _int(input && input.anchorCloseMs);
+  if (endMs === null) {
+    throw new Error('capWindowToAnchor: a numeric windowEndMs is required');
+  }
+  if (anchorCloseMs === null) {
+    throw new Error('capWindowToAnchor: a numeric anchorCloseMs is required — half an anchor is not an anchor');
+  }
+  if (endMs <= anchorCloseMs) {
+    return { window_end_ms: endMs, capped: false, claimed_beyond_ms: 0 };
+  }
+  return {
+    window_end_ms: anchorCloseMs,
+    capped: true,
+    // Surfaced rather than swallowed: a Report routinely capping by minutes is
+    // a clock or an ordering problem worth seeing.
+    claimed_beyond_ms: endMs - anchorCloseMs
+  };
+}
+
 // ── Decision 1: can this window come out of the index? ─────────────────────
 //
 // The window arrives in TIME (the Report's window is [startMs, endMs]); the
@@ -130,11 +167,27 @@ function windowServability(input) {
     throw new Error('windowServability: windowStartMs/windowEndMs must bound a real window');
   }
 
+  // Cap before anything is derived from the window. When the caller supplies
+  // the anchor's close time (it should — the column is NOT NULL), a window
+  // reaching past it is trimmed here rather than at INSERT, so the decision
+  // and every number downstream describe a period the run actually read.
+  const anchorCloseMs = _int(input && input.anchorCloseMs);
+  let effEndMs = endMs, windowCapped = false, claimedBeyondMs = 0;
+  if (anchorCloseMs !== null) {
+    const cap = capWindowToAnchor({ windowEndMs: endMs, anchorCloseMs: anchorCloseMs });
+    effEndMs = cap.window_end_ms;
+    windowCapped = cap.capped;
+    claimedBeyondMs = cap.claimed_beyond_ms;
+  }
+
   const base = {
     address: c.address,
     anchor_ledger: anchor,
     window_start_ms: startMs,
-    window_end_ms: endMs,
+    // The EFFECTIVE end: capped to the anchor's close when one was supplied.
+    window_end_ms: effEndMs,
+    window_capped_to_anchor: windowCapped,
+    claimed_beyond_anchor_ms: claimedBeyondMs,
     proven_start: false,
     evidence_covers_start: false,
     evidence_covers_proof_edge: false,
@@ -242,12 +295,50 @@ function checkpointAdvance(input) {
   // must read as "we do not know", never as "we looked and it was quiet".
   if (status !== PROOF_STATUS.COMPLETE) return refuse('PROOF_NOT_COMPLETE');
 
-  // The walk must have been bounded in ledger space for its result to move a
-  // ledger checkpoint. A date-bounded fallback walk (the `-1` retention retry)
-  // still yields usable evidence, but it cannot prove a ledger RANGE.
-  if (p.range_bound_proven !== true) return refuse('RANGE_NOT_LEDGER_BOUND');
+  // ── Bootstrap: how a never-scanned wallet ever gets a first checkpoint ────
+  //
+  // This used to read `if (p.range_bound_proven !== true) refuse(...)`, full
+  // stop, and a test asserted that refusal as correct. It made the whole design
+  // impossible: a wallet with no checkpoint can only be walked by DATE (there
+  // is no ledger floor to bound it with), so a date walk that can never
+  // establish a checkpoint means a never-scanned wallet stays never-scanned
+  // and pays the full walk every single morning, forever. The suite did not
+  // catch that — it encoded it.
+  //
+  // A date-bounded walk CAN establish a checkpoint, but only on POSITIVE
+  // evidence of a ledger floor. Two ways to get one:
+  //
+  //   boundary_reached    the walk read past the window start and saw a
+  //                       transaction older than it. The oldest ledger index
+  //                       observed is a floor we actually read.
+  //   history_exhausted   the server returned no further marker. Everything
+  //                       this account has, up to the anchor, is in hand.
+  //
+  // Either way the floor is `oldest_ledger_index` — a value that was READ, not
+  // one derived by interpolating a close interval.
+  const bounded          = p.range_bound_proven === true;
+  const boundaryReached  = p.boundary_reached === true;
+  const historyExhausted = p.history_exhausted === true;
+  const oldest           = _int(p.oldest_ledger_index);
 
-  if (from === null || through === null || through < from) {
+  if (!bounded) {
+    if (!boundaryReached && !historyExhausted) {
+      // A walk that stopped for any other reason proves no range at all.
+      return refuse('RANGE_NOT_LEDGER_BOUND');
+    }
+    // Exhausting an account that has NO transactions leaves nothing to read a
+    // floor from. Claiming one anyway would be inventing a ledger value, and
+    // "the server had no more pages" is also what a partial-history server
+    // says. Refusing costs one empty page next run, which is the cheapest
+    // thing in the system.
+    if (oldest === null) return refuse('NO_LEDGER_FLOOR_OBSERVED');
+  }
+
+  // The proven lower bound: read from the proof for a ledger-bounded walk,
+  // derived from the oldest observation for a bootstrap.
+  const effFrom = bounded ? from : oldest;
+
+  if (effFrom === null || through === null || through < effFrom) {
     return refuse('PROOF_RANGE_MALFORMED');
   }
 
@@ -257,14 +348,28 @@ function checkpointAdvance(input) {
   // false. Writing one would record an advance in coverage_advances that reads
   // as progress while the wallet silently falls back to a full walk forever.
   // Refuse it here, where the reason is visible.
-  const fromClose = hasProof(c) ? c.scan_coverage_from_close_ms : _int(p.from_close_ms);
+  //
+  // For a bootstrap the close time comes from the same observation the floor
+  // did — EXCEPT when history was exhausted. Exhaustion means there is nothing
+  // older than what we just read, so coverage reaches back past any window
+  // start, and a recently-created account whose whole history postdates the
+  // window is still fully covered. Recording its oldest transaction's close
+  // time instead would make proven_start false on the next run and send it
+  // back to a full walk — the bug this bootstrap exists to remove, one layer
+  // down.
+  let derivedFromClose;
+  if (bounded) derivedFromClose = _int(p.from_close_ms);
+  else if (historyExhausted) derivedFromClose = 0;
+  else derivedFromClose = _int(p.oldest_close_ms);
+
+  const fromClose = hasProof(c) ? c.scan_coverage_from_close_ms : derivedFromClose;
   if (fromClose === null || _int(p.through_close_ms) === null) {
     return refuse('PROOF_MISSING_CLOSE_TIMES');
   }
 
   // Never claim coverage of ledgers this run did not read. A gap between the
   // existing checkpoint and the proven range would be exactly that.
-  if (hasProof(c) && from > c.scan_coverage_through + 1) {
+  if (hasProof(c) && effFrom > c.scan_coverage_through + 1) {
     return refuse('PROOF_RANGE_NOT_CONTIGUOUS');
   }
 
@@ -284,11 +389,17 @@ function checkpointAdvance(input) {
     // An empty range that was walked to exhaustion is a real proof, and saying
     // so is the difference between "quiet wallets get cheap" and "quiet
     // wallets rescan proven history forever".
-    reason: (_int(p.rows_stored) || 0) === 0 ? 'EMPTY_RANGE_EXHAUSTED' : 'RANGE_PROVEN',
+    reason: !bounded
+      ? (historyExhausted ? 'BOOTSTRAP_HISTORY_EXHAUSTED' : 'BOOTSTRAP_BOUNDARY_REACHED')
+      : ((_int(p.rows_stored) || 0) === 0 ? 'EMPTY_RANGE_EXHAUSTED' : 'RANGE_PROVEN'),
+    // Whether this checkpoint was established by a date walk rather than a
+    // ledger-bounded one. Recorded so coverage_advances shows which runs were
+    // first-scans, and so a reader can tell the two kinds of proof apart.
+    bootstrap: !bounded,
     // The compare-and-set predicate. NULL for a wallet with no prior proof —
     // the SQL side must compare with IS NULL, not `= NULL`.
     expected_prior: hasProof(c) ? c.scan_coverage_through : null,
-    next_from: hasProof(c) ? c.scan_coverage_from : from,
+    next_from: hasProof(c) ? c.scan_coverage_from : effFrom,
     next_from_close_ms: fromClose,
     next_through: through,
     next_through_close_ms: _int(p.through_close_ms)
@@ -388,6 +499,7 @@ module.exports = {
   PROOF_STATUS,
   normalizeCoverage,
   hasProof,
+  capWindowToAnchor,
   windowServability,
   mayReportQuiet,
   checkpointAdvance,

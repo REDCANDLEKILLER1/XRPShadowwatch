@@ -12,10 +12,19 @@
 // Condition/Fulfillment, meta.TransactionIndex and every ModifiedNode delta.
 //
 // Storing that projection would bake today's questions into permanent
-// evidence. A forensic index gets read by classifiers that do not exist yet,
-// so this maps the response into normalized columns for everything the report
-// queries on, PLUS a compact `evidence` JSONB for everything else. Nothing the
-// response carried is discarded.
+// evidence. A forensic index gets read by classifiers that do not exist yet.
+//
+// So every row keeps the COMPLETE payload — `raw_tx` and `raw_meta`, verbatim
+// — alongside normalized columns for the fields the report queries on.
+//
+// An earlier version of this file claimed "nothing the response carried is
+// discarded" while `_evidence()` copied out an ALLOWLIST of about eleven
+// fields. That was simply untrue: an allowlist discards everything nobody
+// thought to list, permanently, and the only way to get such a field back
+// would be re-walking the history this index exists to stop re-walking. The
+// claim is now structural rather than aspirational: raw_tx and raw_meta are
+// NOT NULL, and the suite asserts a field absent from every normalized column
+// and from the derived `evidence` object is still recoverable from raw.
 //
 // ── Amounts: why they are strings here ─────────────────────────────────────
 // XRP is denominated in drops, and the 100,000,000,000 XRP supply is 1e17
@@ -161,6 +170,20 @@ function _sigFacts(txj) {
   };
 }
 
+// DERIVED facts only. This is not the evidence of record — `raw_tx` and
+// `raw_meta` are, and they hold the complete payload verbatim.
+//
+// It used to be an allowlist of fields copied out of tx_json (SendMax, Paths,
+// Memos, Signers, Owner, OfferSequence, Condition, Fulfillment, LimitAmount,
+// TakerGets, TakerPays) while the header claimed "nothing the response carried
+// is discarded". That claim was false: an allowlist discards by definition, and
+// a classifier that does not exist yet would have needed a field nobody thought
+// to list — with no way to recover it but rescanning history the index was
+// built to stop rescanning. Those copies are gone; raw_tx carries them all.
+//
+// What stays here is what the raw payload does NOT say: conclusions this
+// mapping reached, and compact projections the read path wants without
+// digging through AffectedNodes.
 function _evidence(txj, meta, amt, esc, sig) {
   const e = {};
   const put = function (k, v) {
@@ -168,24 +191,14 @@ function _evidence(txj, meta, amt, esc, sig) {
     if (Array.isArray(v) && !v.length) return;
     e[k] = v;
   };
-  put('SendMax', txj.SendMax);
-  put('Paths', txj.Paths);
-  put('Memos', txj.Memos);
-  put('Signers', txj.Signers);
-  put('Owner', txj.Owner);                       // EscrowFinish / EscrowCancel
-  put('OfferSequence', txj.OfferSequence);
-  put('Condition', txj.Condition);
-  put('Fulfillment', txj.Fulfillment);
-  put('LimitAmount', txj.LimitAmount);           // TrustSet
-  put('TakerGets', txj.TakerGets);               // OfferCreate
-  put('TakerPays', txj.TakerPays);
   put('raw_amount_overridden', amt.raw_amount_overridden);
   if (amt.delivered_used) e.delivered_amount_used = true;
   if (esc.nodes_seen > 1) e.escrow_nodes_seen = esc.nodes_seen;
   if (sig.signer_accounts.length) e.signer_accounts = sig.signer_accounts;
   // Balance deltas are the only independent check on a claimed amount, and
   // they are what keeps an unrecognised future transaction type forensically
-  // useful rather than opaque.
+  // useful rather than opaque. A PROJECTION of raw_meta.AffectedNodes, kept
+  // because every read path wants it and none should re-walk the nodes.
   const mods = [];
   for (const nd of (meta.AffectedNodes || [])) {
     const mn = nd && nd.ModifiedNode;
@@ -253,8 +266,20 @@ function rowFromAccountTx(item, ctx) {
     tx_flags: _intOrNull(txj.Flags),
     transaction_index: _intOrNull(meta.TransactionIndex),
     roster_version: _s(ctx && ctx.rosterVersion),
-    // Everything the columns do not carry. Kept compact: only keys that were
-    // actually present, so a plain Payment does not store a screen of nulls.
+    // ── The evidence of record ────────────────────────────────────────────
+    // The complete public ledger payload, verbatim. The normalized columns
+    // above exist for fast querying; THESE are the forensic source of truth,
+    // and they are what lets the index answer a question nobody has asked yet
+    // without rescanning the history it was built to stop rescanning.
+    //
+    // Public transaction evidence only — exactly what account_tx returns from
+    // a validated ledger. No seed, no key, no signing material. TxnSignature
+    // and SigningPubKey are public on-chain fields readable by anyone; they
+    // are not credentials.
+    raw_tx: txj,
+    raw_meta: meta,
+    // Derived conclusions and compact projections — NOT a second copy of the
+    // payload. See _evidence.
     evidence: _evidence(txj, meta, amt, esc, sig),
     // Provenance, not a property of the transaction: which watched wallet's
     // walk saw this, and under which run.
@@ -378,6 +403,15 @@ function mergeSightings(rows) {
         prior.conflicts.push({ field: k, kept: String(a), also_seen: String(b) });
       }
     }
+    // The richer raw payload wins. escrowBackfill's walk reads ledger nodes
+    // the Phase 2 wallet walk never asked for, so its meta can carry
+    // AffectedNodes the first sighting's did not. Keeping the first sighting's
+    // raw unconditionally would discard evidence a later one actually held —
+    // the same loss this file was just fixed for, one level up.
+    const priorNodes = ((prior.raw_meta && prior.raw_meta.AffectedNodes) || []).length;
+    const theseNodes = ((r.raw_meta && r.raw_meta.AffectedNodes) || []).length;
+    if (theseNodes > priorNodes) { prior.raw_meta = r.raw_meta; prior.raw_tx = r.raw_tx; }
+
     const sigs = (prior.evidence && prior.evidence.signer_accounts) || [];
     const more = (r.evidence && r.evidence.signer_accounts) || [];
     if (more.length) {

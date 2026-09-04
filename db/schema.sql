@@ -49,6 +49,11 @@
 --     in application code is not a guarantee -- two report runs and a server
 --     catch-up race each other by design.
 --   * Retained evidence is always a subset of proven coverage.
+--   * Every row keeps the COMPLETE ledger payload (raw_tx / raw_meta, both NOT
+--     NULL), so a classifier that does not exist yet never forces a rescan.
+--   * A run cannot claim time its own anchor did not cover
+--     (window_end <= anchor_close_time), and the anchor's close time is NOT
+--     NULL -- half an anchor is not an anchor.
 --   * Every coverage advance is recorded in coverage_advances, so a claim that
 --     a wallet "proved the window" has an audit row behind it.
 --
@@ -115,12 +120,17 @@ CREATE TABLE IF NOT EXISTS transactions (
   -- into two coordination identities across 30 snapshots.
   roster_version      TEXT,
 
-  -- Everything the columns above do not carry: SendMax, Paths, Memos,
-  -- Signers, EscrowFinish Owner/OfferSequence, Condition/Fulfillment,
-  -- LimitAmount, TakerGets/TakerPays, the raw Amount that delivered_amount
-  -- overrode, and AccountRoot balance deltas. A forensic index is read by
-  -- classifiers that do not exist yet, so nothing the response carried is
-  -- discarded.
+  -- THE EVIDENCE OF RECORD. The complete public ledger payload, verbatim.
+  -- Normalized columns above are for fast querying; these are the forensic
+  -- source of truth. Without them the index answers only the questions we
+  -- thought to normalize, and any future classifier needing something else
+  -- would force a rescan of the history this index exists to stop rescanning.
+  -- Public transaction evidence only: no seed, no key, no signing material.
+  raw_tx              JSONB       NOT NULL,
+  raw_meta            JSONB       NOT NULL,
+  -- Derived conclusions and compact projections, NOT a second copy of the
+  -- payload (delivered-amount override, escrow node count, signer list,
+  -- AccountRoot balance deltas).
   evidence            JSONB       NOT NULL DEFAULT '{}'::jsonb,
 
   first_seen_scan_id  TEXT,
@@ -325,7 +335,7 @@ CREATE INDEX IF NOT EXISTS coverage_advances_scan_idx    ON coverage_advances (s
 CREATE TABLE IF NOT EXISTS scan_runs (
   scan_id            TEXT        PRIMARY KEY,
   anchor_ledger      BIGINT      NOT NULL,
-  anchor_close_time  TIMESTAMPTZ,
+  anchor_close_time  TIMESTAMPTZ NOT NULL,
   window_start       TIMESTAMPTZ NOT NULL,
   window_end         TIMESTAMPTZ NOT NULL,
   window_label       TEXT,                 -- 'LAST 24H' / 'LAST 72H' / a custom range
@@ -341,6 +351,11 @@ CREATE TABLE IF NOT EXISTS scan_runs (
   finished_at        TIMESTAMPTZ,
   CONSTRAINT scan_runs_anchor_positive CHECK (anchor_ledger > 0),
   CONSTRAINT scan_runs_window_ordered  CHECK (window_end >= window_start),
+  -- A run may not claim time its own validated-ledger anchor did not
+  -- cover. Without this the final seconds of a window can fall after the
+  -- anchor closed, so the Report asserts a period no ledger it read was
+  -- inside. Cap window_end to anchor_close_time before persisting.
+  CONSTRAINT scan_runs_window_within_anchor CHECK (window_end <= anchor_close_time),
   CONSTRAINT scan_runs_status CHECK (
     status IN ('RUNNING', 'COMPLETE', 'PARTIAL', 'FAILED')
   )
