@@ -237,5 +237,30 @@ check('the identified counterparty is still named',
 check('the move itself is still reported',
       /1B XRP|1\.00B XRP|1000(\.00)?M XRP/.test(anon.headline), anon.headline);
 
+console.log('\n9. a Ripple-registry wallet is not the company');
+// "20M XRP moved from Ripple to a large XRP holder overnight" (SW20260903E10KD)
+// reads as Ripple Inc. moving money. What was sourced is that the ADDRESS is
+// Ripple-associated, from published account metadata — not that the company
+// authorised the payment. Name the association, not the corporation.
+const RIPPLE_SRC = 'rRippleSrcHHHHHHHHHHHHHHHHHHHHHHHH';
+const IDENT3 = Object.assign({}, IDENT);
+IDENT3[RIPPLE_SRC] = { name: 'Ripple', provenance: 'registry' };
+const rippleMove = load(IDENT3).summarizeLargeMoves({
+  large_transfers: [
+    { from: RIPPLE_SRC, to: COINBASE, amount: 20000000, hash: 'e'.repeat(64),
+      classification: 'EXCHANGE_INFLOW', receiver_label: 'Coinbase' }
+  ]
+});
+console.log('  headline: ' + JSON.stringify(rippleMove.headline));
+check('the sender is described as Ripple-associated',
+      /Ripple-associated wallet/.test(rippleMove.headline), rippleMove.headline);
+check('it does not read as the company moving money',
+      !/from Ripple to/.test(rippleMove.headline), rippleMove.headline);
+check('the association is still stated \u2014 not erased to "a watched wallet"',
+      /Ripple/.test(rippleMove.headline), rippleMove.headline);
+check('the move and counterparty survive',
+      /20M XRP/.test(rippleMove.headline) && /Coinbase/.test(rippleMove.headline),
+      rippleMove.headline);
+
 console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' CHECKS PASS'));
 process.exit(fail ? 1 : 0);
