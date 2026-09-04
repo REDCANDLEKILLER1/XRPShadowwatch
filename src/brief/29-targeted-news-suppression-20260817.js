@@ -203,6 +203,14 @@
     s.async = false;
     s.setAttribute('data-sw-canonical-escrow-model', '2026-09-03.1');
     document.body.appendChild(s);
+
+    // Native XRPL DEX volume truth. Must load before a scan reads market data,
+    // and before 10-pipeline renders the diagnostics block.
+    var d = document.createElement('script');
+    d.src = '/src/brief/40-dex-volume-truth-20260904.js?v=20260904.1';
+    d.async = false;
+    d.setAttribute('data-sw-dex-volume-truth', '2026-09-04.1');
+    document.body.appendChild(d);
   } catch (_) {}
 })();
 

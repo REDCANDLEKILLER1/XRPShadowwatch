@@ -45,7 +45,9 @@ const SUITES = [
   ['escrow-not-movement',    'escrow-not-movement.test.js',      8213],
   ['canonical-escrow-model', 'canonical-escrow-model.test.js',   8214],
   // No browser, no port, no database — pure decision logic for the evidence index.
-  ['db-foundation',          'db-foundation.test.js',            null]
+  ['db-foundation',          'db-foundation.test.js',            null],
+  // Pure decision logic, no browser and no network.
+  ['dex-volume-truth',       'dex-volume-truth.test.js',         null]
 ];
 
 const only = (() => {
