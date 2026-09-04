@@ -121,6 +121,41 @@ ck('a genuinely complete run is still reported COMPLETE',
    R.invalidAllAccounted.slice(0,110));
 ck('healthy pack → no line at all, still sealed', R.healthy==='' && R.healthySealed===true);
 ck('link loss still unsealed', R.zeroSealed===false);
+// ── THE CAVEAT KEYS ON THE WEAKER COVERAGE ──────────────────────────────────
+// SW-20260903 run 2: 251/251 balances answered, so scanCoverage reported 100%
+// and every partial-read caveat stayed silent — while only 219/251 proved their
+// transaction window. A 59/100 score and a "net distributing" direction were
+// published from 87% of the transaction data, unqualified, directly beneath an
+// Executive Summary line reading TX WINDOW: INCOMPLETE.
+const COV = await p.evaluate(() => {
+  const mk = (txOk) => ({
+    date:'x', wallets_checked:251, wallets_failed:0, watchlist_total:251,
+    tx_scan_coverage:{ target_wallets:251, complete_wallets:txOk,
+      failed_wallets:251-txOk, truncated_wallets:0, full_window_complete:txOk===251 }
+  });
+  const H = (window.PUBLIC_REPORT_PIPELINE_V1 && window.PUBLIC_REPORT_PIPELINE_V1.helpers) || {};
+  const f = (typeof H.coverageForNarrative === 'function') ? H.coverageForNarrative : null;
+  if (!f) return { reachable:false };
+  const short = f(mk(219)), ok = f(mk(251));
+  return { reachable:true,
+    shortDegraded:short.degraded, shortChecked:short.checked, shortTotal:short.total,
+    shortBasis:short.basis, shortCaveat:short.caveat, shortNoun:short.basis_noun,
+    okDegraded:ok.degraded, okBasis:ok.basis };
+});
+ck('the coverage helper is reachable through the module API', COV.reachable===true);
+ck('the weaker (transaction) coverage IS flagged when balances are 251/251',
+   COV.shortDegraded===true, COV);
+ck('it reports the transaction numbers, not the balance ones',
+   COV.shortChecked===219 && COV.shortTotal===251, COV);
+ck('it names the basis so the wording can be accurate',
+   COV.shortBasis==='transaction window', COV.shortBasis);
+ck('its caveat says transaction window, not "failed to read"',
+   /transaction window/.test(String(COV.shortCaveat||'')), COV.shortCaveat);
+ck('the Verdict noun matches the basis',
+   /proved the transaction window/.test(String(COV.shortNoun||'')), COV.shortNoun);
+ck('a run complete on BOTH is not flagged', COV.okDegraded===false, COV);
+ck('and that run reports the balance basis', COV.okBasis==='balance', COV.okBasis);
+
 ck('no page errors', errs.length===0, errs.slice(0,3));
 await b.close();srv.close();
 console.log('\n'+(fail?fail+' FAILED of '+(pass+fail):'ALL '+pass+' CHECKS PASS'));
