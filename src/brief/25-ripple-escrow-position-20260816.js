@@ -201,12 +201,25 @@
         try { if (ws) ws.close(); } catch (_) {}
       }
 
+      // FOUR DIFFERENT NUMBERS, NAMED FOR WHAT THEY MEASURE.
+      //   addresses.length  registry addresses we asked about        (20)
+      //   answered          how many of those RPCs came back         (20)
+      //   active            escrow OBJECTS holding XRP               (100)
+      //   activeOwners      DISTINCT owners holding >=1 such object  (8)
+      // The first three existed; the fourth did not, and `answered` was being
+      // rendered with the noun "owners" — an RPC-success count dressed as an
+      // ownership fact. o.Account is already on every stored object (the
+      // owner-only filter above just proved it equals the queried address), so
+      // the real owner count costs no extra RPC.
       var locked = 0, active = 0, nonXrp = 0;
+      var ownersWithEscrow = {};
       Object.keys(objectMap).forEach(function (k) {
-        var amt = amountXrp(objectMap[k]);
+        var o = objectMap[k];
+        var amt = amountXrp(o);
         if (amt == null) { nonXrp++; return; }
         locked += amt;
         active++;
+        if (o && o.Account) ownersWithEscrow[String(o.Account)] = true;
       });
       var answered = Object.keys(ownerDone).length;
       return {
@@ -215,6 +228,7 @@
         failures:failures,
         locked:locked,
         active:active,
+        activeOwners:Object.keys(ownersWithEscrow).length,
         nonXrp:nonXrp,
         ledger:validatedLedger,
         duration_ms:Date.now() - started,
@@ -248,11 +262,18 @@
           version:VERSION,
           source:'validated XRPL account_objects via isolated read-only connection; Ripple public escrow registry; owner-only Escrow.Account filter',
           registry_version:reg.version || null,
+          // Legacy names kept so existing consumers do not break; the
+          // unambiguous names are the ones the canonical model reads.
           expected_owners:addresses.length,
           answered_owners:best.answered,
+          registry_addresses_checked:addresses.length,
+          rpc_responses_received:best.answered,
           failed_owners:complete ? 0 : Math.max(0, addresses.length - best.answered),
           failed_addresses:complete ? [] : best.failures.map(function (f) { return f.address; }),
           active_objects:best.active,
+          // Distinct registry owners actually holding at least one XRP escrow
+          // object right now. NOT the same as either count above.
+          active_escrow_owners:(best.activeOwners != null ? best.activeOwners : null),
           non_xrp_objects:best.nonXrp,
           locked_xrp:complete ? best.locked : null,
           observed_locked_xrp_partial:best.locked,
@@ -269,7 +290,11 @@
         try { state.rippleEscrowPosition = lastPosition; } catch (_) {}
         try {
           log('Ripple escrow current position: ' + (complete
-            ? (lastPosition.locked_xrp.toLocaleString(undefined,{maximumFractionDigits:0}) + ' XRP · ' + lastPosition.active_objects + ' active object(s) · 20/20 owners · isolated XRPL')
+            ? (lastPosition.locked_xrp.toLocaleString(undefined,{maximumFractionDigits:0}) + ' XRP · ' +
+               lastPosition.active_objects + ' active object(s) · ' +
+               (lastPosition.active_escrow_owners != null ? lastPosition.active_escrow_owners : '?') + ' owner(s) holding · ' +
+               lastPosition.rpc_responses_received + '/' + lastPosition.registry_addresses_checked +
+               ' registry addresses answered · isolated XRPL')
             : (lastPosition.status + ' · ' + lastPosition.answered_owners + '/' + lastPosition.expected_owners + ' owners · amount withheld · ' + lastPosition.duration_ms + 'ms ceiling')));
         } catch (_) {}
         return lastPosition;
