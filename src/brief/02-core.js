@@ -322,6 +322,18 @@ const WATCHLIST = [
   ['COREUM_INC_FRONT_B',       'rwt8PJhyXWgW8uwmTjmQ7Rw89tJHELFgb5', 'discovered_receiver'],
   ['COREUM_INC_STAGING_A',     'rnaBRmXU6ZS7orU6Qj38wsBYQmqHPbrhA9', 'discovered_receiver'],
   ['COREUM_INC_STAGING_B',     'r3jV8g599WMR9zeFi5m1rbvXyEwNWwYFXt', 'discovered_receiver'],
+  // ── 2026-09-03 scan SW20260903E10KD: the 4 the run recommended ──
+  // 81 in the review queue, 7 found this scan, 4 with Recommended action: ADD.
+  // Same rule as every prior block — only the tier the run actually recommended
+  // lands; the other 77 stay in the queue until a run recommends them.
+  // Every figure below is quoted from that run's own export: the richlist
+  // readings are what the app read off the ledger, and the entries with no
+  // richlist line are recorded without a balance rather than given a guessed one.
+  // Behavioral evidence only. Flagged, not identified; nobody gets a badge.
+  ['LARGE_RECV_rpH2AT',   'rpH2ATpnDhrMHX6qkdo2uVngwmp5KB3Fms', 'discovered_receiver'],        // watch-net · 4.89M from whale rhuqpD…dvE7 · RECEIVER_STILL_HOLDING_SIZE · richlist #221 (40,130,948) · seen 5 scans · score 175/200
+  ['LARGE_RECV_rK59uk',   'rK59ukHjuj3pBLmUusPTwu5Bu2kCQj73Bs', 'discovered_receiver'],        // watch-net · 3.49M from whale rhuqpD…dvE7 · RECEIVER_STILL_HOLDING_SIZE · richlist #591 (7,206,889) · seen 4 scans · score 160/200
+  ['SPLITTER_rpscz3',     'rpscz3HCXwdLj82nQcoGXZAT5WARSFxzAY', 'next_hop_splitter'],          // routing-node · 3.61M from receiving wallet raN2ev…p9Jg · NEXT_HOP_FORWARDING_DETECTED · no richlist reading · seen 6 scans · score 125/200
+  ['LARGE_RECV_rNMWdx',   'rNMWdxH8uUw17Fj9REhs2cJSWxCHwkzKK3', 'discovered_receiver'],        // watch-net · 3.60M from whale rhuqpD…dvE7 · RECEIVER_STILL_HOLDING_SIZE · no richlist reading · seen 3 scans · score 125/200
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)

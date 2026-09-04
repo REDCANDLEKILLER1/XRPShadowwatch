@@ -172,7 +172,12 @@ function _plain(name, provenance){
     // Internal/watchlist handles such as RIPPLE_ESCROW_* are behavioural
     // labels, not ownership proof, and must not turn an ordinary movement into
     // a Ripple escrow claim.
-    return /^ripple$/i.test(String(name).trim()) ? 'Ripple' : 'a watched wallet';
+    // "moved from Ripple" reads as the COMPANY moving money. What was sourced
+    // is that this ADDRESS is Ripple-associated, from published account
+    // metadata — not that Ripple Inc. authorised the payment. Name the
+    // association, not the corporation. The behavioural-handle case below is
+    // unchanged and still gets the neutral phrase.
+    return /^ripple$/i.test(String(name).trim()) ? 'a Ripple-associated wallet' : 'a watched wallet';
   }
   if(n.includes('exchange')||n.includes('hot')) return 'an exchange wallet';
   if(n.includes('whale'))     return 'a large XRP holder';
@@ -1906,7 +1911,11 @@ function _repairProvenance(text, failures){
     var neutral=_NEUTRAL_FOR[ent]||'an exchange wallet';
     // Whole-word only: "Bitso" must not eat the "Bitso" inside a longer name,
     // and a replacement must never run two words together.
-    var re=new RegExp('(^|[^A-Za-z0-9.])'+ent.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?![A-Za-z0-9])','g');
+    // The lookahead excludes '-' as well as alphanumerics. Without it, a
+    // provenance failure rewrote the "Ripple" inside "a Ripple-associated
+    // wallet" and produced "a Ripple escrow wallet-associated wallet" — the
+    // repair path mangling the very phrase that exists to be careful.
+    var re=new RegExp('(^|[^A-Za-z0-9.])'+ent.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?![A-Za-z0-9-])','g');
     var before=out;
     out=out.replace(re, function(m,p1){ return p1+neutral; });
     if(out!==before){ count++; notes.push('"'+ent+'" → "'+neutral+'"'); }
