@@ -172,7 +172,12 @@ function _plain(name, provenance){
     // Internal/watchlist handles such as RIPPLE_ESCROW_* are behavioural
     // labels, not ownership proof, and must not turn an ordinary movement into
     // a Ripple escrow claim.
-    return /^ripple$/i.test(String(name).trim()) ? 'Ripple' : 'a watched wallet';
+    // "moved from Ripple" reads as the COMPANY moving money. What was sourced
+    // is that this ADDRESS is Ripple-associated, from published account
+    // metadata — not that Ripple Inc. authorised the payment. Name the
+    // association, not the corporation. The behavioural-handle case below is
+    // unchanged and still gets the neutral phrase.
+    return /^ripple$/i.test(String(name).trim()) ? 'a Ripple-associated wallet' : 'a watched wallet';
   }
   if(n.includes('exchange')||n.includes('hot')) return 'an exchange wallet';
   if(n.includes('whale'))     return 'a large XRP holder';
@@ -795,10 +800,54 @@ function _nvBeat(seed, salt){ return _nvPick(_NV_BEATS, seed, 900+(salt||0)); }
 // SW-20260813-VAGPU read 35 of 197 wallets while the device had no network at
 // all, and opened with "not one wallet did anything it had not done before."
 // XRPMan does not get to sound certain about a board he could not read.
+// TWO COVERAGES, AND THE REPORT MUST BE HONEST ABOUT THE WEAKER ONE.
+// scanCoverage() measures BALANCE reads: wallets_checked / wallets_failed, set
+// when account_info answers. tx_scan_coverage measures something else — how
+// many wallets PROVED the transaction window. They diverge, and on
+// SW-20260903 (second run) they diverged badly: 251/251 balances answered, so
+// degraded was false and every caveat stayed silent, while only 219/251 proved
+// their transaction window.
+//
+// The result was a published 59/100 risk score, and a "net distributing"
+// direction, computed from 87% of the transaction data with no partial-read
+// caveat anywhere in the Verdict or the diagnostics — the Executive Summary's
+// own TX WINDOW: INCOMPLETE line contradicting the section beneath it.
+//
+// Every number the caveat qualifies — shadow volume, large transfers, net flow,
+// the score — is built from transactions, not balances. So the caveat keys on
+// the WEAKER of the two, and says which one is short.
 function _cov(pack){
-  if(typeof scanCoverage==='function'){ try{ return scanCoverage(pack); }catch(_){} }
-  return { checked:0, failed:0, total:0, pct:1, percent:100,
-           degraded:false, severe:false, line:'', caveat:'' };
+  var base=null;
+  if(typeof scanCoverage==='function'){ try{ base=scanCoverage(pack); }catch(_){} }
+  if(!base) base={ checked:0, failed:0, total:0, pct:1, percent:100,
+                   degraded:false, severe:false, line:'', caveat:'' };
+  base.basis='balance';
+  base.basis_noun='answered';
+  try{
+    var t=pack&&pack.tx_scan_coverage;
+    var tTotal=t?Number(t.target_wallets)||0:0;
+    if(tTotal>0){
+      var tOk=Number(t.complete_wallets)||0;
+      var tPct=tOk/tTotal;
+      if(tPct<base.pct){
+        var pc=Math.round(tPct*100);
+        return {
+          checked:tOk, failed:tTotal-tOk, total:tTotal, pct:tPct, percent:pc,
+          degraded:tPct<0.95, severe:tPct<0.60,
+          basis:'transaction window', basis_noun:'proved the transaction window',
+          line:tOk+' of '+tTotal+' watched wallet'+(tTotal===1?'':'s')+
+               ' proved the transaction window ('+pc+'%)'+
+               ((tTotal-tOk)>0?'; '+(tTotal-tOk)+' did not':'')+'.',
+          caveat:tPct<0.60
+            ? 'Most of the board never proved its transaction window, so a low reading here is unread, not clear. Nothing below can be treated as an all-clear until the scan is re-run.'
+            : (tPct<0.95
+              ? 'Part of the board never proved its transaction window. Every movement total below is of what was reachable, not of the whole list.'
+              : '')
+        };
+      }
+    }
+  }catch(_){}
+  return base;
 }
 // v16.24 (audit P1): the SAME integrity verdict the structured report and the
 // intel brief already consume, read straight from 02-core. scanIntegrity() is the
@@ -1238,8 +1287,11 @@ function _buildVerdict(interps, pack){
   var delta=_num(pack&&(pack.total_balance_delta_xrp!=null?pack.total_balance_delta_xrp:pack.balance_delta));
   if(delta>500000) dir+=' Watched wallets are net accumulating — about '+_xrpFmt(delta)+' XRP moved inward.';
   else if(delta<-500000) dir+=' Watched wallets are net distributing — about '+_xrpFmt(Math.abs(delta))+' XRP moved outward.';
-  if(cov.degraded) dir+=' Scored across '+cov.checked+' of '+cov.total+' wallets ('+cov.percent+'%) — '+
-                        cov.failed+' failed to read, so treat this as a partial read.';
+  if(cov.degraded) dir+=' Scored across '+cov.checked+' of '+cov.total+' wallets that '+
+                        (cov.basis_noun||'answered')+' ('+cov.percent+'%) — '+
+                        cov.failed+(cov.basis==='transaction window'
+                          ? ' did not, so treat this as a partial read.'
+                          : ' failed to read, so treat this as a partial read.');
   return _nvPick(['Today\u2019s forensic read: ','The read, straight up: ','Bottom line off the Ledger: ','My call this morning: '],seed,32)+verbal+'.'+dir+' '+_nvBeat(seed,5)+
          ' Not financial advice. XRP-only forensic watch.\n\n'+
          'I\u2019m XRPMan, and I tell on the banks.';
@@ -1859,7 +1911,11 @@ function _repairProvenance(text, failures){
     var neutral=_NEUTRAL_FOR[ent]||'an exchange wallet';
     // Whole-word only: "Bitso" must not eat the "Bitso" inside a longer name,
     // and a replacement must never run two words together.
-    var re=new RegExp('(^|[^A-Za-z0-9.])'+ent.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?![A-Za-z0-9])','g');
+    // The lookahead excludes '-' as well as alphanumerics. Without it, a
+    // provenance failure rewrote the "Ripple" inside "a Ripple-associated
+    // wallet" and produced "a Ripple escrow wallet-associated wallet" — the
+    // repair path mangling the very phrase that exists to be careful.
+    var re=new RegExp('(^|[^A-Za-z0-9.])'+ent.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?![A-Za-z0-9-])','g');
     var before=out;
     out=out.replace(re, function(m,p1){ return p1+neutral; });
     if(out!==before){ count++; notes.push('"'+ent+'" → "'+neutral+'"'); }
@@ -2202,7 +2258,10 @@ window.PUBLIC_REPORT_PIPELINE_V1={
     summarizeNewsImpact:         summarizeNewsImpact,
     summarizeReceiverFollowthrough: summarizeReceiverFollowthrough,
     summarizeBandBehavior:       summarizeBandBehavior,
-    summarizeAbsorberActivity:   summarizeAbsorberActivity
+    summarizeAbsorberActivity:   summarizeAbsorberActivity,
+    // Exported so the weaker-of-two coverage rule is testable through the
+    // module's own API rather than by reaching into the IIFE.
+    coverageForNarrative:        _cov
   },
   assertions:{
     assertNoTelemetryLeak:        assertNoTelemetryLeak,
