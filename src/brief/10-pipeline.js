@@ -1332,9 +1332,13 @@ function _buildLedgerDiagnostics(pack){
   if (dexD && DVL && typeof DVL.line === 'function') {
     L.push(DVL.line(dexD));
   } else {
-    var nat=_num(p.xrpl_dex_volume_24h_usd);
-    if(nat>0) L.push('\u2022 Native XRPL DEX (24h): '+_usdC(nat));
-    else L.push('\u2022 Native XRPL DEX (24h): SOURCE UNAVAILABLE');
+    // NO numeric fallback. This branch used to print any bare
+    // xrpl_dex_volume_24h_usd > 0, which is precisely how a stale or unvetted
+    // figure bypassed the decision layer — the same failure the layer was
+    // built to end. Without a decision there is no proof the number was ever
+    // checked, so it is not printed. Silence is not an option either; the line
+    // stays and says what happened.
+    L.push('\u2022 Native XRPL DEX (24h): SOURCE UNAVAILABLE (no decision recorded)');
   }
   var evm=_num(p.xrpl_evm_dex_volume_24h_usd), tvl=_num(p.xrpl_evm_tvl_usd);
   if(evm>0||tvl>0){

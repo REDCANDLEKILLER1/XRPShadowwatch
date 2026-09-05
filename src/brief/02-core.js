@@ -1846,6 +1846,15 @@ async function market() {
   // Order matters: the ledger-derived figure is primary, the dollar aggregate
   // is only a cross-check, and neither may print a number its own source
   // contradicts. See src/brief/40-dex-volume-truth-20260904.js.
+  // CLEAR FIRST, unconditionally. Every path out of this block — the decision
+  // layer failing to load, a thrown fetch, an unprintable decision — used to
+  // leave the PREVIOUS run's number sitting in the input, and 10-pipeline's
+  // fallback printed any bare value > 0. So a stale figure could walk straight
+  // past the truth gate this whole layer exists to install: the exact bypass,
+  // wearing a different coat. Nothing is printed unless this run earns it.
+  try { $('inXrpldex').value = ''; } catch (_) {}
+  try { if (typeof state !== 'undefined') state.dexVolumeDecision = null; } catch (_) {}
+
   try {
     const DV = (typeof window !== 'undefined') && window.SW_DEX_VOLUME;
     let ledger = null, agg = null;
@@ -1879,9 +1888,12 @@ async function market() {
         ? ('✓ Native DEX (' + decision.source + ')')
         : ('Native DEX unavailable: ' + decision.reason));
     } else {
-      notes.push('Native DEX layer missing');
+      // No decision layer means no figure may be claimed. The field is already
+      // cleared above, so the Report says SOURCE UNAVAILABLE rather than
+      // printing whatever survived from last time.
+      notes.push('Native DEX unavailable: DECISION_LAYER_MISSING');
     }
-  } catch (e) { notes.push('Native DEX blocked'); }
+  } catch (e) { notes.push('Native DEX unavailable: ACQUISITION_FAILED'); }
   // 8. RLUSD supply — TWO independent sources in parallel (on-chain gateway +
   //    CoinGecko). Either one covers if the other fails; keep both to compare.
   try {

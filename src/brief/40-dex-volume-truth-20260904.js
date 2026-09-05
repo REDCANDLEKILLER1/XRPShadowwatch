@@ -67,6 +67,11 @@
   // thing. The observed break was ~3700x.
   var DISAGREE_MAX_RATIO = 5;
 
+  function _intOrNull(v) {
+    var n = Number(v);
+    return isFinite(n) ? Math.trunc(n) : null;
+  }
+
   function num(v) {
     var n = Number(v);
     return isFinite(n) ? n : 0;
@@ -78,7 +83,7 @@
   // appear under both sides; that is stated rather than silently corrected,
   // because correcting it would require pair-level data this endpoint does not
   // give and guessing a discount would be inventing a number.
-  function sumLedgerVolume(tokens) {
+  function sumLedgerVolume(tokens, total) {
     var list = Array.isArray(tokens) ? tokens : [];
     var xrp = 0, counted = 0, top = [];
     for (var i = 0; i < list.length; i++) {
@@ -93,14 +98,30 @@
         top.push({ name: meta.name || String(t.currency || '').slice(0, 12), xrp: v });
       }
     }
+    // The omitted tail. `tail_negligible: list.length >= 100` used to live here
+    // and it was an unearned claim: how many tokens came back says nothing
+    // about the volume of the ones that did not. The honest bound is the
+    // smallest returned value times the number not returned, and against
+    // 165,000 XRPL tokens that bound exceeds the total — which is the proof
+    // that this endpoint CANNOT establish negligibility. So it is not claimed.
+    // The inputs are reported instead, and the figure is rendered as an
+    // approximation.
+    var smallest = null;
+    for (var j = 0; j < list.length; j++) {
+      var vv = num((list[j] && list[j].metrics || {}).volume_24h);
+      if (vv > 0 && (smallest === null || vv < smallest)) smallest = vv;
+    }
     return {
       xrp: xrp,
       tokens_counted: counted,
       tokens_returned: list.length,
+      // Total tokens the endpoint says exist, when it tells us.
+      tokens_total: _intOrNull(total),
+      smallest_returned_xrp: smallest,
       top: top,
-      // True when the list was long enough that the untruncated tail cannot
-      // matter. Reported, not assumed.
-      tail_negligible: list.length >= 100
+      // Never true. Kept as a named field so no caller can mistake its absence
+      // for an oversight: the omitted tail is UNBOUNDED from this data.
+      tail_proven_negligible: false
     };
   }
 
@@ -221,15 +242,31 @@
       return '• Native XRPL DEX (24h): SOURCE UNAVAILABLE' +
              (d.note ? ' (' + d.note + ')' : '');
     }
+    // APPROXIMATE, always. Two acknowledged effects push in opposite
+    // directions and neither is quantified: per-token sums count token<->token
+    // trades under both sides (over), and the omitted tail is unbounded from
+    // this endpoint (under). "$11.13M" asserts a precision the method does not
+    // have. "~$11M" is what the evidence supports, and it is what was given to
+    // the operator as the public correction.
     var body;
     if (d.usd === null) {
-      body = fmtXrp(d.xrp) + ' XRP (no USD price this run)';
+      body = '~' + fmtXrp(d.xrp) + ' XRP (no USD price this run)';
     } else {
-      body = fmtUsd(d.usd);
-      if (d.source === 'ledger') body += ' (' + fmtXrp(d.xrp) + ' XRP, ledger-derived)';
+      body = '~' + fmtUsdApprox(d.usd);
+      if (d.source === 'ledger') body += ' (~' + fmtXrp(d.xrp) + ' XRP, ledger-derived estimate)';
     }
     if (d.note) body += ' — ' + d.note;
     return '• Native XRPL DEX (24h): ' + body;
+  }
+
+  // Two significant figures at most. An approximation must not be dressed as a
+  // measurement by the formatter.
+  function fmtUsdApprox(v) {
+    var n = num(v);
+    if (n >= 1e9) return '$' + Math.round(n / 1e8) / 10 + 'B';
+    if (n >= 1e6) return '$' + Math.round(n / 1e6) + 'M';
+    if (n >= 1e3) return '$' + Math.round(n / 1e3) + 'K';
+    return '$' + Math.round(n);
   }
 
   function fmtUsd(v) {
@@ -254,6 +291,7 @@
     aggregatorHealth: aggregatorHealth,
     reconcile: reconcile,
     line: line,
+    fmtUsdApprox: fmtUsdApprox,
     _fmtUsd: fmtUsd,
     _fmtXrp: fmtXrp
   };

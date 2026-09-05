@@ -109,16 +109,27 @@ check('an all-null breakdown is refused for having no value at all',
 
 // ════════════════════════════════════════════════════════════════════════════
 console.log('\n2. the ledger-derived sum');
-const led = DEX.sumLedgerVolume(LEDGER_TOKENS);
+const led = DEX.sumLedgerVolume(LEDGER_TOKENS, 165624);
 check('per-token volumes sum to the measured figure',
       led.xrp === 7661930, led.xrp);
 check('the token count is reported, not assumed', led.tokens_counted === 6);
 check('the leaders are carried for the diagnostics surface',
       led.top[0].name === 'Ripple USD' && led.top[0].xrp === 5686498);
-check('a short list does NOT claim its tail is negligible',
-      led.tail_negligible === false);
-check('a full page does',
-      DEX.sumLedgerVolume(new Array(200).fill({ metrics: { volume_24h: '1' } })).tail_negligible === true);
+// `tail_negligible: list.length >= 100` used to live here, asserted true for a
+// full page. How many tokens came back says NOTHING about the volume of the
+// ones that did not. Against ~165,000 XRPL tokens the honest bound —
+// smallest returned x number omitted — exceeds the total, which is the proof
+// that this endpoint cannot establish negligibility at all.
+check('negligibility of the omitted tail is never claimed',
+      led.tail_proven_negligible === false);
+check('not even for a full page of 200',
+      DEX.sumLedgerVolume(new Array(200).fill({ metrics: { volume_24h: '1' } }), 165624)
+        .tail_proven_negligible === false);
+check('the inputs a reader would need are reported instead',
+      led.smallest_returned_xrp === 117195 && led.tokens_total === 165624 &&
+      led.tokens_returned === 6, { s: led.smallest_returned_xrp, t: led.tokens_total });
+check('an unknown total is null, not a guess',
+      DEX.sumLedgerVolume(LEDGER_TOKENS).tokens_total === null);
 check('zero and malformed volumes are skipped, not coerced',
       DEX.sumLedgerVolume([{ metrics: { volume_24h: '0' } },
                            { metrics: { volume_24h: 'abc' } },
@@ -185,20 +196,80 @@ check('the line is never dropped and never renders a zero',
 check('and it names why', /silent|PARTIAL|unavailable/i.test(unavailableLine));
 
 const goodLine = DEX.line(both);
-check('a measured figure prints in millions, not as a bare integer',
-      /\$11\.\d\dM/.test(goodLine), goodLine);
-check('and shows the XRP volume behind it',
-      /XRP, ledger-derived/.test(goodLine), goodLine);
+// The method acknowledges token<->token double counting (over) and an
+// unbounded omitted tail (under). "$11.13M" asserts a precision it does not
+// have. The public correction given to the operator was "~$11M"; the Report
+// must not claim more than that.
+check('the figure is rendered as an APPROXIMATION, not a measurement',
+      /~\$11M/.test(goodLine) && !/\$11\.\d\dM/.test(goodLine), goodLine);
+check('and is labelled an estimate',
+      /ledger-derived estimate/.test(goodLine), goodLine);
+check('the XRP volume behind it is approximate too',
+      /~7\.66M XRP/.test(goodLine), goodLine);
+check('two significant figures at most — no false precision from the formatter',
+      DEX.fmtUsdApprox(11134317) === '$11M' && DEX.fmtUsdApprox(3010) === '$3K');
 check('the exact false figure from 2026-09-04 can never be produced here',
       !/\$3K/.test(goodLine) && !/\$3K/.test(unavailableLine));
-check('a no-price decision prints XRP and says the price is missing',
-      /XRP \(no USD price this run\)/.test(DEX.line(noPrice)), DEX.line(noPrice));
+check('a no-price decision prints approximate XRP and says the price is missing',
+      /~7\.66M XRP \(no USD price this run\)/.test(DEX.line(noPrice)), DEX.line(noPrice));
 
 // The formatter must not round a real figure down into the false one.
-check('11.13M formats as $11.13M, not $11M or $3K',
+check('the exact formatter still exists for internal use',
       DEX._fmtUsd(11134316) === '$11.13M', DEX._fmtUsd(11134316));
+check('but it is NOT what reaches the Report line',
+      !/\$11\.13M/.test(DEX.line(both)), DEX.line(both));
 check('3010 would format as $3.0K — which is why it must never reach the line',
       DEX._fmtUsd(3010) === '$3.0K');
+
+// ════════════════════════════════════════════════════════════════════════════
+console.log('\n5. the stale-number bypass is closed at the call sites');
+// The decision layer is only as good as the two places that use it. Before
+// this, market() cleared inXrpldex ONLY on the success path, so a decision
+// layer that failed to load — or a thrown fetch — left the PREVIOUS run's
+// number sitting in the field, and 10-pipeline printed any bare value > 0.
+// A stale figure walked straight past the gate. These are source assertions
+// because the call sites are browser code the pure suite cannot execute; they
+// are narrow enough to bite and are sabotage-verified.
+const fs2 = require('fs');
+const CORE = fs2.readFileSync(path.join(__dirname, '..', 'src/brief/02-core.js'), 'utf8');
+const PIPE = fs2.readFileSync(path.join(__dirname, '..', 'src/brief/10-pipeline.js'), 'utf8');
+
+const dexBlock = (CORE.split('// 7. Native XRPL DEX')[1] || '').split('// 8.')[0];
+check('the DEX acquisition block exists to be checked', dexBlock.length > 400);
+// This compared indexOf(clear) < indexOf(acquire). Deleting the clear entirely
+// makes indexOf return -1, and -1 < anything is TRUE — so a MISSING clear read
+// as "cleared very early" and the sabotage restoring the original bypass left
+// the suite green. Assert the clear EXISTS first, then that it precedes
+// acquisition.
+const _clearAt   = dexBlock.indexOf("$('inXrpldex').value = ''");
+const _acquireAt = dexBlock.indexOf('window.SW_DEX_VOLUME');
+check('inXrpldex is cleared at all', _clearAt >= 0, _clearAt);
+check('and the clear happens BEFORE acquisition, not only on success',
+      _clearAt >= 0 && _acquireAt >= 0 && _clearAt < _acquireAt,
+      { clear: _clearAt, acquire: _acquireAt });
+check('the stored decision is cleared before acquisition too',
+      /state\.dexVolumeDecision = null/.test(dexBlock));
+check('a missing decision layer is reported as unavailable, not merely noted',
+      /DECISION_LAYER_MISSING/.test(dexBlock) && !/Native DEX layer missing/.test(dexBlock));
+check('a thrown acquisition is reported as unavailable too',
+      /ACQUISITION_FAILED/.test(dexBlock));
+
+// Strip line comments first. The previous form matched the phrase `if(nat>0)`
+// inside the comment EXPLAINING why it was removed — a check that would have
+// passed on prose while the code did anything at all. Same trap the SQL checks
+// in db-foundation.test.js strip comments to avoid.
+const stripJsComments = (t) => t.split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
+const pipeBlock = stripJsComments(
+  (PIPE.split('Native XRPL DEX. Rendered from the DECISION')[1] || '').slice(0, 1400));
+check('the render block exists to be checked', pipeBlock.length > 200);
+check('there is NO numeric fallback that could print an unvetted figure',
+      !/xrpl_dex_volume_24h_usd\)[\s\S]{0,80}?_usdC\(/.test(pipeBlock), pipeBlock.slice(0, 300));
+check('the fallback says SOURCE UNAVAILABLE instead',
+      /SOURCE UNAVAILABLE \(no decision recorded\)/.test(pipeBlock));
+check('and that is real code, not a comment about it',
+      /L\.push\([^;]*SOURCE UNAVAILABLE/.test(pipeBlock));
+check('and the line is never simply dropped',
+      !/if\s*\(\s*nat\s*>\s*0\s*\)/.test(pipeBlock));
 
 console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' CHECKS PASS'));
 process.exit(fail ? 1 : 0);
