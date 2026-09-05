@@ -22,8 +22,12 @@
 // payload, unread. fetchDefiDex took `total24h` and accepted anything > 0.
 //
 // Measured against the ledger the same morning: 7,661,930 XRP of DEX volume in
-// 24h across the top 200 tokens, about $11.1M. The tail is irrelevant — ranks
-// 101-200 contribute 0.66%.
+// 24h across the top 200 tokens, about $11M. Ranks 101-200 contributed 0.66%
+// of what was returned — which says the RETURNED list is top-heavy, and says
+// nothing about the ~165,000 tokens that were not returned. See
+// sumLedgerVolume: negligibility of the omitted tail is not claimed, because
+// this endpoint cannot establish it. The figure is an approximation and is
+// rendered as one.
 //
 // ── What this layer does ────────────────────────────────────────────────────
 // Two changes, and the second matters more than the first:
