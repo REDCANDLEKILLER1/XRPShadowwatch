@@ -130,6 +130,49 @@ function capWindowToAnchor(input) {
   };
 }
 
+// ── Is "no more marker" actually the end of the account's history? ────────
+//
+// It usually is not. `account_tx` returning no marker means the SERVER has no
+// more pages of what IT retains. A partial-history server exhausts its own
+// retention and looks identical to an account that genuinely has no older
+// transactions. Believing the second when it is the first claims coverage over
+// history nobody read — which is the whole failure class this file exists to
+// prevent, and it is worse here than elsewhere because the bootstrap uses it
+// to claim coverage back to the beginning of time.
+//
+// The only thing that settles it is the server's own complete-ledger range. A
+// server holding history from the genesis ledger down has nothing older to
+// give; one that starts at ledger 90,000,000 has plenty it simply does not
+// keep. `server_info.complete_ledgers` is where that comes from.
+//
+// XRPL's first surviving ledger is 32570 — ledgers 1-32569 were lost early in
+// the network's life, so a full-history server's range starts there.
+const XRPL_EARLIEST_AVAILABLE_LEDGER = 32570;
+
+function proveHistoryExhaustion(input) {
+  const i = input || {};
+  const serverMin = _int(i.serverCompleteLedgerMin);
+  const oldest = _int(i.oldestObservedLedger);
+
+  if (serverMin === null) {
+    return { proven: false, reason: 'SERVER_RANGE_UNKNOWN', server_min: null };
+  }
+  // The server holds history back to the beginning of what exists, so running
+  // out of pages means the account really has nothing older.
+  if (serverMin <= XRPL_EARLIEST_AVAILABLE_LEDGER) {
+    return { proven: true, reason: 'SERVER_HAS_FULL_HISTORY', server_min: serverMin };
+  }
+  // It does not. Whether the account has older transactions is unknown, and
+  // saying otherwise would be reading the server's retention as the ledger's
+  // contents. Report the gap so a caller can see how much is unaccounted for.
+  return {
+    proven: false,
+    reason: 'SERVER_HISTORY_PARTIAL',
+    server_min: serverMin,
+    unproven_below: oldest !== null ? Math.min(oldest, serverMin) : serverMin
+  };
+}
+
 // ── Decision 1: can this window come out of the index? ─────────────────────
 //
 // The window arrives in TIME (the Report's window is [startMs, endMs]); the
@@ -167,18 +210,27 @@ function windowServability(input) {
     throw new Error('windowServability: windowStartMs/windowEndMs must bound a real window');
   }
 
-  // Cap before anything is derived from the window. When the caller supplies
-  // the anchor's close time (it should — the column is NOT NULL), a window
-  // reaching past it is trimmed here rather than at INSERT, so the decision
-  // and every number downstream describe a period the run actually read.
+  // anchorCloseMs is REQUIRED, not optional.
+  //
+  // This used to read `if (anchorCloseMs !== null) { ...cap... }` — silently
+  // skipping the cap whenever the caller omitted it — and a test asserted that
+  // path as acceptable. It contradicted the invariant stated eighty lines above
+  // and enforced in capWindowToAnchor: half an anchor is not an anchor. A
+  // ledger index with no close time cannot be compared against a window at
+  // all, so a decision made without one is a decision about a window nobody
+  // bounded. Every other fixture in the suite took that path.
+  //
+  // Refusing here is the whole point: the cap cannot be the thing that makes
+  // the database CHECK real if a caller can opt out of it by forgetting an
+  // argument.
   const anchorCloseMs = _int(input && input.anchorCloseMs);
-  let effEndMs = endMs, windowCapped = false, claimedBeyondMs = 0;
-  if (anchorCloseMs !== null) {
-    const cap = capWindowToAnchor({ windowEndMs: endMs, anchorCloseMs: anchorCloseMs });
-    effEndMs = cap.window_end_ms;
-    windowCapped = cap.capped;
-    claimedBeyondMs = cap.claimed_beyond_ms;
+  if (anchorCloseMs === null) {
+    throw new Error('windowServability: a numeric anchorCloseMs is required — half an anchor is not an anchor');
   }
+  const cap = capWindowToAnchor({ windowEndMs: endMs, anchorCloseMs: anchorCloseMs });
+  const effEndMs = cap.window_end_ms;
+  const windowCapped = cap.capped;
+  const claimedBeyondMs = cap.claimed_beyond_ms;
 
   const base = {
     address: c.address,
@@ -318,13 +370,24 @@ function checkpointAdvance(input) {
   // one derived by interpolating a close interval.
   const bounded          = p.range_bound_proven === true;
   const boundaryReached  = p.boundary_reached === true;
-  const historyExhausted = p.history_exhausted === true;
-  const oldest           = _int(p.oldest_ledger_index);
+  // "No marker" is the SERVER running out of pages, not proof the account has
+  // nothing older. Only a server whose own complete-ledger range reaches back
+  // to the start of available history can settle that — see
+  // proveHistoryExhaustion. Marker exhaustion alone is not evidence.
+  const exhaustionClaimed = p.history_exhausted === true;
+  const historyExhausted  = exhaustionClaimed && p.history_exhausted_proven === true;
+  const oldest            = _int(p.oldest_ledger_index);
 
   if (!bounded) {
-    if (!boundaryReached && !historyExhausted) {
+    if (!boundaryReached && !exhaustionClaimed) {
       // A walk that stopped for any other reason proves no range at all.
       return refuse('RANGE_NOT_LEDGER_BOUND');
+    }
+    // Exhaustion claimed but unproven, and the walk never reached the window
+    // boundary either: there is nothing here that establishes a floor. On a
+    // partial-history server this is the ordinary case, not an exotic one.
+    if (!boundaryReached && exhaustionClaimed && !historyExhausted) {
+      return refuse('HISTORY_EXHAUSTION_UNPROVEN');
     }
     // Exhausting an account that has NO transactions leaves nothing to read a
     // floor from. Claiming one anyway would be inventing a ledger value, and
@@ -500,6 +563,8 @@ module.exports = {
   normalizeCoverage,
   hasProof,
   capWindowToAnchor,
+  proveHistoryExhaustion,
+  XRPL_EARLIEST_AVAILABLE_LEDGER,
   windowServability,
   mayReportQuiet,
   checkpointAdvance,

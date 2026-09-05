@@ -744,6 +744,10 @@ const T = (iso) => new Date(iso).getTime();
 const WIN_START = T('2026-09-02T00:00:00Z');
 const WIN_END   = T('2026-09-03T00:00:00Z');
 const ANCHOR    = 98800000;
+// An anchor close comfortably after the window end, so fixtures exercising
+// coverage logic are not incidentally testing the cap. anchorCloseMs is
+// mandatory now, so every call must carry one.
+const ANCHOR_CLOSE_OK = T('2026-09-03T02:00:00Z');
 
 const provenCov = {
   address: 'rQuiet',
@@ -754,7 +758,7 @@ const provenCov = {
   evidence_retained_from_close_ms: T('2026-08-01T00:00:00Z')
 };
 
-const edge = COV.windowServability({ coverage: provenCov, windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+const edge = COV.windowServability({ coverage: provenCov, windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR, anchorCloseMs: ANCHOR_CLOSE_OK });
 check('the normal morning case is EDGE_ONLY', edge.reason === COV.REASON.EDGE_ONLY, edge.reason);
 check('history comes from the index', edge.served_from_index === true);
 check('only the un-proven edge is fetched', edge.fetch_from_ledger === 98790001, edge.fetch_from_ledger);
@@ -767,7 +771,7 @@ check('the window is not complete until that edge is fetched',
 // This is the "second report takes seconds" case.
 const ahead = COV.windowServability({
   coverage: Object.assign({}, provenCov, { scan_coverage_through: ANCHOR + 500, evidence_retained_through: ANCHOR + 500 }),
-  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR, anchorCloseMs: ANCHOR_CLOSE_OK });
 check('coverage past the anchor makes the window FULLY_SERVABLE',
       ahead.reason === COV.REASON.FULLY_SERVABLE, ahead.reason);
 check('nothing is fetched in that case',
@@ -775,7 +779,7 @@ check('nothing is fetched in that case',
 check('the run still only reads up to ITS anchor', ahead.fetch_to_ledger === ANCHOR);
 
 // A wallet that has never been scanned.
-const cold = COV.windowServability({ coverage: null, windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+const cold = COV.windowServability({ coverage: null, windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR, anchorCloseMs: ANCHOR_CLOSE_OK });
 check('an unscanned wallet is NO_COVERAGE', cold.reason === COV.REASON.NO_COVERAGE);
 check('nothing is served for it', cold.served_from_index === false);
 check('it cannot be bounded in ledger space, so it falls back to a date walk',
@@ -804,7 +808,7 @@ check('a NULL ledger column normalizes to null, never to ledger 0',
       nullRow.scan_coverage_through === null && nullRow.scan_coverage_from === null,
       nullRow);
 check('a row of NULLs has no proof', COV.hasProof(nullRow) === false);
-const coldPg = COV.windowServability({ coverage: PG_NULL_ROW, windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+const coldPg = COV.windowServability({ coverage: PG_NULL_ROW, windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR, anchorCloseMs: ANCHOR_CLOSE_OK });
 check('a row of NULLs is NO_COVERAGE, not EDGE_ONLY',
       coldPg.reason === COV.REASON.NO_COVERAGE, coldPg.reason);
 check('and claims nothing: not served, not proven at the start',
@@ -822,7 +826,7 @@ check('a numeric string is still accepted — drivers return BIGINT as text',
 // The window reaches back before anything was proven.
 const frontGap = COV.windowServability({
   coverage: Object.assign({}, provenCov, { scan_coverage_from_close_ms: T('2026-09-02T12:00:00Z') }),
-  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR, anchorCloseMs: ANCHOR_CLOSE_OK });
 check('a window starting before proven history is PROOF_GAP_AT_START',
       frontGap.reason === COV.REASON.PROOF_GAP_AT_START, frontGap.reason);
 check('it is not served from the index', frontGap.served_from_index === false);
@@ -834,7 +838,7 @@ const pruned = COV.windowServability({
   coverage: Object.assign({}, provenCov, {
     evidence_retained_from: 98500000,
     evidence_retained_from_close_ms: T('2026-09-02T18:00:00Z') }),
-  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR, anchorCloseMs: ANCHOR_CLOSE_OK });
 check('proven-but-pruned is EVIDENCE_PRUNED, not an empty result',
       pruned.reason === COV.REASON.EVIDENCE_PRUNED, pruned.reason);
 check('the proof is still acknowledged', pruned.proven_start === true);
@@ -859,7 +863,7 @@ const prunedOldOnly = COV.windowServability({
   coverage: Object.assign({}, provenCov, {
     evidence_retained_from: 98500000,
     evidence_retained_from_close_ms: T('2026-08-15T00:00:00Z') }),
-  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR, anchorCloseMs: ANCHOR_CLOSE_OK });
 check('pruning OLDER than the window still serves the window',
       prunedOldOnly.reason === COV.REASON.EDGE_ONLY, prunedOldOnly.reason);
 check('and the evidence is reported as covering the start',
@@ -873,7 +877,7 @@ check('and only the edge is still fetched',
 // serving it would under-report.
 const holed = COV.windowServability({
   coverage: Object.assign({}, provenCov, { evidence_retained_through: 98700000 }),
-  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR, anchorCloseMs: ANCHOR_CLOSE_OK });
 check('a hole below the proof edge is refused, not served',
       holed.reason === COV.REASON.EVIDENCE_PRUNED &&
       holed.evidence_covers_proof_edge === false, holed.reason);
@@ -901,9 +905,19 @@ const uncapped = COV.windowServability({
 // `Number(input.anchorCloseMs) || 0` coercion (the exact Number(null)===0 trap
 // this module is written to prevent) collapsed every uncapped window to 1 Jan
 // 1970 with the suite still green.
-check('a decision made with no anchor close time does not cap the window',
-      edge.window_end_ms === WIN_END && edge.window_capped_to_anchor === false &&
-      edge.claimed_beyond_anchor_ms === 0, edge.window_end_ms);
+// This slot used to hold "a decision made with no anchor close time does not
+// cap the window" — an assertion that the loophole was ACCEPTABLE. It
+// contradicted the invariant stated in the same file (half an anchor is not an
+// anchor) and enforced in capWindowToAnchor, and it blessed the path every
+// other fixture in this suite took. Same shape as the bootstrap contradiction:
+// a hole encoded as a guarantee. windowServability now refuses.
+check('windowServability REFUSES a decision with no anchor close time',
+      /half an anchor/.test(threw(() => COV.windowServability({
+        coverage: provenCov, windowStartMs: WIN_START, windowEndMs: WIN_END,
+        anchorLedger: ANCHOR })) || ''));
+check('an uncapped window cannot be decided at all — no object is returned',
+      threw(() => COV.windowServability({ coverage: null, windowStartMs: WIN_START,
+        windowEndMs: WIN_END, anchorLedger: ANCHOR })) !== null);
 check('a one-millisecond overshoot is still capped',
       COV.capWindowToAnchor({ windowEndMs: WIN_END, anchorCloseMs: WIN_END - 1 }).capped === true);
 check('capWindowToAnchor refuses a missing window end',
@@ -969,7 +983,7 @@ const partialHist = COV.windowServability({
   coverage: Object.assign({}, provenCov, {
     scan_coverage_from: 98700000,
     scan_coverage_from_close_ms: T('2026-09-02T06:00:00Z') }),   // 6h into a 24h window
-  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR, anchorCloseMs: ANCHOR_CLOSE_OK });
 check('coverage starting INSIDE the window is not servable',
       partialHist.served_from_index === false &&
       partialHist.reason === COV.REASON.PROOF_GAP_AT_START, partialHist.reason);
@@ -982,7 +996,7 @@ const stale = COV.windowServability({
   coverage: Object.assign({}, provenCov, {
     scan_coverage_through: 98000500,
     scan_coverage_through_close_ms: T('2026-08-01T00:10:00Z') }),
-  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR, anchorCloseMs: ANCHOR_CLOSE_OK });
 check('a stale checkpoint still yields EDGE_ONLY, not FULLY_SERVABLE',
       stale.reason === COV.REASON.EDGE_ONLY, stale.reason);
 check('and the edge it demands spans the whole gap',
@@ -1088,7 +1102,7 @@ const afterBoot = COV.windowServability({
     scan_coverage_through_close_ms: boot.next_through_close_ms,
     evidence_retained_from: boot.next_from, evidence_retained_through: boot.next_through,
     evidence_retained_from_close_ms: boot.next_from_close_ms },
-  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR + 4000 });
+  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR + 4000, anchorCloseMs: ANCHOR_CLOSE_OK });
 check('THE ACCEPTANCE TEST — the second run is EDGE_ONLY, not another full walk',
       afterBoot.reason === COV.REASON.EDGE_ONLY, afterBoot.reason);
 check('and it fetches only the edge past the bootstrapped checkpoint',
@@ -1108,7 +1122,7 @@ const bootedCov = {
   evidence_retained_from_close_ms: boot.next_from_close_ms };
 const beforeFloor = COV.windowServability({
   coverage: bootedCov, windowStartMs: T('2026-08-01T00:00:00Z'),
-  windowEndMs: WIN_END, anchorLedger: ANCHOR });
+  windowEndMs: WIN_END, anchorLedger: ANCHOR, anchorCloseMs: ANCHOR_CLOSE_OK });
 check('a window predating the bootstrap floor is NOT served from the index',
       beforeFloor.reason === COV.REASON.PROOF_GAP_AT_START &&
       beforeFloor.served_from_index === false, beforeFloor.reason);
@@ -1136,15 +1150,73 @@ check('and a non-contiguous one on that wallet is still refused',
 // an account created yesterday whose whole history postdates the window is
 // still fully covered. Recording its oldest close time instead would make
 // proven_start false next run and send it back to a full walk.
-const bootExh = COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof: {
+const EXH_BASE_FOR_UNKNOWN = {
+  status: 'COMPLETE', range_bound_proven: false,
+  boundary_reached: false, history_exhausted: true,
+  oldest_ledger_index: 98799000, oldest_close_ms: T('2026-09-02T22:00:00Z'),
+  through_ledger: ANCHOR, through_close_ms: T('2026-09-03T00:00:00Z'), rows_stored: 2 };
+
+// "No marker" is the SERVER running out of pages. On a partial-history server
+// that is indistinguishable from an account with nothing older, so exhaustion
+// must be PROVEN against the server's own complete-ledger range before it can
+// claim history. proveHistoryExhaustion is what settles it.
+const proofFull = COV.proveHistoryExhaustion({
+  serverCompleteLedgerMin: COV.XRPL_EARLIEST_AVAILABLE_LEDGER, oldestObservedLedger: 98799000 });
+check('a full-history server proves exhaustion',
+      proofFull.proven === true && proofFull.reason === 'SERVER_HAS_FULL_HISTORY');
+const proofPartial = COV.proveHistoryExhaustion({
+  serverCompleteLedgerMin: 90000000, oldestObservedLedger: 98799000 });
+check('a partial-history server proves nothing',
+      proofPartial.proven === false && proofPartial.reason === 'SERVER_HISTORY_PARTIAL');
+check('and it reports how far down is unaccounted for',
+      proofPartial.unproven_below === 90000000, proofPartial);
+// Asserting only the REASON here was vacuous: a mutation flipping `proven` to
+// true while keeping the reason string left the suite green, so an unknown
+// server range would have bootstrapped history. Caught by sabotage. Assert the
+// verdict, and drive a real decision with it.
+const proofUnknown = COV.proveHistoryExhaustion({});
+check('an unknown server range proves nothing either',
+      proofUnknown.proven === false && proofUnknown.reason === 'SERVER_RANGE_UNKNOWN',
+      proofUnknown);
+check('and a bootstrap driven by that unknown range is refused',
+      COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof:
+        Object.assign({}, EXH_BASE_FOR_UNKNOWN, { history_exhausted_proven: proofUnknown.proven })
+      }).reason === 'HISTORY_EXHAUSTION_UNPROVEN');
+
+const EXH_BASE = {
   status: 'COMPLETE', range_bound_proven: false,
   boundary_reached: false, history_exhausted: true,
   oldest_ledger_index: 98799000,
   oldest_close_ms: T('2026-09-02T22:00:00Z'),   // INSIDE the window — deliberately
   through_ledger: ANCHOR, through_close_ms: T('2026-09-03T00:00:00Z'),
-  rows_stored: 2 } });
-check('exhausted history bootstraps as well', bootExh.advance === true &&
+  rows_stored: 2 };
+
+const bootExh = COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR,
+  proof: Object.assign({}, EXH_BASE, { history_exhausted_proven: proofFull.proven }) });
+check('PROVEN exhausted history bootstraps', bootExh.advance === true &&
       bootExh.reason === 'BOOTSTRAP_HISTORY_EXHAUSTED', bootExh.reason);
+
+// THE AUDITOR'S NEGATIVE CASE. Non-empty recent rows, no marker, partial
+// server history. The rows are real; the claim that nothing older exists is
+// not. This must NOT establish a historical checkpoint.
+const bootExhUnproven = COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR,
+  proof: Object.assign({}, EXH_BASE, { history_exhausted_proven: proofPartial.proven }) });
+check('rows + no marker + PARTIAL server history establishes NOTHING',
+      bootExhUnproven.advance === false &&
+      bootExhUnproven.reason === 'HISTORY_EXHAUSTION_UNPROVEN', bootExhUnproven);
+check('and it claims no coverage at all',
+      bootExhUnproven.next_through === null && bootExhUnproven.next_through_close_ms === null,
+      bootExhUnproven);
+check('omitting the proof flag entirely is the same refusal',
+      COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof: EXH_BASE
+      }).reason === 'HISTORY_EXHAUSTION_UNPROVEN');
+// Boundary-reached remains independently valid — an unproven exhaustion claim
+// alongside it must not poison a walk that DID read past the window start.
+check('a boundary-reached walk still bootstraps despite unproven exhaustion',
+      COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR,
+        proof: Object.assign({}, bootProof, { history_exhausted: true,
+          history_exhausted_proven: false })
+      }).reason === 'BOOTSTRAP_BOUNDARY_REACHED');
 check('and its coverage reaches back past any window start',
       bootExh.next_from_close_ms === 0, bootExh.next_from_close_ms);
 const exhServ = COV.windowServability({
@@ -1154,8 +1226,8 @@ const exhServ = COV.windowServability({
     scan_coverage_through_close_ms: bootExh.next_through_close_ms,
     evidence_retained_from: bootExh.next_from, evidence_retained_through: bootExh.next_through,
     evidence_retained_from_close_ms: bootExh.next_from_close_ms },
-  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
-check('a young account is fully covered rather than re-walked',
+  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR, anchorCloseMs: ANCHOR_CLOSE_OK });
+check('a young account on a full-history server is covered, not re-walked',
       exhServ.reason === COV.REASON.FULLY_SERVABLE, exhServ.reason);
 
 // The bootstrap does NOT open a hole. Each refusal is its own reason.
@@ -1166,7 +1238,7 @@ check('a walk that stopped for no stated reason still never bootstraps',
 check('exhausting an EMPTY account claims no floor it never read',
       COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof:
         Object.assign({}, bootProof, { boundary_reached: false, history_exhausted: true,
-          oldest_ledger_index: null, rows_stored: 0 })
+          history_exhausted_proven: true, oldest_ledger_index: null, rows_stored: 0 })
       }).reason === 'NO_LEDGER_FLOOR_OBSERVED');
 check('a TRUNCATED first scan never bootstraps',
       COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof:
@@ -1260,7 +1332,7 @@ const roundTrip = COV.windowServability({
     evidence_retained_from: adv.next_from, evidence_retained_through: adv.next_through,
     evidence_retained_from_close_ms: adv.next_from_close_ms
   },
-  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR });
+  windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR, anchorCloseMs: ANCHOR_CLOSE_OK });
 check('a checkpoint an advance produced is servable by the next run',
       roundTrip.served_from_index === true &&
       roundTrip.reason === COV.REASON.FULLY_SERVABLE, roundTrip.reason);
