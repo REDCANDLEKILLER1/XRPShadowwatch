@@ -443,6 +443,58 @@ const check = (name, ok, detail) => {
   check('TX_WINDOW never claims LAST 24H unless 24h was recorded',
         r.mpNever24h, r.mpBare);
 
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log('\n7. the coverage gate, through the REAL report path');
+  // These drive window.buildPublicReport in a browser with the whole layer
+  // stack loaded — not a node re-implementation of the walk. A test mirror
+  // would stay green with the gate deleted from layer 17 entirely, which is
+  // how the previous suite passed at 86 while every one of these defects
+  // was live.
+  const g = await page.evaluate(`(()=>{
+    const mk = (cov) => ({ tx_scan_coverage: cov,
+      tx_window:{label:'LAST 24H',startMs:Date.now()-86400000,endMs:Date.now()},
+      large_transfers:[],escrow_transfers:[],txs:[],wallets:[],news_articles:[],
+      news_intel:{top_headlines:[]},tx_24h_count:0,shadow_volume_xrp:0,
+      xrp_price:1.42,wallets_checked:251,watchlist_total:251 });
+    const R = (p) => { try { return String(window.buildPublicReport(p)||''); } catch(e){ return 'ERR '+e.message; } };
+    const line = (t) => (String(t).split('\\n').find(l=>/TRANSACTION WINDOW COVERAGE/i.test(l))||'');
+    const full = {target_wallets:251,complete_wallets:251,failed_wallets:0,truncated_wallets:0,
+                  unproven_wallets:0,unknown_status_wallets:0,anchor_ok:true,full_window_complete:true};
+    const drop = (k) => { const c = Object.assign({}, full); delete c[k]; return c; };
+    return {
+      good:      line(R(mk(full))),
+      noAnchor:  line(R(mk(Object.assign({}, full, {anchor_ok:false})))),
+      unproven:  line(R(mk(Object.assign({}, full, {unproven_wallets:2})))),
+      absentKey: line(R(mk(drop('unproven_wallets'))))
+    };
+  })()`);
+
+  console.log('     good      : ' + g.good);
+  console.log('     no anchor : ' + g.noAnchor);
+  console.log('     unproven  : ' + g.unproven);
+  console.log('     absent key: ' + g.absentKey);
+
+  check('CONTROL: a genuinely complete run still reads COMPLETE',
+        /COMPLETE — 251\/251/.test(g.good) && !/INCOMPLETE/.test(g.good), g.good);
+
+  // REQUIREMENT A. Every other term is satisfied, so only the anchor term can
+  // produce this — the fixture cannot pass for an unrelated reason.
+  check('no validated run anchor => the report cannot certify, and SAYS WHY',
+        /INCOMPLETE/.test(g.noAnchor) && /No validated run anchor/i.test(g.noAnchor), g.noAnchor);
+
+  // ISOLATING. complete_wallets === target_wallets, zero failed, zero
+  // truncated — the pre-existing terms are all satisfied, so a green here
+  // would mean the unproven term does nothing. (The obvious fixture,
+  // complete_wallets:249, is decided by the older `complete === target` term
+  // and would prove nothing about the new one.)
+  check('unproven wallets alone block the claim, and are NAMED in the line',
+        /INCOMPLETE/.test(g.unproven) && /2 unproven/.test(g.unproven), g.unproven);
+
+  // ABSENT KEY. num(undefined) is 0, so gating on num() would let a coverage
+  // object that never carried the key satisfy the term by silence.
+  check('an absent unproven count reads NOT MEASURED, never COMPLETE and never 0/0',
+        /NOT MEASURED/.test(g.absentKey) && !/COMPLETE/.test(g.absentKey) && !/0\/0/.test(g.absentKey), g.absentKey);
+
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 
   await browser.close(); srv.close();
