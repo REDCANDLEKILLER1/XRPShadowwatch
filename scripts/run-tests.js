@@ -50,7 +50,10 @@ const SUITES = [
   ['dex-volume-truth',       'dex-volume-truth.test.js',         null],
   // Integration: the anchor, the row's ledger_index and the capped window,
   // driven through a fake XRPL server rather than a fake decision layer.
-  ['ledger-anchor',          'ledger-anchor-prerequisites.test.js', null]
+  ['ledger-anchor',          'ledger-anchor-prerequisites.test.js', null],
+  // In-page, both V1 modes: the spoken Morning Story must carry the coverage
+  // it earned, and the wording must survive the sanitizer.
+  ['morning-coverage',       'morning-story-coverage-truth.test.js', 8215]
 ];
 
 const only = (() => {

@@ -822,6 +822,16 @@
           return qualifyIncompleteText(out, pack);
         };
         buildMorningStoryText._swTxCompleteness20260819 = true;
+        // CARRY THE V1 MARKER FORWARD. 10-pipeline's _boot re-installs after
+        // 2000ms if window.buildMorningStoryText._pipelineV1Hooked is missing,
+        // and wrapping here dropped it — so the re-install captured THIS
+        // wrapper as `legacy`, called it only to harvest prayer and scripture,
+        // and returned renderPublicReport() instead. The caveat below was
+        // computed and thrown away. Preserving the flag keeps V1 from
+        // reinstalling on top of us. The report's coverage line no longer
+        // depends on winning that race, but losing it should not be silent
+        // either.
+        try { buildMorningStoryText._pipelineV1Hooked = origMorning._pipelineV1Hooked === true; } catch (_) {}
       }
     } catch (_) {}
 
@@ -877,6 +887,11 @@
   installCoverageConsumers();
 
   window.SW_REPORT_SCAN_TUNING_20260816 = {
+    // THE CANONICAL COVERAGE VERDICT, exposed so other surfaces consume it
+    // rather than deriving their own. #57 removed one such divergence (the
+    // database refusing a wallet the Report was certifying); a second copy of
+    // this rule inside the V1 renderer would rebuild it in a different place.
+    coverageFrom: coverageFrom,
     version: VERSION,
     read_only: true,
     promoted_addresses: PROMOTIONS.map(function (p) { return p.address; }),
