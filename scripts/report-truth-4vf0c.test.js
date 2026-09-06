@@ -536,6 +536,12 @@ const check = (name, ok, detail) => {
     await window.accountTxWindowDepth(null, 'rOK', now-86400000, now, 200);
     out.honest = proofOf('rOK');
 
+    // ABSENT ceiling — a server that does not echo the field at all.
+    reset();
+    window.xrpl = async () => ({ transactions: [], ledger_index_min: 32570, validated: true });
+    await window.accountTxWindowDepth(null, 'rNOECHO', now-86400000, now, 200);
+    out.noEcho = proofOf('rNOECHO');
+
     // UNVALIDATED answer.
     reset();
     window.xrpl = async () => ({ transactions: [], ledger_index_max: A,
@@ -599,7 +605,14 @@ const check = (name, ok, detail) => {
         tp.clamped.status === 'UNPROVEN' &&
         tp.clamped.unproven_reason === 'RESPONSE_NOT_BOUND_TO_ANCHOR', tp.clamped);
   check('and an unvalidated answer cannot either',
-        tp.unvalidated.status === 'UNPROVEN', tp.unvalidated);
+        tp.unvalidated.status === 'UNPROVEN' &&
+        tp.unvalidated.unproven_reason === 'RESPONSE_NOT_VALIDATED', tp.unvalidated);
+  // Distinct reason, because "every wallet UNPROVEN" caused by a server that
+  // does not echo the ceiling is a different emergency from one caused by a
+  // server that clamps, and the log has to say which.
+  check('a server that omits the ceiling fails closed with its OWN reason',
+        tp.noEcho.status === 'UNPROVEN' &&
+        tp.noEcho.unproven_reason === 'RESPONSE_CEILING_ABSENT', tp.noEcho);
 
   // BLOCKER 2. The re-proof must be a RUN fact, not a local copy.
   check('a mid-walk reconnect re-proves onto the RUN anchor, not a local copy',

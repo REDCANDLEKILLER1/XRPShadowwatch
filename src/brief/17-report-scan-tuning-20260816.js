@@ -458,11 +458,31 @@
             // response's own echoed ceiling is. A clamped, absent or
             // unvalidated answer means this page describes a different ledger
             // state, and the wallet cannot certify.
-            if (num(res.ledger_index_max) !== num(askedMax) || res.validated !== true) {
+            // Three distinct causes, kept apart. All fail closed, but a run
+            // where EVERY wallet goes UNPROVEN is a very different diagnosis
+            // depending on which one it is, and an operator reading the log at
+            // 5am should not have to work that out.
+            //
+            // ABSENT matters most: ledger_index_max is a documented field of
+            // the account_tx response and xrplcluster returns it (verified),
+            // but this app rotates four transports and the other three could
+            // not be reached from the build environment to confirm. If one of
+            // them omits it, the report reads INCOMPLETE forever — safe, but a
+            // catastrophic under-claim — and this reason is what makes that
+            // visible in one log line instead of a mystery.
+            if (res.ledger_index_max === undefined || res.ledger_index_max === null) {
+              requestBounded = false;
+              unprovenReason = 'RESPONSE_CEILING_ABSENT';
+              responseMaxSeen = null;
+            } else if (num(res.ledger_index_max) !== num(askedMax)) {
               requestBounded = false;
               unprovenReason = 'RESPONSE_NOT_BOUND_TO_ANCHOR';
-              responseMaxSeen = (res.ledger_index_max === undefined) ? null : num(res.ledger_index_max);
-              responseValidated = res.validated === true;
+              responseMaxSeen = num(res.ledger_index_max);
+            } else if (res.validated !== true) {
+              requestBounded = false;
+              unprovenReason = 'RESPONSE_NOT_VALIDATED';
+              responseMaxSeen = num(res.ledger_index_max);
+              responseValidated = false;
             }
             // The server's own retained floor for THIS answer, recorded for
             // diagnosis: it is how a clamped ceiling gets explained.
