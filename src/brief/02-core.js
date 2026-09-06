@@ -1009,6 +1009,16 @@ async function _ensureSock(ws) {
       log('XRPL link dropped — reconnecting…');
       const nw = await connectXRPL();
       state._sock = nw;
+      // TRANSPORT EPOCH. A reconnect may land on a DIFFERENT XRPL server —
+      // 32-xrpl-resilience rotates Honeycluster / xrplcluster / s1 / s2 — and
+      // even the same URL can be a different node behind a round-robin cluster.
+      // Retention differs between them, so a history proof earned on one
+      // transport may not certify a "no more pages" answered by another, and an
+      // account_tx `marker` from one is meaningless to another. Every socket
+      // install bumps this counter; a walk whose epoch changed mid-flight
+      // cannot claim coverage. Comparing the URL alone would miss the
+      // same-URL-different-node case, which is the common one.
+      state._transportEpoch = (n(state._transportEpoch) || 0) + 1;
       state._reconnectFails = 0;
       log('XRPL link re-established. Scan continues.');
       return nw;
@@ -20560,6 +20570,7 @@ async function run() {
     // Hand the socket to state so a mid-scan reconnect can replace it without
     // any of the scan's call sites holding a stale reference.
     state._sock = ws;
+    state._transportEpoch = (n(state._transportEpoch) || 0) + 1;
     state._reconnectFails = 0;
     state._reconnecting = null;
     // Fresh run, fresh verdict on whether the link held.
