@@ -73,9 +73,16 @@ function makeServer(opts) {
         ledger_index_min: cmd.ledger_index_min,
         ledger_index_max: cmd.ledger_index_max
       });
+      // rippled CLAMPS a ledger_index_max it does not hold and still answers
+      // `status: success`. Verified live: asked 107304561, echoed 106804564,
+      // no error. Without this the fixture cannot express the defect at all,
+      // and a response-echo check would pass vacuously.
+      const heldTop = state.clampTo !== undefined ? state.clampTo : state.tip;
+      const effMax = (cmd.ledger_index_max === -1)
+        ? heldTop : Math.min(cmd.ledger_index_max, heldTop);
       const all = (state.txByAccount[cmd.account] || [])
         .filter(t => {
-          if (cmd.ledger_index_max !== -1 && t.ledger_index > cmd.ledger_index_max) return false;
+          if (t.ledger_index > effMax) return false;
           if (cmd.ledger_index_min !== -1 && t.ledger_index < cmd.ledger_index_min) return false;
           return true;
         })
@@ -85,6 +92,11 @@ function makeServer(opts) {
       const next = start + state.pageSize;
       return {
         transactions: page,
+        // The server echoes what it ACTUALLY answered over, which is the whole
+        // point: it is the only evidence of the ceiling that was honoured.
+        ledger_index_max: effMax,
+        ledger_index_min: state.heldFloor !== undefined ? state.heldFloor : 32570,
+        validated: state.answersValidated !== false,
         marker: next < all.length ? { at: next } : undefined
       };
     }

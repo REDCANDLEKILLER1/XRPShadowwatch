@@ -353,6 +353,42 @@
     catch (_) { return 0; }
   }
 
+  // Re-establish the run's history proof on WHATEVER TRANSPORT IS CURRENT, and
+  // write it back to the RUN, not to a local copy.
+  //
+  // The previous version assigned Object.assign({}, runAnchor, …) inside the
+  // walk. That is a copy: state.runAnchor kept the proof from the original
+  // socket, so the next wallet started with `runAnchor = state.runAnchor`
+  // while epoch0 was already the NEW socket — no transport-change event fired,
+  // and server A's exhaustion proof certified a no-marker answered by server B.
+  // Transport provenance has to be a fact about the RUN or every wallet after
+  // the first reconnect inherits a proof that does not belong to it.
+  async function reproveOnCurrentTransport(ws, anchorSeq) {
+    var proof = null;
+    try {
+      var info = await xrpl(ws, { command: 'server_info' });
+      var COVR = (typeof window !== 'undefined') && window.SW_COVERAGE;
+      if (COVR && typeof COVR.proveHistoryExhaustion === 'function') {
+        proof = COVR.proveHistoryExhaustion({
+          anchorLedger: anchorSeq,
+          completeLedgers: info && info.info && info.info.complete_ledgers
+        });
+      }
+    } catch (_) { proof = null; }
+    try {
+      if (typeof state !== 'undefined' && state.runAnchor) {
+        // Mutate the RUN's anchor in place so every later wallet sees it.
+        state.runAnchor.history_exhaustion_proof = proof;
+        state.runAnchor.transport_epoch = transportEpoch();
+      }
+    } catch (_) {}
+    try {
+      if (typeof log === 'function') log('run anchor: re-proved history on the current transport — ' +
+        (proof && proof.proven ? 'PROVEN (' + proof.reason + ')' : 'UNPROVEN (' + ((proof && proof.reason) || 'no server range') + ')'));
+    } catch (_) {}
+    return proof;
+  }
+
   function installCompleteAccountTxPagination() {
     try {
       if (typeof accountTxWindowDepth !== 'function' || accountTxWindowDepth._swTxCompleteness20260819) return;
@@ -379,8 +415,17 @@
 
         var anchorSeq = (runAnchor && runAnchor.ok) ? runAnchor.anchor_ledger : null;
         var epoch0 = transportEpoch();
+        // A previous wallet may have reconnected. The run anchor's proof then
+        // belongs to a socket we are no longer on, and nothing would fire a
+        // transport-change event for THIS wallet because it starts already on
+        // the new one. Re-prove before walking rather than inheriting it.
+        if (anchorSeq !== null && runAnchor && num(runAnchor.transport_epoch) !== epoch0) {
+          await reproveOnCurrentTransport(ws, anchorSeq);
+          try { runAnchor = (typeof state !== 'undefined') ? state.runAnchor : runAnchor; } catch (_) {}
+        }
         var transportConsistent = true;
         var requestBounded = anchorSeq !== null;
+        var responseMaxSeen = null, responseMinSeen = null, responseValidated = true;
         var restartsLeft = 1;
 
         while (pages < TX_SAFETY_MAX_PAGES) {
@@ -397,7 +442,31 @@
               unprovenReason = 'REQUEST_NOT_BOUNDED';
             }
             if (marker) req.marker = marker;
+            var askedMax = req.ledger_index_max;
             var res = await xrpl(ws, req);
+
+            // THE POST-CONDITION, on WHAT CAME BACK. Checking the request only
+            // proved what we asked for. Verified against the live network:
+            // ask rippled for a ledger_index_max it does not have and it
+            // answers `status: success` and SILENTLY CLAMPS —
+            //
+            //   asked  107304561   (tip + 500000)
+            //   echoed 106804564
+            //
+            // no error, no warning. So a request carrying the anchor is not
+            // evidence the server answered through the anchor; only the
+            // response's own echoed ceiling is. A clamped, absent or
+            // unvalidated answer means this page describes a different ledger
+            // state, and the wallet cannot certify.
+            if (num(res.ledger_index_max) !== num(askedMax) || res.validated !== true) {
+              requestBounded = false;
+              unprovenReason = 'RESPONSE_NOT_BOUND_TO_ANCHOR';
+              responseMaxSeen = (res.ledger_index_max === undefined) ? null : num(res.ledger_index_max);
+              responseValidated = res.validated === true;
+            }
+            // The server's own retained floor for THIS answer, recorded for
+            // diagnosis: it is how a clamped ceiling gets explained.
+            if (res.ledger_index_min !== undefined) responseMinSeen = num(res.ledger_index_min);
 
             // TRANSPORT CHECK, after the answer came back. If the socket
             // changed, this page came from a different server than the one the
@@ -408,24 +477,11 @@
             if (transportEpoch() !== epoch0) {
               if (restartsLeft > 0 && RA && typeof RA.buildRunAnchor === 'function') {
                 restartsLeft--;
-                try {
-                  var reInfo = await xrpl(ws, { command: 'server_info' });
-                  var reProof = (typeof window !== 'undefined' && window.SW_COVERAGE)
-                    ? window.SW_COVERAGE.proveHistoryExhaustion({
-                        anchorLedger: anchorSeq,
-                        completeLedgers: reInfo && reInfo.info && reInfo.info.complete_ledgers })
-                    : null;
-                  // The new transport must hold the anchor before it may
-                  // answer for it at all.
-                  if (reProof && reProof.covers_through !== null &&
-                      num(reProof.covers_through) >= num(anchorSeq)) {
-                    runAnchor = Object.assign({}, runAnchor, { history_exhaustion_proof: reProof });
-                  } else {
-                    runAnchor = Object.assign({}, runAnchor, { history_exhaustion_proof: reProof || null });
-                  }
-                } catch (_) {
-                  runAnchor = Object.assign({}, runAnchor, { history_exhaustion_proof: null });
-                }
+                await reproveOnCurrentTransport(ws, anchorSeq);
+                // Re-read the RUN's anchor, which reproveOnCurrentTransport
+                // updated in place, so this wallet and every later one are
+                // working from the same transport-consistent proof.
+                try { runAnchor = (typeof state !== 'undefined') ? state.runAnchor : runAnchor; } catch (_) {}
                 epoch0 = transportEpoch();
                 marker = null; rows = []; pages = 0;
                 oldestLedger = null; newestLedger = null; rowsWithoutLedger = 0;
@@ -511,7 +567,15 @@
 
         if (status !== 'FAILED' && status !== 'TRUNCATED') {
           status = verdict.proven ? 'COMPLETE' : 'UNPROVEN';
-          if (!verdict.proven) unprovenReason = verdict.reason;
+          // Keep the SPECIFIC local cause when the walk observed one. The
+          // predicate can only answer at the granularity of its inputs — a
+          // clamped response and a request that was never bounded both arrive
+          // as request_bounded:false and both come back REQUEST_NOT_BOUNDED —
+          // and overwriting here threw away the distinction that tells an
+          // operator the server silently lowered the ceiling.
+          if (!verdict.proven && (!unprovenReason || unprovenReason === 'NOT_DECIDED')) {
+            unprovenReason = verdict.reason;
+          }
         }
 
         var proof = {
@@ -521,6 +585,9 @@
           request_bounded: requestBounded,
           transport_consistent: transportConsistent,
           transport_epoch: epoch0,
+          response_ledger_index_max: responseMaxSeen,
+          response_ledger_index_min: responseMinSeen,
+          response_validated: responseValidated,
           run_id: runId,
           window_bounded_by_anchor: winBounded,
           pages_scanned: pages,

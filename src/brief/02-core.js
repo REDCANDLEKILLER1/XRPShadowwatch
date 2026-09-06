@@ -1191,6 +1191,11 @@ async function scanWallets(ws) {
       catch (e) { log('run anchor: server_info failed — ' + e.message + ' (no exhaustion proof this run)'); }
     }
     const anchor = RA.buildRunAnchor({ ledgerResult: ledgerRes, serverInfoResult: infoRes });
+    // WHICH SOCKET this anchor and its history proof came from. Without it a
+    // wallet that starts after another wallet's reconnect has nothing to
+    // compare against, and inherits a proof belonging to a server it is not
+    // talking to.
+    anchor.transport_epoch = (n(state._transportEpoch) || 0);
     state.runAnchor = anchor;
     if (anchor.ok) {
       const pr = anchor.history_exhaustion_proof;

@@ -495,6 +495,129 @@ const check = (name, ok, detail) => {
   check('an absent unproven count reads NOT MEASURED, never COMPLETE and never 0/0',
         /NOT MEASURED/.test(g.absentKey) && !/COMPLETE/.test(g.absentKey) && !/0\/0/.test(g.absentKey), g.absentKey);
 
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log('\n8. transport proof, driving the REAL layer-17 walker');
+  // These call window.accountTxWindowDepth — the function layer 17 installs and
+  // the scan actually runs — with a stubbed transport. Not the node mirror:
+  // the mirror re-implements the walk, so it would stay green with both of
+  // these defects present.
+  await page.waitForFunction(() =>
+    typeof window.accountTxWindowDepth === 'function' &&
+    window.accountTxWindowDepth._swTxCompleteness20260819 === true &&
+    !!window.SW_COVERAGE, null, { timeout: 30000 });
+
+  const tp = await page.evaluate(async () => {
+    const A = 106799000, now = Date.now();
+    const full = { proven:true, reason:'SERVER_HAS_FULL_HISTORY',
+                   covers_from:32570, covers_through:A, anchor_ledger:A };
+    const reset = () => {
+      window.state = window.state || {};
+      state.runId = 'probe-run'; state.anchorOk = true;
+      state.effectiveWindow = { bounded_by_anchor:true, start_ms: now-86400000, end_ms: now };
+      state._transportEpoch = 1;
+      state.runAnchor = { ok:true, anchor_ledger:A, anchor_close_ms:now,
+                          history_exhaustion_proof: full, transport_epoch:1 };
+    };
+    const proofOf = a => window.accountTxWindowDepth._proofByAccount[a] || {};
+    const out = {};
+
+    // CLAMPED. rippled answers `success` and silently lowers the ceiling, so
+    // the request carrying the anchor proves nothing.
+    reset();
+    window.xrpl = async () => ({ transactions: [], ledger_index_max: A - 500,
+                                 ledger_index_min: 32570, validated: true });
+    await window.accountTxWindowDepth(null, 'rCLAMP', now-86400000, now, 200);
+    out.clamped = proofOf('rCLAMP');
+
+    // CONTROL: identical except the server answers over the anchor it was asked for.
+    reset();
+    window.xrpl = async () => ({ transactions: [], ledger_index_max: A,
+                                 ledger_index_min: 32570, validated: true });
+    await window.accountTxWindowDepth(null, 'rOK', now-86400000, now, 200);
+    out.honest = proofOf('rOK');
+
+    // UNVALIDATED answer.
+    reset();
+    window.xrpl = async () => ({ transactions: [], ledger_index_max: A,
+                                 ledger_index_min: 32570, validated: false });
+    await window.accountTxWindowDepth(null, 'rUNVAL', now-86400000, now, 200);
+    out.unvalidated = proofOf('rUNVAL');
+
+    // TWO WALLETS ACROSS A RECONNECT. Wallet A reconnects mid-walk onto a
+    // partial-history server; wallet B then starts ALREADY on the new socket,
+    // so no transport-change event fires for it.
+    reset();
+    let n = 0;
+    window.xrpl = async (ws, req) => {
+      n++;
+      if (req.command === 'server_info') return { info: { complete_ledgers: '90000000-' + A } };
+      if (n === 1) state._transportEpoch = 2;
+      return { transactions: [], ledger_index_max: A, ledger_index_min: 32570, validated: true };
+    };
+    await window.accountTxWindowDepth(null, 'rA', now-86400000, now, 200);
+    out.walletA = proofOf('rA');
+    out.runProofAfterA = {
+      proven: !!(state.runAnchor.history_exhaustion_proof||{}).proven,
+      reason: (state.runAnchor.history_exhaustion_proof||{}).reason,
+      epoch: state.runAnchor.transport_epoch
+    };
+    await window.accountTxWindowDepth(null, 'rB', now-86400000, now, 200);
+    out.walletB = proofOf('rB');
+
+    // RECONNECT BETWEEN WALLETS. Distinct from the case above: here the socket
+    // changes while NO walk is in flight — during Phase 1, between two wallets,
+    // or inside scanReceivers' sleep — so the mid-walk transport check never
+    // fires for anybody. The run anchor still holds the OLD socket's proof and
+    // the next wallet starts already on the new one. Only a check at walk START
+    // catches this.
+    reset();
+    state._transportEpoch = 2;          // reconnected since the anchor was taken
+    let m = 0;
+    window.xrpl = async (ws, req) => {
+      m++;
+      if (req.command === 'server_info') return { info: { complete_ledgers: '90000000-' + A } };
+      return { transactions: [], ledger_index_max: A, ledger_index_min: 32570, validated: true };
+    };
+    await window.accountTxWindowDepth(null, 'rBETWEEN', now-86400000, now, 200);
+    out.between = proofOf('rBETWEEN');
+    out.reprovedAtStart = m > 0 && !!(state.runAnchor.history_exhaustion_proof||{}).reason;
+    out.runProofAfterBetween = (state.runAnchor.history_exhaustion_proof||{}).reason;
+    return out;
+  });
+
+  console.log('     clamped   : ' + tp.clamped.status + ' / ' + tp.clamped.unproven_reason);
+  console.log('     honest    : ' + tp.honest.status + ' / ' + tp.honest.proven_reason);
+  console.log('     wallet B  : ' + tp.walletB.status + ' / ' + tp.walletB.unproven_reason);
+  console.log('     run proof after reconnect: ' + JSON.stringify(tp.runProofAfterA));
+
+  check('CONTROL: a server answering over the anchor it was asked for certifies',
+        tp.honest.status === 'COMPLETE' &&
+        tp.honest.proven_reason === 'HISTORY_EXHAUSTED_FULL_RETENTION', tp.honest);
+
+  // BLOCKER 1. Verified live: asked 107304561, echoed 106804564, status success.
+  check('a CLAMPED response cannot certify, even though the request carried the anchor',
+        tp.clamped.status === 'UNPROVEN' &&
+        tp.clamped.unproven_reason === 'RESPONSE_NOT_BOUND_TO_ANCHOR', tp.clamped);
+  check('and an unvalidated answer cannot either',
+        tp.unvalidated.status === 'UNPROVEN', tp.unvalidated);
+
+  // BLOCKER 2. The re-proof must be a RUN fact, not a local copy.
+  check('a mid-walk reconnect re-proves onto the RUN anchor, not a local copy',
+        tp.runProofAfterA.proven === false &&
+        tp.runProofAfterA.reason === 'SERVER_HISTORY_PARTIAL' &&
+        tp.runProofAfterA.epoch === 2, tp.runProofAfterA);
+  check('THE REGRESSION — the NEXT wallet does not inherit the old server\'s proof',
+        tp.walletB.status === 'UNPROVEN' &&
+        tp.walletB.unproven_reason === 'HISTORY_EXHAUSTION_UNPROVEN', tp.walletB);
+
+  console.log('     between   : ' + tp.between.status + ' / ' + tp.between.unproven_reason +
+              '   run proof: ' + tp.runProofAfterBetween);
+  check('a reconnect BETWEEN wallets is caught at walk start, not silently inherited',
+        tp.between.status === 'UNPROVEN' &&
+        tp.between.unproven_reason === 'HISTORY_EXHAUSTION_UNPROVEN' &&
+        tp.runProofAfterBetween === 'SERVER_HISTORY_PARTIAL',
+        { proof: tp.between, run: tp.runProofAfterBetween });
+
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 
   await browser.close(); srv.close();
