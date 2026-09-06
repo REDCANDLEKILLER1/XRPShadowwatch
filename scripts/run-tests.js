@@ -43,7 +43,9 @@ const SUITES = [
   ['morning-story-canonical','morning-story-canonical.test.js',  8211],
   ['report-truth-4vf0c',     'report-truth-4vf0c.test.js',       8212],
   ['escrow-not-movement',    'escrow-not-movement.test.js',      8213],
-  ['canonical-escrow-model', 'canonical-escrow-model.test.js',   8214]
+  ['canonical-escrow-model', 'canonical-escrow-model.test.js',   8214],
+  // No browser, no port, no database — pure decision logic for the evidence index.
+  ['db-foundation',          'db-foundation.test.js',            null]
 ];
 
 const only = (() => {
