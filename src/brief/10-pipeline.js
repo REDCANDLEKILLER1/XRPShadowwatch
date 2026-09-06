@@ -826,6 +826,17 @@ function _cov(pack){
   try{
     var t=pack&&pack.tx_scan_coverage;
     var tTotal=t?Number(t.target_wallets)||0:0;
+    // ABSENCE IS NOT HEALTH. A missing or zero-target coverage object used to
+    // fall straight through to BALANCE coverage with degraded:false and an
+    // empty caveat, so "we never measured the transaction window" rendered
+    // identically to "the transaction window was fine".
+    if(!t||tTotal<=0){
+      base.degraded=true; base.severe=false;
+      base.basis='transaction window'; base.basis_noun='proved the transaction window';
+      base.caveat='Transaction-window coverage was not measured this run. Nothing below can be read as an all-clear.';
+      base.line='Transaction-window coverage NOT MEASURED this run.';
+      return base;
+    }
     if(tTotal>0){
       var tOk=Number(t.complete_wallets)||0;
       var tPct=tOk/tTotal;
@@ -943,10 +954,15 @@ function _buildExecutiveSummary(interps, pack){
 
     // Transaction-window completeness is independent from balance/read coverage.
     var txc=pack&&pack.tx_scan_coverage;
+    // Every cause named. Three buckets against a ROSTER denominator meant
+    // "219/251 complete; 0 failed; 0 truncated" — the audience hears zero
+    // failures and zero truncations and cannot tell where the other 32 went.
     if(txc&&txc.full_window_complete===false){
+      var _causes=_num(txc.failed_wallets)+' failed; '+_num(txc.truncated_wallets)+' truncated';
+      if(typeof txc.unproven_wallets==='number') _causes+='; '+_num(txc.unproven_wallets)+' unproven';
+      if(_num(txc.unknown_status_wallets)>0) _causes+='; '+_num(txc.unknown_status_wallets)+' unrecognised';
       parts.push('⚠️ TX WINDOW: INCOMPLETE — '+_num(txc.complete_wallets)+'/'+_num(txc.target_wallets)+
-        ' complete; '+_num(txc.failed_wallets)+' failed; '+_num(txc.truncated_wallets)+
-        ' truncated. Zero-result claims are not definitive.');
+        ' proved; '+_causes+'. Zero-result claims are not definitive.');
     }
 
     parts.push('Transfer classifications are heuristic; movement does not prove intent.');

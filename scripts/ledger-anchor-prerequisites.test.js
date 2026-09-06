@@ -581,7 +581,13 @@ console.log('\nG. window consistency  ->  capped, and CONSUMED');
 
   // THE HALF THAT WAS MISSING. A cap nothing reads changes nothing.
   const CORE = fs.readFileSync(path.join(__dirname, '..', 'src/brief/02-core.js'), 'utf8');
-  const stripComments = t => t.split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
+  // Strip BLOCK comments too. 17's /* … */ header lists exactly the guarantees
+  // these regexes look for, so a /UNPROVEN/ check would pass on a file whose
+  // walker still wrote status = 'COMPLETE'. One line, and it re-arms every
+  // source assertion below.
+  const stripComments = t => t
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
   const CORE_CODE = stripComments(CORE);
   check('G. CONSUMED — buildPack reads the effective window, not getTxWindow()',
         /tx_window:\s*\(typeof state[^,]*state\.txWindowEffective\)\s*\|\|\s*getTxWindow\(\)/.test(CORE_CODE),
@@ -598,17 +604,26 @@ console.log('\n3. the wiring is real, not just the decision layer');
   const CORE = fs.readFileSync(path.join(__dirname, '..', 'src/brief/02-core.js'), 'utf8');
   const L17 = fs.readFileSync(path.join(__dirname, '..', 'src/brief/17-report-scan-tuning-20260816.js'), 'utf8');
   const L29 = fs.readFileSync(path.join(__dirname, '..', 'src/brief/29-targeted-news-suppression-20260817.js'), 'utf8');
-  const stripComments = t => t.split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
+  // Strip BLOCK comments too. 17's /* … */ header lists exactly the guarantees
+  // these regexes look for, so a /UNPROVEN/ check would pass on a file whose
+  // walker still wrote status = 'COMPLETE'. One line, and it re-arms every
+  // source assertion below.
+  const stripComments = t => t
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
   const C = stripComments(CORE), S17 = stripComments(L17), S29 = stripComments(L29);
 
   check('the anchor is fetched at scan start, before any wallet is read',
         /state\.runAnchor = null[\s\S]{0,900}?command: 'ledger', ledger_index: 'validated'/.test(C));
+  // BOTH must exist before their order means anything. indexOf returns -1 for a
+  // missing needle and -1 < anything is true, so deleting the server_info fetch
+  // entirely used to SATISFY this check — the exact defect it polices.
+  const _iLedger = C.indexOf("command: 'ledger', ledger_index: 'validated'");
+  const _iInfo   = C.indexOf("command: 'server_info'");
+  check('both anchor fetches exist at all', _iLedger >= 0 && _iInfo >= 0,
+        { ledger: _iLedger, info: _iInfo });
   check('and server_info is fetched AFTER the anchor, not before',
-        C.indexOf("command: 'ledger', ledger_index: 'validated'") <
-        C.indexOf("command: 'server_info'"), {
-          ledger: C.indexOf("command: 'ledger', ledger_index: 'validated'"),
-          info: C.indexOf("command: 'server_info'")
-        });
+        _iLedger >= 0 && _iInfo >= 0 && _iLedger < _iInfo, { ledger: _iLedger, info: _iInfo });
   check('the window is recomputed at scan start for an AUTO window',
         /state\._txWindowAuto && typeof applyAutoTxWindow === 'function'\) applyAutoTxWindow\(\)/.test(C));
   check('the row carries a ledger_index', /ledger_index: _adm\.ledger_index/.test(C));
@@ -619,6 +634,23 @@ console.log('\n3. the wiring is real, not just the decision layer');
   // a fix that never runs.
   check('layer 17 — the walker that actually runs — is bounded too',
         /req = RA\.boundRequest\(req, runAnchor\)/.test(S17), 'boundRequest missing from layer 17');
+  // The literal above cannot distinguish a bound that LANDED from one that was
+  // swallowed by a catch — and that distinction is defect (1) itself. Assert
+  // the post-condition exists and that the call is no longer wrapped.
+  check('and the bound is verified as a POST-CONDITION, not assumed',
+        /req\.ledger_index_max !== anchorSeq/.test(S17), 'no post-condition on the bound');
+  check('and boundRequest is no longer wrapped in catch-and-ignore',
+        !/try \{ req = RA\.boundRequest\(req, runAnchor\); \} catch/.test(S17));
+  check('the walker starts UNPROVEN, so an undecided path cannot inherit a claim',
+        /var status = 'UNPROVEN'/.test(S17), 'status still initialises optimistically');
+  check('proofs are cleared at the start of every run',
+        /for \(var _k in proofByAccount\) delete proofByAccount\[_k\]/.test(S17));
+  check('the report calls the SHARED predicate rather than re-deriving it',
+        /COVR\.coverageProven\(/.test(S17), 'layer 17 re-derives the rule');
+  check('the transport epoch is READ, not merely written',
+        /transportEpoch\(\) !== epoch0/.test(S17));
+  check('and a transport change discards the marker rather than replaying it',
+        /marker = null; rows = \[\]; pages = 0;/.test(S17));
   check('layer 17 records the ledger span it actually read',
         /oldest_observed_ledger:/.test(S17) && /newest_observed_ledger:/.test(S17));
   check('layer 17 carries the run proof rather than minting its own',
@@ -640,6 +672,111 @@ console.log('\n4. read-only, still');
   check('and issues no requests of its own — it only shapes them',
         !/fetch\(|XMLHttpRequest|WebSocket/.test(
           fs.readFileSync(path.join(__dirname, '..', 'src/brief/41-run-anchor-20260906.js'), 'utf8')));
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+console.log('\n5. ONE PREDICATE — the report and the database may not disagree');
+// The defect that started this round: checkpointAdvance refused a
+// partial-history exhaustion while the Report certified the same wallet
+// COMPLETE and read it on air. Same evidence, two verdicts, the on-air one
+// permissive. These assert the two gates agree on the SAME proof object.
+{
+  const A = L(9000);
+  const base = (over) => Object.assign({
+    status: 'COMPLETE', request_bounded: true, transport_consistent: true,
+    anchor_ledger: A, run_id: 'r1', boundary_reached: false, history_exhausted: false,
+    history_exhaustion_proof: null
+  }, over || {});
+  const gate = (proof, over) => COV.coverageProven(Object.assign({
+    anchorOk: true, anchorLedger: A, windowBoundedByAnchor: true, runId: 'r1', proof
+  }, over || {}));
+
+  check('5. a boundary reached by a real transaction earns the claim',
+        gate(base({ boundary_reached: true })).proven === true);
+
+  const fullProof = { proven: true, reason: 'SERVER_HAS_FULL_HISTORY',
+                      covers_from: 32570, covers_through: A, anchor_ledger: A };
+  check('5. exhaustion WITH full retention earns it',
+        gate(base({ history_exhausted: true, history_exhaustion_proof: fullProof })).proven === true);
+
+  // THE ONE THAT WENT ON AIR.
+  const partial = { proven: false, reason: 'SERVER_HISTORY_PARTIAL',
+                    covers_from: null, covers_through: null, anchor_ledger: A };
+  const vPartial = gate(base({ history_exhausted: true, history_exhaustion_proof: partial }));
+  check('5. THE REGRESSION — exhaustion on a partial-history server does NOT',
+        vPartial.proven === false && vPartial.reason === 'HISTORY_EXHAUSTION_UNPROVEN', vPartial);
+
+  // A proof that is `proven` but names ANOTHER anchor must not certify. A
+  // one-term gate (`proven === true`) certifies this; checkpointAdvance refuses
+  // it — so this case is exactly where the two would drift apart again.
+  const foreign = { proven: true, reason: 'SERVER_HAS_FULL_HISTORY',
+                    covers_from: 32570, covers_through: A - 500, anchor_ledger: A - 500 };
+  const vForeign = gate(base({ history_exhausted: true, history_exhaustion_proof: foreign }));
+  check('5. a proof naming ANOTHER anchor does not certify',
+        vForeign.proven === false && vForeign.reason === 'HISTORY_EXHAUSTION_UNPROVEN', vForeign);
+
+  // Agreement, asserted directly rather than assumed.
+  const rows = [
+    ['boundary', base({ boundary_reached: true })],
+    ['full exhaustion', base({ history_exhausted: true, history_exhaustion_proof: fullProof })],
+    ['partial exhaustion', base({ history_exhausted: true, history_exhaustion_proof: partial })],
+    ['foreign anchor', base({ history_exhausted: true, history_exhaustion_proof: foreign })],
+    ['quiet, no floor', base({})]
+  ];
+  // THE INVARIANT, stated precisely. Blanket agreement is the WRONG assertion:
+  // the two gates answer related but different questions. The report asks "was
+  // this window covered"; checkpointAdvance also has to WRITE a floor, so it
+  // refuses a fully-exhausted account with zero transactions for
+  // NO_LEDGER_FLOOR_OBSERVED — there is no ledger number to record. That is a
+  // storage limitation, not a disagreement about truth, and with contiguous
+  // retention proven from 32570 the report's claim is genuinely earned.
+  //
+  // What must never happen is the report being MORE PERMISSIVE than the
+  // database for a reason about TRUTH. That is the defect that went on air.
+  const STORAGE_ONLY = ['NO_LEDGER_FLOOR_OBSERVED', 'PROOF_MISSING_CLOSE_TIMES'];
+  let violations = [], divergences = [];
+  for (const [name, proof] of rows) {
+    const reportSays = gate(proof).proven;
+    const db = COV.checkpointAdvance({
+      coverage: null, anchorLedger: A,
+      proof: Object.assign({}, proof, {
+        through_ledger: A, through_close_ms: T0,
+        oldest_ledger_index: proof.boundary_reached ? A - 100 : null,
+        oldest_close_ms: proof.boundary_reached ? T0 - 26 * HOUR : null,
+        range_bound_proven: false, rows_stored: proof.boundary_reached ? 1 : 0
+      })
+    });
+    if (reportSays && !db.advance) {
+      (STORAGE_ONLY.indexOf(db.reason) >= 0 ? divergences : violations).push(name + ':' + db.reason);
+    }
+  }
+  check('5. THE INVARIANT — the report is never more permissive than the database for a TRUTH reason',
+        violations.length === 0, violations);
+  check('5. and the only tolerated divergence is the storage-only one, named',
+        divergences.length === 1 && /NO_LEDGER_FLOOR_OBSERVED/.test(divergences[0]), divergences);
+
+  // The quiet wallet: the honest gap, named rather than guessed.
+  const vQuiet = gate(base({}));
+  check('5. a quiet wallet with no floor is UNPROVEN, not COMPLETE',
+        vQuiet.proven === false &&
+        vQuiet.reason === 'RETENTION_DOES_NOT_PROVE_WINDOW_START', vQuiet);
+
+  // Run-level preconditions — each must independently refuse.
+  check('5. no anchor refuses regardless of the walk',
+        gate(base({ boundary_reached: true }), { anchorOk: false }).reason === 'NO_RUN_ANCHOR');
+  check('5. an unbounded request refuses',
+        gate(base({ boundary_reached: true, request_bounded: false })).reason === 'REQUEST_NOT_BOUNDED');
+  check('5. an uncapped window refuses',
+        gate(base({ boundary_reached: true }), { windowBoundedByAnchor: false }).reason === 'WINDOW_NOT_BOUNDED');
+  check('5. a transport change refuses — a marker cannot cross servers',
+        gate(base({ boundary_reached: true, transport_consistent: false })).reason === 'TRANSPORT_CHANGED');
+  check('5. a proof from LAST run refuses even if its own walk was clean',
+        gate(base({ boundary_reached: true, run_id: 'r0' })).reason === 'PROOF_RUN_MISMATCH');
+  check('5. and one bound to a different anchor refuses',
+        gate(base({ boundary_reached: true, anchor_ledger: A - 1 })).reason === 'PROOF_ANCHOR_MISMATCH');
+  // undefined must not read as consent.
+  check('5. an absent flag is not a true one',
+        gate({ status: 'COMPLETE', anchor_ledger: A, run_id: 'r1' }).reason === 'REQUEST_NOT_BOUNDED');
 }
 
 console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' CHECKS PASS'));

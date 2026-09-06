@@ -506,11 +506,24 @@
     if (m) return compact(m[0], 180);
 
     var c = pack && pack.tx_scan_coverage;
-    if (c && c.full_window_complete === false) {
+    // ABSENT IS NOT COMPLETE. `c.full_window_complete === false` let a null
+    // pack — a re-render from cached text, or an export before a pack was
+    // sealed — omit the coverage line entirely from a post that is read aloud.
+    // undefined !== false, so silence passed the gate.
+    if (!c || typeof c.target_wallets !== 'number' || typeof c.unproven_wallets !== 'number') {
+      return compact('⚠️ TX WINDOW: NOT MEASURED — transaction-window coverage was not established this run. Zero-result claims are not definitive.', 180);
+    }
+    if (c.full_window_complete === false) {
+      // Every cause named. Three buckets against a roster denominator meant
+      // wallets vanished from the arithmetic with no account given, in a post
+      // that is read on air. compact() caps at 180 — unproven is placed before
+      // the trailing sentence so the cap cannot eat it.
+      var causes = Number(c.failed_wallets || 0) + ' failed; ' +
+                   Number(c.truncated_wallets || 0) + ' truncated; ' +
+                   Number(c.unproven_wallets || 0) + ' unproven';
       return compact('⚠️ TX WINDOW: INCOMPLETE — ' +
         Number(c.complete_wallets || 0) + '/' + Number(c.target_wallets || 0) +
-        ' complete; ' + Number(c.failed_wallets || 0) + ' failed; ' +
-        Number(c.truncated_wallets || 0) + ' truncated. Zero-result claims are not definitive.', 180);
+        ' proved; ' + causes + '. Zero-result claims are not definitive.', 180);
     }
     return '';
   }

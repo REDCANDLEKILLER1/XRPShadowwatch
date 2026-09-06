@@ -598,9 +598,16 @@
                   w.prev_balance_xrp = null;
                   w.delta_xrp = null;
                 }
+                // EXPLICIT nulls/falses. Every absent field here would read
+                // as `undefined`, and any downstream `x !== false` test takes
+                // undefined for consent.
                 w.tx_scan = proofs[w.address] || {
                   status: 'FAILED', pages_scanned: 0, boundary_reached: false,
-                  history_exhausted: false, error: 'missing tx scan proof'
+                  history_exhausted: false, request_bounded: false,
+                  transport_consistent: false, anchor_ledger: null, run_id: null,
+                  history_exhaustion_proof: null, oldest_observed_ledger: null,
+                  newest_observed_ledger: null, proven_reason: null,
+                  unproven_reason: 'NO_PROOF_ROW', error: 'missing tx scan proof'
                 };
               });
             }

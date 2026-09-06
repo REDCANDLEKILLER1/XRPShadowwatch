@@ -69,6 +69,14 @@ const check = (name, cond, detail) => {
     const W = mkWallets(20);
     const healthy = {
       date: '2026-08-21', scan_id: 'SC-ACC', wallets_checked: 20, wallets_failed: 0,
+      // A clean run PROVED its transaction window; it does not merely omit the
+      // question. Absence now renders NOT MEASURED — the whole point of the
+      // change — so a fixture standing for a healthy run has to say so.
+      tx_scan_coverage: { target_wallets: 20, complete_wallets: 20,
+                          failed_wallets: 0, truncated_wallets: 0,
+                          unproven_wallets: 0, unknown_status_wallets: 0,
+                          anchor_ok: true, counts_reconcile: true,
+                          full_window_complete: true },
       wallets_invalid: 0, watchlist_total: 20, wallet_results: W,
       xrp_price: 1.005, xrp_delta_24h_pct: -0.3, total_balance_delta_xrp: 4e7,
       shadow_volume_xrp: 4e7, tx_24h_count: 800, fragmentation_flags: [],
