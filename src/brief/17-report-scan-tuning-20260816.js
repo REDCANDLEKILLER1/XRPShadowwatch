@@ -230,6 +230,10 @@
         pages_scanned: num(p.pages_scanned),
         boundary_reached: !!p.boundary_reached,
         history_exhausted: !!p.history_exhausted,
+        anchor_ledger: p.anchor_ledger === undefined ? null : p.anchor_ledger,
+        oldest_observed_ledger: p.oldest_observed_ledger === undefined ? null : p.oldest_observed_ledger,
+        newest_observed_ledger: p.newest_observed_ledger === undefined ? null : p.newest_observed_ledger,
+        history_exhaustion_proof: p.history_exhaustion_proof || null,
         error: p.error || null
       };
     });
@@ -257,10 +261,19 @@
         var rows = [], marker = null, pages = 0;
         var boundaryReached = false, historyExhausted = false;
         var status = 'COMPLETE', error = '';
+        // Every page of every wallet in this run asks for the SAME ledger tip.
+        // This is the walker that actually runs — layer 17 replaces the core
+        // one — so bounding only the core version would have left the real
+        // scan drifting across ledger states while the code looked fixed.
+        var RA = (typeof window !== 'undefined') && window.SW_RUN_ANCHOR;
+        var runAnchor = null;
+        try { runAnchor = (typeof state !== 'undefined') ? state.runAnchor : null; } catch (_) {}
+        var oldestLedger = null, newestLedger = null, rowsWithoutLedger = 0;
 
         while (pages < TX_SAFETY_MAX_PAGES) {
           try {
             var req = { command: 'account_tx', account: account, ledger_index_min: -1, ledger_index_max: -1, limit: limit, forward: false };
+            if (RA) { try { req = RA.boundRequest(req, runAnchor); } catch (_) {} }
             if (marker) req.marker = marker;
             var res = await xrpl(ws, req);
             pages++;
@@ -275,6 +288,17 @@
               var ms = new Date(iso).getTime();
               if (!Number.isFinite(ms)) continue;
               oldest = Math.min(oldest, ms);
+              // The ledger span this wallet was actually READ over. A checkpoint
+              // records proven COVERAGE, not the last transaction seen, so the
+              // writer needs the range the walk covered — including pages whose
+              // rows all fell outside the window.
+              if (RA) {
+                var _li = RA.ledgerIndexOf(item);
+                if (_li !== null) {
+                  if (oldestLedger === null || _li < oldestLedger) oldestLedger = _li;
+                  if (newestLedger === null || _li > newestLedger) newestLedger = _li;
+                } else rowsWithoutLedger++;
+              }
               if (ms >= startMs && ms <= endMs) rows.push(item);
             }
 
@@ -294,6 +318,18 @@
           pages_scanned: pages,
           boundary_reached: boundaryReached,
           history_exhausted: historyExhausted,
+          // The anchor this wallet was read against, carried on the proof so a
+          // checkpoint can never be written against a different tip than the
+          // one the walk actually used.
+          anchor_ledger: (runAnchor && runAnchor.ok) ? runAnchor.anchor_ledger : null,
+          oldest_observed_ledger: oldestLedger,
+          newest_observed_ledger: newestLedger,
+          rows_without_ledger: rowsWithoutLedger,
+          // history_exhausted alone is "the server had no more pages". Whether
+          // that is the END OF HISTORY is decided by the run anchor's proof,
+          // built from server_info.complete_ledgers for THIS run. A wallet may
+          // not manufacture one.
+          history_exhaustion_proof: (runAnchor && runAnchor.ok) ? (runAnchor.history_exhaustion_proof || null) : null,
           error: error || null
         };
         proofByAccount[account] = proof;

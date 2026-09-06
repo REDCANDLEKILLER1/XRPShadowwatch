@@ -1,4 +1,12 @@
-// XRPMAN Shadow Watch — coverage decisions. Server-side only (Node/Vercel).
+// XRPMAN Shadow Watch — coverage decisions. Pure: facts in, decision out.
+//
+// Loaded BOTH in Node (the server/evidence path) and in the browser (the
+// scanner, via src/brief/41-run-anchor-20260906.js). That is deliberate and it
+// is the point: the rule that decides whether history was proven must be ONE
+// implementation. A browser copy and a server copy of "is this range
+// contiguous from 32570 through the anchor" would drift, and the drift would
+// show up as the browser claiming coverage the server would have refused —
+// which is the exact failure class this file exists to prevent.
 //
 // ── What this file is for ───────────────────────────────────────────────────
 // Today a Report re-walks all 251 wallet histories every morning, because
@@ -631,7 +639,7 @@ function sealable(perWallet) {
   };
 }
 
-module.exports = {
+const API = {
   REASON,
   PROOF_STATUS,
   normalizeCoverage,
@@ -645,3 +653,8 @@ module.exports = {
   checkpointAdvance,
   sealable
 };
+
+// Dual export. `module` is undefined in a browser and `window` is undefined in
+// Node, so each guard is checked before use rather than assumed.
+if (typeof module !== 'undefined' && module.exports) module.exports = API;
+if (typeof window !== 'undefined') window.SW_COVERAGE = API;

@@ -1076,7 +1076,17 @@ async function accountTxWindow(ws, account, startMs, endMs, limit) {
 async function accountTxWindowDepth(ws, account, startMs, endMs, limit, maxPages) {
   const rows = []; let marker = null, pages = 0;
   do {
-    const req = { command: 'account_tx', account, ledger_index_min: -1, ledger_index_max: -1, limit, forward: false };
+    // ledger_index_max is THIS RUN'S anchor, not -1. With -1 the server
+    // resolves the tip per request, so wallet 1 could be answered against
+    // ledger N and wallet 251 against N+400 — 251 ledger states described as
+    // one. ledger_index_min stays -1 until the checkpoint writer lands; asking
+    // for a narrower floor before one is stored would request a range nothing
+    // has proven.
+    let req = { command: 'account_tx', account, ledger_index_min: -1, ledger_index_max: -1, limit, forward: false };
+    try {
+      if (typeof window !== 'undefined' && window.SW_RUN_ANCHOR && typeof state !== 'undefined')
+        req = window.SW_RUN_ANCHOR.boundRequest(req, state.runAnchor);
+    } catch (_) {}
     if (marker) req.marker = marker;
     const res = await xrpl(ws, req);
     const txs = res.transactions || []; let oldest = Infinity;
@@ -1130,7 +1140,66 @@ function pageDepthFor(label) {
 async function scanWallets(ws) {
   state.wallets = []; state.txs = []; state.flags = []; state.large = []; state.escrowLarge = []; state.frags = [];
   const prev = JSON.parse(localStorage.getItem(STORE) || '{}');
-  const tw = getTxWindow();
+
+  // ── RECOMPUTE THE WINDOW AT SCAN START ──────────────────────────────────
+  // applyAutoTxWindow() writes txStart/txEnd into the DOM at boot, and
+  // getTxWindow() then reads those frozen inputs. A console left open
+  // overnight scanned yesterday's window and printed "LAST 24H" over it.
+  // Refresh only an AUTO window: an operator-chosen range is theirs, and
+  // silently moving it would be worse than the staleness.
+  try {
+    if (state._txWindowAuto && typeof applyAutoTxWindow === 'function') applyAutoTxWindow();
+  } catch (_) {}
+
+  // ── ONE VALIDATED ANCHOR FOR THIS ENTIRE RUN ────────────────────────────
+  // Fetched ONCE, here, before a single wallet is read. Order is load-bearing:
+  // the ledger command defines the anchor (its seq and close_time come from one
+  // response, so they cannot disagree), then server_info proves the range
+  // covers it. The reverse order routinely reports a range topping out one
+  // below the anchor and refuses a healthy server. See 41-run-anchor.
+  state.runAnchor = null;
+  state.effectiveWindow = null;
+  const RA = (typeof window !== 'undefined') && window.SW_RUN_ANCHOR;
+  if (RA) {
+    let ledgerRes = null, infoRes = null;
+    try { ledgerRes = await xrpl(ws, { command: 'ledger', ledger_index: 'validated' }); }
+    catch (e) { log('run anchor: ledger(validated) failed — ' + e.message); }
+    if (ledgerRes) {
+      try { infoRes = await xrpl(ws, { command: 'server_info' }); }
+      catch (e) { log('run anchor: server_info failed — ' + e.message + ' (no exhaustion proof this run)'); }
+    }
+    const anchor = RA.buildRunAnchor({ ledgerResult: ledgerRes, serverInfoResult: infoRes });
+    state.runAnchor = anchor;
+    if (anchor.ok) {
+      const pr = anchor.history_exhaustion_proof;
+      log('run anchor: ledger ' + anchor.anchor_ledger + ' closed ' + anchor.anchor_close_iso +
+          ' · history ' + (pr && pr.proven ? 'PROVEN (' + pr.reason + ')' : 'UNPROVEN (' + ((pr && pr.reason) || 'no server range') + ')'));
+    } else {
+      log('run anchor: NOT ESTABLISHED (' + anchor.reason + ') — requests stay unbounded and no window cap is claimed');
+    }
+  }
+
+  const twRequested = getTxWindow();
+  // The window the Report may actually claim. A run cannot report on ledger
+  // time it did not read, so the end is capped to the anchor's close.
+  const ew = RA
+    ? RA.effectiveWindow({ requestedStartMs: twRequested.startMs, requestedEndMs: twRequested.endMs, anchor: state.runAnchor })
+    : null;
+  state.effectiveWindow = ew;
+  if (ew && ew.capped) {
+    log('window capped to anchor close: requested end was ' + Math.round(ew.claimed_beyond_ms / 1000) +
+        's beyond ledger ' + ew.anchor_ledger);
+  }
+  // Everything downstream reads `tw`, so the cap has to land HERE — computing
+  // it and leaving the scan on the browser's own end time would change nothing.
+  const tw = ew
+    ? Object.assign({}, twRequested, {
+        startMs: ew.start_ms, endMs: ew.end_ms,
+        anchor_ledger: ew.anchor_ledger, anchor_close_ms: ew.anchor_close_ms,
+        window_capped_to_anchor: ew.capped, claimed_beyond_anchor_ms: ew.claimed_beyond_ms
+      })
+    : twRequested;
+  state.txWindowEffective = tw;
   const limit = Math.max(20, Math.min(400, n($('inTxLimit').value) || 200));
   const active = getActiveWatchlist();
   log('SCAN: ' + active.length + ' wallets, parallel=' + SCAN_PARALLEL + ', smart-skip tx-pass');
@@ -1227,9 +1296,19 @@ async function scanWallets(ws) {
           if (!amt && typeof t.Amount === 'string') amt = drops(t.Amount);
         }
         const _sig = _sigMode(t);
+        // WHICH LEDGER this happened in, read off the response. Null when the
+        // response did not carry one — never interpolated from a neighbour, a
+        // marker or the anchor, because coverage is proven over ledger ranges
+        // and a guessed index would prove a range nobody read. A row without
+        // one is still real evidence; it just cannot participate in a proof.
+        const _adm = (typeof window !== 'undefined' && window.SW_RUN_ANCHOR)
+          ? window.SW_RUN_ANCHOR.admitRow(item, state.runAnchor)
+          : { ledger_index: null, proves_coverage: false, reason: 'NO_ANCHOR_LAYER' };
         state.txs.push({
           account: row.address, label: row.label, cat: row.cat,
           type: t.TransactionType, hash: t.hash || item.hash || '',
+          ledger_index: _adm.ledger_index,
+          proves_coverage: _adm.proves_coverage === true,
           date: iso, from: t.Account || '', to: escrowDest || t.Destination || '',
           amount: amt, currency: cur, destination_tag: t.DestinationTag ?? '',
           // Empty for non-escrow rows, and for an escrow row whose ledger node
@@ -3275,7 +3354,21 @@ function buildPack(v) {
   const price = n($('inPrice')?.value);
   const p = {
     version: APP_VERSION, date: $('inDate')?.value || today(), data_as_of_utc: nowUTC(),
-    scan_target: targetLabel(), tx_window: getTxWindow(),
+    scan_target: targetLabel(),
+    // THE EFFECTIVE WINDOW, not the browser's requested one. getTxWindow()
+    // returns what was ASKED FOR; state.txWindowEffective is what the run
+    // actually read, capped to the anchor's close. Leaving getTxWindow() here
+    // would have computed a cap nothing consumed — the narrative would keep
+    // printing an end time past the last ledger the scan saw, which is the
+    // precise defect the cap exists to remove.
+    tx_window: (typeof state !== 'undefined' && state.txWindowEffective) || getTxWindow(),
+    run_anchor: (typeof state !== 'undefined' && state.runAnchor) || null,
+    window_end_ms: (typeof state !== 'undefined' && state.effectiveWindow)
+      ? state.effectiveWindow.end_ms : null,
+    window_capped_to_anchor: (typeof state !== 'undefined' && state.effectiveWindow)
+      ? state.effectiveWindow.capped === true : false,
+    claimed_beyond_anchor_ms: (typeof state !== 'undefined' && state.effectiveWindow)
+      ? state.effectiveWindow.claimed_beyond_ms : null,
     xrp_price: price, xrp_delta_24h_pct: n($('inDelta')?.value), xrp_volume_24h: n($('inVolume')?.value),
     escrowed_xrp: n($('inEscrowed')?.value),
     support: n($('inSupport')?.value) || price * 0.94, resistance: n($('inResistance')?.value) || price * 1.06,
@@ -3550,7 +3643,12 @@ function escrowFromTxs(byHash) {
         // Recorded so a surface can say "ownership unresolved" instead of
         // silently defaulting an unattributable release to non-Ripple.
         owner_attributed: !!(t.escrow_owner || t.type === 'EscrowCreate'),
-        dest: t.to || null, ts: t.date ? new Date(t.date).getTime() : Date.now(), ledger: null };
+        // Was hardcoded null while parseEscrowItem had the real value, so the
+        // SAME escrow event carried a ledger index or not depending which path
+        // built it. The row now carries one; use it, and stay null when the
+        // response genuinely did not give one.
+        dest: t.to || null, ts: t.date ? new Date(t.date).getTime() : Date.now(),
+        ledger: (t.ledger_index === undefined ? null : t.ledger_index) };
   });
 }
 
