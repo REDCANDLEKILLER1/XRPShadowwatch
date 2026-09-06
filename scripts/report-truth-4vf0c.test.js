@@ -277,12 +277,18 @@ const check = (name, ok, detail) => {
       support: 0.9, resistance: 1.1,
       evidence_quality: { grade: 'B', score: 78 },
       risk_score: { score: 10, label: 'GREEN / QUIET', drivers: [] },
+      // anchor_ok and unproven_wallets are REQUIRED for a complete claim now.
+      // coverageFrom gates on the PRESENCE of unproven_wallets, not on num(),
+      // so an object that never carried the key can no longer satisfy the term
+      // by silence — and a run with no validated anchor certifies nothing.
       tx_scan_coverage: { full_window_complete: true, target_wallets: 3,
-                          complete_wallets: 3, failed_wallets: 0, truncated_wallets: 0 }
+                          complete_wallets: 3, failed_wallets: 0, truncated_wallets: 0,
+                          unproven_wallets: 0, unknown_status_wallets: 0, anchor_ok: true }
     };
     const incompletePack = Object.assign({}, basePack, {
       tx_scan_coverage: { full_window_complete: false, target_wallets: 3,
-                          complete_wallets: 1, failed_wallets: 1, truncated_wallets: 1 }
+                          complete_wallets: 1, failed_wallets: 1, truncated_wallets: 1,
+                          unproven_wallets: 0, unknown_status_wallets: 0, anchor_ok: true }
     });
     const txLine = t => (String(t).split('\n')
       .find(l => /^Transactions in scan window/.test(l) || /24h transactions/i.test(l)) || '');

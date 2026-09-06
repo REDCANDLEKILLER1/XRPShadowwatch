@@ -131,7 +131,9 @@ const COV = await p.evaluate(() => {
   const mk = (txOk) => ({
     date:'x', wallets_checked:251, wallets_failed:0, watchlist_total:251,
     tx_scan_coverage:{ target_wallets:251, complete_wallets:txOk,
-      failed_wallets:251-txOk, truncated_wallets:0, full_window_complete:txOk===251 }
+      failed_wallets:251-txOk, truncated_wallets:0,
+      unproven_wallets:0, unknown_status_wallets:0, anchor_ok:true,
+      full_window_complete:txOk===251 }
   });
   const H = (window.PUBLIC_REPORT_PIPELINE_V1 && window.PUBLIC_REPORT_PIPELINE_V1.helpers) || {};
   const f = (typeof H.coverageForNarrative === 'function') ? H.coverageForNarrative : null;

@@ -205,28 +205,81 @@
     var complete = num(c.complete_wallets);
     var failed = num(c.failed_wallets);
     var truncated = num(c.truncated_wallets);
-    var full = c.full_window_complete === true && target > 0 && complete === target && failed === 0 && truncated === 0;
+    // PRESENCE, not num(). num(undefined) is 0, so gating on
+    // `num(c.unproven_wallets) === 0` would let a coverage object that never
+    // carried the key satisfy the term by silence — which is precisely the
+    // shape of the object this layer used to emit.
+    var hasUnproven = (typeof c.unproven_wallets === 'number');
+    var unproven = hasUnproven ? num(c.unproven_wallets) : null;
+    var unknown = (typeof c.unknown_status_wallets === 'number') ? num(c.unknown_status_wallets) : 0;
+    var anchorOk = c.anchor_ok === true;
+
+    // A coverage object with no target at all is NOT a run in which zero
+    // wallets were complete — it is a run whose coverage was never measured.
+    // Rendering '0/0 complete' made silence look like a measurement.
+    var measured = target > 0 && hasUnproven;
+
+    var full = measured && anchorOk && c.full_window_complete === true &&
+               complete === target && failed === 0 && truncated === 0 &&
+               unproven === 0 && unknown === 0;
+
+    var line;
+    if (!measured) {
+      line = 'NOT MEASURED — transaction-window coverage was not established this run. No zero-result claim below is definitive.';
+    } else if (full) {
+      line = 'COMPLETE — ' + complete + '/' + target + ' watched wallets proved the requested transaction window.';
+    } else {
+      // Every cause named. Three buckets against a roster denominator meant a
+      // listener heard "0 failed; 0 truncated" while wallets went missing from
+      // the arithmetic with no account given.
+      var causes = [failed + ' failed', truncated + ' truncated', unproven + ' unproven'];
+      if (unknown > 0) causes.push(unknown + ' unrecognised');
+      line = 'INCOMPLETE — ' + complete + '/' + target + ' proved the window; ' +
+             causes.join('; ') + '.' +
+             (anchorOk ? '' : ' No validated run anchor, so no wallet could be certified.') +
+             ' Zero-result claims are not definitive.';
+    }
+
     return {
       target_wallets: target,
       complete_wallets: complete,
       failed_wallets: failed,
       truncated_wallets: truncated,
+      unproven_wallets: unproven,
+      unknown_status_wallets: unknown,
+      anchor_ok: anchorOk,
+      measured: measured,
       full_window_complete: full,
-      line: full
-        ? 'COMPLETE — ' + complete + '/' + target + ' checked wallets proved the requested transaction window.'
-        : 'INCOMPLETE — ' + complete + '/' + target + ' complete; ' + failed + ' failed; ' + truncated + ' truncated. Zero-result claims are not definitive.'
+      line: line
     };
   }
 
   function proofList() {
     var rows = [];
     try { rows = (typeof state !== 'undefined' && Array.isArray(state.wallets)) ? state.wallets : []; } catch (_) {}
+    var liveAnchor = null, liveRun = null;
+    try {
+      liveAnchor = (state.runAnchor && state.runAnchor.ok) ? state.runAnchor.anchor_ledger : null;
+      liveRun = state.runId || null;
+    } catch (_) {}
     return rows.filter(function (w) { return w && w.status === 'CHECKED'; }).map(function (w) {
       var p = w.tx_scan || {};
+      // A proof that does not name THIS run and THIS anchor describes some
+      // other run. Demote rather than trust: the alternative is certifying
+      // today's window from yesterday's evidence.
+      var st = p.status || 'FAILED';
+      var stale = (liveAnchor !== null && num(p.anchor_ledger) !== num(liveAnchor)) ||
+                  (liveRun !== null && String(p.run_id || '') !== String(liveRun));
+      if (stale && st === 'COMPLETE') st = 'UNPROVEN';
       return {
+        proven_reason: p.proven_reason || null,
+        unproven_reason: stale ? 'PROOF_NOT_THIS_RUN' : (p.unproven_reason || null),
+        request_bounded: p.request_bounded === true,
+        transport_consistent: p.transport_consistent === true,
+        run_id: p.run_id || null,
         address: w.address,
         label: w.label,
-        status: p.status || 'FAILED',
+        status: st,
         pages_scanned: num(p.pages_scanned),
         boundary_reached: !!p.boundary_reached,
         history_exhausted: !!p.history_exhausted,
@@ -241,15 +294,63 @@
 
   function aggregateCoverage() {
     var list = proofList();
+
+    // THE DENOMINATOR IS THE ROSTER, not the wallets whose account_info
+    // happened to answer. proofList only sees status 'CHECKED', so 200 balance
+    // failures used to render "COMPLETE — 51/51": arithmetically tidy and
+    // forensically false. Every watched wallet that produced no proof this run
+    // is counted, and counted as UNPROVEN.
+    var roster = 0;
+    try {
+      if (typeof getActiveWatchlist === 'function') roster = (getActiveWatchlist() || []).length;
+      else if (typeof WATCHLIST !== 'undefined' && WATCHLIST) roster = WATCHLIST.length;
+    } catch (_) {}
+    var target = Math.max(roster, list.length);
+
+    // No run anchor means no wallet may be certified, whatever its own status
+    // string says. Nothing used to ask this question at all.
+    var anchorOk = false;
+    try { anchorOk = (typeof state !== 'undefined') && state.anchorOk === true; } catch (_) {}
+
+    var complete = 0, failed = 0, truncated = 0, unproven = 0, unknown = 0;
+    for (var i = 0; i < list.length; i++) {
+      var st = list[i].status;
+      if (st === 'COMPLETE') { if (anchorOk) complete++; else unproven++; }
+      else if (st === 'FAILED') failed++;
+      else if (st === 'TRUNCATED') truncated++;
+      else if (st === 'UNPROVEN') unproven++;
+      else unknown++;
+    }
+    // Roster wallets that never produced a proof row this run — a balance
+    // failure, an invalid address, or simply never walked. They are part of
+    // the claim's denominator and they are not proven.
+    var notChecked = Math.max(0, target - list.length);
+    unproven += notChecked;
+
     var c = {
-      target_wallets: list.length,
-      complete_wallets: list.filter(function (p) { return p.status === 'COMPLETE'; }).length,
-      failed_wallets: list.filter(function (p) { return p.status === 'FAILED'; }).length,
-      truncated_wallets: list.filter(function (p) { return p.status === 'TRUNCATED'; }).length,
-      full_window_complete: list.length > 0 && list.every(function (p) { return p.status === 'COMPLETE'; })
+      target_wallets: target,
+      complete_wallets: complete,
+      failed_wallets: failed,
+      truncated_wallets: truncated,
+      unproven_wallets: unproven,
+      unknown_status_wallets: unknown,
+      not_checked_wallets: notChecked,
+      anchor_ok: anchorOk,
+      // The identity that makes a missing bucket visible instead of silent.
+      counts_reconcile: (complete + failed + truncated + unproven + unknown) === target,
+      full_window_complete: anchorOk && target > 0 && complete === target &&
+                            failed === 0 && truncated === 0 && unproven === 0 && unknown === 0
     };
     try { if (typeof state !== 'undefined') state.txScanCoverage = c; } catch (_) {}
     return c;
+  }
+
+  // The socket that served a page, not the URL that named it. A reconnect can
+  // land on the same URL and a different node behind a round-robin cluster,
+  // with different retention — the case a URL comparison cannot see.
+  function transportEpoch() {
+    try { return (typeof state !== 'undefined') ? (num(state._transportEpoch) || 0) : 0; }
+    catch (_) { return 0; }
   }
 
   function installCompleteAccountTxPagination() {
@@ -260,7 +361,13 @@
       accountTxWindowDepth = async function (ws, account, startMs, endMs, limit) {
         var rows = [], marker = null, pages = 0;
         var boundaryReached = false, historyExhausted = false;
-        var status = 'COMPLETE', error = '';
+        // PESSIMISTIC INITIAL VALUE. This was 'COMPLETE', so every path that
+        // fell through without explicitly deciding — a swallowed bound, a
+        // transport swap, a no-marker on a partial-history server — landed on
+        // the claim rather than on the refusal. A coverage claim must be
+        // EARNED by a positive test, never inherited from an initializer.
+        var status = 'UNPROVEN', error = '';
+        var unprovenReason = 'NOT_DECIDED';
         // Every page of every wallet in this run asks for the SAME ledger tip.
         // This is the walker that actually runs — layer 17 replaces the core
         // one — so bounding only the core version would have left the real
@@ -270,12 +377,66 @@
         try { runAnchor = (typeof state !== 'undefined') ? state.runAnchor : null; } catch (_) {}
         var oldestLedger = null, newestLedger = null, rowsWithoutLedger = 0;
 
+        var anchorSeq = (runAnchor && runAnchor.ok) ? runAnchor.anchor_ledger : null;
+        var epoch0 = transportEpoch();
+        var transportConsistent = true;
+        var requestBounded = anchorSeq !== null;
+        var restartsLeft = 1;
+
         while (pages < TX_SAFETY_MAX_PAGES) {
           try {
             var req = { command: 'account_tx', account: account, ledger_index_min: -1, ledger_index_max: -1, limit: limit, forward: false };
-            if (RA) { try { req = RA.boundRequest(req, runAnchor); } catch (_) {} }
+            // NOT wrapped in catch-and-ignore. boundRequest has no throw path
+            // for the case that matters — handed a null anchor it returns
+            // ledger_index_max:-1 and returns NORMALLY — so a catch-derived
+            // flag would read "bounded" on every unbounded request. The only
+            // thing that settles it is a POST-CONDITION on what came back.
+            if (RA) req = RA.boundRequest(req, runAnchor);
+            if (req.ledger_index_max !== anchorSeq || anchorSeq === null) {
+              requestBounded = false;
+              unprovenReason = 'REQUEST_NOT_BOUNDED';
+            }
             if (marker) req.marker = marker;
             var res = await xrpl(ws, req);
+
+            // TRANSPORT CHECK, after the answer came back. If the socket
+            // changed, this page came from a different server than the one the
+            // anchor and the range proof were established on — and `marker` is
+            // server-specific state, so the chain we were walking is not
+            // resumable, it is meaningless. Restart once against the SAME
+            // anchor on the new transport; a second change gives up.
+            if (transportEpoch() !== epoch0) {
+              if (restartsLeft > 0 && RA && typeof RA.buildRunAnchor === 'function') {
+                restartsLeft--;
+                try {
+                  var reInfo = await xrpl(ws, { command: 'server_info' });
+                  var reProof = (typeof window !== 'undefined' && window.SW_COVERAGE)
+                    ? window.SW_COVERAGE.proveHistoryExhaustion({
+                        anchorLedger: anchorSeq,
+                        completeLedgers: reInfo && reInfo.info && reInfo.info.complete_ledgers })
+                    : null;
+                  // The new transport must hold the anchor before it may
+                  // answer for it at all.
+                  if (reProof && reProof.covers_through !== null &&
+                      num(reProof.covers_through) >= num(anchorSeq)) {
+                    runAnchor = Object.assign({}, runAnchor, { history_exhaustion_proof: reProof });
+                  } else {
+                    runAnchor = Object.assign({}, runAnchor, { history_exhaustion_proof: reProof || null });
+                  }
+                } catch (_) {
+                  runAnchor = Object.assign({}, runAnchor, { history_exhaustion_proof: null });
+                }
+                epoch0 = transportEpoch();
+                marker = null; rows = []; pages = 0;
+                oldestLedger = null; newestLedger = null; rowsWithoutLedger = 0;
+                boundaryReached = false; historyExhausted = false;
+                try { if (typeof log === 'function') log('tx-scan ' + account + ': transport changed mid-walk — marker discarded, restarting on the new socket'); } catch (_) {}
+                continue;
+              }
+              transportConsistent = false;
+              unprovenReason = 'TRANSPORT_CHANGED';
+              break;
+            }
             pages++;
             var txs = res.transactions || [];
             var oldest = Infinity;
@@ -312,9 +473,56 @@
           }
         }
 
-        if (status !== 'FAILED' && !boundaryReached && !historyExhausted) status = 'TRUNCATED';
+        if (status !== 'FAILED' && !boundaryReached && !historyExhausted && transportConsistent) {
+          status = 'TRUNCATED';
+          unprovenReason = 'SAFETY_CEILING_REACHED';
+        }
+
+        // THE ONE PREDICATE decides whether this walk earned a claim — the same
+        // function checkpointAdvance uses. Layer 17 must not re-derive it: two
+        // implementations is how the database came to refuse a wallet the
+        // Report was certifying on air.
+        var COVR = (typeof window !== 'undefined') && window.SW_COVERAGE;
+        var runId = null, winBounded = false, anchorOk = false;
+        try {
+          runId = (typeof state !== 'undefined') ? (state.runId || null) : null;
+          winBounded = !!(typeof state !== 'undefined' && state.effectiveWindow &&
+                          state.effectiveWindow.bounded_by_anchor === true);
+          anchorOk = !!(runAnchor && runAnchor.ok === true);
+        } catch (_) {}
+
+        var candidate = {
+          status: status === 'FAILED' ? 'FAILED' : (status === 'TRUNCATED' ? 'TRUNCATED' : 'COMPLETE'),
+          request_bounded: requestBounded,
+          transport_consistent: transportConsistent,
+          anchor_ledger: anchorSeq,
+          run_id: runId,
+          boundary_reached: boundaryReached,
+          history_exhausted: historyExhausted,
+          history_exhaustion_proof: (runAnchor && runAnchor.ok) ? (runAnchor.history_exhaustion_proof || null) : null
+        };
+        var verdict = (COVR && typeof COVR.coverageProven === 'function')
+          ? COVR.coverageProven({ anchorOk: anchorOk, anchorLedger: anchorSeq,
+                                  windowBoundedByAnchor: winBounded, runId: runId, proof: candidate })
+          // No rule loaded means nothing may be certified. Failing OPEN here
+          // would make the whole gate optional exactly when the layer that
+          // enforces it did not arrive — the /report deep-link case.
+          : { proven: false, reason: 'NO_COVERAGE_RULE' };
+
+        if (status !== 'FAILED' && status !== 'TRUNCATED') {
+          status = verdict.proven ? 'COMPLETE' : 'UNPROVEN';
+          if (!verdict.proven) unprovenReason = verdict.reason;
+        }
+
         var proof = {
           status: status,
+          proven_reason: verdict.proven ? verdict.reason : null,
+          unproven_reason: verdict.proven ? null : (unprovenReason || verdict.reason),
+          request_bounded: requestBounded,
+          transport_consistent: transportConsistent,
+          transport_epoch: epoch0,
+          run_id: runId,
+          window_bounded_by_anchor: winBounded,
           pages_scanned: pages,
           boundary_reached: boundaryReached,
           history_exhausted: historyExhausted,
@@ -356,6 +564,12 @@
       var original = scanWallets;
 
       scanWallets = async function () {
+        // A NEW RUN GETS A NEW PROOF TABLE. This was created once at install
+        // time and never cleared, so a wallet CHECKED but not walked this run
+        // inherited the PREVIOUS run's proof — status COMPLETE, the previous
+        // run's anchor — and was counted for today's claim. That is a COMPLETE
+        // assertion about a wallet nobody read this morning.
+        try { for (var _k in proofByAccount) delete proofByAccount[_k]; } catch (_) {}
         var previous = readPreviousSnapshot();
         var previousRaw = null;
         var completed = false;

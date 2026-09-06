@@ -1161,6 +1161,18 @@ async function scanWallets(ws) {
     if (state._txWindowAuto && typeof applyAutoTxWindow === 'function') applyAutoTxWindow();
   } catch (_) {}
 
+  // ── RUN IDENTITY AND A CLEAN SLATE ──────────────────────────────────────
+  // Nothing was reset at run start, so last run's aggregate stood as the live
+  // claim: state.txScanCoverage is written once and was never cleared, and a
+  // connection failure that throws BEFORE this point left state.pack intact
+  // for the X export to publish as though it were today's. Every wallet's
+  // proof is stamped with this id, and anything carrying a different one is
+  // not evidence about this run.
+  state.runId = 'run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  state.txScanCoverage = null;
+  state.pack = null;
+  try { for (const _w of (state.wallets || [])) { if (_w) delete _w.tx_scan; } } catch (_) {}
+
   // ── ONE VALIDATED ANCHOR FOR THIS ENTIRE RUN ────────────────────────────
   // Fetched ONCE, here, before a single wallet is read. Order is load-bearing:
   // the ledger command defines the anchor (its seq and close_time come from one
@@ -1185,8 +1197,19 @@ async function scanWallets(ws) {
       log('run anchor: ledger ' + anchor.anchor_ledger + ' closed ' + anchor.anchor_close_iso +
           ' · history ' + (pr && pr.proven ? 'PROVEN (' + pr.reason + ')' : 'UNPROVEN (' + ((pr && pr.reason) || 'no server range') + ')'));
     } else {
-      log('run anchor: NOT ESTABLISHED (' + anchor.reason + ') — requests stay unbounded and no window cap is claimed');
+      log('run anchor: NOT ESTABLISHED (' + anchor.reason + ') — this run CANNOT certify transaction-window coverage');
     }
+  }
+  // The gate. An absent anchor LAYER and a failed acquisition are the same
+  // fact — no immutable ledger ceiling for this run — and both must reach
+  // aggregateCoverage. The /report deep link (src/js/report-route.js:116)
+  // clicks #scanBtn as soon as an onclick exists, which 02-core binds
+  // synchronously, while 41-run-anchor arrives at the end of an injection
+  // chain: a stranger opening the public link is the likeliest anchorless run,
+  // and before this it was told COMPLETE.
+  state.anchorOk = !!(RA && state.runAnchor && state.runAnchor.ok === true);
+  if (!state.anchorOk) {
+    log('COVERAGE: this run cannot claim a complete transaction window — no validated run anchor.');
   }
 
   const twRequested = getTxWindow();
