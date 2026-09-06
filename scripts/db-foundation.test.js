@@ -1158,30 +1158,69 @@ const EXH_BASE_FOR_UNKNOWN = {
 
 // "No marker" is the SERVER running out of pages. On a partial-history server
 // that is indistinguishable from an account with nothing older, so exhaustion
-// must be PROVEN against the server's own complete-ledger range before it can
-// claim history. proveHistoryExhaustion is what settles it.
-const proofFull = COV.proveHistoryExhaustion({
-  serverCompleteLedgerMin: COV.XRPL_EARLIEST_AVAILABLE_LEDGER, oldestObservedLedger: 98799000 });
-check('a full-history server proves exhaustion',
-      proofFull.proven === true && proofFull.reason === 'SERVER_HAS_FULL_HISTORY');
-const proofPartial = COV.proveHistoryExhaustion({
-  serverCompleteLedgerMin: 90000000, oldestObservedLedger: 98799000 });
-check('a partial-history server proves nothing',
-      proofPartial.proven === false && proofPartial.reason === 'SERVER_HISTORY_PARTIAL');
-check('and it reports how far down is unaccounted for',
-      proofPartial.unproven_below === 90000000, proofPartial);
-// Asserting only the REASON here was vacuous: a mutation flipping `proven` to
-// true while keeping the reason string left the suite green, so an unknown
-// server range would have bootstrapped history. Caught by sabotage. Assert the
-// verdict, and drive a real decision with it.
-const proofUnknown = COV.proveHistoryExhaustion({});
-check('an unknown server range proves nothing either',
-      proofUnknown.proven === false && proofUnknown.reason === 'SERVER_RANGE_UNKNOWN',
-      proofUnknown);
-check('and a bootstrap driven by that unknown range is refused',
-      COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof:
-        Object.assign({}, EXH_BASE_FOR_UNKNOWN, { history_exhausted_proven: proofUnknown.proven })
-      }).reason === 'HISTORY_EXHAUSTION_UNPROVEN');
+// must be PROVEN against the server's own retained range.
+//
+// And the range is an EXPRESSION, not a number. XRPL's documentation says
+// complete_ledgers may be DISJOINT — "24900901-24900984,24901116-24901158" —
+// so reducing it to its minimum loses exactly the fact it carries. The
+// previous version did that, and read "32570-50000,90000000-98800000" as full
+// history across a ninety-million-ledger hole.
+const A_ANCHOR = ANCHOR;
+const prove = (expr) => COV.proveHistoryExhaustion({ completeLedgers: expr, anchorLedger: A_ANCHOR });
+
+check('1. contiguous from the earliest ledger to the anchor is PROVEN',
+      prove('32570-98800000').proven === true &&
+      prove('32570-98800000').reason === 'SERVER_HAS_FULL_HISTORY');
+check('2. a range that does not reach back far enough proves nothing',
+      prove('90000000-98800000').proven === false &&
+      prove('90000000-98800000').reason === 'SERVER_HISTORY_PARTIAL');
+check('3. THE DISJOINT CASE — a hole is not full history',
+      prove('32570-50000,90000000-98800000').proven === false &&
+      prove('32570-50000,90000000-98800000').reason === 'SERVER_HISTORY_DISJOINT',
+      prove('32570-50000,90000000-98800000'));
+check('   and the gap is reported, not swallowed',
+      prove('32570-50000,90000000-98800000').gap_above === 50000);
+// Cases 4 and 5 asserted only `.reason`, so a mutation flipping `proven` to
+// true while keeping the label left them GREEN — the same "assert the label,
+// not the verdict" slip caught twice before in this file. The VERDICT is the
+// thing that decides whether coverage is claimed; assert it first.
+check('4. "empty" proves nothing',
+      prove('empty').proven === false && prove('empty').reason === 'SERVER_RANGE_EMPTY',
+      prove('empty'));
+check('5. malformed proves nothing',
+      ['not-a-range', '32570-', '50000-32570', '32570,,98800000', '-98800000']
+        .every(e => prove(e).proven === false &&
+                    prove(e).reason === 'SERVER_RANGE_UNPARSEABLE'),
+      ['not-a-range', '32570-', '50000-32570', '32570,,98800000', '-98800000']
+        .map(e => [e, prove(e).proven, prove(e).reason]));
+// Nothing that fails may carry a usable coverage bound either — a refusal that
+// still hands back covers_through would be a refusal in name only.
+check('   and a refused proof carries no coverage bound',
+      ['empty', 'not-a-range', '90000000-98800000', '32570-50000,90000000-98800000']
+        .every(e => prove(e).proven === false &&
+                    (prove(e).covers_through === null ||
+                     prove(e).covers_through < A_ANCHOR)),
+      ['empty', 'not-a-range', '90000000-98800000', '32570-50000,90000000-98800000']
+        .map(e => [e, prove(e).covers_through]));
+check('   as does an absent range', prove(undefined).proven === false && prove(null).proven === false);
+// Contiguity written in two touching pieces is still contiguity — refusing it
+// would be as wrong as accepting a real gap.
+check('touching ranges merge into contiguous coverage',
+      prove('32570-50000,50001-98800000').proven === true);
+check('overlapping ranges do too',
+      prove('32570-60000,50000-98800000').proven === true);
+// Reaching back far enough but stopping short of the anchor is still a hole.
+check('coverage that stops one ledger short of the anchor is refused',
+      prove('32570-98799999').proven === false &&
+      prove('32570-98799999').reason === 'SERVER_HISTORY_DISJOINT');
+check('a proof with no anchor is refused outright',
+      COV.proveHistoryExhaustion({ completeLedgers: '32570-98800000' }).reason === 'ANCHOR_REQUIRED');
+check('the parser is exposed and merges as expected',
+      JSON.stringify(COV.parseCompleteLedgers('32570-50000,50001-98800000')) ===
+      JSON.stringify([[32570, 98800000]]));
+
+const proofFull    = prove('32570-98800000');
+const proofPartial = prove('32570-50000,90000000-98800000');
 
 const EXH_BASE = {
   status: 'COMPLETE', range_bound_proven: false,
@@ -1192,7 +1231,7 @@ const EXH_BASE = {
   rows_stored: 2 };
 
 const bootExh = COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR,
-  proof: Object.assign({}, EXH_BASE, { history_exhausted_proven: proofFull.proven }) });
+  proof: Object.assign({}, EXH_BASE, { history_exhaustion_proof: proofFull }) });
 check('PROVEN exhausted history bootstraps', bootExh.advance === true &&
       bootExh.reason === 'BOOTSTRAP_HISTORY_EXHAUSTED', bootExh.reason);
 
@@ -1200,22 +1239,37 @@ check('PROVEN exhausted history bootstraps', bootExh.advance === true &&
 // server history. The rows are real; the claim that nothing older exists is
 // not. This must NOT establish a historical checkpoint.
 const bootExhUnproven = COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR,
-  proof: Object.assign({}, EXH_BASE, { history_exhausted_proven: proofPartial.proven }) });
+  proof: Object.assign({}, EXH_BASE, { history_exhaustion_proof: proofPartial }) });
 check('rows + no marker + PARTIAL server history establishes NOTHING',
       bootExhUnproven.advance === false &&
       bootExhUnproven.reason === 'HISTORY_EXHAUSTION_UNPROVEN', bootExhUnproven);
 check('and it claims no coverage at all',
       bootExhUnproven.next_through === null && bootExhUnproven.next_through_close_ms === null,
       bootExhUnproven);
-check('omitting the proof flag entirely is the same refusal',
+check('omitting the proof entirely is the same refusal',
       COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof: EXH_BASE
+      }).reason === 'HISTORY_EXHAUSTION_UNPROVEN');
+// A caller must not be able to manufacture the verdict. The proof is now the
+// OBJECT the prover returned, and it has to name THIS run's anchor.
+check('a bare history_exhausted_proven flag is NOT accepted',
+      COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof:
+        Object.assign({}, EXH_BASE, { history_exhausted_proven: true })
+      }).reason === 'HISTORY_EXHAUSTION_UNPROVEN');
+check('a hand-made proven:true object without the anchor is NOT accepted',
+      COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof:
+        Object.assign({}, EXH_BASE, { history_exhaustion_proof: { proven: true } })
+      }).reason === 'HISTORY_EXHAUSTION_UNPROVEN');
+check('a real proof for a DIFFERENT anchor is NOT accepted',
+      COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof:
+        Object.assign({}, EXH_BASE, { history_exhaustion_proof:
+          COV.proveHistoryExhaustion({ completeLedgers: '32570-98800000', anchorLedger: 12345 }) })
       }).reason === 'HISTORY_EXHAUSTION_UNPROVEN');
 // Boundary-reached remains independently valid — an unproven exhaustion claim
 // alongside it must not poison a walk that DID read past the window start.
 check('a boundary-reached walk still bootstraps despite unproven exhaustion',
       COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR,
         proof: Object.assign({}, bootProof, { history_exhausted: true,
-          history_exhausted_proven: false })
+          history_exhaustion_proof: proofPartial })
       }).reason === 'BOOTSTRAP_BOUNDARY_REACHED');
 check('and its coverage reaches back past any window start',
       bootExh.next_from_close_ms === 0, bootExh.next_from_close_ms);
@@ -1238,7 +1292,7 @@ check('a walk that stopped for no stated reason still never bootstraps',
 check('exhausting an EMPTY account claims no floor it never read',
       COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof:
         Object.assign({}, bootProof, { boundary_reached: false, history_exhausted: true,
-          history_exhausted_proven: true, oldest_ledger_index: null, rows_stored: 0 })
+          history_exhaustion_proof: proofFull, oldest_ledger_index: null, rows_stored: 0 })
       }).reason === 'NO_LEDGER_FLOOR_OBSERVED');
 check('a TRUNCATED first scan never bootstraps',
       COV.checkpointAdvance({ coverage: null, anchorLedger: ANCHOR, proof:

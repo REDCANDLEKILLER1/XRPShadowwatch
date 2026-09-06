@@ -149,27 +149,89 @@ function capWindowToAnchor(input) {
 // the network's life, so a full-history server's range starts there.
 const XRPL_EARLIEST_AVAILABLE_LEDGER = 32570;
 
+// `complete_ledgers` is a RANGE EXPRESSION, and XRPL's own documentation says
+// it may be DISJOINT:
+//
+//     24900901-24900984,24901116-24901158
+//
+// Reducing it to its minimum loses exactly the fact it was telling us. A
+// server reporting
+//
+//     32570-50000,90000000-98800000
+//
+// has a minimum of 32570 and a hole of roughly ninety million ledgers. The
+// previous version read that as SERVER_HAS_FULL_HISTORY and let a wallet claim
+// coverage across the gap.
+//
+// So parse the expression, merge what it actually holds, and require
+// CONTIGUOUS coverage from the earliest surviving mainnet ledger through the
+// run's anchor. Anything else — empty, unknown, malformed, partial, disjoint —
+// fails closed.
+function parseCompleteLedgers(expr) {
+  if (typeof expr !== 'string') return null;
+  const raw = expr.trim();
+  if (!raw || /^empty$/i.test(raw)) return [];
+  const out = [];
+  for (const part of raw.split(',')) {
+    const seg = part.trim();
+    if (!seg) return null;                       // trailing/double comma: malformed
+    const m = seg.match(/^(\d+)(?:-(\d+))?$/);   // "a-b" or a bare "a"
+    if (!m) return null;
+    const lo = _int(m[1]);
+    const hi = m[2] === undefined ? lo : _int(m[2]);
+    if (lo === null || hi === null || hi < lo) return null;
+    out.push([lo, hi]);
+  }
+  out.sort((a, b) => a[0] - b[0]);
+  // Merge touching or overlapping spans: 32570-50000 and 50001-98800000 are
+  // contiguous coverage written in two pieces, and refusing that would be as
+  // wrong as accepting a real gap.
+  const merged = [];
+  for (const r of out) {
+    const last = merged[merged.length - 1];
+    if (last && r[0] <= last[1] + 1) { last[1] = Math.max(last[1], r[1]); }
+    else merged.push([r[0], r[1]]);
+  }
+  return merged;
+}
+
 function proveHistoryExhaustion(input) {
   const i = input || {};
-  const serverMin = _int(i.serverCompleteLedgerMin);
-  const oldest = _int(i.oldestObservedLedger);
+  const anchor = _int(i.anchorLedger);
+  const ranges = parseCompleteLedgers(i.completeLedgers);
 
-  if (serverMin === null) {
-    return { proven: false, reason: 'SERVER_RANGE_UNKNOWN', server_min: null };
+  const fail = (reason, extra) => Object.assign({
+    proven: false, reason: reason,
+    covers_from: null, covers_through: null, anchor_ledger: anchor
+  }, extra || {});
+
+  if (anchor === null || anchor <= 0) return fail('ANCHOR_REQUIRED');
+  if (ranges === null) return fail('SERVER_RANGE_UNPARSEABLE');
+  if (!ranges.length) return fail('SERVER_RANGE_EMPTY');
+
+  // The span that contains the earliest surviving ledger, if any.
+  let span = null;
+  for (const r of ranges) {
+    if (r[0] <= XRPL_EARLIEST_AVAILABLE_LEDGER && r[1] >= XRPL_EARLIEST_AVAILABLE_LEDGER) { span = r; break; }
   }
-  // The server holds history back to the beginning of what exists, so running
-  // out of pages means the account really has nothing older.
-  if (serverMin <= XRPL_EARLIEST_AVAILABLE_LEDGER) {
-    return { proven: true, reason: 'SERVER_HAS_FULL_HISTORY', server_min: serverMin };
+  if (!span) {
+    return fail('SERVER_HISTORY_PARTIAL', {
+      unproven_below: ranges[0][0], server_ranges: ranges.length });
   }
-  // It does not. Whether the account has older transactions is unknown, and
-  // saying otherwise would be reading the server's retention as the ledger's
-  // contents. Report the gap so a caller can see how much is unaccounted for.
+  // It reaches back far enough. Does the SAME unbroken span reach forward to
+  // the anchor? A hole anywhere between is a hole in the claim.
+  if (span[1] < anchor) {
+    return fail('SERVER_HISTORY_DISJOINT', {
+      covers_from: span[0], covers_through: span[1],
+      gap_above: span[1], server_ranges: ranges.length });
+  }
   return {
-    proven: false,
-    reason: 'SERVER_HISTORY_PARTIAL',
-    server_min: serverMin,
-    unproven_below: oldest !== null ? Math.min(oldest, serverMin) : serverMin
+    proven: true,
+    reason: 'SERVER_HAS_FULL_HISTORY',
+    covers_from: span[0],
+    covers_through: span[1],
+    anchor_ledger: anchor,
+    server_ranges: ranges.length
   };
 }
 
@@ -375,8 +437,20 @@ function checkpointAdvance(input) {
   // to the start of available history can settle that — see
   // proveHistoryExhaustion. Marker exhaustion alone is not evidence.
   const exhaustionClaimed = p.history_exhausted === true;
-  const historyExhausted  = exhaustionClaimed && p.history_exhausted_proven === true;
-  const oldest            = _int(p.oldest_ledger_index);
+  // The proof is the OBJECT proveHistoryExhaustion returned, not a boolean a
+  // caller can set. A bare `history_exhausted_proven: true` is exactly the
+  // thing that needs proving, so it is no longer accepted: the proof must
+  // carry the range it verified AND name the anchor it verified against, and
+  // that anchor must be this run's. A caller wanting to fake it now has to
+  // fabricate a specific ledger number that has to match — visible, rather
+  // than a flag flipped in passing.
+  const exProof = p.history_exhaustion_proof || null;
+  const historyExhausted = exhaustionClaimed &&
+    !!exProof && exProof.proven === true &&
+    _int(exProof.anchor_ledger) === anchor &&
+    _int(exProof.covers_through) !== null &&
+    _int(exProof.covers_through) >= anchor;
+  const oldest = _int(p.oldest_ledger_index);
 
   if (!bounded) {
     if (!boundaryReached && !exhaustionClaimed) {
@@ -563,6 +637,7 @@ module.exports = {
   normalizeCoverage,
   hasProof,
   capWindowToAnchor,
+  parseCompleteLedgers,
   proveHistoryExhaustion,
   XRPL_EARLIEST_AVAILABLE_LEDGER,
   windowServability,
