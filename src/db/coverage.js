@@ -51,7 +51,10 @@ const REASON = {
   PROOF_GAP_AT_START:'PROOF_GAP_AT_START', // window starts before proven history
   EVIDENCE_PRUNED:   'EVIDENCE_PRUNED',    // proven, but the rows are gone
   EDGE_ONLY:         'EDGE_ONLY',          // the normal case: fetch the new ledgers
-  FULLY_SERVABLE:    'FULLY_SERVABLE'      // a catch-up already passed our anchor
+  FULLY_SERVABLE:    'FULLY_SERVABLE',     // a catch-up already passed our anchor
+  // The window lies entirely after the anchor, so it survived the cap
+  // inverted. Refused rather than narrowed — see windowServability.
+  WINDOW_AFTER_ANCHOR:'WINDOW_AFTER_ANCHOR'
 };
 
 const PROOF_STATUS = {
@@ -330,6 +333,29 @@ function windowServability(input) {
     complete_without_fetch: false,
     reason: REASON.NO_COVERAGE
   };
+
+  // ── A WINDOW THAT SURVIVED THE CAP INVERTED IS NOT A WINDOW ───────────────
+  //
+  // capWindowToAnchor lowers the END to the anchor's close. It says nothing
+  // about the START, so a window lying entirely AFTER the anchor comes out of
+  // it inverted — start greater than end — and every test below then passes
+  // vacuously, because a proof covering real history trivially covers an empty
+  // interval. Verified by execution against this file:
+  //
+  //   window [anchorClose+1h .. anchorClose+2h]
+  //     -> FULLY_SERVABLE, window_start_ms > window_end_ms
+  //     -> mayReportQuiet(d, 0) = { quiet: true, reason: 'PROVEN_QUIET' }
+  //
+  // "Nothing happened", certified over an interval that cannot contain
+  // anything. Reachable from a clock running ahead of the ledger, a stale
+  // browser window, or an operator-chosen range — none of them exotic.
+  //
+  // It is refused, not narrowed: a window whose start is already past the last
+  // ledger this run read describes a period nobody observed.
+  if (startMs > effEndMs) {
+    base.reason = REASON.WINDOW_AFTER_ANCHOR;
+    return base;
+  }
 
   if (!hasProof(c)) return base;
 

@@ -962,6 +962,57 @@ check('a Postgres row of NULLs + zero rows is NOT quiet',
 check('proven-but-pruned + zero rows is NOT quiet',
       COV.mayReportQuiet(pruned, 0).quiet === false &&
       COV.mayReportQuiet(pruned, 0).reason === COV.REASON.EVIDENCE_PRUNED);
+// ── A WINDOW ENTIRELY AFTER THE ANCHOR ───────────────────────────────────
+// capWindowToAnchor lowers the END and says nothing about the START, so a
+// window lying past the anchor survived the cap INVERTED — start greater than
+// end. Every coverage test then passed vacuously, because a proof covering
+// real history trivially covers an empty interval. Confirmed by execution
+// before the fix: FULLY_SERVABLE, window_start_ms > window_end_ms, and
+// mayReportQuiet -> { quiet: true, reason: 'PROVEN_QUIET' }. "Nothing
+// happened", certified over an interval that cannot contain anything.
+//
+// Reachable from a clock running ahead of the ledger, a stale browser window,
+// or an operator-chosen range. None of those is exotic.
+{
+  const ac = 1788393600000, A = 106799000;
+  const proven = {
+    address: 'rAFTER',
+    scan_coverage_from: 32570, scan_coverage_through: A,
+    scan_coverage_from_close_ms: 0, scan_coverage_through_close_ms: ac,
+    evidence_retained_from: 32570, evidence_retained_through: A,
+    evidence_retained_from_close_ms: 0
+  };
+  const after = COV.windowServability({
+    coverage: proven, windowStartMs: ac + 3600000, windowEndMs: ac + 7200000,
+    anchorLedger: A, anchorCloseMs: ac });
+
+  check('THE REGRESSION — a window entirely after the anchor is refused',
+        after.reason === COV.REASON.WINDOW_AFTER_ANCHOR, after.reason);
+  check('and it is never servable from the index',
+        after.served_from_index === false && after.complete_without_fetch === false, after);
+  check('and zero rows in it may NOT be reported quiet',
+        COV.mayReportQuiet(after, 0).quiet === false &&
+        COV.mayReportQuiet(after, 0).reason === COV.REASON.WINDOW_AFTER_ANCHOR,
+        COV.mayReportQuiet(after, 0));
+
+  // CONTROL: the same coverage over a real window must still certify, or the
+  // guard would be indistinguishable from breaking servability outright.
+  const good = COV.windowServability({
+    coverage: proven, windowStartMs: ac - 86400000, windowEndMs: ac,
+    anchorLedger: A, anchorCloseMs: ac });
+  check('CONTROL: the same proof over a REAL window is still fully servable',
+        good.reason === COV.REASON.FULLY_SERVABLE &&
+        COV.mayReportQuiet(good, 0).quiet === true, good.reason);
+
+  // The boundary itself: a zero-width window ending exactly at the anchor
+  // close is degenerate but not inverted, and must not be swept up.
+  const edgeCase = COV.windowServability({
+    coverage: proven, windowStartMs: ac, windowEndMs: ac,
+    anchorLedger: A, anchorCloseMs: ac });
+  check('a window starting exactly at the anchor close is not treated as inverted',
+        edgeCase.reason !== COV.REASON.WINDOW_AFTER_ANCHOR, edgeCase.reason);
+}
+
 check('a window predating proven history + zero rows is NOT quiet',
       COV.mayReportQuiet(frontGap, 0).quiet === false);
 check('history served but the EDGE not yet fetched is NOT quiet',
