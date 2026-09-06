@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS wallet_coverage (
     OR evidence_retained_from >= scan_coverage_from
   ),
   CONSTRAINT wallet_coverage_status CHECK (
-    last_status IS NULL OR last_status IN ('COMPLETE', 'TRUNCATED', 'FAILED')
+    last_status IS NULL OR last_status IN ('COMPLETE', 'TRUNCATED', 'FAILED', 'UNPROVEN')
   )
 );
 

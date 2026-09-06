@@ -1,4 +1,12 @@
-// XRPMAN Shadow Watch — coverage decisions. Server-side only (Node/Vercel).
+// XRPMAN Shadow Watch — coverage decisions. Pure: facts in, decision out.
+//
+// Loaded BOTH in Node (the server/evidence path) and in the browser (the
+// scanner, via src/brief/41-run-anchor-20260906.js). That is deliberate and it
+// is the point: the rule that decides whether history was proven must be ONE
+// implementation. A browser copy and a server copy of "is this range
+// contiguous from 32570 through the anchor" would drift, and the drift would
+// show up as the browser claiming coverage the server would have refused —
+// which is the exact failure class this file exists to prevent.
 //
 // ── What this file is for ───────────────────────────────────────────────────
 // Today a Report re-walks all 251 wallet histories every morning, because
@@ -49,7 +57,14 @@ const REASON = {
 const PROOF_STATUS = {
   COMPLETE:  'COMPLETE',
   TRUNCATED: 'TRUNCATED',
-  FAILED:    'FAILED'
+  FAILED:    'FAILED',
+  // The walk finished without error and still did not EARN a coverage claim:
+  // no run anchor, a request that was never bounded to it, a transport that
+  // changed mid-walk, or a terminal condition the server's retention cannot
+  // license. Distinct from FAILED (the walk broke) and from TRUNCATED (a
+  // safety ceiling stopped it) because the diagnosis differs and the log line
+  // is the only place anyone will read it.
+  UNPROVEN:  'UNPROVEN'
 };
 
 // NULL is not zero. `Number(null)` is 0 and `Number('')` is 0, so a naive
@@ -379,6 +394,95 @@ function windowServability(input) {
   return base;
 }
 
+// ── Decision 1b: did this wallet's WALK earn a coverage claim? ─────────────
+//
+// THE ONE PREDICATE. Layer 17 (the browser report) and checkpointAdvance (the
+// evidence database) both call this. They used to answer the question
+// separately, and they disagreed: the DB refused a partial-history exhaustion
+// while the Report certified the same wallet as COMPLETE and read it on air.
+// Two implementations of "was this proven" is the defect, not the symptom, so
+// there is exactly one here and both callers are held to it.
+//
+// ── What licenses a claim over [windowStart .. anchor] ─────────────────────
+//
+//   BOUNDARY_REACHED_BY_TX     the walk read a transaction at or older than
+//                              the window start. The account itself supplied
+//                              the floor. Nothing about server retention
+//                              needs to be assumed.
+//
+//   HISTORY_EXHAUSTED + FULL   the server ran out of pages AND its own
+//                              complete_ledgers proves contiguous history from
+//                              XRPL's first surviving ledger through this
+//                              anchor. There is nothing older to miss.
+//
+// and what does NOT:
+//
+//   NO MARKER, NO FLOOR        a quiet wallet whose oldest visible transaction
+//                              is INSIDE the window. "No more pages" is the
+//                              server's statement about what IT retains. On a
+//                              partial-history node that is indistinguishable
+//                              from a genuinely short history, and believing
+//                              it claims coverage over ledgers nobody read.
+//
+// Licensing that third case needs a trustworthy mapping from the window's
+// START TIME to a ledger at or before it, so retention can be checked against
+// the actual boundary. That mapping needs an acquisition this layer does not
+// have, and inventing one from close-time arithmetic would be exactly the
+// "numeric shortcut" that turned the last range check into a tautology. So it
+// fails closed: RETENTION_DOES_NOT_PROVE_WINDOW_START, and the wallet is
+// UNPROVEN until the mapping exists.
+//
+// Every term is an EXPLICIT POSITIVE test. The fallback proof minted for a
+// wallet with no proof row carries undefined for most of these, and
+// `x !== false` would read undefined as consent.
+function coverageProven(input) {
+  const i = input || {};
+  const anchor = _int(i.anchorLedger);
+  const p = i.proof || {};
+
+  const no = (reason) => ({ proven: false, reason });
+
+  // ── Run-level preconditions. None of these is about the wallet. ──────────
+  if (i.anchorOk !== true) return no('NO_RUN_ANCHOR');
+  if (anchor === null || anchor <= 0) return no('NO_RUN_ANCHOR');
+  // Every page of this walk asked for `<= anchor` and the server said so.
+  if (p.request_bounded !== true) return no('REQUEST_NOT_BOUNDED');
+  // The claimed window may not outrun the ledgers that were read.
+  if (i.windowBoundedByAnchor !== true) return no('WINDOW_NOT_BOUNDED');
+  // One transport for the whole walk: a history proof earned from server A may
+  // not certify a no-marker answered by server B, and an account_tx marker is
+  // server-specific state that cannot be replayed across a reconnect.
+  if (p.transport_consistent !== true) return no('TRANSPORT_CHANGED');
+  // The proof must describe THIS run against THIS anchor. A wallet that was
+  // not walked this run inherits the previous run's object otherwise.
+  if (_int(p.anchor_ledger) !== anchor) return no('PROOF_ANCHOR_MISMATCH');
+  if (i.runId && String(p.run_id || '') !== String(i.runId)) return no('PROOF_RUN_MISMATCH');
+
+  // ── The walk's own terminal condition. ──────────────────────────────────
+  const status = String(p.status || '');
+  if (status === PROOF_STATUS.FAILED)    return no('WALK_FAILED');
+  if (status === PROOF_STATUS.TRUNCATED) return no('SAFETY_CEILING_REACHED');
+
+  if (p.boundary_reached === true) {
+    return { proven: true, reason: 'BOUNDARY_REACHED_BY_TX' };
+  }
+
+  if (p.history_exhausted === true) {
+    const ex = p.history_exhaustion_proof || null;
+    // Mirrors checkpointAdvance in full: proven, naming THIS anchor, and
+    // covering through it. A bare `proven: true` is the flag anyone can set.
+    const ok = !!ex && ex.proven === true &&
+               _int(ex.anchor_ledger) === anchor &&
+               _int(ex.covers_through) !== null &&
+               _int(ex.covers_through) >= anchor;
+    if (!ok) return no('HISTORY_EXHAUSTION_UNPROVEN');
+    return { proven: true, reason: 'HISTORY_EXHAUSTED_FULL_RETENTION' };
+  }
+
+  // Neither floor. See the note above: this is the honest gap, not an oversight.
+  return no('RETENTION_DOES_NOT_PROVE_WINDOW_START');
+}
+
 // ── Decision 2: may this wallet's checkpoint move? ─────────────────────────
 //
 // Refusing to advance costs one wallet one extra scan tomorrow. Advancing
@@ -407,6 +511,11 @@ function checkpointAdvance(input) {
   // A safety ceiling is not a proof. TX_SAFETY_MAX_PAGES stopping the walk
   // (17-report-scan-tuning-20260816.js:21) yields TRUNCATED, and TRUNCATED
   // must read as "we do not know", never as "we looked and it was quiet".
+  // UNPROVEN is a status this system MINTS, so it gets its own reason. Folding
+  // it into PROOF_NOT_COMPLETE would short-circuit 54 lines before
+  // HISTORY_EXHAUSTION_UNPROVEN and delete the diagnosis from the log exactly
+  // when someone is trying to work out why coverage was refused.
+  if (status === PROOF_STATUS.UNPROVEN) return refuse('PROOF_UNPROVEN');
   if (status !== PROOF_STATUS.COMPLETE) return refuse('PROOF_NOT_COMPLETE');
 
   // ── Bootstrap: how a never-scanned wallet ever gets a first checkpoint ────
@@ -593,12 +702,17 @@ function mayReportQuiet(decision, rowCount) {
 function sealable(perWallet) {
   const list = Array.isArray(perWallet) ? perWallet : [];
   const target = list.length;
-  let complete = 0, failed = 0, truncated = 0, unproven_start = 0, unknown = 0;
+  let complete = 0, failed = 0, truncated = 0, unproven = 0, unproven_start = 0, unknown = 0;
 
   for (const w of list) {
     const st = String((w && w.status) || PROOF_STATUS.FAILED);
     if (st === PROOF_STATUS.FAILED) { failed++; continue; }
     if (st === PROOF_STATUS.TRUNCATED) { truncated++; continue; }
+    // A well-defined refusal. It already failed closed by falling into the
+    // unknown bucket, so this is about diagnosis rather than safety: that
+    // bucket exists to say "we do not understand this wallet's state", and a
+    // status we minted ourselves must not consume that signal.
+    if (st === PROOF_STATUS.UNPROVEN) { unproven++; continue; }
     // Fail CLOSED on anything that is not literally COMPLETE. An earlier
     // version tested only for FAILED and TRUNCATED and let everything else
     // fall through to be counted complete, so a status of 'RUNNING', or a
@@ -615,6 +729,8 @@ function sealable(perWallet) {
     complete_wallets: complete,
     failed_wallets: failed,
     truncated_wallets: truncated,
+    // Wallets whose walk finished cleanly but earned no claim.
+    unproven_wallets: unproven,
     // Wallets that answered without proving the start of the window. Without
     // this the COMPLETE claim is a tautology: with a numeric lower bound the
     // `oldest <= startMs` break can never fire, so every wallet would report
@@ -631,12 +747,13 @@ function sealable(perWallet) {
   };
 }
 
-module.exports = {
+const API = {
   REASON,
   PROOF_STATUS,
   normalizeCoverage,
   hasProof,
   capWindowToAnchor,
+  coverageProven,
   parseCompleteLedgers,
   proveHistoryExhaustion,
   XRPL_EARLIEST_AVAILABLE_LEDGER,
@@ -645,3 +762,8 @@ module.exports = {
   checkpointAdvance,
   sealable
 };
+
+// Dual export. `module` is undefined in a browser and `window` is undefined in
+// Node, so each guard is checked before use rather than assumed.
+if (typeof module !== 'undefined' && module.exports) module.exports = API;
+if (typeof window !== 'undefined') window.SW_COVERAGE = API;

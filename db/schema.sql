@@ -233,7 +233,7 @@ CREATE TABLE IF NOT EXISTS wallet_coverage (
   -- would never advance.
   last_observed_tx_ledger         BIGINT,
 
-  last_status                     TEXT,      -- 'COMPLETE' | 'TRUNCATED' | 'FAILED'
+  last_status                     TEXT,      -- 'COMPLETE' | 'TRUNCATED' | 'FAILED' | 'UNPROVEN'
   last_scan_id                    TEXT,
   updated_at                      TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -251,7 +251,7 @@ CREATE TABLE IF NOT EXISTS wallet_coverage (
     OR evidence_retained_from >= scan_coverage_from
   ),
   CONSTRAINT wallet_coverage_status CHECK (
-    last_status IS NULL OR last_status IN ('COMPLETE', 'TRUNCATED', 'FAILED')
+    last_status IS NULL OR last_status IN ('COMPLETE', 'TRUNCATED', 'FAILED', 'UNPROVEN')
   )
 );
 

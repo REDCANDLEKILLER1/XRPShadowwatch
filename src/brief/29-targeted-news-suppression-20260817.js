@@ -211,6 +211,25 @@
     d.async = false;
     d.setAttribute('data-sw-dex-volume-truth', '2026-09-04.1');
     document.body.appendChild(d);
+
+    // The run anchor's proof rules are the SAME code the server evidence path
+    // uses — src/db/coverage.js, loaded here rather than reimplemented, so a
+    // browser copy cannot drift from the server's. 41 resolves it at call time,
+    // so this pair does not depend on which lands first.
+    var c = document.createElement('script');
+    c.src = '/src/db/coverage.js?v=20260906.1';
+    c.async = false;
+    c.setAttribute('data-sw-coverage-rules', '2026-09-06.1');
+    document.body.appendChild(c);
+
+    // One validated ledger anchor per run: the row's ledger_index, the numeric
+    // ledger_index_max every wallet shares, and the window cap the report
+    // consumes. Must load before a scan starts.
+    var a = document.createElement('script');
+    a.src = '/src/brief/41-run-anchor-20260906.js?v=20260906.1';
+    a.async = false;
+    a.setAttribute('data-sw-run-anchor', '2026-09-06.1');
+    document.body.appendChild(a);
   } catch (_) {}
 })();
 
