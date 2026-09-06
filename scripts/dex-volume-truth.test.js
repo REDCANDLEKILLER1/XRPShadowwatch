@@ -68,11 +68,16 @@ const LEDGER_TOKENS = [
   { currency: '46555A',     meta: { token: { name: 'Fuzzybear' } },   metrics: { volume_24h: '186168' } },
   { currency: '41524D59',   meta: { token: { name: 'ARMY' } },        metrics: { volume_24h: '147162' } },
   { currency: '564C54',     meta: { token: { name: 'Valtorum USD' } },metrics: { volume_24h: '117195' } },
-  // The remainder of the measured top 200, so this fixture sums to the real
-  // figure (7,661,930 XRP) rather than to a subset. A fixture that does not
-  // reproduce the observed total cannot check the observed dollar amount.
-  { currency: 'REST', meta: { token: { name: 'rest of top 200' } }, metrics: { volume_24h: '824503' } }
 ];
+// The remainder of the measured top 200, as 195 separate rows rather than one
+// aggregate. The fixture must reproduce the observed COUNT as well as the
+// observed total (7,661,930 XRP): the scope label is built from the returned
+// count, so a 6-row stand-in for 200 tokens would have made every label
+// assertion test a number the real endpoint never produces.
+for (let i = 0; i < 195; i++) {
+  LEDGER_TOKENS.push({ currency: 'F' + i, meta: { token: { name: 'filler ' + i } },
+                       metrics: { volume_24h: String(i === 194 ? 4271 : 4228) } });
+}
 const XRP_PRICE = 1.4532;
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -112,7 +117,7 @@ console.log('\n2. the ledger-derived sum');
 const led = DEX.sumLedgerVolume(LEDGER_TOKENS, 165624);
 check('per-token volumes sum to the measured figure',
       led.xrp === 7661930, led.xrp);
-check('the token count is reported, not assumed', led.tokens_counted === 6);
+check('the token count is reported, not assumed', led.tokens_counted === 200, led.tokens_counted);
 check('the leaders are carried for the diagnostics surface',
       led.top[0].name === 'Ripple USD' && led.top[0].xrp === 5686498);
 // `tail_negligible: list.length >= 100` used to live here, asserted true for a
@@ -126,8 +131,8 @@ check('not even for a full page of 200',
       DEX.sumLedgerVolume(new Array(200).fill({ metrics: { volume_24h: '1' } }), 165624)
         .tail_proven_negligible === false);
 check('the inputs a reader would need are reported instead',
-      led.smallest_returned_xrp === 117195 && led.tokens_total === 165624 &&
-      led.tokens_returned === 6, { s: led.smallest_returned_xrp, t: led.tokens_total });
+      led.smallest_returned_xrp === 4228 && led.tokens_total === 165624 &&
+      led.tokens_returned === 200, { s: led.smallest_returned_xrp, t: led.tokens_total });
 check('an unknown total is null, not a guess',
       DEX.sumLedgerVolume(LEDGER_TOKENS).tokens_total === null);
 check('zero and malformed volumes are skipped, not coerced',
@@ -270,6 +275,82 @@ check('and that is real code, not a comment about it',
       /L\.push\([^;]*SOURCE UNAVAILABLE/.test(pipeBlock));
 check('and the line is never simply dropped',
       !/if\s*\(\s*nat\s*>\s*0\s*\)/.test(pipeBlock));
+
+// ════════════════════════════════════════════════════════════════════════════
+console.log('\n6. the LABEL is a claim too — scope, not just precision');
+// Fixing "$11.13M" to "~$11M" fixed the PRECISION of the number and left the
+// SCOPE of the sentence overstated: "Native XRPL DEX (24h): ~$11M" reads as
+// the whole native DEX, when what was measured is the top slice of a token
+// index against ~165,000 indexed tokens. The label must say what was looked at.
+check('the scope is named, not implied',
+      /Native XRPL DEX observed volume \(top 200-token index, 24h\)/.test(goodLine), goodLine);
+check('THE REGRESSION — the unscoped label never fronts a ledger figure',
+      !/^\u2022 Native XRPL DEX \(24h\): ~\$/.test(goodLine), goodLine);
+check('and the count in the label is the count actually returned',
+      DEX.reconcile({ ledger: led, aggregator: null, xrpPriceUsd: XRP_PRICE })
+         .scope.tokens_returned === 200);
+
+// A DEGRADED response is a second, different failure from the unbounded tail.
+// The tail is a permanent limit of the method. A short sample is the index
+// answering with less than we asked for, and the claim must shrink with it
+// rather than keep the 200-token wording.
+const SHORT_TOKENS = [];
+for (let i = 0; i < 12; i++) {
+  SHORT_TOKENS.push({ currency: 'S' + i, metrics: { volume_24h: '1000' } });
+}
+const shortLed = DEX.sumLedgerVolume(SHORT_TOKENS, 165624);
+check('a short sample is detected against the requested count',
+      shortLed.sample_short === true && shortLed.tokens_requested === 200, shortLed);
+check('a full page against a large index is NOT flagged short',
+      DEX.sumLedgerVolume(LEDGER_TOKENS, 165624).sample_short === false);
+check('nor is a list that is short only because the index really is that small',
+      DEX.sumLedgerVolume(SHORT_TOKENS, 12).sample_short === false);
+check('an unreported total assumes the worse case rather than the flattering one',
+      DEX.sumLedgerVolume(SHORT_TOKENS).sample_short === true);
+
+const shortDec = DEX.reconcile({ ledger: shortLed, aggregator: null, xrpPriceUsd: XRP_PRICE });
+const shortLine = DEX.line(shortDec);
+check('a degraded response labels the SMALLER observed sample',
+      /top 12-token index/.test(shortLine), shortLine);
+check('and does NOT keep claiming the 200-token scope',
+      !/200-token/.test(shortLine), shortLine);
+check('and the shortfall is stated in words, with both numbers',
+      /index returned 12 of 200 tokens requested/.test(shortLine), shortLine);
+
+// Two things can be wrong with one figure. `out.note` was a single slot, so
+// whichever was written second erased the first.
+const shortAndWrong = DEX.reconcile({ ledger: shortLed, aggregator: broken, xrpPriceUsd: XRP_PRICE });
+check('a short sample AND a disagreeing aggregator both survive to the note',
+      /index returned 12 of 200/.test(shortAndWrong.note) &&
+      /aggregator feed disagrees/.test(shortAndWrong.note), shortAndWrong.note);
+
+// An aggregator dollar figure is not a ledger observation and must not borrow
+// the wording of one.
+const aggLine = DEX.line(aggOnly);
+check('an aggregator figure is labelled reported, not observed',
+      /reported volume \(third-party aggregator, 24h\)/.test(aggLine), aggLine);
+check('and never claims a token index it did not read',
+      !/observed volume/.test(aggLine) && !/token index/.test(aggLine), aggLine);
+check('an aggregator decision carries no measurement scope at all',
+      aggOnly.scope === null, aggOnly.scope);
+check('and neither does an unprintable one', neither.scope === null);
+
+check('the decision restates that the tail is unbounded, rather than inheriting it',
+      both.scope.tail_proven_negligible === false && both.scope.tokens_total === 165624,
+      both.scope);
+
+// The short-sample test compares against the count in the URL. If the URL and
+// the constant could drift apart, the test would compare against a number we
+// never asked for.
+check('the requested limit and the URL cannot drift apart',
+      DEX.XRPLMETA_LIMIT === 200 &&
+      DEX.XRPLMETA_URL.indexOf('limit=' + DEX.XRPLMETA_LIMIT) > 0, DEX.XRPLMETA_URL);
+
+// The endpoint reports its own total as `count`. Without it every healthy run
+// showed tokens_total=null and the short-sample test had to guess.
+const lm = dexBlock.match(/sumLedgerVolume\(([^)]*)\)/);
+check('the call site passes the endpoint total, not just the token list',
+      !!lm && /lj\s*&&\s*lj\.count/.test(lm[1]), lm && lm[1]);
 
 console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' CHECKS PASS'));
 process.exit(fail ? 1 : 0);

@@ -1864,7 +1864,11 @@ async function market() {
         const lr = await fetchWithTimeout(DV.XRPLMETA_URL, MARKET_FETCH_TIMEOUT_MS);
         if (lr.ok) {
           const lj = await lr.json();
-          ledger = DV.sumLedgerVolume(lj && lj.tokens);
+          // Pass the endpoint's own total (`count`, ~165,000) alongside the
+          // returned list. Without it the decision layer cannot tell a short,
+          // degraded response from a genuinely small index, and the
+          // diagnostics showed tokens_total=null on every healthy run.
+          ledger = DV.sumLedgerVolume(lj && lj.tokens, lj && lj.count);
         }
       } catch (e) { notes.push('Native DEX ledger source ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
     }

@@ -52,6 +52,16 @@
 // dollar aggregator to a ledger-derived one; it does not claim to be
 // first-party evidence, and `source` on every result says which it is.
 //
+// The LABEL carries the same honesty as the number. Rounding "$11.13M" to
+// "~$11M" fixed the precision and left the scope overstated: "Native XRPL DEX
+// (24h)" reads as the whole native DEX, when what was measured is the top
+// slice of a token index. The line now names the sample it observed —
+//
+//     • Native XRPL DEX observed volume (top 200-token index, 24h): ~$11M
+//
+// and it builds that count from the response, so a degraded answer of twelve
+// tokens says "top 12-token index" instead of keeping the 200-token claim.
+//
 // Read-only. No signing, no submission, no wallet material.
 (function () {
   'use strict';
@@ -59,8 +69,13 @@
   // Public, CORS-open (Access-Control-Allow-Origin: *), so the browser reaches
   // it directly and api/proxy.js — the security-sensitive allowlist — is not
   // touched by this change.
+  // The number of tokens we ASK for. Kept as a constant rather than buried in
+  // the URL because sumLedgerVolume compares the returned count against it: if
+  // we ask for 200 and the index hands back 12, that is a degraded response,
+  // not a 12-token market, and the difference has to be visible.
+  var XRPLMETA_LIMIT = 200;
   var XRPLMETA_URL =
-    'https://s1.xrplmeta.org/tokens?sort_by=volume_24h&limit=200';
+    'https://s1.xrplmeta.org/tokens?sort_by=volume_24h&limit=' + XRPLMETA_LIMIT;
 
   // Below this share of its own trailing daily average, a 24h aggregate is
   // treated as a broken feed rather than a quiet day. The observed break was
@@ -87,8 +102,13 @@
   // appear under both sides; that is stated rather than silently corrected,
   // because correcting it would require pair-level data this endpoint does not
   // give and guessing a discount would be inventing a number.
-  function sumLedgerVolume(tokens, total) {
+  // `total` is the endpoint's own count of every token it indexes (~165,000).
+  // `requested` is how many we asked for; it defaults to the constant the URL
+  // is built from, so the short-sample test can never drift away from the URL.
+  function sumLedgerVolume(tokens, total, requested) {
     var list = Array.isArray(tokens) ? tokens : [];
+    var want = _intOrNull(requested);
+    if (want === null || want <= 0) want = XRPLMETA_LIMIT;
     var xrp = 0, counted = 0, top = [];
     for (var i = 0; i < list.length; i++) {
       var t = list[i] || {};
@@ -115,12 +135,24 @@
       var vv = num((list[j] && list[j].metrics || {}).volume_24h);
       if (vv > 0 && (smallest === null || vv < smallest)) smallest = vv;
     }
+    // A SHORT SAMPLE is a second, different failure from the unbounded tail.
+    // The tail is a known, permanent limit of the method and is labelled as
+    // such. A short sample is the index answering with less than we asked for
+    // — a degraded response — and the scope of the claim has to shrink with
+    // it rather than keep saying "top 200". `tokens_total` decides whether
+    // "fewer than asked" means truncated or means the index is genuinely that
+    // small; with no total we assume the worse case and flag it.
+    var totalN = _intOrNull(total);
+    var short = list.length < want &&
+                (totalN === null || totalN > list.length);
     return {
       xrp: xrp,
       tokens_counted: counted,
       tokens_returned: list.length,
       // Total tokens the endpoint says exist, when it tells us.
-      tokens_total: _intOrNull(total),
+      tokens_total: totalN,
+      tokens_requested: want,
+      sample_short: short,
       smallest_returned_xrp: smallest,
       top: top,
       // Never true. Kept as a named field so no caller can mistake its absence
@@ -186,8 +218,17 @@
       confidence: 'none',
       reason: 'NO_SOURCE',
       note: '',
+      // What the figure actually covers. Present on every result (null when
+      // nothing was measured) so a renderer can never state a wider scope
+      // than the one that was observed.
+      scope: null,
       cross_check: null
     };
+
+    // More than one thing can be worth saying about a single figure — a short
+    // sample AND a disagreeing aggregator — and a single-slot note silently
+    // dropped whichever came second.
+    var notes = [];
 
     var ledgerXrp = ledger && num(ledger.xrp);
     var ledgerUsd = (ledgerXrp > 0 && price > 0) ? ledgerXrp * price : null;
@@ -201,6 +242,20 @@
       // the thing we cannot state, so the XRP one stays printable.
       out.printable = true;
       out.confidence = 'measured';
+      out.scope = {
+        tokens_counted: _intOrNull(ledger.tokens_counted),
+        tokens_returned: _intOrNull(ledger.tokens_returned),
+        tokens_requested: _intOrNull(ledger.tokens_requested),
+        tokens_total: _intOrNull(ledger.tokens_total),
+        sample_short: ledger.sample_short === true,
+        // Restated here, not inherited, so a caller reading only the decision
+        // cannot assume the tail was bounded.
+        tail_proven_negligible: false
+      };
+      if (out.scope.sample_short) {
+        notes.push('index returned ' + out.scope.tokens_returned + ' of ' +
+                   out.scope.tokens_requested + ' tokens requested');
+      }
 
       if (agg && agg.value_usd !== null && ledgerUsd !== null) {
         var hi = Math.max(agg.value_usd, ledgerUsd);
@@ -213,9 +268,10 @@
           aggregator_reason: agg.reason
         };
         if (!agg.plausible || disagree > DISAGREE_MAX_RATIO) {
-          out.note = 'aggregator feed disagrees (' + agg.reason + ')';
+          notes.push('aggregator feed disagrees (' + agg.reason + ')');
         }
       }
+      out.note = notes.join('; ');
       return out;
     }
 
@@ -240,6 +296,28 @@
   // ── Rendering ─────────────────────────────────────────────────────────────
   // One place decides the words, so the diagnostics block and any other
   // surface cannot drift into printing different things about one fact.
+  // The LABEL is the scope claim, and it was wrong before this: "Native XRPL
+  // DEX (24h): ~$11M" reads as the whole native DEX, when what was measured is
+  // the top slice of a token index. Fixing the precision of the number left
+  // the scope of the sentence overstated. The label now names the sample, and
+  // it names it from the sample's OWN count — so a degraded response that
+  // returns 12 tokens says "top 12-token index" instead of quietly keeping the
+  // 200-token claim.
+  function scopeLabel(d) {
+    if (d.source === 'ledger') {
+      var s = d.scope || {};
+      var n = _intOrNull(s.tokens_returned);
+      return '• Native XRPL DEX observed volume (top ' +
+             (n !== null && n > 0 ? n + '-token' : 'token') + ' index, 24h)';
+    }
+    if (d.source === 'aggregator') {
+      // Not ledger-derived at all. It must not borrow the observed-volume
+      // wording, which would claim a measurement nobody here made.
+      return '• Native XRPL DEX reported volume (third-party aggregator, 24h)';
+    }
+    return '• Native XRPL DEX (24h)';
+  }
+
   function line(decision) {
     var d = decision || {};
     if (!d.printable) {
@@ -260,7 +338,7 @@
       if (d.source === 'ledger') body += ' (~' + fmtXrp(d.xrp) + ' XRP, ledger-derived estimate)';
     }
     if (d.note) body += ' — ' + d.note;
-    return '• Native XRPL DEX (24h): ' + body;
+    return scopeLabel(d) + ': ' + body;
   }
 
   // Two significant figures at most. An approximation must not be dressed as a
@@ -289,12 +367,14 @@
 
   var API = {
     XRPLMETA_URL: XRPLMETA_URL,
+    XRPLMETA_LIMIT: XRPLMETA_LIMIT,
     PLAUSIBLE_MIN_RATIO: PLAUSIBLE_MIN_RATIO,
     DISAGREE_MAX_RATIO: DISAGREE_MAX_RATIO,
     sumLedgerVolume: sumLedgerVolume,
     aggregatorHealth: aggregatorHealth,
     reconcile: reconcile,
     line: line,
+    scopeLabel: scopeLabel,
     fmtUsdApprox: fmtUsdApprox,
     _fmtUsd: fmtUsd,
     _fmtXrp: fmtXrp
