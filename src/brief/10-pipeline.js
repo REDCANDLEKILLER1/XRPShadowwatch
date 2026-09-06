@@ -1322,7 +1322,24 @@ function _buildLedgerDiagnostics(pack){
   // Market volume = exchange trading (external, in USD). Labeled so it is never
   // confused with the on-Ledger movement figures below (which are in XRP).
   var vol=_num(p.xrp_volume_24h);            if(vol>0) L.push('\u2022 Market volume (exchanges, 24h): '+_usdC(vol));
-  var nat=_num(p.xrpl_dex_volume_24h_usd);   if(nat>0) L.push('\u2022 Native XRPL DEX (24h): '+_usdC(nat));
+  // Native XRPL DEX. Rendered from the DECISION, not from a bare number.
+  // `if(nat>0)` silently dropped the line whenever the source failed, and
+  // printed whatever survived when it half-failed — which is how "$3K" reached
+  // air on 2026-09-04 while the real figure was ~$11.1M. A missing line reads
+  // as "we did not look"; a wrong number is worse. Say which it is.
+  var dexD = p && p.xrpl_dex_volume_decision;
+  var DVL = (typeof window!=='undefined') && window.SW_DEX_VOLUME;
+  if (dexD && DVL && typeof DVL.line === 'function') {
+    L.push(DVL.line(dexD));
+  } else {
+    // NO numeric fallback. This branch used to print any bare
+    // xrpl_dex_volume_24h_usd > 0, which is precisely how a stale or unvetted
+    // figure bypassed the decision layer — the same failure the layer was
+    // built to end. Without a decision there is no proof the number was ever
+    // checked, so it is not printed. Silence is not an option either; the line
+    // stays and says what happened.
+    L.push('\u2022 Native XRPL DEX (24h): SOURCE UNAVAILABLE (no decision recorded)');
+  }
   var evm=_num(p.xrpl_evm_dex_volume_24h_usd), tvl=_num(p.xrpl_evm_tvl_usd);
   if(evm>0||tvl>0){
     var parts=[]; if(evm>0) parts.push(_usdC(evm)+' DEX'); if(tvl>0) parts.push(_usdC(tvl)+' TVL');

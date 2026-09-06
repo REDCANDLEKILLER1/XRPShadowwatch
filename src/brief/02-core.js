@@ -1690,6 +1690,19 @@ const MARKET_FETCH_TIMEOUT_MS = 5000;
 // v3.32b: DeFiLlama DEX volume was fetched direct-only, so a CORS block or a
 // renamed adapter slug left the DEX tiles blank. Try direct, then the relay
 // cascade, and only return a positive number (never overwrite good data with 0).
+// Returns the WHOLE payload, so a caller can weigh total24h against the
+// total7d / total30d / per-protocol breakdown that arrive with it. fetchDefiDex
+// below reduces it to one number and cannot; that reduction is exactly how a
+// silently broken adapter reached air on 2026-09-04.
+async function fetchDefiDexRaw(url) {
+  let j = null;
+  try { const r = await fetchWithTimeout(url, MARKET_FETCH_TIMEOUT_MS); if (r.ok) j = await r.json(); } catch (e) {}
+  if (!j || j.total24h == null) {
+    try { const { response } = await proxyFetch(url, MARKET_FETCH_TIMEOUT_MS); if (response && response.ok) j = await response.json(); } catch (e) {}
+  }
+  return j || null;
+}
+
 async function fetchDefiDex(url) {
   let j = null;
   try { const r = await fetchWithTimeout(url, MARKET_FETCH_TIMEOUT_MS); if (r.ok) j = await r.json(); } catch (e) {}
@@ -1821,11 +1834,70 @@ async function market() {
     const v = await fetchDefiDex('https://api.llama.fi/overview/dexs/xrpl-evm?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume');
     if (v != null) { $('inDexvol').value = v; notes.push('✓ EVM DEX'); } else notes.push('EVM DEX empty');
   } catch (e) { notes.push('EVM DEX blocked'); }
-  // 7. DefiLlama XRPL Native DEX (direct → relay fallback; keep prior value on failure)
+  // 7. Native XRPL DEX — LEDGER-DERIVED, with the aggregator as a cross-check.
+  //
+  // This used to be `fetchDefiDex(...); if (v != null) use it`, and on
+  // 2026-09-04 that put "Native XRPL DEX (24h): $3K" on air. DefiLlama's
+  // xrpl-dex adapter had gone silent on 09-02 while Sologenic alone kept
+  // reporting; the same response carried total7d $25,308,259 (~$3.6M/day) and
+  // a null protocol entry, so every fact needed to reject the number arrived
+  // with it, unread. Measured from the ledger that morning: 7.66M XRP, ~$11.1M.
+  //
+  // Order matters: the ledger-derived figure is primary, the dollar aggregate
+  // is only a cross-check, and neither may print a number its own source
+  // contradicts. See src/brief/40-dex-volume-truth-20260904.js.
+  // CLEAR FIRST, unconditionally. Every path out of this block — the decision
+  // layer failing to load, a thrown fetch, an unprintable decision — used to
+  // leave the PREVIOUS run's number sitting in the input, and 10-pipeline's
+  // fallback printed any bare value > 0. So a stale figure could walk straight
+  // past the truth gate this whole layer exists to install: the exact bypass,
+  // wearing a different coat. Nothing is printed unless this run earns it.
+  try { $('inXrpldex').value = ''; } catch (_) {}
+  try { if (typeof state !== 'undefined') state.dexVolumeDecision = null; } catch (_) {}
+
   try {
-    const v = await fetchDefiDex('https://api.llama.fi/overview/dexs/xrpl?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume');
-    if (v != null) { $('inXrpldex').value = v; notes.push('✓ Native DEX'); } else notes.push('Native DEX empty');
-  } catch (e) { notes.push('Native DEX blocked'); }
+    const DV = (typeof window !== 'undefined') && window.SW_DEX_VOLUME;
+    let ledger = null, agg = null;
+
+    if (DV) {
+      try {
+        const lr = await fetchWithTimeout(DV.XRPLMETA_URL, MARKET_FETCH_TIMEOUT_MS);
+        if (lr.ok) {
+          const lj = await lr.json();
+          // Pass the endpoint's own total (`count`, ~165,000) alongside the
+          // returned list. Without it the decision layer cannot tell a short,
+          // degraded response from a genuinely small index, and the
+          // diagnostics showed tokens_total=null on every healthy run.
+          ledger = DV.sumLedgerVolume(lj && lj.tokens, lj && lj.count);
+        }
+      } catch (e) { notes.push('Native DEX ledger source ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
+    }
+
+    try {
+      const raw = await fetchDefiDexRaw('https://api.llama.fi/overview/dexs/xrpl?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume');
+      if (raw && DV) agg = DV.aggregatorHealth(raw);
+    } catch (e) { /* cross-check only; its absence never blocks the ledger figure */ }
+
+    if (DV) {
+      const decision = DV.reconcile({
+        ledger: ledger, aggregator: agg,
+        xrpPriceUsd: n($('inPrice').value)
+      });
+      state.dexVolumeDecision = decision;
+      // The input carries the USD figure ONLY when it may be claimed. Leaving a
+      // stale or unsupported number here is what put $3K on air.
+      $('inXrpldex').value = (decision.printable && decision.usd != null)
+        ? Math.round(decision.usd) : '';
+      notes.push(decision.printable
+        ? ('✓ Native DEX (' + decision.source + ')')
+        : ('Native DEX unavailable: ' + decision.reason));
+    } else {
+      // No decision layer means no figure may be claimed. The field is already
+      // cleared above, so the Report says SOURCE UNAVAILABLE rather than
+      // printing whatever survived from last time.
+      notes.push('Native DEX unavailable: DECISION_LAYER_MISSING');
+    }
+  } catch (e) { notes.push('Native DEX unavailable: ACQUISITION_FAILED'); }
   // 8. RLUSD supply — TWO independent sources in parallel (on-chain gateway +
   //    CoinGecko). Either one covers if the other fails; keep both to compare.
   try {
@@ -3234,6 +3306,10 @@ function buildPack(v) {
     xrpl_evm_tvl_usd: n($('inTvl')?.value),
     xrpl_evm_dex_volume_24h_usd: n($('inDexvol')?.value),
     xrpl_dex_volume_24h_usd: n($('inXrpldex')?.value),
+    // The decision behind that number: source, confidence, and why it is
+    // absent when it is. The Report renders from THIS, so an unavailable
+    // source is stated rather than silently dropped.
+    xrpl_dex_volume_decision: (typeof state !== 'undefined' && state.dexVolumeDecision) || null,
     rlusd_supply: n(state.rlusdSupply),
     rlusd_supply_gateway:   n(state.rlusdSupplySources?.gateway),
     rlusd_supply_coingecko: n(state.rlusdSupplySources?.coingecko),
