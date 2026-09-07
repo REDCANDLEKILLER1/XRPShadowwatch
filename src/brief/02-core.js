@@ -1093,7 +1093,16 @@ async function xrpl(ws, cmd) {
         // for the failure it was created to fix, and a flapping link would
         // never get a fair chance to recover.
         sock._swTimeouts = (Number(sock._swTimeouts) || 0) + 1;
-        if (sock._swTimeouts >= DEAD_SOCKET_TIMEOUTS) {
+        // ONE SOCKET DEATH IS ONE REPLACEMENT. Under SCAN_PARALLEL the eight
+        // requests in flight share a socket, so when it goes silent eight
+        // timeout handlers fire against the SAME connection and each one sees
+        // the threshold crossed. Counting per observation instead of per
+        // socket let a single silent server spend the whole run budget in one
+        // batch — the run aborted before it had tried even one replacement,
+        // which is the opposite of recovery. Only the handler that actually
+        // retires this socket may spend from the budget.
+        if (sock._swTimeouts >= DEAD_SOCKET_TIMEOUTS && !sock._swRetired) {
+          sock._swRetired = true;
           state._silentReplacements = n(state._silentReplacements) + 1;
           log('XRPL link open but unresponsive — ' + sock._swTimeouts +
               ' consecutive timeouts on this socket. Closing it so it can be replaced (' +

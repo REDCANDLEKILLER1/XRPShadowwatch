@@ -347,6 +347,62 @@ const INSTALL_FAKE_WS = () => {
         r4b.sawAbort === true && r4b.socketsCreated <= 3, r4b);
 
   // ══════════════════════════════════════════════════════════════════════════
+  console.log('\n4c. the REAL dispatch shape: eight concurrent, every replacement silent');
+  // Sections 4 and 4b issue requests one at a time, which never reaches the
+  // path that matters most in production: SCAN_PARALLEL wallets hitting a dead
+  // socket at once. _ensureSock dedupes that through a single shared
+  // state._reconnecting promise — eight parallel wallets must not open eight
+  // connections — and a run-terminal decision has to hold across concurrent
+  // callers rather than being raced past by seven of them.
+  const r4c = await page.evaluate(async () => {
+    window.__SW_NEXT_ANSWERS = false;                 // every replacement stays silent
+    state._sock = null; state._reconnecting = null; state._reconnectFails = 0;
+    state._silentReplacements = 0; state._runAbortReason = null;
+    const startSockets = window.__SW_SOCKETS.length;
+    const PARALLEL = 8, BATCHES = 40;                 // 320 requests; a FAIL guard, not the bound
+    let batchesRun = 0, stoppedAtBatch = null, settled = 0;
+    for (let bIdx = 0; bIdx < BATCHES; bIdx++) {
+      batchesRun++;
+      // EVERY request must settle. Promise.allSettled resolving is itself the
+      // assertion that none hung — a request left pending would stall here and
+      // the outer test timeout would fire instead of a check reporting.
+      const rs = await Promise.allSettled(Array.from({ length: PARALLEL }, () =>
+        window.xrpl(null, { command: 'server_info' })));
+      settled += rs.length;
+      if (state._runAbortReason && stoppedAtBatch === null) stoppedAtBatch = batchesRun;
+    }
+    const socketsAtVerdict = window.__SW_SOCKETS.length;
+    // Dependent phases must issue nothing further. account_tx and account_info
+    // are the two that walked the whole roster during the incident.
+    const after = await Promise.allSettled([].concat(
+      Array.from({ length: PARALLEL }, () => window.xrpl(null, { command: 'account_tx', account: 'rTEST' })),
+      Array.from({ length: PARALLEL }, () => window.xrpl(null, { command: 'account_info', account: 'rTEST' }))));
+    return {
+      requestsIssued: PARALLEL * BATCHES,
+      settled,
+      allSettled: settled === PARALLEL * BATCHES,
+      stoppedAtBatch,
+      abortReason: state._runAbortReason,
+      silentReplacements: Number(state._silentReplacements) || 0,
+      socketsCreated: socketsAtVerdict - startSockets,
+      socketsAfterVerdict: window.__SW_SOCKETS.length - socketsAtVerdict,
+      dependentRejected: after.every(r => r.status === 'rejected'),
+      linkDownAfter: (typeof window._linkDown === 'function') ? window._linkDown() : null
+    };
+  });
+  console.log('     ' + JSON.stringify(r4c));
+  check('every one of 320 concurrent requests SETTLED — none left hanging',
+        r4c.allSettled === true, r4c);
+  check('the run reaches its named terminal failure under concurrency too',
+        r4c.abortReason === 'XRPL_TRANSPORT_SILENT' && typeof r4c.stoppedAtBatch === 'number', r4c);
+  check('THE REGRESSION — eight concurrent callers share ONE reconnect, not eight',
+        r4c.socketsCreated <= 3 && r4c.silentReplacements === 3, r4c);
+  check('and dependent phases issue nothing after exhaustion — zero new sockets',
+        r4c.socketsAfterVerdict === 0 && r4c.dependentRejected === true, r4c);
+  check('the link reads as down so batch passes stop early',
+        r4c.linkDownAfter === true, r4c);
+
+  // ══════════════════════════════════════════════════════════════════════════
   console.log('\n5. failed reads are never presented as coverage or a quiet market');
   const r5 = await page.evaluate(() => {
     // The 7UDKL shape: a full roster, nothing proved.
