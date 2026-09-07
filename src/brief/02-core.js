@@ -3332,6 +3332,72 @@ function scanIntegrity(pack) {
 // This is the same failure as the coverage bug: absence of data reported as a
 // finding of zero. And it only happens on a fresh profile — which is every
 // stranger handed the /report link, and never the operator's own machine.
+// ── A DELTA NEEDS TWO READINGS ──────────────────────────────────────────────
+// SW-20260907-2GAKH reported "Ripple gained +1.33B XRP", "Bithumb gained
+// +1.84B XRP" and "Highest active accumulator: Bithumb (+1.84B XRP this
+// window)" in the SAME report whose summary said "the tracked wallet board has
+// no prior balances on this device yet, so net flow is not measurable on this
+// run". Both statements came from one scan. Only the second was true.
+//
+// The cause is `n()`: it maps null to 0, so the narrative sections' own
+// recomputation
+//
+//     delta = n(w.balance_xrp) - n(w.prev_balance_xrp)
+//
+// silently became `balance - 0` for every wallet with no stored prior reading,
+// rendering each wallet's ENTIRE HOLDING as this window's movement. The
+// aggregate escaped it only by accident: totalDeltaXRP sums w.delta_xrp, which
+// balanceOne correctly leaves null, so NET DELTA read 0 while the per-wallet
+// lines read in the billions.
+//
+// A first reading is not a gain. It is the baseline the NEXT scan will measure
+// against. So an unmeasurable wallet gets null, never a number — and null is
+// not sortable, rankable, or reportable as movement.
+function walletDelta(w) {
+  if (!w) return null;
+  const prev = w.prev_balance_xrp;
+  if (prev === null || prev === undefined || prev === '') return null;
+  const cur = w.balance_xrp;
+  if (cur === null || cur === undefined || cur === '') return null;
+  if (!Number.isFinite(Number(prev)) || !Number.isFinite(Number(cur))) return null;
+  return Number(cur) - Number(prev);
+}
+// Wallets whose movement this run can actually be measured. Everything that
+// ranks, sorts or names a mover must read from here; a group that is entirely
+// unmeasurable is NOT a quiet group, and must not be described as flat.
+function measuredMovers(list) {
+  return (Array.isArray(list) ? list : [])
+    .map(w => (w && Object.prototype.hasOwnProperty.call(w, 'delta'))
+                ? w
+                : Object.assign({}, w, { delta: walletDelta(w) }))
+    .filter(w => w && w.delta !== null && w.delta !== undefined);
+}
+// True when this device holds no prior reading for ANY checked wallet, so the
+// whole board's movement is unmeasurable rather than zero.
+function _dbNoBaseline(pack) {
+  try { return deltaBaseline(pack || {}).none === true; } catch (_) { return false; }
+}
+// What a group of wallets can honestly be said to have done. Three outcomes,
+// and collapsing any two of them is how a first scan came to read as a
+// billion-XRP accumulation event.
+function groupMovement(walletsInGroup) {
+  const all = Array.isArray(walletsInGroup) ? walletsInGroup : [];
+  const measured = measuredMovers(all);
+  return {
+    total: all.length,
+    measured: measured.length,
+    movers: measured,
+    maxAbs: measured.length ? Math.max(...measured.map(w => Math.abs(w.delta))) : 0,
+    // Nothing to compare against: NOT flat, NOT quiet, NOT a shock.
+    unmeasurable: all.length > 0 && measured.length === 0
+  };
+}
+if (typeof window !== 'undefined') {
+  window.walletDelta = walletDelta;
+  window.measuredMovers = measuredMovers;
+  window.groupMovement = groupMovement;
+}
+
 function deltaBaseline(pack) {
   const p = pack || {};
   const ws = (Array.isArray(p.wallet_results) && p.wallet_results.length) ? p.wallet_results
@@ -3808,7 +3874,7 @@ function buildXRPMainReport(p) {
   results.forEach(w => {
     const grp = getWalletGroup(w.label || w.address);
     if (!buckets[grp]) buckets[grp] = [];
-    buckets[grp].push({ ...w, delta: n(w.balance_xrp) - n(w.prev_balance_xrp) });
+    buckets[grp].push({ ...w, delta: walletDelta(w) });
   });
 
   const netDelta = p.total_balance_delta_xrp || 0;
@@ -3965,13 +4031,19 @@ function buildXRPMainReport(p) {
         r.push(`• Top 10 watched share: ${fmt(hd.combined_top_10_xrp, 0)} XRP (${hd.combined_top_10_pct.toFixed(3)}% of 100B supply)`);
       }
       // Highest active accumulator: top non-dormant wallet with positive delta
-      const accumulators = (p.wallet_results || [])
-        .filter(w => w.status === 'CHECKED' && n(w.balance_xrp) - n(w.prev_balance_xrp) > 100_000)
-        .sort((a, b) => (n(b.balance_xrp) - n(b.prev_balance_xrp)) - (n(a.balance_xrp) - n(a.prev_balance_xrp)));
+      // An "accumulator" is a wallet observed to have GAINED. Without a prior
+      // reading there is nothing to have gained against, and ranking on
+      // balance-minus-zero simply crowns the largest holder — which is how
+      // Bithumb was named "highest active accumulator (+1.84B XRP this window)"
+      // on a device holding no baseline at all.
+      const accumulators = measuredMovers((p.wallet_results || []).filter(w => w.status === 'CHECKED'))
+        .filter(w => w.delta > 100_000)
+        .sort((a, b) => b.delta - a.delta);
       if (accumulators.length) {
         const top = accumulators[0];
-        const gained = n(top.balance_xrp) - n(top.prev_balance_xrp);
-        r.push(`• Highest active accumulator: ${_swWho(top.address, top.label, { bare: true })} (+${fmt(gained, 0)} XRP this window)`);
+        r.push(`• Highest active accumulator: ${_swWho(top.address, top.label, { bare: true })} (+${fmt(top.delta, 0)} XRP this window)`);
+      } else if (_dbNoBaseline(p)) {
+        r.push('• Highest active accumulator: not measurable — no prior balances stored on this device, so no wallet can be shown to have gained yet.');
       }
       // Strongest behavioral cluster
       if (hasCluster) {
@@ -14644,6 +14716,29 @@ function buildExecutiveSummary(p, netDelta, news) {
 // Build per-group Shadow Watch bullets with 🟢🟡🔴 indicator
 function shadowWatchSection(buckets, p) {
   const lines = [];
+  // ── MEASURABILITY BEFORE MOVEMENT ────────────────────────────────────────
+  // Every bullet below describes MOVEMENT, and movement needs two readings.
+  // A wallet with no stored prior balance can be reported as neither a mover
+  // NOR as quiet: "Founder Wallets quiet. Historically rare to move.",
+  // "Dormant Whales: still dormant." and "Binance cold nodes flat" are all
+  // positive claims about a comparison that never happened.
+  //
+  // So unmeasurable wallets are removed from the groups rather than defaulted
+  // to zero, and the count is stated at the end. A group that is entirely
+  // unmeasurable produces no bullet at all — omission is honest; "quiet" is
+  // not. On SW-20260907-2GAKH the opposite default made every wallet's whole
+  // holding look like this window's movement.
+  const _unmeasured = [];
+  const _measurableBuckets = {};
+  Object.keys(buckets || {}).forEach(k => {
+    const keep = [];
+    (buckets[k] || []).forEach(w => {
+      if (w && w.delta !== null && w.delta !== undefined) keep.push(w);
+      else if (w) _unmeasured.push(w);
+    });
+    _measurableBuckets[k] = keep;
+  });
+  buckets = _measurableBuckets;
   // Helper: classify a group's biggest move
   function indicator(maxAbsDelta) {
     if (maxAbsDelta >= 5_000_000) return '🔴';
@@ -14777,6 +14872,12 @@ function shadowWatchSection(buckets, p) {
       lines.push(`• 🔴 Dormant Whales: ${movers.join('; ')}. HIGH-SIGNIFICANCE awakening.`);
     }
   }
+  // The omission, stated. Without this line a first scan would simply show
+  // fewer bullets, and a reader could not tell a quiet board from an
+  // unmeasured one.
+  if (_unmeasured.length) {
+    lines.push(`• ⚪ Movement not measurable for ${_unmeasured.length} wallet${_unmeasured.length === 1 ? '' : 's'}: no prior balance stored on this device, so no gain, loss or flat reading can be claimed for ${_unmeasured.length === 1 ? 'it' : 'them'} this run. Balances were read; a second scan measures against them.`);
+  }
   // 9. Failed / invalid — yellow if any
   const failed = (p.wallets_failed || 0);
   const invalid = (p.wallets_invalid || 0);
@@ -14807,12 +14908,20 @@ function shadowWatchSection(buckets, p) {
 // Anomaly detection — picks the biggest non-trivial delta and writes Event + Evidence
 function anomalySection(buckets, p, netDelta) {
   const results = p.wallet_results || [];
-  const sorted = [...results]
-    .map(w => ({ ...w, delta: n(w.balance_xrp) - n(w.prev_balance_xrp) }))
+  const sorted = measuredMovers(results)
     .filter(w => Math.abs(w.delta) >= 100_000)
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
 
   if (!sorted.length) {
+    // "Below the threshold" and "no threshold could be applied" are different
+    // findings. Reporting baseline drift over wallets that were never measured
+    // asserts a comparison that did not happen.
+    if (_dbNoBaseline(p)) {
+      return [
+        '• Event: Balance anomaly detection did not run this window.',
+        '• Evidence: No prior balances stored on this device, so no wallet delta could be computed. This is the first scan here; the next one can measure against it.'
+      ];
+    }
     return [
       '• Event: No statistically significant balance anomaly this window.',
       '• Evidence: Largest delta below the 100k XRP threshold. Board is in baseline drift.'
@@ -14942,8 +15051,7 @@ function missionDebrief(buckets, p, netDelta, news) {
     parts.push(`and the wallet board was relatively quiet.`);
   }
   // Largest mover
-  const results = (p.wallet_results || [])
-    .map(w => ({ ...w, delta: n(w.balance_xrp) - n(w.prev_balance_xrp) }))
+  const results = measuredMovers(p.wallet_results || [])
     .filter(w => Math.abs(w.delta) > 100_000)
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
   if (results.length) {

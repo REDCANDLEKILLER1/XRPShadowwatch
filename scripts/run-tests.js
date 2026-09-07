@@ -48,6 +48,7 @@ const SUITES = [
   ['db-foundation',          'db-foundation.test.js',            null],
   // Pure decision logic, no browser and no network.
   ['dex-volume-truth',       'dex-volume-truth.test.js',         null],
+  ['first-scan-baseline',    'first-scan-baseline-truth.test.js', 8219],
   // Integration: the anchor, the row's ledger_index and the capped window,
   // driven through a fake XRPL server rather than a fake decision layer.
   ['ledger-anchor',          'ledger-anchor-prerequisites.test.js', null]
