@@ -1198,6 +1198,11 @@ const DEAD_SOCKET_TIMEOUTS = 3;
 // discover the same failure once per wallet for the whole roster.
 const MAX_SILENT_REPLACEMENTS_PER_RUN = 3;
 
+// How many times the run may try to acquire its validated anchor before giving
+// up on certifying. Bounded, and spent BEFORE Phase 1 — a permanent failure
+// must not be discovered one wallet at a time.
+const ANCHOR_ACQUIRE_ATTEMPTS = 3;
+
 // The per-request RPC budget. 15s is the operating value and stays the
 // default; this is a seam, added deliberately, for two reasons.
 //
@@ -1293,8 +1298,27 @@ async function scanWallets(ws) {
   const RA = (typeof window !== 'undefined') && window.SW_RUN_ANCHOR;
   if (RA) {
     let ledgerRes = null, infoRes = null;
-    try { ledgerRes = await xrpl(ws, { command: 'ledger', ledger_index: 'validated' }); }
-    catch (e) { log('run anchor: ledger(validated) failed — ' + e.message); }
+    // BOUNDED RETRY, BEFORE ANY WALLET IS READ. One transient failure at scan
+    // start should not cost the whole run its ability to certify, and a
+    // permanent one must not be discovered 255 wallets later. The budget is
+    // small and explicit; exhausting it is a stated outcome, not a silence.
+    //
+    // What this deliberately does NOT do is let a later success certify
+    // retroactively. state.anchorOk is decided once, here, before Phase 1 —
+    // so a reply that arrives after the run has given up cannot bless a run
+    // that scanned without an anchor.
+    for (let a = 1; a <= ANCHOR_ACQUIRE_ATTEMPTS && !ledgerRes; a++) {
+      if (state._runAbortReason) break;
+      try { ledgerRes = await xrpl(ws, { command: 'ledger', ledger_index: 'validated' }); }
+      catch (e) {
+        log('run anchor: ledger(validated) attempt ' + a + '/' + ANCHOR_ACQUIRE_ATTEMPTS +
+            ' failed — ' + e.message);
+      }
+    }
+    if (!ledgerRes) {
+      log('run anchor: acquisition exhausted after ' + ANCHOR_ACQUIRE_ATTEMPTS +
+          ' attempts. This run cannot certify transaction-window coverage.');
+    }
     if (ledgerRes) {
       try { infoRes = await xrpl(ws, { command: 'server_info' }); }
       catch (e) { log('run anchor: server_info failed — ' + e.message + ' (no exhaustion proof this run)'); }

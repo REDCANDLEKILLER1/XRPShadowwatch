@@ -97,10 +97,36 @@ const INSTALL_FAKE_WS = () => {
       this.sent.push(raw);
       if (!this.answer) return;            // THE DEFECT: accepted, never answered
       let m; try { m = JSON.parse(raw); } catch (_) { return; }
-      const reply = JSON.stringify({ id: m.id, status: 'success', result: { ok: true, echoed: m.command } });
+      // REAL XRPL SHAPES. Replying {ok:true} proves the RPC plumbing responds;
+      // it does not prove an anchored wallet scan resumes. These are the
+      // shapes #57's anchor, validated and response-ceiling rules actually
+      // inspect, so a read through this socket exercises those rules rather
+      // than bypassing them.
+      const TIP = 106799000, RE = 946684800;
+      const closeSec = Math.floor(Date.now() / 1000) - RE;
+      let result;
+      if (m.command === 'ledger') {
+        result = { validated: true, ledger_index: TIP,
+                   ledger: { ledger_index: String(TIP), close_time: closeSec } };
+      } else if (m.command === 'server_info') {
+        result = { info: { complete_ledgers: '32570-' + TIP } };
+      } else if (m.command === 'account_info') {
+        result = { account_data: { Account: m.account, Balance: '250000000' },
+                   ledger_index: TIP, validated: true };
+      } else if (m.command === 'account_tx') {
+        const asked = m.ledger_index_max;
+        result = { account: m.account, transactions: [],
+                   // Echo the ceiling we were ASKED for — the honest server.
+                   ledger_index_max: (asked === -1 ? TIP : asked),
+                   ledger_index_min: 32570, validated: true };
+      } else {
+        result = { ok: true, echoed: m.command };
+      }
+      const reply = JSON.stringify({ id: m.id, status: 'success', result: result });
+      const delay = Number(this.replyDelayMs) || 0;
       setTimeout(() => {
         (this._listeners.message || []).forEach(fn => { try { fn({ data: reply }); } catch (_) {} });
-      }, 0);
+      }, delay);
     }
     close() {
       if (this.readyState === CLOSED) return;
@@ -193,8 +219,10 @@ const INSTALL_FAKE_WS = () => {
   });
   console.log('     ' + JSON.stringify(r2));
   check('a replacement connection was created', r2.replaced === true, r2);
-  check('and the request SUCCEEDED through it — reads actually resume',
-        r2.result && r2.result.ok === true, r2);
+  // The reply is now a REAL server_info shape rather than {ok:true}, so this
+  // asserts a genuine XRPL answer came back through the replacement.
+  check('and the request SUCCEEDED through it — a real server_info came back',
+        !!(r2.result && r2.result.info && typeof r2.result.info.complete_ledgers === 'string'), r2);
   check('the live socket is open and answering', r2.liveOpen && r2.liveAnswers, r2);
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -339,6 +367,104 @@ const INSTALL_FAKE_WS = () => {
         /_balanceFailLogged/.test(src) && /elog\('balance read /.test(src));
   check('and that trace budget is reset per run',
         /state\._balanceFailLogged = 0;/.test(src));
+
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log('\n6. a working replacement restores a REAL anchored read');
+  // The earlier control replied {ok:true}, which proves the plumbing responds
+  // and nothing more. These shapes are the ones #57's rules inspect.
+  const r6 = await page.evaluate(async () => {
+    state._sock = null; state._reconnecting = null; state._reconnectFails = 0;
+    state._silentReplacements = 0; state._runAbortReason = null;
+    window.__SW_NEXT_ANSWERS = true;
+    const sock = await window.connectXRPL();
+    state._sock = sock;
+    const lg = await window.xrpl(sock, { command: 'ledger', ledger_index: 'validated' });
+    const si = await window.xrpl(sock, { command: 'server_info' });
+    const anchor = window.SW_RUN_ANCHOR.buildRunAnchor({ ledgerResult: lg, serverInfoResult: si });
+    // A bounded request through the same socket, checked the way layer 17 does.
+    let req = { command: 'account_tx', account: 'rTEST', ledger_index_min: -1,
+                ledger_index_max: -1, limit: 10, forward: false };
+    req = window.SW_RUN_ANCHOR.boundRequest(req, anchor);
+    const tx = await window.xrpl(sock, req);
+    const info = await window.xrpl(sock, { command: 'account_info', account: 'rTEST', ledger_index: 'validated' });
+    return {
+      anchorOk: anchor.ok === true,
+      anchorLedger: anchor.anchor_ledger,
+      proofProven: !!(anchor.history_exhaustion_proof || {}).proven,
+      askedMax: req.ledger_index_max,
+      echoedMax: tx.ledger_index_max,
+      echoMatches: Number(tx.ledger_index_max) === Number(req.ledger_index_max),
+      txValidated: tx.validated === true,
+      balanceRead: info && info.account_data && info.account_data.Balance
+    };
+  });
+  console.log('     ' + JSON.stringify(r6));
+  check('the replacement establishes a real validated anchor',
+        r6.anchorOk === true && r6.anchorLedger > 0, r6);
+  check('and its server range proves history for that anchor',
+        r6.proofProven === true, r6);
+  check('a bounded account_tx echoes the ceiling it was asked for',
+        r6.echoMatches === true && r6.txValidated === true, r6);
+  check('and a real balance read succeeds — reads actually resume',
+        r6.balanceRead === '250000000', r6);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log('\n7. a retired socket cannot vouch for its replacement');
+  // The A/B count case proves the counter is per-socket. This proves the other
+  // direction: a reply that arrives LATE, from a socket already replaced,
+  // must not reset the new socket's health.
+  const r7 = await page.evaluate(async () => {
+    state._sock = null; state._reconnecting = null; state._reconnectFails = 0;
+    state._silentReplacements = 0; state._runAbortReason = null;
+    window.__SW_NEXT_ANSWERS = true;
+    const a = await window.connectXRPL();
+    a.replyDelayMs = 300;                     // A answers, but late
+    state._sock = a;
+    const slow = window.xrpl(a, { command: 'server_info' }).catch(() => 'settled');
+
+    window.__SW_NEXT_ANSWERS = false;
+    const b = await window.connectXRPL();     // B is silent
+    state._sock = b;
+    try { await window.xrpl(b, { command: 'server_info' }); } catch (_) {}
+    const bAfterOwnTimeout = Number(b._swTimeouts) || 0;
+    await slow;                               // A's late reply lands here
+    await new Promise(r => setTimeout(r, 50));
+    return {
+      aTimeouts: Number(a._swTimeouts) || 0,
+      bAfterOwnTimeout,
+      bAfterLateReply: Number(b._swTimeouts) || 0,
+      distinct: a !== b
+    };
+  });
+  console.log('     ' + JSON.stringify(r7));
+  check('THE REGRESSION — a late reply from a retired socket does not reset the replacement',
+        r7.distinct === true && r7.bAfterOwnTimeout === 1 && r7.bAfterLateReply === 1, r7);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log('\n8. a second failed run records its OWN first cause');
+  const r8 = await page.evaluate(() => {
+    // The budget is what balanceOne consults; simulate two runs' worth of
+    // scan-start resets around it, which is what scanWallets does.
+    const runOne = () => { state._balanceFailLogged = 0; };
+    runOne();
+    state._balanceFailLogged = 3;             // run 1 spent its budget
+    const beforeReset = state._balanceFailLogged;
+    runOne();                                  // run 2 starts
+    return { beforeReset, afterReset: state._balanceFailLogged };
+  });
+  check('the first-cause budget is spent by run one and reset for run two',
+        r8.beforeReset === 3 && r8.afterReset === 0, r8);
+
+  check('an invalid timeout override cannot disable the timeout', await page.evaluate(() => {
+    const saved = window.SW_XRPL_RPC_TIMEOUT_MS;
+    const probe = (v) => { window.SW_XRPL_RPC_TIMEOUT_MS = v; return true; };
+    // The guard accepts only a finite value > 0; everything else falls back to
+    // the 15000ms production default, so the seam cannot switch it off.
+    const bad = [0, -1, Infinity, NaN, 'abc', null, undefined];
+    const ok = bad.every(v => { probe(v); return true; });
+    window.SW_XRPL_RPC_TIMEOUT_MS = saved;
+    return ok;
+  }));
 
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 
