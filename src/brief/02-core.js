@@ -992,6 +992,99 @@ function _sockOpen(w) { try { return !!w && w.readyState === 1; } catch (_) { re
 
 // Have we given up on the connection? Used by the batch passes so they stop
 // instead of walking their whole list producing one identical error per wallet.
+// ── THE XRPL QUOTA GATE ─────────────────────────────────────────────────────
+// SW-20260907-UO4N2: the server answered 255 offer requests with
+//
+//     rate limit: units quota (10000 per 60s) exhausted, retry in ~69888ms
+//
+// and the scan issued all 255 anyway, in 32 chunks of 8, with no spacing, every
+// one of them inside the cooldown the server had already stated. A 256th came
+// from runRelatedOfferScan, a second dispatcher with its own copy of the same
+// link-down-only guard — neither pass could tell the other what it had learned.
+//
+// The quota itself is UPSTREAM: the string appears nowhere in this repository,
+// so there is no app-side limiter to have produced it. What is ours is that a
+// quota rejection was indistinguishable from "this wallet has no offers": it
+// was caught, logged, and returned 0, and the loop walked on.
+//
+// ONE decision, shared, for the whole run — the same shape as _ensureSock's
+// single state._reconnecting. Deliberately NOT: a sleeper per caller (that is
+// the same mistake N times), a retry inside the cooldown (that is what we
+// already do), or rotating endpoints to evade a published limit (that is not
+// engineering). The cooldown comes from the server's own hint, never a number
+// invented here.
+//
+// The gate STOPS a pass rather than stalling it. A forensic scan that silently
+// sleeps 70 seconds per pass is a scan nobody can reason about, and the run
+// already knows how to report a short pass honestly. What must never happen is
+// the pass ending early and the report claiming it finished.
+const QUOTA_HINT_RE = /retry\s+in\s+~?\s*(\d+)\s*ms/i;
+const QUOTA_ERROR_RE = /rate limit|quota|too many requests|429|slow ?down/i;
+const QUOTA_FALLBACK_MS = 60000;   // only if the server rejects without a hint
+const QUOTA_MAX_MS      = 300000;  // never trust an absurd hint
+
+// Is this error the server telling us to back off? A timeout is not: silence
+// and an explicit rejection are different failures and #59's breaker owns the
+// first one.
+function _isQuotaError(e) {
+  const m = (e && (e.message || e.error_message || e.error)) || '';
+  return QUOTA_ERROR_RE.test(String(m));
+}
+function _quotaRetryMs(e) {
+  const m = String((e && (e.message || e.error_message || e.error)) || '');
+  const hit = QUOTA_HINT_RE.exec(m);
+  const ms = hit ? Number(hit[1]) : NaN;
+  if (!Number.isFinite(ms) || ms <= 0) return QUOTA_FALLBACK_MS;
+  return Math.min(ms, QUOTA_MAX_MS);
+}
+// Record the rejection ONCE for the whole run. Later rejections inside the same
+// cooldown extend nothing and log nothing: they are the passes already in
+// flight discovering what we now know.
+function _noteQuota(e, where) {
+  if (!_isQuotaError(e)) return false;
+  const until = Date.now() + _quotaRetryMs(e);
+  const first = !(state._quotaUntil && Date.now() < state._quotaUntil);
+  if (!state._quotaUntil || until > state._quotaUntil) state._quotaUntil = until;
+  state._quotaHits = (n(state._quotaHits) || 0) + 1;
+  if (first) {
+    state._quotaFirstAt = new Date().toISOString();
+    state._quotaWhere = where || 'unknown';
+    log('XRPL quota exhausted during ' + (where || 'scan') + ' — the server asked for ' +
+        Math.round(_quotaRetryMs(e) / 1000) + 's. Stopping this pass rather than spending the cooldown on requests it will reject.');
+  }
+  return true;
+}
+// Every dispatcher asks this BEFORE issuing. One answer, one clock.
+function _quotaBlocked() {
+  return !!(state._quotaUntil && Date.now() < state._quotaUntil);
+}
+// What the run must carry into the report: a pass that stopped early is not a
+// pass that found nothing.
+function _quotaNote() {
+  if (!state._quotaHits) return null;
+  return {
+    hit: true,
+    hits: n(state._quotaHits),
+    first_at: state._quotaFirstAt || null,
+    first_where: state._quotaWhere || null,
+    passes_cut_short: (state._quotaCutPasses || []).slice()
+  };
+}
+function _quotaCutPass(name, done, total) {
+  try {
+    state._quotaCutPasses = state._quotaCutPasses || [];
+    state._quotaCutPasses.push({ pass: name, completed: n(done), of: n(total) });
+  } catch (_) {}
+  log(name + ': stopped after ' + done + '/' + total + ' — XRPL quota cooldown outstanding.');
+}
+if (typeof window !== 'undefined') {
+  window._isQuotaError = _isQuotaError;
+  window._quotaRetryMs = _quotaRetryMs;
+  window._noteQuota    = _noteQuota;
+  window._quotaBlocked = _quotaBlocked;
+  window._quotaNote    = _quotaNote;
+}
+
 function _linkDown() {
   if (_sockOpen(state._sock)) return false;
   return n(state._reconnectFails) >= 1 && !state._reconnecting;
@@ -1171,6 +1264,14 @@ async function scanWallets(ws) {
   state.runId = 'run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
   state.txScanCoverage = null;
   state.pack = null;
+  // The quota cooldown is RUN-scoped: a new scan is entitled to try, and a
+  // previous run's cooldown must not mute it. The evidence that it happened is
+  // kept separately, so a short run still reports why it was short.
+  state._quotaUntil = 0;
+  state._quotaHits = 0;
+  state._quotaFirstAt = null;
+  state._quotaWhere = null;
+  state._quotaCutPasses = [];
   try { for (const _w of (state.wallets || [])) { if (_w) delete _w.tx_scan; } } catch (_) {}
 
   // ── ONE VALIDATED ANCHOR FOR THIS ENTIRE RUN ────────────────────────────
@@ -1273,11 +1374,16 @@ async function scanWallets(ws) {
       row.status = 'CHECKED';
     } catch (e) {
       row.status = 'FAILED'; row.error = e.message;
+      // The wallet still failed — that is real and stays recorded. But if the
+      // server said WHY, the whole run needs to know, or the next 31 chunks
+      // spend the cooldown rediscovering it one wallet at a time.
+      _noteQuota(e, 'the balance pass');
     }
   }
 
   let phase1Done = 0;
   for (let i = 0; i < rows.length; i += SCAN_PARALLEL) {
+    if (_quotaBlocked()) { _quotaCutPass('BALANCES', phase1Done, rows.length); break; }
     const chunk = rows.slice(i, i + SCAN_PARALLEL);
     await Promise.all(chunk.map(balanceOne));
     phase1Done = i + chunk.length;
@@ -1359,12 +1465,14 @@ async function scanWallets(ws) {
       }
     } catch (e) {
       // Don't fail the wallet — Phase 1 balance is still valid. Just log.
+      _noteQuota(e, 'the transaction-window pass');
       log('tx-scan miss: ' + row.label + ' (' + e.message + ')');
     }
   }
 
   let phase2Done = 0;
   for (let i = 0; i < needTx.length; i += SCAN_PARALLEL) {
+    if (_quotaBlocked()) { _quotaCutPass('TX WINDOWS', phase2Done, needTx.length); break; }
     const chunk = needTx.slice(i, i + SCAN_PARALLEL);
     await Promise.all(chunk.map(txOne));
     phase2Done = i + chunk.length;
@@ -3425,6 +3533,10 @@ function buildPack(v) {
     // array in every export.
     wallet_results: state.wallets, tx_24h_count: state.txs.length,
     total_tx_xrp: totalTxXRP(), active_wallets: activeWalletCount(),
+    // A pass that stopped early is not a pass that found nothing. Without this
+    // in the pack the report cannot tell the difference, and a quota-shortened
+    // scan reads exactly like a quiet one.
+    xrpl_quota: _quotaNote(),
     shadow_volume_xrp: shadowVolumeXRP(), total_balance_delta_xrp: totalDeltaXRP(),
     // The measured delta with the escrow-attributable part removed, and the
     // adjustment itself so the two reconcile in the debug pack.
@@ -19052,6 +19164,10 @@ async function scanOffers(ws) {
       // error log. The fail-fast added yesterday is what makes them arrive
       // instantly; this is what stops them arriving at all.
       if (/link down|link closed/i.test(e && e.message || '')) throw e;
+      // A quota rejection was indistinguishable from "no offers here" — caught,
+      // logged, return 0, loop on. Record it once for the whole run instead, so
+      // the next chunk's gate check stops the walk.
+      if (_noteQuota(e, 'the offer sweep')) return 0;
       elog('scanOffers ' + w.label, e);
       return 0;
     }
@@ -19063,6 +19179,7 @@ async function scanOffers(ws) {
       log('OFFERS: stopped after ' + scanned + '/' + wallets.length + ' — XRPL link down.');
       return;
     }
+    if (_quotaBlocked()) { _quotaCutPass('OFFERS', scanned, wallets.length); return; }
     const chunk = wallets.slice(i, i + CHUNK);
     let counts;
     try {
@@ -19920,6 +20037,7 @@ async function runRelatedOfferScan(ws) {
     // Same reason as the offer scan: once the link is confirmed down, every
     // remaining candidate reports the identical failure. Say it once and stop.
     if (_linkDown()) { log('RELATED OFFERS: stopped after ' + attempts + '/' + ranked.length + ' — XRPL link down.'); break; }
+    if (_quotaBlocked()) { _quotaCutPass('RELATED OFFERS', attempts, ranked.length); break; }
     const chunk = ranked.slice(i, i + RELATED_OFFERS_CONFIG.PARALLEL_FETCH);
     let linkGone = false;
     await Promise.all(chunk.map(async c => {
