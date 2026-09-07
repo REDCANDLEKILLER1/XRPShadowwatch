@@ -50,7 +50,11 @@ const SUITES = [
   ['dex-volume-truth',       'dex-volume-truth.test.js',         null],
   // Integration: the anchor, the row's ledger_index and the capped window,
   // driven through a fake XRPL server rather than a fake decision layer.
-  ['ledger-anchor',          'ledger-anchor-prerequisites.test.js', null]
+  ['ledger-anchor',          'ledger-anchor-prerequisites.test.js', null],
+  // Fault injection: an open socket that accepts requests and then answers
+  // nothing — the SW-20260907-7UDKL production failure, driven against the
+  // real connection layer.
+  ['dead-socket',            'dead-socket-recovery.test.js',      8216]
 ];
 
 const only = (() => {

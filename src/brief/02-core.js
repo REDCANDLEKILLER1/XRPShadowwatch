@@ -1079,25 +1079,33 @@ async function xrpl(ws, cmd) {
     // closed-socket case every existing guard already handles.
     const timer = setTimeout(() => {
       try {
-        state._consecutiveTimeouts = n(state._consecutiveTimeouts) + 1;
-        if (state._consecutiveTimeouts >= DEAD_SOCKET_TIMEOUTS) {
-          log('XRPL link open but unresponsive — ' + state._consecutiveTimeouts +
-              ' consecutive timeouts. Closing the socket so it can be replaced.');
-          state._consecutiveTimeouts = 0;
+        // THE COUNT BELONGS TO THIS SOCKET, not to the app. A shared counter
+        // carries a dead connection's history onto its replacement: two
+        // timeouts on socket A, reconnect to B, and B's FIRST timeout closes
+        // it because it inherited A's count. The replacement would be executed
+        // for the failure it was created to fix, and a flapping link would
+        // never get a fair chance to recover.
+        sock._swTimeouts = (Number(sock._swTimeouts) || 0) + 1;
+        if (sock._swTimeouts >= DEAD_SOCKET_TIMEOUTS) {
+          log('XRPL link open but unresponsive — ' + sock._swTimeouts +
+              ' consecutive timeouts on this socket. Closing it so it can be replaced.');
           // Closing is what makes readyState !== 1, so _linkDown() and
-          // _ensureSock() can finally see what is wrong.
+          // _ensureSock() can finally see what is wrong. The counter dies with
+          // the socket; there is nothing to reset.
           try { sock.close(); } catch (_) {}
           try { if (state._sock === sock) state._sock = null; } catch (_) {}
         }
       } catch (_) {}
       done(rej, new Error('timeout ' + cmd.command));
-    }, 15000);
+    }, _rpcTimeoutMs());
     function onMsg(ev) {
       let j; try { j = JSON.parse(ev.data); } catch { return; }
       if (j.id !== id) return;
-      // ANY answer proves the socket is alive, including an XRPL-level error.
-      // Only silence counts toward the dead-socket verdict.
-      try { state._consecutiveTimeouts = 0; } catch (_) {}
+      // ANY answer proves THIS socket is alive, including an XRPL-level error.
+      // Only silence counts toward the dead-socket verdict, and the reset is
+      // scoped to the socket that answered — a late reply from a replaced
+      // connection cannot vouch for its successor's health.
+      try { sock._swTimeouts = 0; } catch (_) {}
       j.status === 'success' ? done(res, j.result)
                              : done(rej, new Error(j.error_message || j.error || 'xrpl error'));
     }
@@ -1161,6 +1169,28 @@ async function accountTxWindowDepth(ws, account, startMs, endMs, limit, maxPages
 // otherwise the run pays 15s per batch for the whole roster before noticing.
 const DEAD_SOCKET_TIMEOUTS = 3;
 
+// The per-request RPC budget. 15s is the operating value and stays the
+// default; this is a seam, added deliberately, for two reasons.
+//
+// First, a hardcoded timeout with no override is an operational gap: when a
+// link degrades there is no way to tighten it without a deploy.
+//
+// Second, and the reason it exists today: the dead-socket recovery below can
+// only be proven by a test that actually waits out consecutive timeouts.
+// At 15s that is 45 seconds of dead air per assertion, which is long enough
+// that the test would not get written — and an untested recovery path is how
+// this defect reached production in the first place. Faking the clock instead
+// was tried and rejected: the console's layers arrive through setTimeout
+// injection chains, so freezing timers before load stalls the very code under
+// test.
+function _rpcTimeoutMs() {
+  try {
+    const v = Number(typeof window !== 'undefined' && window.SW_XRPL_RPC_TIMEOUT_MS);
+    if (Number.isFinite(v) && v > 0) return v;
+  } catch (_) {}
+  return 15000;
+}
+
 const SCAN_PARALLEL = 8;          // v3.12: doubled from 4
 const SCAN_CHUNK_DELAY_MS = 0;    // v3.12: no inter-chunk delay needed
 
@@ -1210,6 +1240,11 @@ async function scanWallets(ws) {
   // proof is stamped with this id, and anything carrying a different one is
   // not evidence about this run.
   state.runId = 'run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  // The first-failure log budget is PER RUN. Without this reset a second scan
+  // in the same page inherits the first run's exhausted budget and suppresses
+  // its own opening error — losing the diagnostic exactly when a repeat run is
+  // being used to investigate the first one.
+  state._balanceFailLogged = 0;
   state.txScanCoverage = null;
   state.pack = null;
   try { for (const _w of (state.wallets || [])) { if (_w) delete _w.tx_scan; } } catch (_) {}
