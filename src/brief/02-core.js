@@ -993,11 +993,18 @@ function _sockOpen(w) { try { return !!w && w.readyState === 1; } catch (_) { re
 // Have we given up on the connection? Used by the batch passes so they stop
 // instead of walking their whole list producing one identical error per wallet.
 function _linkDown() {
+  // An abandoned run is down regardless of what any socket's readyState says.
+  if (state._runAbortReason) return true;
   if (_sockOpen(state._sock)) return false;
   return n(state._reconnectFails) >= 1 && !state._reconnecting;
 }
 
 async function _ensureSock(ws) {
+  // A run that has spent its silence budget issues no further requests. This
+  // is the difference between recovering and rediscovering the same failure
+  // once per wallet: without it, every remaining wallet pays its own timeout
+  // batch, which is the sixteen minutes of SW-20260907-7UDKL.
+  if (state._runAbortReason) return null;
   if (_sockOpen(ws)) return ws;
   if (_sockOpen(state._sock)) return state._sock;
   // One shared reconnect for the whole scan: 8 parallel wallets hitting a dead
@@ -1087,8 +1094,19 @@ async function xrpl(ws, cmd) {
         // never get a fair chance to recover.
         sock._swTimeouts = (Number(sock._swTimeouts) || 0) + 1;
         if (sock._swTimeouts >= DEAD_SOCKET_TIMEOUTS) {
+          state._silentReplacements = n(state._silentReplacements) + 1;
           log('XRPL link open but unresponsive — ' + sock._swTimeouts +
-              ' consecutive timeouts on this socket. Closing it so it can be replaced.');
+              ' consecutive timeouts on this socket. Closing it so it can be replaced (' +
+              state._silentReplacements + '/' + MAX_SILENT_REPLACEMENTS_PER_RUN + ' this run).');
+          // THE RUN-LEVEL TERMINAL DECISION. Reaching OPEN must not replenish
+          // the budget: a server that accepts and then says nothing is
+          // indistinguishable from the next one that does the same, and the
+          // roster is not a reasonable number of times to find that out.
+          if (state._silentReplacements >= MAX_SILENT_REPLACEMENTS_PER_RUN) {
+            state._runAbortReason = 'XRPL_TRANSPORT_SILENT';
+            log('XRPL transport silent after ' + state._silentReplacements +
+                ' replacements — abandoning this run. No further requests will be issued.');
+          }
           // Closing is what makes readyState !== 1, so _linkDown() and
           // _ensureSock() can finally see what is wrong. The counter dies with
           // the socket; there is nothing to reset.
@@ -1169,6 +1187,17 @@ async function accountTxWindowDepth(ws, account, startMs, endMs, limit, maxPages
 // otherwise the run pays 15s per batch for the whole roster before noticing.
 const DEAD_SOCKET_TIMEOUTS = 3;
 
+// How many times ONE RUN may replace a socket for going silent before the run
+// gives up. This is the run-level policy that closing a socket is NOT.
+//
+// Closing a dead socket and opening another is recovery; doing it forever is
+// the original defect wearing a reconnect. _reconnectFails cannot bound it:
+// that counts failed connection ESTABLISHMENT, and an open-but-silent
+// replacement is exactly the case where opening SUCCEEDS. Every silent
+// replacement would reset the only budget the file had, so the run could
+// discover the same failure once per wallet for the whole roster.
+const MAX_SILENT_REPLACEMENTS_PER_RUN = 3;
+
 // The per-request RPC budget. 15s is the operating value and stays the
 // default; this is a seam, added deliberately, for two reasons.
 //
@@ -1245,6 +1274,10 @@ async function scanWallets(ws) {
   // its own opening error — losing the diagnostic exactly when a repeat run is
   // being used to investigate the first one.
   state._balanceFailLogged = 0;
+  // The silence budget and the terminal decision are RUN-scoped. A new scan is
+  // entitled to a fresh attempt; an old one's verdict must not silence it.
+  state._silentReplacements = 0;
+  state._runAbortReason = null;
   state.txScanCoverage = null;
   state.pack = null;
   try { for (const _w of (state.wallets || [])) { if (_w) delete _w.tx_scan; } } catch (_) {}

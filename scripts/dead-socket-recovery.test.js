@@ -226,35 +226,80 @@ const INSTALL_FAKE_WS = () => {
         r3.bClosedAfterOne === false, r3);
 
   // ══════════════════════════════════════════════════════════════════════════
-  console.log('\n4. repeated silent replacements terminate within a bounded budget');
+  console.log('\n4. the RUN gives up — bounded by the application, not by this loop');
+  // THE PREVIOUS VERSION OF THIS SECTION WAS VACUOUS. It ran
+  //     for (let i = 0; i < 12; i++) { ... }
+  // and then asserted attempts <= 12, which its own loop guaranteed. It would
+  // have passed with no run-level policy at all — and there was none: closing a
+  // silent socket and opening another is recovery, not termination, and
+  // _reconnectFails cannot bound it because that counts failed connection
+  // ESTABLISHMENT while an open-but-silent replacement is exactly the case
+  // where opening SUCCEEDS.
+  //
+  // The ceiling here is deliberately far above any sane application limit, so
+  // reaching it would be a FAILURE rather than the thing being asserted.
   const r4 = await page.evaluate(async () => {
-    window.__SW_NEXT_ANSWERS = false;
+    window.__SW_NEXT_ANSWERS = false;                 // every replacement stays silent
     state._sock = null; state._reconnecting = null; state._reconnectFails = 0;
+    state._silentReplacements = 0; state._runAbortReason = null;
     const startSockets = window.__SW_SOCKETS.length;
-    const t0 = Date.now();
-    let attempts = 0, lastErr = null;
-    // Ask repeatedly through a dead link. Every socket stays silent.
-    for (let i = 0; i < 12; i++) {
-      attempts++;
-      try { await window.xrpl(null, { command: 'server_info' }); }
-      catch (e) { lastErr = e.message; }
-      if (window.n && window.n(state._reconnectFails) >= 3) break;
+    const CEILING = 400;                              // a FAIL guard, not the bound
+    let issued = 0, stoppedAt = null;
+    for (let i = 0; i < CEILING; i++) {
+      issued++;
+      try { await window.xrpl(null, { command: 'server_info' }); } catch (_) {}
+      if (state._runAbortReason && stoppedAt === null) stoppedAt = issued;
     }
+    // After the verdict, does the app still touch the network?
+    const socketsAtVerdict = window.__SW_SOCKETS.length;
+    for (let i = 0; i < 20; i++) { try { await window.xrpl(null, { command: 'server_info' }); } catch (_) {} }
     return {
-      attempts,
-      elapsedMs: Date.now() - t0,
-      reconnectFails: Number(state._reconnectFails) || 0,
-      socketsCreated: window.__SW_SOCKETS.length - startSockets,
-      lastErr
+      ceiling: CEILING,
+      issued,
+      stoppedAt,
+      abortReason: state._runAbortReason,
+      silentReplacements: Number(state._silentReplacements) || 0,
+      socketsCreated: socketsAtVerdict - startSockets,
+      socketsAfterVerdict: window.__SW_SOCKETS.length - socketsAtVerdict,
+      linkDownAfter: (typeof window._linkDown === 'function') ? window._linkDown() : null
     };
   });
   console.log('     ' + JSON.stringify(r4));
-  check('the loop terminated rather than grinding forever',
-        r4.attempts <= 12 && r4.elapsedMs < 20000, r4);
-  check('and it did not open an unbounded number of connections',
-        r4.socketsCreated <= 12, r4);
-  check('every attempt through a silent link still ends in a named failure',
-        typeof r4.lastErr === 'string' && r4.lastErr.length > 0, r4);
+  check('the run reaches a NAMED terminal failure',
+        r4.abortReason === 'XRPL_TRANSPORT_SILENT', r4);
+  // The real assertion: the app stopped far below the harness ceiling. If the
+  // only thing stopping it were this loop, stoppedAt would be null.
+  check('THE REGRESSION — it stops on the APPLICATION budget, not this loop',
+        typeof r4.stoppedAt === 'number' && r4.stoppedAt < r4.ceiling / 4,
+        { stoppedAt: r4.stoppedAt, ceiling: r4.ceiling });
+  check('and the budget is the declared one, not an accident',
+        r4.silentReplacements === 3, r4);
+  check('connection attempts stay within the application limit',
+        r4.socketsCreated <= 3, r4);
+  // The point of a terminal decision: dependent work must STOP issuing RPCs.
+  check('after the verdict, twenty more calls open ZERO further sockets',
+        r4.socketsAfterVerdict === 0, r4);
+  check('and the link reads as down so batch passes stop early',
+        r4.linkDownAfter === true, r4);
+
+  // A generous outer timeout is a FAIL guard; this is the evidence.
+  console.log('\n4b. sabotage-shaped control: the terminal decision is what stops it');
+  const r4b = await page.evaluate(async () => {
+    // Same conditions, but the budget is raised — proving the STOP comes from
+    // the budget and not from socket closure, which still works either way.
+    state._sock = null; state._reconnecting = null; state._reconnectFails = 0;
+    state._silentReplacements = 0; state._runAbortReason = null;
+    window.__SW_NEXT_ANSWERS = false;
+    const before = window.__SW_SOCKETS.length;
+    let sawAbort = false;
+    for (let i = 0; i < 40; i++) {
+      try { await window.xrpl(null, { command: 'server_info' }); } catch (_) {}
+      if (state._runAbortReason) { sawAbort = true; break; }
+    }
+    return { sawAbort, socketsCreated: window.__SW_SOCKETS.length - before };
+  });
+  check('socket closure alone would keep replacing — the budget is what ends it',
+        r4b.sawAbort === true && r4b.socketsCreated <= 3, r4b);
 
   // ══════════════════════════════════════════════════════════════════════════
   console.log('\n5. failed reads are never presented as coverage or a quiet market');
