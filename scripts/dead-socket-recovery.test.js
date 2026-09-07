@@ -436,6 +436,35 @@ const INSTALL_FAKE_WS = () => {
   console.log('     healthy    : ' + r5.healthy);
   // THE REGRESSION. The production report printed "5/100 — GREEN / QUIET
   // (LOW / QUIET)" on a run where zero wallets answered.
+  // SW-20260907-UO4N2: an XRPL rate limit left 5 of 255 proved, and the
+  // zero-only guard let "2/100 — GREEN / QUIET" through on a 2% read.
+  const rPartial = await page.evaluate(() => {
+    const label = (proved, target) => window.publicRiskLabel({
+      risk_score: { score: 2 },
+      tx_scan_coverage: { target_wallets: target, complete_wallets: proved }
+    });
+    return {
+      rateLimited: label(5, 255),     // the incident: 2%
+      halfRead:    label(152, 255),   // 59.6% — still under severe
+      mostlyRead:  label(160, 255),   // 62.7% — over severe, scored
+      nearFull:    label(249, 255)    // the good 2GAKH run
+    };
+  });
+  console.log('     5/255   : ' + rPartial.rateLimited);
+  console.log('     249/255 : ' + rPartial.nearFull);
+  check('THE REGRESSION — a 2% read is NOT SCORED, not GREEN / QUIET',
+        /^NOT SCORED/.test(rPartial.rateLimited) &&
+        /5 of 255/.test(rPartial.rateLimited) &&
+        !/QUIET/.test(rPartial.rateLimited), rPartial.rateLimited);
+  check('the withheld band extends to the severe threshold, not just zero',
+        /^NOT SCORED/.test(rPartial.halfRead), rPartial.halfRead);
+  check('CONTROL: coverage above the severe threshold still gets its band',
+        !/^NOT SCORED/.test(rPartial.mostlyRead) && /QUIET/.test(rPartial.mostlyRead),
+        rPartial.mostlyRead);
+  check('CONTROL: a near-complete run is scored normally',
+        !/^NOT SCORED/.test(rPartial.nearFull) && /QUIET/.test(rPartial.nearFull),
+        rPartial.nearFull);
+
   check('THE REGRESSION — a run that proved nothing is NOT SCORED',
         /NOT SCORED/.test(r5.failed) && !/GREEN|QUIET/.test(r5.failed), r5.failed);
   check('CONTROL: a fully proven run still gets its real band',

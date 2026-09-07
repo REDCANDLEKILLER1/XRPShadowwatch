@@ -3081,8 +3081,27 @@ function publicRiskLabel(p) {
     const cov = (p && p.tx_scan_coverage) || (typeof state !== 'undefined' && state.txScanCoverage) || null;
     const target = cov ? n(cov.target_wallets) : 0;
     const proved = cov ? n(cov.complete_wallets) : 0;
+    // ZERO IS NOT THE ONLY UNREADABLE NUMBER. The first version of this guard
+    // fired only at proved === 0, and SW-20260907-UO4N2 walked straight
+    // through it: an XRPL rate limit ("units quota (10000 per 60s)
+    // exhausted") left 250 of 255 wallets unanswered, and because FIVE
+    // wallets came back the run was scored and stamped
+    // "2/100 — GREEN / QUIET (LOW / QUIET)" — twice — on a 2% read. The
+    // narrative above it was already saying "this scan did not finish" and
+    // "an unread wallet is not a still one". Five is not zero, and it is not
+    // evidence either.
+    //
+    // The threshold is the one the report already uses rather than a new
+    // number: 10-pipeline treats coverage under 0.60 as SEVERE and under 0.95
+    // as degraded. A colour is a verdict, so it is withheld at severe.
+    const SEVERE_COVERAGE = 0.60;
+    const pct = target > 0 ? (proved / target) : 0;
     if (target > 0 && proved === 0) {
       return 'NOT SCORED — no wallet proved its transaction window this run, so there is no evidence to score. Re-run before reading any risk level.';
+    }
+    if (target > 0 && pct < SEVERE_COVERAGE) {
+      return 'NOT SCORED — only ' + proved + ' of ' + target + ' wallets proved the transaction window (' +
+             Math.round(pct * 100) + '%), which is too little of the board to support a risk level. Re-run before reading one.';
     }
   } catch (_) {}
   const internal = r.label || (
