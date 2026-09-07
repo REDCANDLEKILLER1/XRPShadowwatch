@@ -1059,10 +1059,45 @@ async function xrpl(ws, cmd) {
       try { sock.removeEventListener('close', onClose); } catch (_) {}
       fn(arg);
     }
-    const timer = setTimeout(() => done(rej, new Error('timeout ' + cmd.command)), 15000);
+    // ── AN OPEN SOCKET THAT DOES NOT ANSWER ──────────────────────────────
+    // SW-20260907-7UDKL: every request in a production run timed out at 15s,
+    // for over sixteen minutes, and not one reconnect was attempted. The
+    // socket's readyState stayed 1 the whole time — the server accepted the
+    // connection and then answered nothing.
+    //
+    // _sockOpen() tests readyState, so _linkDown() read the link as healthy
+    // and _ensureSock() handed the same dead socket back every time. The guard
+    // written to stop a batch pass "walking its whole list producing one
+    // identical error per wallet" could not fire, because it was asking the
+    // wrong question. 255 wallets x 15s, in batches of 8, is the crawl the
+    // operator watched: the wallet counter advanced eight at a time instead of
+    // filling instantly, and no transaction ever arrived.
+    //
+    // A timeout is the ONLY evidence available that a still-open socket has
+    // stopped answering. Count them, and when enough pile up consecutively,
+    // close the socket — which turns an invisible failure into the ordinary
+    // closed-socket case every existing guard already handles.
+    const timer = setTimeout(() => {
+      try {
+        state._consecutiveTimeouts = n(state._consecutiveTimeouts) + 1;
+        if (state._consecutiveTimeouts >= DEAD_SOCKET_TIMEOUTS) {
+          log('XRPL link open but unresponsive — ' + state._consecutiveTimeouts +
+              ' consecutive timeouts. Closing the socket so it can be replaced.');
+          state._consecutiveTimeouts = 0;
+          // Closing is what makes readyState !== 1, so _linkDown() and
+          // _ensureSock() can finally see what is wrong.
+          try { sock.close(); } catch (_) {}
+          try { if (state._sock === sock) state._sock = null; } catch (_) {}
+        }
+      } catch (_) {}
+      done(rej, new Error('timeout ' + cmd.command));
+    }, 15000);
     function onMsg(ev) {
       let j; try { j = JSON.parse(ev.data); } catch { return; }
       if (j.id !== id) return;
+      // ANY answer proves the socket is alive, including an XRPL-level error.
+      // Only silence counts toward the dead-socket verdict.
+      try { state._consecutiveTimeouts = 0; } catch (_) {}
       j.status === 'success' ? done(res, j.result)
                              : done(rej, new Error(j.error_message || j.error || 'xrpl error'));
     }
@@ -1120,6 +1155,12 @@ async function accountTxWindowDepth(ws, account, startMs, endMs, limit, maxPages
 // PHASE 2: Tier-based account_tx ONLY for wallets where balance actually changed
 //          OR first-scan baseline (no prev). Most quiet wallets skip Phase 2 entirely.
 // Result: quiet day ~3-5 sec, active day ~8-12 sec (vs old 75 sec).
+// How many CONSECUTIVE 15s timeouts mean the socket is dead rather than the
+// network being slow. One batch of SCAN_PARALLEL requests fails together on a
+// dead link, so this must be small enough to trip inside the first batch —
+// otherwise the run pays 15s per batch for the whole roster before noticing.
+const DEAD_SOCKET_TIMEOUTS = 3;
+
 const SCAN_PARALLEL = 8;          // v3.12: doubled from 4
 const SCAN_CHUNK_DELAY_MS = 0;    // v3.12: no inter-chunk delay needed
 
@@ -1273,6 +1314,18 @@ async function scanWallets(ws) {
       row.status = 'CHECKED';
     } catch (e) {
       row.status = 'FAILED'; row.error = e.message;
+      // TRACE THE FIRST FAILURE. balanceOne swallowed every error, so a run
+      // in which all 255 balance reads failed produced an error log containing
+      // only scanOffers timeouts — the phase that failed FIRST left no record
+      // at all, and the origin of the incident was unrecoverable from the
+      // export. Log the first few; after that the pattern is established and
+      // 255 identical lines help nobody.
+      try {
+        state._balanceFailLogged = n(state._balanceFailLogged) + 1;
+        if (state._balanceFailLogged <= 3) elog('balance read ' + row.label, e);
+        else if (state._balanceFailLogged === 4)
+          log('balance reads still failing — further identical errors suppressed');
+      } catch (_) {}
     }
   }
 
@@ -1293,7 +1346,16 @@ async function scanWallets(ws) {
     try {
       if (window.XAI_SCAN_PROGRESS) {
         window.XAI_SCAN_PROGRESS.walletsTotal   = rows.length;
-        window.XAI_SCAN_PROGRESS.walletsChecked = phase1Done;
+        // SUCCESSES, not attempts. phase1Done is the loop counter — the number
+        // of wallets REACHED — so on the 2026-09-07 run where every read timed
+        // out, the display climbed to 255/255 and reported "running smoothly"
+        // while not one wallet had answered. A progress bar that cannot tell
+        // "asked" from "answered" is not progress, it is decoration.
+        window.XAI_SCAN_PROGRESS.walletsChecked =
+          rows.filter(r => r.status === 'CHECKED').length;
+        window.XAI_SCAN_PROGRESS.walletsAttempted = phase1Done;
+        window.XAI_SCAN_PROGRESS.walletsFailed =
+          rows.filter(r => r.status === 'FAILED' || r.status === 'INVALID_ADDR').length;
         window.XAI_SCAN_PROGRESS.phase          = 'WALLET_PROGRESS';
       }
       if (window.__swDashApplied && typeof window.renderDashboardV1Live === 'function') window.renderDashboardV1Live();
@@ -1373,7 +1435,13 @@ async function scanWallets(ws) {
     try {
       if (window.XAI_SCAN_PROGRESS) {
         window.XAI_SCAN_PROGRESS.walletsTotal   = rows.length;
-        window.XAI_SCAN_PROGRESS.walletsChecked = rows.length;   // balances all read
+        // WAS: rows.length, with the comment "balances all read". That comment
+        // was an assumption, and on a failed run it was simply false — it
+        // pinned the display at 255/255 no matter how many reads had failed.
+        window.XAI_SCAN_PROGRESS.walletsChecked =
+          rows.filter(r => r.status === 'CHECKED').length;
+        window.XAI_SCAN_PROGRESS.walletsFailed =
+          rows.filter(r => r.status === 'FAILED' || r.status === 'INVALID_ADDR').length;
         window.XAI_SCAN_PROGRESS.phase          = 'LEDGER';
       }
       if (window.__swDashApplied && typeof window.renderDashboardV1Live === 'function') window.renderDashboardV1Live();
@@ -2887,6 +2955,26 @@ function publicRiskLabel(p) {
   // softer public framing only as a secondary qualifier.
   const r = (p && p.risk_score) || state.riskScore || {};
   const s = n(r.score);
+
+  // ── A SCORE OVER NOTHING IS NOT A LOW SCORE ────────────────────────────
+  // SW-20260907-7UDKL printed "5/100 — GREEN / QUIET (LOW / QUIET)" on a run
+  // where ZERO of 255 wallets answered. Every other line in that report said
+  // so — "unread, not clear", "re-run before you trust a single total" — and
+  // then the risk line handed the reader the one phrase that sounds like an
+  // all-clear. The score is computed from large_transfers and shadow volume,
+  // both of which are empty when nothing was read, so an unreadable night
+  // scores the same as a genuinely calm one.
+  //
+  // The band is withheld rather than softened: a colour is a verdict, and
+  // this run had no evidence to reach one.
+  try {
+    const cov = (p && p.tx_scan_coverage) || (typeof state !== 'undefined' && state.txScanCoverage) || null;
+    const target = cov ? n(cov.target_wallets) : 0;
+    const proved = cov ? n(cov.complete_wallets) : 0;
+    if (target > 0 && proved === 0) {
+      return 'NOT SCORED — no wallet proved its transaction window this run, so there is no evidence to score. Re-run before reading any risk level.';
+    }
+  } catch (_) {}
   const internal = r.label || (
     s >= 75 ? 'BLACK / EXTREME' :
     s >= 50 ? 'ORANGE / ACTIVE' :
