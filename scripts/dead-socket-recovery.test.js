@@ -1,19 +1,25 @@
 #!/usr/bin/env node
 /* ── AN OPEN SOCKET THAT STOPS ANSWERING ──────────────────────────────────────
    SW-20260907-7UDKL, a real production run: 0 of 255 wallets read, 255
-   unproven windows, no validated run anchor, sixteen minutes of wall clock,
-   and not one reconnect attempted.
+   unproven windows, no validated run anchor, sixteen minutes of wall clock.
+
+   SCOPE OF THE CLAIM. These tests demonstrate a controlled open-but-silent
+   MECHANISM. They do not recover the production incident's trace: the export
+   records neither socket readyState nor reconnect attempts, so it cannot show
+   that the original socket stayed OPEN or that no reconnect occurred
+   throughout. The initiating cause was not preserved — itself one of the
+   defects fixed here.
 
    THE MECHANISM, in the merged source:
 
        function _sockOpen(w) { return !!w && w.readyState === 1; }
 
    A WebSocket that is OPEN but answering nothing still has readyState 1. So
-   _linkDown() read the link as healthy, _ensureSock() handed the same dead
-   socket back on every call, and every request waited its full timeout before
+   _linkDown() reads such a link as healthy, _ensureSock() hands the same dead
+   socket back on every call, and every request waits its full timeout before
    rejecting. Nothing counted consecutive timeouts. _reconnectFails only
-   increments when connectXRPL() throws, which never happened, because no
-   reconnect was ever attempted. The guard written to stop a batch pass
+   increments when connectXRPL() throws, which an open-but-silent replacement
+   never does, because opening SUCCEEDS. The guard written to stop a batch pass
    "walking its whole list producing one identical error per wallet" could not
    fire — it asks about readyState, not about responsiveness.
 
@@ -77,12 +83,19 @@ const INSTALL_FAKE_WS = () => {
   window.SW_XRPL_RPC_TIMEOUT_MS = 40;      // ms, so three timeouts cost ~120ms
   window.__SW_SOCKETS = [];
   window.__SW_NEXT_ANSWERS = false;        // do sockets created from now on answer?
+  window.__SW_NEXT_ERROR_COMMANDS = null;  // commands that fail at the XRPL level
+  window.__SW_NEXT_SILENCE = null;         // commands that go unanswered N times
   const OPEN = 1, CLOSED = 3;
   class FakeWS {
     constructor(url) {
       this.url = url;
       this.readyState = OPEN;              // "connected" from the first tick
       this.answer = window.__SW_NEXT_ANSWERS;
+      // Sockets that the APPLICATION opens for itself (run() builds its own
+      // connection) cannot be configured by the test after the fact, so the
+      // fault travels with the constructor.
+      this.errorCommands = window.__SW_NEXT_ERROR_COMMANDS || null;
+      this.silence = window.__SW_NEXT_SILENCE ? Object.assign({}, window.__SW_NEXT_SILENCE) : null;
       this.sent = [];
       this._listeners = { message: [], close: [] };
       window.__SW_SOCKETS.push(this);
@@ -689,65 +702,75 @@ const INSTALL_FAKE_WS = () => {
   const r10 = await page.evaluate(async () => {
     const realRoster = window.getActiveWatchlist;
     const out = {};
+    // A SMALL FROZEN FIXTURE ROSTER. Nonempty is the point — an empty roster
+    // makes every "nothing was proven" assertion true for the wrong reason.
+    // The 255 of the incident is not a required constant.
+    const FIXTURE = [
+      { address: 'rrrrrrrrrrrrrrrrrrrrrhoLvTp', label: 'FIXTURE ONE',   cat: 'whale',    tier: 3 },
+      { address: 'rrrrrrrrrrrrrrrrrrrrbzbvji',  label: 'FIXTURE TWO',   cat: 'exchange', tier: 2 },
+      { address: 'rrrrrrrrrrrrrrrrrNAMEtxvNvQ', label: 'FIXTURE THREE', cat: 'whale',    tier: 3 }
+    ];
+    const dom = (id) => { const e = document.getElementById(id); return e ? (e.textContent || '') : null; };
+    const snapshot = () => {
+      const prog = window.XAI_SCAN_PROGRESS || {};
+      const cov  = (state.pack && state.pack.tx_scan_coverage) || state.txScanCoverage || null;
+      const exp  = window.buildShadowWatchTotalFile();
+      return {
+        // the dashboard, read from the DOM after the real renderer ran
+        status:        dom('swScanStatus'),
+        footStatus:    dom('swFootStatus'),
+        // the three quantities that must stay distinct
+        attempted:     Number(prog.walletsAttempted) || 0,
+        checked:       Number(prog.walletsChecked)   || 0,
+        walletsFailed: Number(prog.walletsFailed)    || 0,
+        rosterSize:    Number(prog.walletsTotal)     || 0,
+        provenWindows: cov ? (Number(cov.complete_wallets) || 0) : null,
+        coverageTarget: cov ? (Number(cov.target_wallets) || 0) : null,
+        errorLog:      dom('errorLog'),
+        // the report the operator reads, and the file they send
+        reportLen:     (dom('mainReport') || '').length,
+        reportIncomplete: /TX WINDOW: INCOMPLETE/.test(dom('mainReport') || ''),
+        exportLen:     exp.length,
+        exportHasReport:   /TX WINDOW/.test(exp),
+        exportQuietVerdict: /GREEN \/ QUIET|LOW \/ QUIET/.test(exp),
+        exportNotScored:   /NOT SCORED/.test(exp),
+        exportFirstCause:  /balance read FIXTURE/.test(exp),
+        exportEmptySections: (exp.match(/\[EMPTY \/ NOT GENERATED THIS RUN\]/g) || []).length
+      };
+    };
     try {
-      window.getActiveWatchlist = () => [
-        { address: 'rrrrrrrrrrrrrrrrrrrrrhoLvTp', label: 'TEST WALLET', cat: 'whale', tier: 3 }
-      ];
+      window.getActiveWatchlist = () => FIXTURE.slice();
+      const el = document.getElementById('errorLog');
+
+      // ── FAILED RUN ONE ─────────────────────────────────────────────────
+      // Every balance read fails at the XRPL level: the transport is healthy
+      // and answering, so this is a READ failure, which is the harder case —
+      // nothing about the socket looks wrong.
       state._sock = null; state._reconnecting = null; state._reconnectFails = 0;
       state._silentReplacements = 0; state._runAbortReason = null;
       window.__SW_NEXT_ANSWERS = true;
-      const sock = await window.connectXRPL();
-      state._sock = sock;
-      // Every balance read fails at the XRPL level. The transport is healthy,
-      // so this is a READ failure, not a link failure — the harder case,
-      // because nothing about the socket looks wrong.
-      sock.errorCommands = { account_info: 'actNotFound' };
-      const el = document.getElementById('errorLog');
+      window.__SW_NEXT_ERROR_COMMANDS = { account_info: 'actNotFound' };
       if (el) el.textContent = 'No errors yet.';
-      document.body.classList.add('scanning');       // the state it renders in
-      await window.scanWallets(sock);
+      // THE REAL ORCHESTRATOR — scan, flags, escrow, flow, pack, risk score,
+      // and the report render. Not scanWallets in isolation.
+      await window.run();
+      out.failed = snapshot();
 
-      const prog = window.XAI_SCAN_PROGRESS || {};
-      out.failed = {
-        status: window._swScanStatusText(),
-        attempted: Number(prog.walletsAttempted) || 0,
-        checked: Number(prog.walletsChecked) || 0,
-        walletsFailed: Number(prog.walletsFailed) || 0,
-        errorLogHasCause: !!(el && /balance read TEST WALLET/.test(el.textContent)),
-        errorLogEmpty: !!(el && /^No errors yet/.test(el.textContent))
-      };
-      // The real render, not a string built for the test.
-      try { window._swRenderReactor(); } catch (_) {}
-      const st = document.getElementById('swScanStatus');
-      const ft = document.getElementById('swFootStatus');
-      out.failed.rendered = st ? (st.textContent || '') : null;
-      out.failed.renderedFoot = ft ? (ft.textContent || '') : null;
-      // The real export the operator sends.
-      // THE REAL EXPORT the operator sends. Scope this honestly: this harness
-      // runs a scan, not a full report build, so the narrative sections come
-      // out "[EMPTY / NOT GENERATED THIS RUN]". Asserting that such a file
-      // does NOT contain "Running smoothly" would be vacuous — it contains
-      // almost nothing. The ERROR LOG section IS generated here, and it is the
-      // section that was empty during the incident, so that is what gets
-      // asserted: positively, with a control.
-      const exp = window.buildShadowWatchTotalFile();
-      out.failed.exportLen = exp.length;
-      out.failed.exportHasErrorSection = /SECTION 09 — ERROR LOG/.test(exp);
-      out.failed.exportHasFirstCause = /balance read TEST WALLET/.test(exp);
-      out.failed.exportSectionsEmpty = (exp.match(/\[EMPTY \/ NOT GENERATED THIS RUN\]/g) || []).length;
+      // ── FAILED RUN TWO, same page ──────────────────────────────────────
+      // Its own first cause must be recorded, not suppressed by run one's
+      // spent budget.
+      state._sock = null; state._reconnecting = null; state._reconnectFails = 0;
+      if (el) el.textContent = 'No errors yet.';
+      await window.run();
+      out.secondFailed = snapshot();
 
-      // CONTROL: the same surfaces on a run that actually read its wallet.
+      // ── TRANSPORT SILENT, driven by the real breaker ───────────────────
+      // A read failure and an abandoned transport are different facts and the
+      // dashboard must not collapse them. The flag is set by the production
+      // code path, not by the test.
       state._sock = null; state._reconnecting = null; state._reconnectFails = 0;
       state._silentReplacements = 0; state._runAbortReason = null;
-      const sock2 = await window.connectXRPL();
-      state._sock = sock2;
-      if (el) el.textContent = 'No errors yet.';
-      await window.scanWallets(sock2);
-      // (b) TRANSPORT SILENT, driven by the real breaker rather than by setting
-      // the flag: every socket goes quiet until the run takes its own terminal
-      // decision, and the dashboard must name that rather than the read count.
-      state._sock = null; state._reconnecting = null; state._reconnectFails = 0;
-      state._silentReplacements = 0; state._runAbortReason = null;
+      window.__SW_NEXT_ERROR_COMMANDS = null;
       window.__SW_NEXT_ANSWERS = false;
       for (let i = 0; i < 40 && !state._runAbortReason; i++) {
         try { await window.xrpl(null, { command: 'server_info' }); } catch (_) {}
@@ -759,53 +782,73 @@ const INSTALL_FAKE_WS = () => {
       state._runAbortReason = null;
       window.__SW_NEXT_ANSWERS = true;
 
-      const prog2 = window.XAI_SCAN_PROGRESS || {};
-      const exp2 = window.buildShadowWatchTotalFile();
-      out.healthy = {
-        status: window._swScanStatusText(),
-        attempted: Number(prog2.walletsAttempted) || 0,
-        checked: Number(prog2.walletsChecked) || 0,
-        exportHasFirstCause: /balance read TEST WALLET/.test(exp2)
-      };
+      // ── SUCCESSFUL CONTROL, same nonempty roster ───────────────────────
+      // Without this the gate could pass by permanently refusing to succeed.
+      window.__SW_NEXT_ERROR_COMMANDS = null;
+      state._sock = null; state._reconnecting = null; state._reconnectFails = 0;
+      state._silentReplacements = 0; state._runAbortReason = null;
+      if (el) el.textContent = 'No errors yet.';
+      await window.run();
+      out.healthy = snapshot();
     } catch (e) {
-      out.threw = e.message;
+      out.threw = e.message + ' | ' + String(e.stack || '').split('\n').slice(0, 3).join(' / ');
     } finally {
       window.getActiveWatchlist = realRoster;
-      document.body.classList.remove('scanning');
+      window.__SW_NEXT_ERROR_COMMANDS = null;
     }
     return out;
   });
-  console.log('     failed : ' + JSON.stringify(r10.failed));
-  console.log('     healthy: ' + JSON.stringify(r10.healthy));
-  check('the all-read-failure scan completed without throwing', !r10.threw, r10.threw);
-  check('THE REGRESSION — the dashboard does NOT say "Running smoothly" over an unread run',
-        !!r10.failed && r10.failed.status !== 'Running smoothly' &&
-        /Attention needed/.test(r10.failed.status), r10.failed);
-  check('and the real render writes that text to the actual status elements',
-        !!r10.failed && r10.failed.rendered === r10.failed.status &&
-        r10.failed.renderedFoot === r10.failed.status, r10.failed);
-  check('health is not zero-error — the first cause reached the error log',
-        !!r10.failed && r10.failed.errorLogHasCause === true &&
-        r10.failed.errorLogEmpty === false, r10.failed);
-  check('attempts, successful reads and failures stay distinct',
-        !!r10.failed && r10.failed.attempted === 1 && r10.failed.checked === 0 &&
-        r10.failed.walletsFailed === 1, r10.failed);
-  // Positive, not "the file lacks a bad string" — the narrative sections are
-  // not generated by this harness, so a negative there would prove nothing.
-  check('THE REGRESSION — the real export FILE carries the first cause, not a clean error log',
-        !!r10.failed && r10.failed.exportLen > 0 &&
-        r10.failed.exportHasErrorSection === true &&
-        r10.failed.exportHasFirstCause === true, r10.failed);
-  check('CONTROL: the same export from a run that read its wallet carries no such line',
-        !!r10.healthy && r10.healthy.exportHasFirstCause === false, r10.healthy);
-  console.log('     aborted: ' + JSON.stringify(r10.aborted));
-  check('THE REGRESSION — an abandoned run names the silent link on the dashboard',
+  console.log('     failed  : ' + JSON.stringify(r10.failed));
+  console.log('     second  : ' + JSON.stringify(r10.secondFailed));
+  console.log('     healthy : ' + JSON.stringify(r10.healthy));
+  if (r10.threw) console.log('     THREW   : ' + r10.threw);
+  check('the real run() completed end-to-end on a nonempty roster', !r10.threw, r10.threw);
+  const F = r10.failed || {}, S = r10.secondFailed || {}, H = r10.healthy || {};
+
+  // (1) a nonempty roster, real coverage — not a manually constructed pack
+  check('the fixture roster is NONEMPTY and its coverage came from the run itself',
+        F.rosterSize === 3 && F.coverageTarget === 3, F);
+
+  // (2) the actual dashboard DOM, after the real renderer
+  check('THE REGRESSION — the dashboard does NOT read "Running smoothly" over an unread run',
+        F.status !== 'Running smoothly' && /Attention needed/.test(F.status || '') &&
+        F.footStatus === F.status, F);
+  check('attempts, successful reads and PROVEN WINDOWS stay three distinct quantities',
+        F.attempted === 3 && F.checked === 0 && F.walletsFailed === 3 &&
+        F.provenWindows === 0, F);
+  check('the dashboard does not show all wallets read',
+        F.checked !== F.rosterSize, F);
+  check('health is not zero-error — every failed read left its cause',
+        /balance read FIXTURE ONE/.test(F.errorLog || '') &&
+        /balance read FIXTURE TWO/.test(F.errorLog || '') &&
+        /balance read FIXTURE THREE/.test(F.errorLog || ''), F.errorLog);
+  check('the rendered report refuses to certify the window',
+        F.reportLen > 0 && F.reportIncomplete === true, F);
+
+  // (3) the actual final export builder
+  check('the export is REAL — every section generated, nothing stale or empty',
+        F.exportLen > 10000 && F.exportEmptySections === 0 && F.exportHasReport === true, F);
+  check("THE REGRESSION — the export carries this run's failure and coverage",
+        F.exportNotScored === true && F.exportFirstCause === true, F);
+  check('and carries NO assessed quiet-market verdict',
+        F.exportQuietVerdict === false, F);
+
+  // (4) a second failed run in the same page, and a success control
+  check('a second failed run records its OWN first cause',
+        /balance read FIXTURE ONE/.test(S.errorLog || '') &&
+        S.checked === 0 && S.provenWindows === 0 && S.exportNotScored === true, S);
+  console.log('     aborted : ' + JSON.stringify(r10.aborted));
+  check('THE REGRESSION — an ABANDONED run names the silent link, distinct from an unread one',
         !!r10.aborted && r10.aborted.abortReason === 'XRPL_TRANSPORT_SILENT' &&
-        /Attention needed/.test(r10.aborted.status) &&
-        /silent/i.test(r10.aborted.status), r10.aborted);
-  check('CONTROL: a run that DID read its wallet still reports smoothly',
-        !!r10.healthy && r10.healthy.checked === 1 &&
-        r10.healthy.status === 'Running smoothly', r10.healthy);
+        /Attention needed/.test(r10.aborted.status || '') &&
+        /silent/i.test(r10.aborted.status || ''), r10.aborted);
+  check('CONTROL: the same nonempty roster still SUCCEEDS — the gate cannot pass by never succeeding',
+        H.checked === 3 && H.provenWindows === 3 && H.walletsFailed === 0, H);
+  check('CONTROL: a successful run does get its assessed verdict and no failure trace',
+        H.exportQuietVerdict === true && H.exportNotScored === false &&
+        H.exportFirstCause === false && H.reportIncomplete === false, H);
+  check('CONTROL: and its dashboard is not flagged for attention',
+        !/Attention needed/.test(H.status || ''), H);
 
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 

@@ -1067,13 +1067,19 @@ async function xrpl(ws, cmd) {
       fn(arg);
     }
     // ── AN OPEN SOCKET THAT DOES NOT ANSWER ──────────────────────────────
-    // SW-20260907-7UDKL: every request in a production run timed out at 15s,
-    // for over sixteen minutes, and not one reconnect was attempted. The
-    // socket's readyState stayed 1 the whole time — the server accepted the
-    // connection and then answered nothing.
+    // SW-20260907-7UDKL: a production run read 0 of 255 wallets over sixteen
+    // minutes, its export full of timeouts and carrying no reconnect log line.
     //
-    // _sockOpen() tests readyState, so _linkDown() read the link as healthy
-    // and _ensureSock() handed the same dead socket back every time. The guard
+    // WHAT IS ESTABLISHED, and what is not. The export does not record socket
+    // readyState or reconnect attempts, so it cannot prove the socket stayed
+    // OPEN or that no reconnect occurred. What IS established, from the source
+    // rather than the incident, is that this recovery path did not exist: a
+    // socket that is open but silent leaves readyState at 1, and NOTHING here
+    // counted consecutive timeouts. The observed run is consistent with that
+    // gap; the initiating cause was not preserved.
+    //
+    // _sockOpen() tests readyState, so _linkDown() reads such a link as healthy
+    // and _ensureSock() hands the same dead socket back every time. The guard
     // written to stop a batch pass "walking its whole list producing one
     // identical error per wallet" could not fire, because it was asking the
     // wrong question. 255 wallets x 15s, in batches of 8, is the crawl the
