@@ -679,6 +679,134 @@ const INSTALL_FAKE_WS = () => {
   check('CONTROL: a successful read writes no first-cause line',
         !!r9.control && r9.control.logged === false, r9.control);
 
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log('\n10. the DASHBOARD and the FINAL EXPORT both carry the failure');
+  // §5 asserts publicRiskLabel on a hand-made pack and §9 drives scanWallets,
+  // but neither is the dashboard the operator looks at or the file they send.
+  // "Running smoothly" lives in _swScanStatusText, which reads body classes —
+  // what the engine is DOING — and never asks whether anything answered. This
+  // drives a real all-read-failure scan and then reads the real surfaces.
+  const r10 = await page.evaluate(async () => {
+    const realRoster = window.getActiveWatchlist;
+    const out = {};
+    try {
+      window.getActiveWatchlist = () => [
+        { address: 'rrrrrrrrrrrrrrrrrrrrrhoLvTp', label: 'TEST WALLET', cat: 'whale', tier: 3 }
+      ];
+      state._sock = null; state._reconnecting = null; state._reconnectFails = 0;
+      state._silentReplacements = 0; state._runAbortReason = null;
+      window.__SW_NEXT_ANSWERS = true;
+      const sock = await window.connectXRPL();
+      state._sock = sock;
+      // Every balance read fails at the XRPL level. The transport is healthy,
+      // so this is a READ failure, not a link failure — the harder case,
+      // because nothing about the socket looks wrong.
+      sock.errorCommands = { account_info: 'actNotFound' };
+      const el = document.getElementById('errorLog');
+      if (el) el.textContent = 'No errors yet.';
+      document.body.classList.add('scanning');       // the state it renders in
+      await window.scanWallets(sock);
+
+      const prog = window.XAI_SCAN_PROGRESS || {};
+      out.failed = {
+        status: window._swScanStatusText(),
+        attempted: Number(prog.walletsAttempted) || 0,
+        checked: Number(prog.walletsChecked) || 0,
+        walletsFailed: Number(prog.walletsFailed) || 0,
+        errorLogHasCause: !!(el && /balance read TEST WALLET/.test(el.textContent)),
+        errorLogEmpty: !!(el && /^No errors yet/.test(el.textContent))
+      };
+      // The real render, not a string built for the test.
+      try { window._swRenderReactor(); } catch (_) {}
+      const st = document.getElementById('swScanStatus');
+      const ft = document.getElementById('swFootStatus');
+      out.failed.rendered = st ? (st.textContent || '') : null;
+      out.failed.renderedFoot = ft ? (ft.textContent || '') : null;
+      // The real export the operator sends.
+      // THE REAL EXPORT the operator sends. Scope this honestly: this harness
+      // runs a scan, not a full report build, so the narrative sections come
+      // out "[EMPTY / NOT GENERATED THIS RUN]". Asserting that such a file
+      // does NOT contain "Running smoothly" would be vacuous — it contains
+      // almost nothing. The ERROR LOG section IS generated here, and it is the
+      // section that was empty during the incident, so that is what gets
+      // asserted: positively, with a control.
+      const exp = window.buildShadowWatchTotalFile();
+      out.failed.exportLen = exp.length;
+      out.failed.exportHasErrorSection = /SECTION 09 — ERROR LOG/.test(exp);
+      out.failed.exportHasFirstCause = /balance read TEST WALLET/.test(exp);
+      out.failed.exportSectionsEmpty = (exp.match(/\[EMPTY \/ NOT GENERATED THIS RUN\]/g) || []).length;
+
+      // CONTROL: the same surfaces on a run that actually read its wallet.
+      state._sock = null; state._reconnecting = null; state._reconnectFails = 0;
+      state._silentReplacements = 0; state._runAbortReason = null;
+      const sock2 = await window.connectXRPL();
+      state._sock = sock2;
+      if (el) el.textContent = 'No errors yet.';
+      await window.scanWallets(sock2);
+      // (b) TRANSPORT SILENT, driven by the real breaker rather than by setting
+      // the flag: every socket goes quiet until the run takes its own terminal
+      // decision, and the dashboard must name that rather than the read count.
+      state._sock = null; state._reconnecting = null; state._reconnectFails = 0;
+      state._silentReplacements = 0; state._runAbortReason = null;
+      window.__SW_NEXT_ANSWERS = false;
+      for (let i = 0; i < 40 && !state._runAbortReason; i++) {
+        try { await window.xrpl(null, { command: 'server_info' }); } catch (_) {}
+      }
+      out.aborted = {
+        abortReason: state._runAbortReason,
+        status: window._swScanStatusText()
+      };
+      state._runAbortReason = null;
+      window.__SW_NEXT_ANSWERS = true;
+
+      const prog2 = window.XAI_SCAN_PROGRESS || {};
+      const exp2 = window.buildShadowWatchTotalFile();
+      out.healthy = {
+        status: window._swScanStatusText(),
+        attempted: Number(prog2.walletsAttempted) || 0,
+        checked: Number(prog2.walletsChecked) || 0,
+        exportHasFirstCause: /balance read TEST WALLET/.test(exp2)
+      };
+    } catch (e) {
+      out.threw = e.message;
+    } finally {
+      window.getActiveWatchlist = realRoster;
+      document.body.classList.remove('scanning');
+    }
+    return out;
+  });
+  console.log('     failed : ' + JSON.stringify(r10.failed));
+  console.log('     healthy: ' + JSON.stringify(r10.healthy));
+  check('the all-read-failure scan completed without throwing', !r10.threw, r10.threw);
+  check('THE REGRESSION — the dashboard does NOT say "Running smoothly" over an unread run',
+        !!r10.failed && r10.failed.status !== 'Running smoothly' &&
+        /Attention needed/.test(r10.failed.status), r10.failed);
+  check('and the real render writes that text to the actual status elements',
+        !!r10.failed && r10.failed.rendered === r10.failed.status &&
+        r10.failed.renderedFoot === r10.failed.status, r10.failed);
+  check('health is not zero-error — the first cause reached the error log',
+        !!r10.failed && r10.failed.errorLogHasCause === true &&
+        r10.failed.errorLogEmpty === false, r10.failed);
+  check('attempts, successful reads and failures stay distinct',
+        !!r10.failed && r10.failed.attempted === 1 && r10.failed.checked === 0 &&
+        r10.failed.walletsFailed === 1, r10.failed);
+  // Positive, not "the file lacks a bad string" — the narrative sections are
+  // not generated by this harness, so a negative there would prove nothing.
+  check('THE REGRESSION — the real export FILE carries the first cause, not a clean error log',
+        !!r10.failed && r10.failed.exportLen > 0 &&
+        r10.failed.exportHasErrorSection === true &&
+        r10.failed.exportHasFirstCause === true, r10.failed);
+  check('CONTROL: the same export from a run that read its wallet carries no such line',
+        !!r10.healthy && r10.healthy.exportHasFirstCause === false, r10.healthy);
+  console.log('     aborted: ' + JSON.stringify(r10.aborted));
+  check('THE REGRESSION — an abandoned run names the silent link on the dashboard',
+        !!r10.aborted && r10.aborted.abortReason === 'XRPL_TRANSPORT_SILENT' &&
+        /Attention needed/.test(r10.aborted.status) &&
+        /silent/i.test(r10.aborted.status), r10.aborted);
+  check('CONTROL: a run that DID read its wallet still reports smoothly',
+        !!r10.healthy && r10.healthy.checked === 1 &&
+        r10.healthy.status === 'Running smoothly', r10.healthy);
+
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 
   await browser.close(); srv.close();

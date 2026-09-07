@@ -1541,6 +1541,9 @@ async function scanWallets(ws) {
         // pinned the display at 255/255 no matter how many reads had failed.
         window.XAI_SCAN_PROGRESS.walletsChecked =
           rows.filter(r => r.status === 'CHECKED').length;
+        // Phase 1 publishes attempts; Phase 2 must keep doing so, or the pair
+        // the dashboard compares goes stale halfway through the run.
+        window.XAI_SCAN_PROGRESS.walletsAttempted = rows.length;
         window.XAI_SCAN_PROGRESS.walletsFailed =
           rows.filter(r => r.status === 'FAILED' || r.status === 'INVALID_ADDR').length;
         window.XAI_SCAN_PROGRESS.phase          = 'LEDGER';
@@ -21529,6 +21532,28 @@ function _swLink() {
 }
 function _swScanning() { var b = document.body.classList; return b.contains('scanning') || b.contains('building'); }
 function _swScanStatusText() {
+  // A dashboard that reads "Running smoothly" while every wallet read is
+  // failing is the same defect as a risk score computed over nothing: the
+  // words describe the LOOP, not the evidence. SW-20260907-7UDKL ran for
+  // sixteen minutes reading zero of 255 wallets, and this line said "Running
+  // smoothly" for all of it while the report underneath correctly refused to
+  // certify anything. The status is derived from body classes alone, which
+  // record what the engine is DOING, never whether it is getting answers.
+  try {
+    if (typeof state !== 'undefined' && state && state._runAbortReason) {
+      return 'Attention needed \u2014 XRPL link silent, run abandoned';
+    }
+    var p = (typeof window !== 'undefined') && window.XAI_SCAN_PROGRESS;
+    if (p) {
+      var attempted = Number(p.walletsAttempted) || 0;
+      var checked   = Number(p.walletsChecked)   || 0;
+      // Only once something has actually been attempted: before a scan starts
+      // both are zero, and "Standing by" is the honest answer then.
+      if (attempted > 0 && checked === 0) {
+        return 'Attention needed \u2014 no wallet has been read';
+      }
+    }
+  } catch (_) {}
   switch (_swMode()) {
     case 'SCANNING': return 'Running smoothly';
     case 'BUILDING': return 'Sealing evidence';
