@@ -97,6 +97,23 @@ const INSTALL_FAKE_WS = () => {
       this.sent.push(raw);
       if (!this.answer) return;            // THE DEFECT: accepted, never answered
       let m; try { m = JSON.parse(raw); } catch (_) { return; }
+      // A TRANSIENT failure, distinct from a dead socket: this connection is
+      // healthy and answering, but the next N calls of one command go
+      // unanswered. That is what a retry budget exists for, and without it
+      // the budget can only ever be read, never exercised.
+      if (this.silence && this.silence[m.command] > 0) { this.silence[m.command]--; return; }
+      // An XRPL-LEVEL error: the socket ANSWERS (so its health count resets)
+      // but the command fails. This is what a read failure looks like when the
+      // transport is fine, which is the case balanceOne's first-cause trace
+      // exists for.
+      if (this.errorCommands && this.errorCommands[m.command]) {
+        const errReply = JSON.stringify({ id: m.id, status: 'error',
+                                          error: this.errorCommands[m.command] });
+        setTimeout(() => {
+          (this._listeners.message || []).forEach(fn => { try { fn({ data: errReply }); } catch (_) {} });
+        }, Number(this.replyDelayMs) || 0);
+        return;
+      }
       // REAL XRPL SHAPES. Replying {ok:true} proves the RPC plumbing responds;
       // it does not prove an anchored wallet scan resumes. These are the
       // shapes #57's anchor, validated and response-ceiling rules actually
@@ -418,18 +435,38 @@ const INSTALL_FAKE_WS = () => {
     state._silentReplacements = 0; state._runAbortReason = null;
     window.__SW_NEXT_ANSWERS = true;
     const a = await window.connectXRPL();
-    a.replyDelayMs = 300;                     // A answers, but late
     state._sock = a;
-    const slow = window.xrpl(a, { command: 'server_info' }).catch(() => 'settled');
 
+    // A earns a real timeout of its own, so the reset below has something to
+    // undo. Without this the check could pass on a count that was never set.
+    a.answer = false;
+    try { await window.xrpl(a, { command: 'server_info' }); } catch (_) {}
+    const aBeforeReply = Number(a._swTimeouts) || 0;      // 1
+
+    // B becomes the current socket and earns its own timeout.
     window.__SW_NEXT_ANSWERS = false;
-    const b = await window.connectXRPL();     // B is silent
+    const b = await window.connectXRPL();
     state._sock = b;
     try { await window.xrpl(b, { command: 'server_info' }); } catch (_) {}
-    const bAfterOwnTimeout = Number(b._swTimeouts) || 0;
-    await slow;                               // A's late reply lands here
-    await new Promise(r => setTimeout(r, 50));
+    const bAfterOwnTimeout = Number(b._swTimeouts) || 0;   // 1
+
+    // NOW the retired socket answers. This must reach onMsg with A's listener
+    // still attached — the earlier version delayed A's reply 300ms against a
+    // 40ms budget, so A timed out first, done() removed the listener, and the
+    // reply was discarded before it ever reached the reset. The check passed
+    // because the path was never taken. Answering inside the budget is what
+    // makes this a test about SCOPING rather than about listener teardown.
+    // (Arming a longer budget for A instead does not work: xrpl() awaits
+    // _ensureSock before arming its timer, so a global set synchronously
+    // around the call is already back to the short value by then.)
+    a.answer = true; a.replyDelayMs = 0;
+    let replyArrived = false;
+    try { replyArrived = !!((await window.xrpl(a, { command: 'server_info' })) || {}).info; }
+    catch (_) {}
+    await new Promise(r => setTimeout(r, 20));
     return {
+      replyArrived,
+      aBeforeReply,
       aTimeouts: Number(a._swTimeouts) || 0,
       bAfterOwnTimeout,
       bAfterLateReply: Number(b._swTimeouts) || 0,
@@ -437,6 +474,12 @@ const INSTALL_FAKE_WS = () => {
     };
   });
   console.log('     ' + JSON.stringify(r7));
+  // Guards this test against becoming vacuous again: if the reply is ever
+  // dropped before reaching onMsg, replyArrived is false and this fails.
+  check('the retired socket\'s reply actually ARRIVES — the path is exercised',
+        r7.replyArrived === true && r7.aBeforeReply === 1, r7);
+  check('and it resets the socket that answered',
+        r7.aTimeouts === 0, r7);
   check('THE REGRESSION — a late reply from a retired socket does not reset the replacement',
         r7.distinct === true && r7.bAfterOwnTimeout === 1 && r7.bAfterLateReply === 1, r7);
 
@@ -455,16 +498,130 @@ const INSTALL_FAKE_WS = () => {
   check('the first-cause budget is spent by run one and reset for run two',
         r8.beforeReset === 3 && r8.afterReset === 0, r8);
 
-  check('an invalid timeout override cannot disable the timeout', await page.evaluate(() => {
+  // The previous version of this check called a probe that returned a bare
+  // `true` and never consulted _rpcTimeoutMs at all, so it would have passed
+  // against a guard that did not exist. It now reads the value the timer is
+  // actually armed with.
+  const rOv = await page.evaluate(() => {
     const saved = window.SW_XRPL_RPC_TIMEOUT_MS;
-    const probe = (v) => { window.SW_XRPL_RPC_TIMEOUT_MS = v; return true; };
+    const read = (v) => { window.SW_XRPL_RPC_TIMEOUT_MS = v; return window._rpcTimeoutMs(); };
     // The guard accepts only a finite value > 0; everything else falls back to
     // the 15000ms production default, so the seam cannot switch it off.
-    const bad = [0, -1, Infinity, NaN, 'abc', null, undefined];
-    const ok = bad.every(v => { probe(v); return true; });
+    const bad = [0, -1, Infinity, NaN, 'abc', null, undefined, {}, [], -0];
+    const results = bad.map(read);
+    const good = read(40);
     window.SW_XRPL_RPC_TIMEOUT_MS = saved;
-    return ok;
-  }));
+    return { results, good, allDefault: results.every(v => v === 15000) };
+  });
+  check('an invalid timeout override cannot disable the timeout — every bad value falls back to 15000ms',
+        rOv.allDefault === true, rOv);
+  check('CONTROL: a valid override is still honoured, so the check is not vacuous',
+        rOv.good === 40, rOv);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log('\n9. the anchor retry budget is spent, not merely declared');
+  // Sections 6 calls window.xrpl directly, so it never reaches the acquisition
+  // loop in scanWallets — ANCHOR_ACQUIRE_ATTEMPTS could be set to 1 and every
+  // check still passed. This drives the REAL loop: getActiveWatchlist is
+  // stubbed empty so the roster phases no-op and only the anchor block runs.
+  const r9 = await page.evaluate(async () => {
+    const realRoster = window.getActiveWatchlist;
+    window.getActiveWatchlist = () => [];
+    const out = {};
+    const setup = (silenceLedger) => {
+      state._sock = null; state._reconnecting = null; state._reconnectFails = 0;
+      state._silentReplacements = 0; state._runAbortReason = null;
+      window.__SW_NEXT_ANSWERS = true;
+    };
+    try {
+      // (a) TRANSIENT: the first two ledger(validated) calls go unanswered on a
+      // socket that is otherwise healthy. Two timeouts is under the
+      // dead-socket threshold of three, so the socket survives and the third
+      // attempt answers — exactly the case the budget exists for.
+      setup();
+      let sock = await window.connectXRPL();
+      state._sock = sock;
+      sock.silence = { ledger: 2 };
+      state._balanceFailLogged = 3;          // run 1's spent budget, for the reset check
+      await window.scanWallets(sock);
+      out.transient = {
+        anchorOk: state.anchorOk === true,
+        anchorLedger: (state.runAnchor || {}).anchor_ledger || null,
+        proofProven: !!(((state.runAnchor || {}).history_exhaustion_proof) || {}).proven,
+        ledgerCalls: sock.sent.filter(r => (JSON.parse(r) || {}).command === 'ledger').length,
+        balanceBudgetReset: state._balanceFailLogged === 0,
+        runId: !!state.runId
+      };
+
+      // (b) PERMANENT: every ledger(validated) goes unanswered. The budget is
+      // exhausted and the run must decline to certify rather than proceed.
+      setup();
+      sock = await window.connectXRPL();
+      state._sock = sock;
+      sock.silence = { ledger: 99 };
+      await window.scanWallets(sock);
+      out.permanent = {
+        anchorOk: state.anchorOk === true,
+        anchorReason: (state.runAnchor || {}).reason || null,
+        ledgerCalls: sock.sent.filter(r => (JSON.parse(r) || {}).command === 'ledger').length
+      };
+      // (c) THE FIRST CAUSE IS ACTUALLY RECORDED. Section 5 only greps the
+      // source for the elog call, which still reads as present if the call is
+      // neutered — `if (false) elog(...)` passed that check. This drives one
+      // real wallet whose account_info fails at the XRPL level (an ANSWER, so
+      // the socket stays healthy and the dead-socket breaker is not involved)
+      // and reads the error log the export actually ships.
+      const el = document.getElementById('errorLog');
+      window.getActiveWatchlist = () => [
+        // A real base58 address shape — BASE58_RE rejects anything shorter as
+        // INVALID_ADDR before balanceOne ever issues a request, which would
+        // make this case pass for the wrong reason.
+        { address: 'rrrrrrrrrrrrrrrrrrrrrhoLvTp', label: 'TEST WALLET', cat: 'whale', tier: 3 }
+      ];
+      setup();
+      sock = await window.connectXRPL();
+      state._sock = sock;
+      sock.errorCommands = { account_info: 'actNotFound' };
+      if (el) el.textContent = 'No errors yet.';
+      await window.scanWallets(sock);
+      out.traced = {
+        logged: !!(el && /balance read TEST WALLET/.test(el.textContent)),
+        budget: n(state._balanceFailLogged)
+      };
+
+      // CONTROL: with the read succeeding, no first-cause line is written.
+      setup();
+      sock = await window.connectXRPL();
+      state._sock = sock;
+      if (el) el.textContent = 'No errors yet.';
+      await window.scanWallets(sock);
+      out.control = {
+        logged: !!(el && /balance read TEST WALLET/.test(el.textContent)),
+        budget: n(state._balanceFailLogged)
+      };
+    } catch (e) {
+      out.threw = e.message;
+    } finally {
+      window.getActiveWatchlist = realRoster;
+    }
+    return out;
+  });
+  console.log('     transient: ' + JSON.stringify(r9.transient));
+  console.log('     permanent: ' + JSON.stringify(r9.permanent));
+  check('the scan reached the anchor block without throwing', !r9.threw, r9.threw);
+  check('THE REGRESSION — a transient anchor failure is RETRIED, not fatal',
+        !!r9.transient && r9.transient.anchorOk === true && r9.transient.ledgerCalls === 3, r9.transient);
+  check('and the anchor it recovers is a real validated one with a proven range',
+        !!r9.transient && r9.transient.anchorLedger === 106799000 && r9.transient.proofProven === true, r9.transient);
+  check('the per-run first-cause budget is reset by the real scan, not a stub',
+        !!r9.transient && r9.transient.balanceBudgetReset === true, r9.transient);
+  check('CONTROL: a permanent failure exhausts the budget and the run does NOT certify',
+        !!r9.permanent && r9.permanent.anchorOk === false && r9.permanent.ledgerCalls === 3, r9.permanent);
+  console.log('     traced   : ' + JSON.stringify(r9.traced) + '  control: ' + JSON.stringify(r9.control));
+  check('THE REGRESSION — a failed balance read WRITES its first cause to the error log',
+        !!r9.traced && r9.traced.logged === true && r9.traced.budget >= 1, r9.traced);
+  check('CONTROL: a successful read writes no first-cause line',
+        !!r9.control && r9.control.logged === false, r9.control);
 
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 
