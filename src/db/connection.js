@@ -75,6 +75,7 @@ function redactedTarget() {
 // browser.
 let _injected = null;
 let _pool = null;
+let _idlePoolErrors = 0;
 
 // A transaction owns ONE checked-out Neon WebSocket connection. Separate
 // HTTP queries containing BEGIN/COMMIT do not provide this guarantee.
@@ -84,6 +85,10 @@ function getPool() {
     const { Pool, neonConfig } = require('@neondatabase/serverless');
     neonConfig.webSocketConstructor = require('ws');
     _pool = new Pool({ connectionString: connectionString(), max: 4, idleTimeoutMillis: 10000 });
+    // The driver removes a failed idle client, then emits this event. Without
+    // a listener Node terminates the whole scan and dumps the client object.
+    // Active-query failures still reject their transaction normally.
+    _pool.on('error', () => { _idlePoolErrors++; });
   }
   return _pool;
 }
@@ -95,7 +100,7 @@ async function transaction(work) {
     await client.query('COMMIT');
     return result;
   } catch (error) {
-    await client.query('ROLLBACK');
+    try { await client.query('ROLLBACK'); } catch (_) { /* preserve the original failure */ }
     throw error;
   } finally { client.release(); }
 }
@@ -163,6 +168,7 @@ async function health() {
     reachable: false,
     error: null
   };
+  out.idle_connection_recoveries = _idlePoolErrors;
   const exec = getExecutor();
   if (!exec) return out;
   try {

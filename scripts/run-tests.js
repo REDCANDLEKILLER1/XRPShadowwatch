@@ -47,6 +47,7 @@ const SUITES = [
   // No browser, no port, no database — pure decision logic for the evidence index.
   ['db-foundation',          'db-foundation.test.js',            null],
   ['evidence-boundary',      'evidence-boundary.test.js',        null],
+  ['desktop-navigation',     'desktop-navigation.test.js',       8230],
   // Pure decision logic, no browser and no network.
   ['dex-volume-truth',       'dex-volume-truth.test.js',         null],
   ['xrpl-quota',             'xrpl-quota-backpressure.test.js',  8221],

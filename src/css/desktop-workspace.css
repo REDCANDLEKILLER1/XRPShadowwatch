@@ -1,0 +1,22 @@
+#swDesktopNav { display:none; }
+@media(min-width:1100px) {
+  body.sw-desktop-ready #swDesktopNav { position:fixed; inset:0 0 auto; height:64px; z-index:9992; box-sizing:border-box;
+    display:flex; align-items:center; gap:5px; padding:10px 24px; background:#09130fff; border-bottom:1px solid #315340; }
+  #swDesktopNav .sw-desk-brand { color:#baffd3; font:800 16px 'Rajdhani',sans-serif; letter-spacing:.09em; margin-right:auto; }
+  #swDesktopNav button { padding:11px 14px; border:1px solid transparent; border-radius:7px; background:transparent; color:#9eb6a7;
+    font:600 13px Arial,sans-serif; cursor:pointer; }
+  #swDesktopNav button:hover { background:#16271d; color:#e1fbea; }
+  #swDesktopNav button[aria-current=page] { background:#173a25; border-color:#4a8d61; color:#baffd3; }
+  #swDesktopNav button:focus-visible { outline:2px solid #baffd3; outline-offset:2px; }
+  body.sw-desktop-ready #hud-top { top:64px; padding:8px 16px; height:104px; box-sizing:border-box; }
+  body.sw-desktop-ready #hud-top .hdr-row,body.sw-desktop-ready #xrpman-strip { display:none!important; }
+  body.sw-desktop-ready #hud-top .header-section { padding-top:0; padding-bottom:0; }
+  body.sw-desktop-ready #hud-bottom { top:168px!important; bottom:0; height:auto!important; }
+  body.sw-desktop-ready #command-deck { height:100%; border-radius:0; }
+  body.sw-desktop-ready .tab-bar { display:none; }
+  body.sw-desktop-ready #view-brief.active { top:64px; height:calc(100dvh - 64px); max-width:none; padding-top:0!important; }
+  body.sw-desktop-ready #brief-exit { display:none!important; }
+  body.sw-desktop-ready .view-panel.active { flex:1 1 auto; min-height:0; }
+  body.sw-desktop-ready .module-header { padding:12px 20px; }
+  body.sw-desktop-ready #wallet-resolver-modal>div,body.sw-desktop-ready #discovery-inbox-modal>div { max-height:calc(100vh - 100px); }
+}

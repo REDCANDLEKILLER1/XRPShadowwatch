@@ -11,6 +11,7 @@ async function main(){
     FROM scan_runs r JOIN scan_wallets w USING(scan_id)
     GROUP BY r.scan_id ORDER BY r.started_at DESC LIMIT 4`);
   console.log(JSON.stringify(runs.rows,null,2));
+  console.log(JSON.stringify((await q("SELECT scan_id,address,error FROM scan_wallets WHERE status='FAILED' ORDER BY updated_at DESC LIMIT 5")).rows));
   console.log(JSON.stringify((await q('SELECT count(*)::integer AS unique_transactions FROM transactions')).rows[0]));
 }
 main().catch(e=>{console.error(e.message);process.exitCode=1;}).finally(()=>db.close());

@@ -9779,6 +9779,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     el = document.createElement('div');
     el.id = 'morningReportFloat';
     el.className = 'morning-report-float mrf-hidden';
+    el.setAttribute('role','dialog');
+    el.setAttribute('aria-label','Morning report');
     el.innerHTML =
       '<div class="mrf-header" id="mrfHeader">' +
         '<button class="mrf-ico" id="mrfMenuBtn" type="button" title="Menu">\u2630</button>' +
@@ -9798,7 +9800,13 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         '<button class="mrf-menu-item" id="mrfDlWalletsBtn"     type="button">\u2B07 Download wallet suggestions</button>' +
         '<button class="mrf-menu-item" id="mrfDownloadTotalBtn" type="button">\u2B07 Download total report</button>' +
       '</div>' +
-      '<div id="mrfBody"    class="mrf-body"></div>' +
+      '<nav class="sw-desktop-reader-tools" aria-label="Report actions">' +
+        '<button type="button" data-reader-action="copy">Copy report</button>' +
+        '<button type="button" data-reader-action="download">Download</button>' +
+        '<button type="button" data-reader-action="full">Fill screen</button>' +
+        '<button type="button" data-reader-action="center">Center window</button>' +
+        '<button type="button" data-reader-action="close">Close report</button></nav>' +
+      '<div id="mrfBody"    class="mrf-body" tabindex="0" aria-label="Report text"></div>' +
       '<div id="mrfSources" class="mrf-sources"></div>';
     document.body.appendChild(el);
     _mrfDom = el;
@@ -9818,6 +9826,19 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     if (btnMenu)  btnMenu.onclick  = function(e) { if (menu) menu.classList.toggle('mrf-menu-hidden'); if (e) e.stopPropagation(); };
     if (btnDl)    btnDl.onclick     = function() { MORNING_REPORT_FLOAT.download(); };
     if (btnClose) btnClose.onclick  = function() { MORNING_REPORT_FLOAT.hide(); };
+    _mrfDom.querySelectorAll('[data-reader-action]').forEach(function(button){
+      button.onclick=function(){
+        var action=button.dataset.readerAction;
+        if(action==='copy')MORNING_REPORT_FLOAT.copy();
+        if(action==='download')MORNING_REPORT_FLOAT.download();
+        if(action==='full')MORNING_REPORT_FLOAT.toggleFull();
+        if(action==='close')MORNING_REPORT_FLOAT.hide();
+        if(action==='center'){
+          _mrfDom.style.left='';_mrfDom.style.top='';_mrfDom.style.transform='';
+          _mrfDom.style.width='';_mrfDom.style.height='';
+        }
+      };
+    });
     item('mrfFullBtn',          function() { MORNING_REPORT_FLOAT.toggleFull(); });
     item('mrfCollapseBtn',      function() { MORNING_REPORT_FLOAT.collapse(); });
     item('mrfResizeBtn',        function() { MORNING_REPORT_FLOAT.toggleSize(); });
@@ -9840,6 +9861,12 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         if (menu && !menu.classList.contains('mrf-menu-hidden') &&
             !menu.contains(ev.target) && ev.target !== btnMenu &&
             !(btnMenu && btnMenu.contains(ev.target))) closeMenu();
+      });
+      document.addEventListener('keydown',function(ev){
+        if(ev.key!=='Escape'||!_mrfState.open)return;
+        if(menu&&!menu.classList.contains('mrf-menu-hidden'))closeMenu();
+        else MORNING_REPORT_FLOAT.hide();
+        ev.preventDefault();
       });
     }
     _wireMrfDrag();
@@ -9867,8 +9894,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     var move = function(e){
       if (!dragging) return;
       var p = pt(e);
-      _mrfDom.style.left = (p.clientX - ox) + 'px';
-      _mrfDom.style.top  = (p.clientY - oy) + 'px';
+      _mrfDom.style.left = Math.max(0,Math.min(window.innerWidth-_mrfDom.offsetWidth,p.clientX-ox)) + 'px';
+      _mrfDom.style.top  = Math.max(0,Math.min(window.innerHeight-64,p.clientY-oy)) + 'px';
       if (e.cancelable) e.preventDefault();
     };
     var up = function(){ dragging = false; header.style.cursor = 'grab'; };
@@ -9932,6 +9959,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     show: function(reportText, sources, pack) {
       try {
         _ensureMrfDom();
+        if(!_mrfState.open)_mrfState.opener=document.activeElement;
+        ['left','top','transform','width','height'].forEach(function(key){_mrfDom.style[key]='';});
         _mrfState.lastReport  = String(reportText || '');
         _mrfState.lastSources = Array.isArray(sources) ? sources.slice() : [];
         _mrfState.lastPack    = pack || null;
@@ -9944,7 +9973,11 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         try { _renderBody(reportText); _renderSources(sources); } catch (_) {}
       } catch (_) {}
     },
-    hide:     function() { if (_mrfDom) { _mrfDom.classList.add('mrf-hidden'); } _mrfState.open = false; },
+    hide:     function() {
+      if (_mrfDom) _mrfDom.classList.add('mrf-hidden');
+      _mrfState.open = false;
+      try { if(_mrfState.opener&&_mrfState.opener.isConnected)_mrfState.opener.focus(); }catch(_){}
+    },
     collapse: function() {
       _ensureMrfDom();
       _mrfState.collapsed = !_mrfState.collapsed;
@@ -16934,11 +16967,11 @@ function canonicalMorningStory(pack, opts) {
 // The governor decides whether news may be cited at all; this only formats what
 // it cleared. Returns '' when nothing is cleared, so a quiet news day produces
 // no block rather than an empty heading.
-function _canonicalNewsUsedBlock(pack) {
+function clearedMorningNewsSources(pack) {
   try {
     const G = (typeof window !== 'undefined') && window.MORNING_NEWS_GOVERNOR;
-    if (!G || typeof G.publicSourcesCleared !== 'function') return '';
-    if (!G.publicSourcesCleared(pack)) return '';
+    if (!G || typeof G.publicSourcesCleared !== 'function') return [];
+    if (!G.publicSourcesCleared(pack)) return [];
     // SOURCES COME FROM THE PACK, NOT FROM THE DRAWER.
     //
     // This block used to read MORNING_REPORT_FLOAT._copyLastSources, which is
@@ -16974,11 +17007,18 @@ function _canonicalNewsUsedBlock(pack) {
       else if (typeof rankNewsItems === 'function' && typeof getNewsSources === 'function')
         sources = rankNewsItems(getNewsSources(pack)).slice(0, 8);
     } catch (_) {}
-    if (!Array.isArray(sources) || !sources.length) return '';
+    if (!Array.isArray(sources) || !sources.length) return [];
     const clean = (typeof G.dedupeSources === 'function' && typeof G.filterClearedSources === 'function')
       ? G.dedupeSources(G.filterClearedSources(sources, pack))
       : sources;
-    if (!clean || !clean.length) return '';
+    return Array.isArray(clean) ? clean.slice(0,3) : [];
+  } catch (_) { return []; }
+}
+if(typeof window!=='undefined')window.clearedMorningNewsSources=clearedMorningNewsSources;
+function _canonicalNewsUsedBlock(pack) {
+  try {
+    const clean=clearedMorningNewsSources(pack);
+    if (!clean.length) return '';
     let b = '\n\nNEWS USED:\n';
     clean.slice(0, 10).forEach(function (s, i) {
       b += '[' + (i + 1) + '] ' + (s.source || s.name || '?') +
@@ -22098,6 +22138,16 @@ function _swBuildCockpit() {
 
   // ── left rail ──
   var rail = _swEl('nav', { id:'swDashRail', 'aria-label':'Shadow Watch sections' });
+  if(window.parent!==window){
+    document.body.classList.add('sw-embedded');
+    var jumps=_swEl('div',{'class':'sw-report-jumps'});
+    [['swReactorPhase','Scan overview'],['swMarketPanel','Market & network'],['swLogPanel','Live scan log'],['swFeed','Activity'],['swDownloads','Report & downloads']].forEach(function(item){
+      var jump=_swEl('button',{type:'button','class':'sw-navbtn'},item[1]);
+      jump.addEventListener('click',function(){document.getElementById(item[0])?.scrollIntoView({behavior:'smooth',block:'start'});});
+      jumps.appendChild(jump);
+    });
+    rail.appendChild(jumps);
+  }
   SW_NAV_ITEMS.forEach(function (it, i) { rail.appendChild(_swNavBtn(it, i === 0)); });
   var menuNav = _swEl('button', { type:'button', 'class':'sw-navbtn sw-dev-only' }, _swIcon('menu') + '<span>MENU</span>');
   menuNav.addEventListener('click', function () { _swClickCmd('open-system'); });

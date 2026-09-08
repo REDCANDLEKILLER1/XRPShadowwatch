@@ -6,6 +6,10 @@ const E=require('../src/db/evidence');
 const T=require('../src/db/transactions');
 const C=require('../src/db/coverage');
 async function main(){
+  db.getPool().emit('error',new Error('INJECTED_IDLE_CONNECTION_CLOSE'));
+  assert.ok((await db.health()).idle_connection_recoveries>=1);
+  assert.equal(Number((await db.transaction(q=>q('SELECT 1 AS ok'))).rows[0].ok),1);
+  console.log('PASS an idle pool failure is handled and the next real Neon transaction succeeds');
   const read=db.getExecutor();
   const actual=(await read(`SELECT w.scan_id,w.address,w.proof FROM scan_wallets w
     WHERE status='COMPLETE' AND EXISTS(SELECT 1 FROM transaction_accounts a WHERE a.address=w.address AND a.role='observed_via') LIMIT 1`)).rows[0];

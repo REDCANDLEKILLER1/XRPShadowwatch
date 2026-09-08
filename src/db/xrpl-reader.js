@@ -146,12 +146,16 @@ class Reader {
     return header;
   }
   async retainedRange(anchor = 0) {
-    await this.connect();
-    if(this.retention && this.retention.epoch===this.epoch && this.retention.ranges && this.retention.ranges.some(r=>r[1]>=anchor))return this.retention.ranges;
-    const epoch=this.epoch;
-    const info=await this.request({command:'server_info'},epoch);
-    const ranges=coverage.parseCompleteLedgers(info.info && info.info.complete_ledgers);
-    this.retention={epoch,ranges};return ranges;
+    for(let attempt=0;attempt<4;attempt++){
+      await this.connect();
+      if(this.retention && this.retention.epoch===this.epoch && this.retention.ranges && this.retention.ranges.some(r=>r[1]>=anchor))return this.retention.ranges;
+      const epoch=this.epoch;
+      try{
+        const info=await this.request({command:'server_info'},epoch);
+        const ranges=coverage.parseCompleteLedgers(info.info && info.info.complete_ledgers);
+        this.retention={epoch,ranges};return ranges;
+      }catch(e){if(e.message==='XRPL_TRANSPORT_CHANGED'&&attempt<3)continue;throw e;}
+    }
   }
   async floor(startMs, anchor) {
     const ranges = await this.retainedRange(anchor.ledger);

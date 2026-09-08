@@ -106,6 +106,7 @@ const check = (name, ok, detail) => {
       // headlines or the gate opens on a list the report never prints.
       news_articles: [{ title: FRESH }, { title: 'XRP Ledger validator set expands again' }],
       news_intel: { top_headlines: [
+        {title:'XRP Price Prediction: We Asked Grok Where XRP Ends September',source:'speculation',url:'https://example.test/prediction'},
         { title: FRESH, source: 'coindesk', url: 'https://example.test/fresh' },
         { title: 'XRP Ledger validator set expands again', source: 'u.today',
           url: 'https://example.test/fresh2' }
@@ -122,6 +123,7 @@ const check = (name, ok, detail) => {
       out.provHasBlock   = /\nNEWS USED:/.test(canonNews);
       out.provHasFresh   = canonNews.indexOf(FRESH) > -1;
       out.provNoStale    = canonNews.indexOf(STALE) === -1;
+      out.provNoRejected = canonNews.indexOf('We Asked Grok') === -1;
       const nu = (canonNews.split('\nNEWS USED:')[1] || '');
       out.provBlockNoStale = nu.indexOf(STALE) === -1;
       out.provBlockSample  = nu.split('\n').filter(Boolean).slice(0, 3);
@@ -260,6 +262,7 @@ const check = (name, ok, detail) => {
   check('a NEWS USED block is produced with NO prior MRF.show()',
         r.provHasBlock, r.provErr);
   check('it carries the CURRENT pack\u2019s headline', r.provHasFresh, r.provErr);
+  check('a rejected speculative headline cannot appear in the spoken body or sources',r.provNoRejected);
   check('the stale drawer headline does not appear anywhere in the story',
         r.provNoStale, r.provBlockSample);
   check('and specifically not inside the NEWS USED block',

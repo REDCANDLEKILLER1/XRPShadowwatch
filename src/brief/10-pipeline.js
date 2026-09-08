@@ -428,6 +428,10 @@ function summarizeNewsImpact(pack){
         if(Array.isArray(a)) items=items.concat(a);
       });
     }
+    // The spoken headlines and NEWS USED must share the same cleared list.
+    // Topic-matching the unfiltered news pool here used to quote rejected
+    // headlines while the final provenance block named a different article.
+    if(typeof window.clearedMorningNewsSources==='function')items=window.clearedMorningNewsSources(pack);
     // XRP-only filter, dedup, top 3
     var seen={};
     var xrp=[];
@@ -447,7 +451,7 @@ function summarizeNewsImpact(pack){
              provenance:'news_router'};
     });
     var titles=xrp.map(function(it){return it.title;});
-    var summary='Ledger-matched context: '+titles.join(' \u00B7 ')+'.';
+    var summary='Published news context: '+titles.join(' \u00B7 ')+'.';
     if(titles.length===1) summary='Relevant headline: '+titles[0]+'.';
     return _contract({
       headline:lead.title.slice(0,110),
@@ -1483,7 +1487,7 @@ function _buildSources(interpretations, pack){
   var legacySources='';
   if(typeof window.renderPlainTextSources==='function'){
     legacySources=_safe(function(){
-      var items=(typeof window.getNewsSources==='function')
+      var items=typeof window.clearedMorningNewsSources==='function'?window.clearedMorningNewsSources(pack):(typeof window.getNewsSources==='function')
         ? window.getNewsSources(pack)
         : [];
       if(typeof window.filterSourcesForReport==='function'){

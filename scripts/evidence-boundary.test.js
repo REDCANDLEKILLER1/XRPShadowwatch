@@ -40,6 +40,20 @@ async function main(){
   assert.equal(retryMs({retry_after_ms:999999999}),999999999);
   await assert.rejects(()=>new Reader().request({command:'submit'}),/METHOD_NOT_ALLOWED/);
   console.log('PASS explicit overload keeps its retry signal; transaction submission is rejected');
+  const retentionReader=new Reader();let retentionCalls=0;
+  retentionReader.epoch=1;retentionReader.connect=async()=>{};
+  retentionReader.request=async function(){
+    retentionCalls++;
+    if(retentionCalls===1){this.epoch++;throw new Error('XRPL_TRANSPORT_CHANGED');}
+    return {info:{complete_ledgers:'100-300'}};
+  };
+  assert.deepEqual(await retentionReader.retainedRange(200),[[100,300]]);
+  assert.equal(retentionReader.retention.epoch,2);
+  await retentionReader.retainedRange(250);assert.equal(retentionCalls,2,'same socket reuses its verified range');
+  retentionReader.epoch++;await retentionReader.retainedRange(250);
+  assert.equal(retentionCalls,3,'replacement socket re-proves retained history');
+  await retentionReader.retainedRange(400);assert.equal(retentionCalls,4,'new anchor refreshes an older retained ceiling');
+  console.log('PASS a connection change during retention verification retries and never inherits another socket’s proof');
   async function invoke(req){
     const out={headers:{},code:200};
     const res={setHeader:(k,v)=>out.headers[k]=v,status:n=>{out.code=n;return res;},json:b=>{out.body=b;return out;}};
