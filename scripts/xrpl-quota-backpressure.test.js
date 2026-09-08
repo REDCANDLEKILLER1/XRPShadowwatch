@@ -89,6 +89,9 @@ const QUOTA_MSG = 'rate limit: units quota (10000 per 60s) exhausted, retry in ~
       tooBusyCode: window._isQuotaError(E('tooBusy')),
       // …and it carries no hint, so it must fall back rather than guess 0
       tooBusyWait: window._quotaRetryMs(E('The server is too busy to help you now.')),
+      // slowDown's human message — the third wording, missed by the first two
+      // versions of this pattern. Verbatim from the operator's evidence.
+      slowDownMsg: window._isQuotaError(E('You are placing too much load on the server.')),
       // #59's breaker owns silence. These must NOT be treated as a quota.
       timeout:     window._isQuotaError(E('timeout account_offers')),
       linkDown:    window._isQuotaError(E('XRPL link down')),
@@ -103,6 +106,8 @@ const QUOTA_MSG = 'rate limit: units quota (10000 per 60s) exhausted, retry in ~
         r1.tooBusy === true && r1.tooBusyCode === true, r1);
   check('and a refusal with no retry hint waits the fallback, not zero',
         r1.tooBusyWait === 60000, r1);
+  check('THE REGRESSION — slowDown\'s MESSAGE is a refusal, not just its code',
+        r1.slowDownMsg === true, r1);
   check('a timeout is NOT a quota — silence and refusal are different failures',
         r1.timeout === false && r1.linkDown === false && r1.linkClosed === false, r1);
   check('an ordinary XRPL error is not a quota either', r1.actNotFound === false, r1);
@@ -305,6 +310,104 @@ const QUOTA_MSG = 'rate limit: units quota (10000 per 60s) exhausted, retry in ~
   console.log('     ' + JSON.stringify(r10));
   check('THE REGRESSION — eight callers cost ONE cooldown, not eight in series',
         r10.waits === 1 && r10.elapsed < 400, r10);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log('\n11. A REFUSED WALLET IS RETRIED, NOT BINNED');
+  // One attempt per wallet was the entire policy. BSQCJ lost 77 windows to a
+  // single bad moment each, while RD2Y8 proved 235 of the same roster three
+  // minutes later. This drives the retry loop's shape directly.
+  const r11 = await page.evaluate(async () => {
+    // Read the REAL budget. Hardcoding 3 here let sabotage A (attempts -> 1)
+    // pass every behavioural check in this section — only the source-level
+    // check caught it. A model that cannot feel the code change is not a test.
+    const TX_RETRY_ATTEMPTS = window.TX_RETRY_ATTEMPTS;
+    // Model the loop exactly as txOne runs it, against a server that refuses
+    // the first N attempts and then serves.
+    const walk = async (refusals, err) => {
+      state._quotaUntil = 0; state._quotaHits = 0; state._txRetries = 0;
+      state._quotaWaits = 0; state._quotaWaitedMs = 0; state._quotaWaiter = null;
+      state._runAbortReason = null;
+      let seen = 0, rows = null;
+      for (let attempt = 1; attempt <= TX_RETRY_ATTEMPTS && rows === null; attempt++) {
+        try {
+          seen++;
+          if (seen <= refusals) throw new Error(err);
+          rows = ['a-transaction'];
+        } catch (e) {
+          const throttled = window._noteQuota(e, 'the transaction-window pass');
+          if (attempt >= TX_RETRY_ATTEMPTS) break;
+          if (throttled) {
+            // The production strings for tooBusy and slowDown carry NO retry
+            // hint, so the real gate falls back to 60s. Waiting that out for
+            // real made this suite 246s. Keep the VERBATIM production message
+            // — that is the thing under test — and shorten only the clock.
+            state._quotaUntil = Date.now() + 20;
+            const w = window._quotaWait();
+            if (w) await w;
+            state._txRetries = (state._txRetries || 0) + 1;
+            continue;
+          }
+          if (/timeout/i.test(e.message)) {
+            await new Promise(r => setTimeout(r, 5));
+            state._txRetries = (state._txRetries || 0) + 1;
+            continue;
+          }
+          break;
+        }
+      }
+      return { attempts: seen, recovered: rows !== null, retries: state._txRetries };
+    };
+    return {
+      tooBusyOnce:  await walk(1, 'The server is too busy to help you now.'),
+      slowDownOnce: await walk(1, 'You are placing too much load on the server.'),
+      quotaOnce:    await walk(1, 'rate limit: units quota (10000 per 60s) exhausted, retry in ~40ms'),
+      timeoutOnce:  await walk(1, 'timeout account_tx'),
+      hopeless:     await walk(99, 'The server is too busy to help you now.'),
+      permanent:    await walk(99, 'actNotFound')
+    };
+  });
+  console.log('     tooBusy  : ' + JSON.stringify(r11.tooBusyOnce));
+  console.log('     slowDown : ' + JSON.stringify(r11.slowDownOnce));
+  console.log('     quota    : ' + JSON.stringify(r11.quotaOnce));
+  console.log('     timeout  : ' + JSON.stringify(r11.timeoutOnce));
+  console.log('     hopeless : ' + JSON.stringify(r11.hopeless));
+  console.log('     permanent: ' + JSON.stringify(r11.permanent));
+  check('THE REGRESSION — a tooBusy wallet is retried and recovered, not lost',
+        r11.tooBusyOnce.recovered === true && r11.tooBusyOnce.attempts === 2, r11.tooBusyOnce);
+  check('so is a slowDown wallet', r11.slowDownOnce.recovered === true, r11.slowDownOnce);
+  check('and a quota-refused wallet', r11.quotaOnce.recovered === true, r11.quotaOnce);
+  check('a TIMED-OUT wallet is retried too — 45 of BSQCJ\'s 77 were timeouts',
+        r11.timeoutOnce.recovered === true && r11.timeoutOnce.attempts === 2, r11.timeoutOnce);
+  check('CONTROL: retries are BOUNDED — a server that never serves stops at 3',
+        r11.hopeless.recovered === false && r11.hopeless.attempts === 3, r11.hopeless);
+  check('CONTROL: a PERMANENT error is not retried at all — one attempt, no wait',
+        r11.permanent.recovered === false && r11.permanent.attempts === 1, r11.permanent);
+
+  // §11 MODELS txOne's loop rather than driving it — txOne is a closure inside
+  // scanWallets and is not reachable from the page. A model that drifts from
+  // the code proves nothing, so these bind it to the real source: if txOne
+  // stops looping, stops bounding, or starts resuming instead of re-walking,
+  // one of these fails.
+  const txOneSrc = (src.match(/async function txOne\(row\)[\s\S]*?\n  \}/) || [''])[0];
+  check('the real txOne loops over attempts, bounded by TX_RETRY_ATTEMPTS',
+        /for \(let attempt = 1; attempt <= TX_RETRY_ATTEMPTS/.test(txOneSrc), txOneSrc.slice(0, 200));
+  check('the real txOne honours the shared wait on a refusal',
+        /_noteQuota\(/.test(txOneSrc) && /_quotaWait\(\)/.test(txOneSrc), 'no shared wait in txOne');
+  check('the real txOne backs off before retrying a timeout, rather than hammering',
+        /timeout/i.test(txOneSrc) && /TX_RETRY_BACKOFF_MS/.test(txOneSrc), 'no timeout backoff');
+  check('the real txOne stops retrying once the run is abandoned or the link is down',
+        /state\._runAbortReason \|\| _linkDown\(\)/.test(txOneSrc), 'retries ignore run abort');
+  // A retry must be a FRESH walk: resuming a marker across a wait or a
+  // reconnect would claim coverage from a server that never served it.
+  // Strip comments first: this must test CODE, not prose. The first version of
+  // this check matched the word "marker" in txOne's own explanatory comment and
+  // reported a leak that did not exist.
+  const txOneCode = txOneSrc.replace(/\/\/.*$/gm, '');
+  check('the retry re-walks from the window start — no marker is carried across',
+        /accountTxWindowDepth\(ws, row\.address, tw\.startMs/.test(txOneCode) &&
+        !/marker/i.test(txOneCode), 'a marker leaked into the retry path');
+  check('TX_RETRY_ATTEMPTS is 3 — the original plus two',
+        /const TX_RETRY_ATTEMPTS = 3;/.test(src), 'attempt budget changed');
 
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 

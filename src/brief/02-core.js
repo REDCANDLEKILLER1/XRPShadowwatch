@@ -1028,7 +1028,14 @@ const QUOTA_HINT_RE = /retry\s+in\s+~?\s*(\d+)\s*ms/i;
 // now — and it arrives with NO retry hint, so it takes the 60s fallback. It is
 // still not a timeout: the other 45 of those 77 were `timeout account_tx`,
 // which is silence and belongs to the dead-socket breaker, not here.
-const QUOTA_ERROR_RE = /rate limit|quota|too many requests|429|slow ?down|too ?busy/i;
+// Three refusal wordings have now been seen in production and each was missed
+// by the pattern before it. rippled sends a CODE and a human MESSAGE, and the
+// exports carry the message:
+//     slowDown  -> "You are placing too much load on the server."
+//     tooBusy   -> "The server is too busy to help you now."
+//     provider  -> "rate limit: units quota (10000 per 60s) exhausted…"
+// Matching only the codes catches none of them.
+const QUOTA_ERROR_RE = /rate limit|quota|too many requests|429|slow ?down|too ?busy|too much load/i;
 const QUOTA_FALLBACK_MS = 60000;   // only if the server rejects without a hint
 const QUOTA_MAX_MS      = 300000;  // never trust an absurd hint
 
@@ -1076,6 +1083,7 @@ function _quotaNote() {
     hits: n(state._quotaHits),
     first_at: state._quotaFirstAt || null,
     first_where: state._quotaWhere || null,
+    wallet_retries: n(state._txRetries),
     waits: n(state._quotaWaits),
     waited_ms: n(state._quotaWaitedMs),
     passes_cut_short: (state._quotaCutPasses || []).slice()
@@ -1099,6 +1107,10 @@ function _quotaNote() {
 // The wait is bounded so a run can never hang: at most QUOTA_MAX_WAITS pauses,
 // each capped by QUOTA_MAX_MS. Past that the pass stops and says so, which is
 // the old behaviour and still the right floor.
+// Three attempts per wallet: the original, plus two. Enough to ride out a
+// refusal and a retry-time saturation spike; not enough to become the load.
+const TX_RETRY_ATTEMPTS = 3;
+const TX_RETRY_BACKOFF_MS = 1500;
 const QUOTA_MAX_WAITS = 8;
 // The real bound is TIME, not a count: a full roster may legitimately need
 // several refills, and four was chosen for a test rather than for a scan.
@@ -1153,6 +1165,8 @@ function _quotaCutPass(name, done, total) {
 }
 if (typeof window !== 'undefined') {
   window._quotaHold    = _quotaHold;
+  // exposed so the retry test reads the REAL budget rather than its own copy
+  window.TX_RETRY_ATTEMPTS = TX_RETRY_ATTEMPTS;
   window._isQuotaError = _isQuotaError;
   window._quotaRetryMs = _quotaRetryMs;
   window._noteQuota    = _noteQuota;
@@ -1347,6 +1361,7 @@ async function scanWallets(ws) {
   state._quotaFirstAt = null;
   state._quotaWhere = null;
   state._quotaCutPasses = [];
+  state._txRetries = 0;
   state._quotaWaits = 0;
   state._quotaWaitedMs = 0;
   state._quotaWaiter = null;
@@ -1494,8 +1509,53 @@ async function scanWallets(ws) {
 
   async function txOne(row) {
     const depth = pageDepthFor(row.label);
+    // ── RETRY THE WALLET, DO NOT BIN IT ──────────────────────────────────
+    // One attempt per wallet was the whole policy: a single refusal or timeout
+    // marked a wallet FAILED for the entire run, and there was no second pass
+    // anywhere. SW-20260908-BSQCJ lost 77 windows that way — 32 to tooBusy and
+    // 45 to timeouts — while its balance reads all succeeded, and RD2Y8 three
+    // minutes later proved 235 of the same roster. Those wallets were not
+    // unreadable; they were asked once, at a bad moment.
+    //
+    // A retry is a FRESH walk from the window start, never a resumed one: an
+    // account_tx marker belongs to the server and the transport epoch that
+    // issued it, so resuming across a wait — or across a reconnect — would
+    // claim coverage the run cannot prove. Starting over is the only safe
+    // retry, and it is why this loops around the fetch and not around the
+    // page walk inside it.
+    let txRows = null;
+    for (let attempt = 1; attempt <= TX_RETRY_ATTEMPTS && txRows === null; attempt++) {
+      try {
+        txRows = await accountTxWindowDepth(ws, row.address, tw.startMs, tw.endMs, limit, depth);
+      } catch (e) {
+        // A refusal we understand: honour the server's own wait, then re-walk.
+        const throttled = _noteQuota(e, 'the transaction-window pass');
+        const last = attempt >= TX_RETRY_ATTEMPTS;
+        if (state._runAbortReason || _linkDown() || last) {
+          log('tx-scan miss: ' + row.label + ' (' + e.message + ')' +
+              (last && attempt > 1 ? ' after ' + attempt + ' attempts' : ''));
+          return;
+        }
+        if (throttled) {
+          const w = _quotaWait();
+          if (w) await w;
+          state._txRetries = n(state._txRetries) + 1;
+          continue;
+        }
+        // A timeout is not a refusal — the server said nothing at all — but on
+        // a saturated endpoint it has the same cause, and retrying INSTANTLY
+        // is what turns saturation into a cascade. Back off a little first.
+        if (/timeout/i.test(e && e.message || '')) {
+          await new Promise(r => setTimeout(r, TX_RETRY_BACKOFF_MS * attempt));
+          state._txRetries = n(state._txRetries) + 1;
+          continue;
+        }
+        log('tx-scan miss: ' + row.label + ' (' + e.message + ')');
+        return;
+      }
+    }
+    if (txRows === null) return;
     try {
-      const txRows = await accountTxWindowDepth(ws, row.address, tw.startMs, tw.endMs, limit, depth);
       for (const item of txRows) {
         const t = item.tx_json || item.tx || {}, iso = t.date ? rip(t.date) : '';
         if (!iso) continue;
@@ -1542,8 +1602,7 @@ async function scanWallets(ws) {
         });
       }
     } catch (e) {
-      // Don't fail the wallet — Phase 1 balance is still valid. Just log.
-      _noteQuota(e, 'the transaction-window pass');
+      // Row processing, not fetching. Phase 1's balance is still valid.
       log('tx-scan miss: ' + row.label + ' (' + e.message + ')');
     }
   }
