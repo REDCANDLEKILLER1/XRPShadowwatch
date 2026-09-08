@@ -30,7 +30,7 @@ const SKIP_DIRS = new Set(['node_modules', '.git', '.vercel', 'dist', 'build', '
 
 function listTracked() {
   try {
-    return execFileSync('git', ['ls-files', '*.js'], { cwd: ROOT, encoding: 'utf8' })
+    return execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '*.js'], { cwd: ROOT, encoding: 'utf8' })
       .split('\n').map(s => s.trim()).filter(Boolean);
   } catch (_) {
     return null;   // not a git checkout — fall back to a walk

@@ -237,7 +237,7 @@ const QUOTA_MSG = 'rate limit: units quota (10000 per 60s) exhausted, retry in ~
   const held = (src.match(/_quotaHold\(/g) || []).length;
   check('all four dispatch loops go through the shared wait-then-decide gate',
         // its own definition + the four dispatch loops
-        held === 6 && gated === 3, { held, gated });
+        held === 6 && gated === 4, { held, gated });
   // scanOffers, balanceOne, txOne, and the window export.
   check('and the passes that can be rejected all report it',
         noted === 5, noted);

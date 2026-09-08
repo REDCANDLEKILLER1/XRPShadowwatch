@@ -599,7 +599,7 @@ console.log('\nG. window consistency  ->  capped, and CONSUMED');
   // source assertion below.
   const stripComments = t => t
     .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
+    .split(/\r?\n/).map(l => l.replace(/\/\/.*$/, '')).join('\n');
   const CORE_CODE = stripComments(CORE);
   check('G. CONSUMED — buildPack reads the effective window, not getTxWindow()',
         /tx_window:\s*\(typeof state[^,]*state\.txWindowEffective\)\s*\|\|\s*getTxWindow\(\)/.test(CORE_CODE),
@@ -626,7 +626,8 @@ console.log('\n3. the wiring is real, not just the decision layer');
   const C = stripComments(CORE), S17 = stripComments(L17), S29 = stripComments(L29);
 
   check('the anchor is fetched at scan start, before any wallet is read',
-        /state\.runAnchor = null[\s\S]{0,900}?command: 'ledger', ledger_index: 'validated'/.test(C));
+        C.indexOf("command: 'ledger', ledger_index: 'validated'", C.indexOf('state.runAnchor = null')) > C.indexOf('state.runAnchor = null') &&
+        C.indexOf("command: 'ledger', ledger_index: 'validated'", C.indexOf('state.runAnchor = null')) < C.indexOf("command: 'account_info'", C.indexOf('state.runAnchor = null')));
   // BOTH must exist before their order means anything. indexOf returns -1 for a
   // missing needle and -1 < anything is true, so deleting the server_info fetch
   // entirely used to SATISFY this check — the exact defect it polices.

@@ -840,18 +840,18 @@ function _cov(pack){
     if(tTotal>0){
       var tOk=Number(t.complete_wallets)||0;
       var tPct=tOk/tTotal;
-      if(tPct<base.pct){
+      if(tPct<base.pct || t.full_window_complete!==true){
         var pc=Math.round(tPct*100);
         return {
           checked:tOk, failed:tTotal-tOk, total:tTotal, pct:tPct, percent:pc,
-          degraded:tPct<0.95, severe:tPct<0.60,
+          degraded:t.full_window_complete!==true, severe:tPct<0.60,
           basis:'transaction window', basis_noun:'proved the transaction window',
           line:tOk+' of '+tTotal+' watched wallet'+(tTotal===1?'':'s')+
                ' proved the transaction window ('+pc+'%)'+
                ((tTotal-tOk)>0?'; '+(tTotal-tOk)+' did not':'')+'.',
           caveat:tPct<0.60
             ? 'Most of the board never proved its transaction window, so a low reading here is unread, not clear. Nothing below can be treated as an all-clear until the scan is re-run.'
-            : (tPct<0.95
+            : (t.full_window_complete!==true
               ? 'Part of the board never proved its transaction window. Every movement total below is of what was reachable, not of the whole list.'
               : '')
         };
@@ -880,14 +880,8 @@ function _covLead(cov, seed){
     'I would rather hand you a short report than a confident wrong one. ',
     'Read this part first, because it changes how you read the rest: '
   ], seed, 9) +
-  'only ' + cov.checked + ' of ' + cov.total + ' watched wallets answered tonight (' +
-  cov.percent + '%). ' + cov.failed + ' never came back. ' +
-  _nvPick([
-    'The link to the Ledger went down mid-scan and most of the board went dark with it.',
-    'Most of the board was unreachable when I ran it — that is a connection problem, not a market one.',
-    'The servers stopped answering partway through and took the rest of the list with them.',
-    'I lost the wire before I got through the list.'
-  ], seed, 10) +
+  'only ' + cov.checked + ' of ' + cov.total + ' watched wallets ' + cov.basis_noun + ' (' +
+  cov.percent + '%). ' + cov.failed + ' did not complete that check. Acquisition was incomplete. ' +
   ' So I am not calling this a quiet night. I could not see most of it, and an unread wallet is not a still one. ' +
   'Re-run the scan before you trust a single total below.';
 }
@@ -901,7 +895,7 @@ function _buildExecutiveSummary(interps, pack){
   // A scan that lost most of the board reports the outage, not the calm.
   if(cov.severe) return _covLead(cov, seed)+' '+_nvBeat(seed,0);
   var covNote=cov.degraded
-    ? ' Coverage note: '+cov.checked+' of '+cov.total+' wallets answered — the numbers below are of what was reachable, not the whole list.'
+    ? ' Coverage note: '+cov.checked+' of '+cov.total+' wallets '+cov.basis_noun+' — totals describe the acquired evidence.'
     : '';
 
   // Issue #26: when aggregate whale activity is material, the public lead must
@@ -1270,6 +1264,9 @@ function _buildVerdict(interps, pack){
   // v16.10: a low score off an unread board is not a verdict. Say what the
   // number actually measures before anyone reads it on air as an all-clear.
   var cov=_cov(pack);
+  if(cov.degraded && !cov.severe){
+    return 'Today’s forensic read is incomplete. '+cov.line+' The acquired evidence is available below, but I am withholding an all-clear until the full transaction window is proved.\n\nI’m XRPMan, and I tell on the banks.';
+  }
   var ig=_intg(pack);
   if(ig.linkLost){
     return _nvPick(['Today’s forensic read: ','The read, straight up: ','Bottom line off the Ledger: ','My call this morning: '],seed,32)+
@@ -2116,6 +2113,52 @@ function _setFallbackBanner(n){
   });
 }
 
+// ── The canonical coverage line, for the text that is READ ALOUD ───────────
+//
+// The spoken Morning Story carried no transaction-window coverage caveat at
+// all. Layer 17 wraps buildMorningStoryText to prepend one, but _boot's
+// 2000ms re-install (below) captures 17's wrapper as `legacy`, calls it only
+// to harvest prayer and scripture, and returns renderPublicReport(pack)
+// instead — so 17's caveat was computed and thrown away. The structured
+// report said INCOMPLETE while the on-air text said nothing.
+//
+// The durable fix is not to win that race. It is for the renderer that
+// actually produces the spoken text to consume the canonical verdict itself.
+//
+// THE VERDICT IS NOT RE-DERIVED HERE. coverageFrom comes from layer 17 — the
+// same function the structured report and the X export use. #57 removed one
+// divergence of exactly this kind; a second copy of the rule living in the V1
+// renderer would rebuild it somewhere new.
+//
+// ── Wording is load-bearing ────────────────────────────────────────────────
+// sanitizePublicNarrative DELETES every match, WARN included (body.replace
+// with ''), so a caveat containing a forbidden pattern is silently gutted
+// rather than rejected. This text must avoid:
+//   cat 4  ALL_CAPS_UNDERSCORE tokens  -> never put a reason code in here
+//   cat 6  { } and [ ]
+//   cat 8  "partial coverage"
+//   cat 12 "threshold", "heuristic", "confidence score"
+// A test asserts the rendered line survives sanitization byte for byte.
+function _canonicalCoverageLine(pack){
+  var c=null;
+  try{
+    var L17=(typeof window!=='undefined') && window.SW_REPORT_SCAN_TUNING_20260816;
+    if(L17 && typeof L17.coverageFrom==='function') c=L17.coverageFrom(pack);
+  }catch(_){}
+  // No canonical rule loaded means no claim may be made about coverage. Saying
+  // nothing is what produced this defect in the first place.
+  if(!c) return '\u26A0\uFE0F Transaction window coverage was not established this run. Nothing below can be read as an all-clear.';
+  if(c.measured===false)
+    return '\u26A0\uFE0F Transaction window coverage was not established this run. Nothing below can be read as an all-clear.';
+  if(c.full_window_complete===true) return '';
+  var causes=_num(c.failed_wallets)+' failed, '+_num(c.truncated_wallets)+' truncated, '+
+             _num(c.unproven_wallets)+' unproven';
+  if(_num(c.unknown_status_wallets)>0) causes+=', '+_num(c.unknown_status_wallets)+' unrecognised';
+  return '\u26A0\uFE0F Transaction window coverage: '+_num(c.complete_wallets)+' of '+
+         _num(c.target_wallets)+' watched wallets proved the requested window \u2014 '+causes+
+         '. Nothing below can be read as an all-clear.';
+}
+
 function renderPublicReport(pack){
   if(!_isEnabled()) return null;
 
@@ -2125,11 +2168,24 @@ function renderPublicReport(pack){
     var rawText=assembled.text;
     var interps=assembled.interpretations;
 
+    // Canonical coverage, BEFORE sanitization, so the sanitizer sees it and
+    // the test proves it survives rather than assuming it would.
+    var _covLine=_canonicalCoverageLine(pack);
+    if(_covLine) rawText=_covLine+'\n\n'+rawText;
+
     // Store for prayer/scripture extraction by later builds
     window._pipelineLegacyText=rawText;
 
     // Sanitize
     var sanitized=sanitizePublicNarrative(rawText, interps);
+
+    // FAIL CLOSED IF THE SANITIZER ATE IT. The wording above is chosen to
+    // survive, and a test proves it — but the sanitizer deletes silently, so
+    // if a future category ever matches the caveat the report must not simply
+    // go quiet about coverage. Re-assert rather than lose the claim.
+    if(_covLine && sanitized.text.indexOf('Transaction window coverage')<0){
+      sanitized.text='\u26A0\uFE0F Transaction window coverage could not be stated safely this run. Nothing below can be read as an all-clear.\n\n'+sanitized.text;
+    }
 
     // Audit
     var audit=auditPublicReport(sanitized.text, sanitized.violations, interps, false);

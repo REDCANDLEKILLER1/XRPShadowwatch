@@ -263,7 +263,7 @@ check('a thrown acquisition is reported as unavailable too',
 // inside the comment EXPLAINING why it was removed — a check that would have
 // passed on prose while the code did anything at all. Same trap the SQL checks
 // in db-foundation.test.js strip comments to avoid.
-const stripJsComments = (t) => t.split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
+const stripJsComments = (t) => t.split(/\r?\n/).map(l => l.replace(/\/\/.*$/, '')).join('\n');
 const pipeBlock = stripJsComments(
   (PIPE.split('Native XRPL DEX. Rendered from the DECISION')[1] || '').slice(0, 1400));
 check('the render block exists to be checked', pipeBlock.length > 200);

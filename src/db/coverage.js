@@ -51,7 +51,10 @@ const REASON = {
   PROOF_GAP_AT_START:'PROOF_GAP_AT_START', // window starts before proven history
   EVIDENCE_PRUNED:   'EVIDENCE_PRUNED',    // proven, but the rows are gone
   EDGE_ONLY:         'EDGE_ONLY',          // the normal case: fetch the new ledgers
-  FULLY_SERVABLE:    'FULLY_SERVABLE'      // a catch-up already passed our anchor
+  FULLY_SERVABLE:    'FULLY_SERVABLE',     // a catch-up already passed our anchor
+  // The window lies entirely after the anchor, so it survived the cap
+  // inverted. Refused rather than narrowed — see windowServability.
+  WINDOW_AFTER_ANCHOR:'WINDOW_AFTER_ANCHOR'
 };
 
 const PROOF_STATUS = {
@@ -88,15 +91,22 @@ function _int(v) {
 // full-window fallback rather than quietly serving an empty result.
 function normalizeCoverage(row) {
   const r = row || {};
+  const close = (name) => {
+    if (r[name + '_ms'] !== undefined) return _int(r[name + '_ms']);
+    const value = r[name];
+    if (value === null || value === undefined || value === '') return null;
+    const ms = value instanceof Date ? value.getTime() : Date.parse(value);
+    return Number.isFinite(ms) ? ms : null;
+  };
   return {
     address:                       r.address || '',
     scan_coverage_from:            _int(r.scan_coverage_from),
     scan_coverage_through:         _int(r.scan_coverage_through),
-    scan_coverage_from_close_ms:   _int(r.scan_coverage_from_close_ms),
-    scan_coverage_through_close_ms:_int(r.scan_coverage_through_close_ms),
+    scan_coverage_from_close_ms:   close('scan_coverage_from_close'),
+    scan_coverage_through_close_ms:close('scan_coverage_through_close'),
     evidence_retained_from:        _int(r.evidence_retained_from),
     evidence_retained_through:     _int(r.evidence_retained_through),
-    evidence_retained_from_close_ms:_int(r.evidence_retained_from_close_ms),
+    evidence_retained_from_close_ms:close('evidence_retained_from_close'),
     last_observed_tx_ledger:       _int(r.last_observed_tx_ledger),
     roster_version:                r.roster_version || null
   };
@@ -331,6 +341,29 @@ function windowServability(input) {
     reason: REASON.NO_COVERAGE
   };
 
+  // ── A WINDOW THAT SURVIVED THE CAP INVERTED IS NOT A WINDOW ───────────────
+  //
+  // capWindowToAnchor lowers the END to the anchor's close. It says nothing
+  // about the START, so a window lying entirely AFTER the anchor comes out of
+  // it inverted — start greater than end — and every test below then passes
+  // vacuously, because a proof covering real history trivially covers an empty
+  // interval. Verified by execution against this file:
+  //
+  //   window [anchorClose+1h .. anchorClose+2h]
+  //     -> FULLY_SERVABLE, window_start_ms > window_end_ms
+  //     -> mayReportQuiet(d, 0) = { quiet: true, reason: 'PROVEN_QUIET' }
+  //
+  // "Nothing happened", certified over an interval that cannot contain
+  // anything. Reachable from a clock running ahead of the ledger, a stale
+  // browser window, or an operator-chosen range — none of them exotic.
+  //
+  // It is refused, not narrowed: a window whose start is already past the last
+  // ledger this run read describes a period nobody observed.
+  if (startMs > effEndMs) {
+    base.reason = REASON.WINDOW_AFTER_ANCHOR;
+    return base;
+  }
+
   if (!hasProof(c)) return base;
 
   // Does the PROOF reach back to the start of the window?
@@ -462,6 +495,13 @@ function coverageProven(input) {
   const status = String(p.status || '');
   if (status === PROOF_STATUS.FAILED)    return no('WALK_FAILED');
   if (status === PROOF_STATUS.TRUNCATED) return no('SAFETY_CEILING_REACHED');
+
+  if (status === PROOF_STATUS.COMPLETE && p.source === 'NEON_VERIFIED_INDEX' &&
+      p.range_bound_proven === true && p.range_exhausted === true &&
+      p.edge_fetch_complete === true && p.covers_window_start === true &&
+      p.response_validated === true && _int(p.response_ledger_index_max) === anchor) {
+    return { proven:true, reason:'RETAINED_HISTORY_AND_VERIFIED_EDGE' };
+  }
 
   if (p.boundary_reached === true) {
     return { proven: true, reason: 'BOUNDARY_REACHED_BY_TX' };
@@ -605,7 +645,7 @@ function checkpointAdvance(input) {
   // down.
   let derivedFromClose;
   if (bounded) derivedFromClose = _int(p.from_close_ms);
-  else if (historyExhausted) derivedFromClose = 0;
+  else if (historyExhausted) derivedFromClose = _int(p.oldest_close_ms);
   else derivedFromClose = _int(p.oldest_close_ms);
 
   const fromClose = hasProof(c) ? c.scan_coverage_from_close_ms : derivedFromClose;

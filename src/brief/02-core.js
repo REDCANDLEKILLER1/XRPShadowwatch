@@ -1172,11 +1172,13 @@ if (typeof window !== 'undefined') {
 }
 
 function _linkDown() {
+  if (state._runAbortReason || (state.xrplRecovery && state.xrplRecovery.exhausted)) return true;
   if (_sockOpen(state._sock)) return false;
   return n(state._reconnectFails) >= 1 && !state._reconnecting;
 }
 
 async function _ensureSock(ws) {
+  if (state._runAbortReason) return null;
   if (_sockOpen(state._sock)) return state._sock;
   if (_sockOpen(ws) && !ws._swRetired) return ws;
   // One shared reconnect for the whole scan: 8 parallel wallets hitting a dead
@@ -1260,6 +1262,13 @@ async function _xrplRotate(sock, reason) {
   // One replacement for a failed socket even when eight callers observed it.
   if (sock && !sock._swRetired && (!state._sock || state._sock === sock)) {
     sock._swRetired = true;
+    if (/^timeout /i.test(reason)) {
+      state._silentReplacements = n(state._silentReplacements) + 1;
+      if (state._silentReplacements >= 3) {
+        state._runAbortReason = 'XRPL_TRANSPORT_SILENT';
+        _xrplRecoveryNote().exhausted = true;
+      }
+    }
     state._xrplAvoidServer = sock.url;
     const r = _xrplRecoveryNote({ event: 'rotate', endpoint: sock.url, reason });
     r.rotations++;
@@ -1303,7 +1312,7 @@ async function xrpl(ws, cmd) {
       const quota = _isQuotaError(e);
       const transient = /timeout |XRPL link (closed|down)|WebSocket.*(closed|not open)/i.test(_xrplErrorText(e));
       if (!quota && !transient) throw e;
-      if (++retries > 8) {
+      if (++retries > 12) {
         stats.exhausted = true;
         _xrplRecoveryNote({ event: 'exhausted', command: cmd.command, account: cmd.account, reason: e.message });
         throw new Error('XRPL_RECOVERY_EXHAUSTED: ' + e.message);
@@ -1315,7 +1324,7 @@ async function xrpl(ws, cmd) {
         _noteQuota(e, cmd.command);
         // A responsive server refusing load is not a silent socket. Preserve
         // it and respect its cooldown, including repeated refusals.
-      } else {
+      } else if (!/^timeout /i.test(e.message) || n(sock && sock._swTimeouts) >= 3) {
         await _xrplRotate(sock, e.message);
       }
     } finally { release(); }
@@ -1332,10 +1341,16 @@ function _xrplRequest(sock, cmd) {
       try { sock.removeEventListener('close', onClose); } catch (_) {}
       fn(arg);
     }
-    const timer = setTimeout(() => done(rej, new Error('timeout ' + cmd.command)), 15000);
+    const configuredTimeout = Number(window.SW_XRPL_RPC_TIMEOUT_MS);
+    const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 15000;
+    const timer = setTimeout(() => {
+      sock._swTimeouts = n(sock._swTimeouts) + 1;
+      done(rej, new Error('timeout ' + cmd.command));
+    }, timeoutMs);
     function onMsg(ev) {
       let j; try { j = JSON.parse(ev.data); } catch { return; }
       if (j.id !== id) return;
+      sock._swTimeouts = 0; // Explicit refusals are replies, not transport silence.
       if (j.status === 'success' && !(j.result && j.result.error)) return done(res, j.result);
       const body = j.result && j.result.error ? j.result : j;
       const err = new Error(body.error_message || body.error || 'xrpl error');
@@ -1468,8 +1483,21 @@ async function scanWallets(ws) {
   // below the anchor and refuses a healthy server. See 41-run-anchor.
   state.runAnchor = null;
   state.effectiveWindow = null;
+  state.indexRun = null;
+  if (window.SW_EVIDENCE_INDEX) {
+    try {
+      log('Evidence index: establishing the server-owned run and roster…');
+      state.indexRun = await window.SW_EVIDENCE_INDEX.begin(getTxWindow(), getActiveWatchlist().map(w => w.address));
+      state.runId = state.indexRun.scan_id;
+      const ir = state.indexRun;
+      state.runAnchor = { ok:true, anchor_ledger:ir.anchor_ledger, anchor_close_ms:ir.anchor_close_ms,
+        anchor_close_iso:new Date(ir.anchor_close_ms).toISOString(), history_exhaustion_proof:null,
+        transport_epoch:0, source:'SERVER_VERIFIED_INDEX' };
+      log('Evidence index: run ' + ir.scan_id + ', roster ' + ir.accounts.length + ', anchor ' + ir.anchor_ledger);
+    } catch(e) { log('Evidence index unavailable — direct XRPL acquisition: ' + e.message); }
+  }
   const RA = (typeof window !== 'undefined') && window.SW_RUN_ANCHOR;
-  if (RA) {
+  if (RA && !state.indexRun) {
     let ledgerRes = null, infoRes = null;
     try { ledgerRes = await xrpl(ws, { command: 'ledger', ledger_index: 'validated' }); }
     catch (e) { log('run anchor: ledger(validated) failed — ' + e.message); }
@@ -1560,6 +1588,10 @@ async function scanWallets(ws) {
       row.status = 'CHECKED';
     } catch (e) {
       row.status = 'FAILED'; row.error = e.message;
+      if (n(state._balanceFailLogged) < 3) {
+        state._balanceFailLogged = n(state._balanceFailLogged) + 1;
+        elog('balance ' + row.address, e);
+      }
       // The wallet still failed — that is real and stays recorded. But if the
       // server said WHY, the whole run needs to know, or the next 31 chunks
       // spend the cooldown rediscovering it one wallet at a time.
@@ -1585,7 +1617,7 @@ async function scanWallets(ws) {
     try {
       if (window.XAI_SCAN_PROGRESS) {
         window.XAI_SCAN_PROGRESS.walletsTotal   = rows.length;
-        window.XAI_SCAN_PROGRESS.walletsChecked = phase1Done;
+        window.XAI_SCAN_PROGRESS.walletsChecked = rows.filter(r => r.status === 'CHECKED').length;
         window.XAI_SCAN_PROGRESS.phase          = 'WALLET_PROGRESS';
       }
       if (window.__swDashApplied && typeof window.renderDashboardV1Live === 'function') window.renderDashboardV1Live();
@@ -1667,7 +1699,7 @@ async function scanWallets(ws) {
     try {
       if (window.XAI_SCAN_PROGRESS) {
         window.XAI_SCAN_PROGRESS.walletsTotal   = rows.length;
-        window.XAI_SCAN_PROGRESS.walletsChecked = rows.length;   // balances all read
+        window.XAI_SCAN_PROGRESS.walletsChecked = rows.filter(r => r.status === 'CHECKED').length;
         window.XAI_SCAN_PROGRESS.phase          = 'LEDGER';
       }
       if (window.__swDashApplied && typeof window.renderDashboardV1Live === 'function') window.renderDashboardV1Live();
@@ -3177,6 +3209,10 @@ function riskBand(s) {
   return 'GREEN / QUIET';
 }
 function publicRiskLabel(p) {
+  const coverage = p && p.tx_scan_coverage;
+  if (p && (!coverage || coverage.full_window_complete !== true)) {
+    return coverage ? 'NOT SCORED — ' + n(coverage.complete_wallets) + '/' + n(coverage.target_wallets) + ' transaction windows proved' : 'NOT SCORED — transaction coverage not measured';
+  }
   // v3.18: never silently downgrade. Show internal label + score; append
   // softer public framing only as a secondary qualifier.
   const r = (p && p.risk_score) || state.riskScore || {};
@@ -3626,6 +3662,72 @@ function scanIntegrity(pack) {
 // This is the same failure as the coverage bug: absence of data reported as a
 // finding of zero. And it only happens on a fresh profile — which is every
 // stranger handed the /report link, and never the operator's own machine.
+// ── A DELTA NEEDS TWO READINGS ──────────────────────────────────────────────
+// SW-20260907-2GAKH reported "Ripple gained +1.33B XRP", "Bithumb gained
+// +1.84B XRP" and "Highest active accumulator: Bithumb (+1.84B XRP this
+// window)" in the SAME report whose summary said "the tracked wallet board has
+// no prior balances on this device yet, so net flow is not measurable on this
+// run". Both statements came from one scan. Only the second was true.
+//
+// The cause is `n()`: it maps null to 0, so the narrative sections' own
+// recomputation
+//
+//     delta = n(w.balance_xrp) - n(w.prev_balance_xrp)
+//
+// silently became `balance - 0` for every wallet with no stored prior reading,
+// rendering each wallet's ENTIRE HOLDING as this window's movement. The
+// aggregate escaped it only by accident: totalDeltaXRP sums w.delta_xrp, which
+// balanceOne correctly leaves null, so NET DELTA read 0 while the per-wallet
+// lines read in the billions.
+//
+// A first reading is not a gain. It is the baseline the NEXT scan will measure
+// against. So an unmeasurable wallet gets null, never a number — and null is
+// not sortable, rankable, or reportable as movement.
+function walletDelta(w) {
+  if (!w) return null;
+  const prev = w.prev_balance_xrp;
+  if (prev === null || prev === undefined || prev === '') return null;
+  const cur = w.balance_xrp;
+  if (cur === null || cur === undefined || cur === '') return null;
+  if (!Number.isFinite(Number(prev)) || !Number.isFinite(Number(cur))) return null;
+  return Number(cur) - Number(prev);
+}
+// Wallets whose movement this run can actually be measured. Everything that
+// ranks, sorts or names a mover must read from here; a group that is entirely
+// unmeasurable is NOT a quiet group, and must not be described as flat.
+function measuredMovers(list) {
+  return (Array.isArray(list) ? list : [])
+    .map(w => (w && Object.prototype.hasOwnProperty.call(w, 'delta'))
+                ? w
+                : Object.assign({}, w, { delta: walletDelta(w) }))
+    .filter(w => w && w.delta !== null && w.delta !== undefined);
+}
+// True when this device holds no prior reading for ANY checked wallet, so the
+// whole board's movement is unmeasurable rather than zero.
+function _dbNoBaseline(pack) {
+  try { return deltaBaseline(pack || {}).none === true; } catch (_) { return false; }
+}
+// What a group of wallets can honestly be said to have done. Three outcomes,
+// and collapsing any two of them is how a first scan came to read as a
+// billion-XRP accumulation event.
+function groupMovement(walletsInGroup) {
+  const all = Array.isArray(walletsInGroup) ? walletsInGroup : [];
+  const measured = measuredMovers(all);
+  return {
+    total: all.length,
+    measured: measured.length,
+    movers: measured,
+    maxAbs: measured.length ? Math.max(...measured.map(w => Math.abs(w.delta))) : 0,
+    // Nothing to compare against: NOT flat, NOT quiet, NOT a shock.
+    unmeasurable: all.length > 0 && measured.length === 0
+  };
+}
+if (typeof window !== 'undefined') {
+  window.walletDelta = walletDelta;
+  window.measuredMovers = measuredMovers;
+  window.groupMovement = groupMovement;
+}
+
 function deltaBaseline(pack) {
   const p = pack || {};
   const ws = (Array.isArray(p.wallet_results) && p.wallet_results.length) ? p.wallet_results
@@ -3724,6 +3826,7 @@ function buildPack(v) {
     // scan reads exactly like a quiet one.
     xrpl_quota: _quotaNote(),
     xrpl_recovery: state.xrplRecovery || null,
+    evidence_index: state.indexRun && window.SW_EVIDENCE_INDEX ? window.SW_EVIDENCE_INDEX.metrics() : null,
     shadow_volume_xrp: shadowVolumeXRP(), total_balance_delta_xrp: totalDeltaXRP(),
     // The measured delta with the escrow-attributable part removed, and the
     // adjustment itself so the two reconcile in the debug pack.
@@ -4107,7 +4210,7 @@ function buildXRPMainReport(p) {
   results.forEach(w => {
     const grp = getWalletGroup(w.label || w.address);
     if (!buckets[grp]) buckets[grp] = [];
-    buckets[grp].push({ ...w, delta: n(w.balance_xrp) - n(w.prev_balance_xrp) });
+    buckets[grp].push({ ...w, delta: walletDelta(w) });
   });
 
   const netDelta = p.total_balance_delta_xrp || 0;
@@ -4264,13 +4367,19 @@ function buildXRPMainReport(p) {
         r.push(`• Top 10 watched share: ${fmt(hd.combined_top_10_xrp, 0)} XRP (${hd.combined_top_10_pct.toFixed(3)}% of 100B supply)`);
       }
       // Highest active accumulator: top non-dormant wallet with positive delta
-      const accumulators = (p.wallet_results || [])
-        .filter(w => w.status === 'CHECKED' && n(w.balance_xrp) - n(w.prev_balance_xrp) > 100_000)
-        .sort((a, b) => (n(b.balance_xrp) - n(b.prev_balance_xrp)) - (n(a.balance_xrp) - n(a.prev_balance_xrp)));
+      // An "accumulator" is a wallet observed to have GAINED. Without a prior
+      // reading there is nothing to have gained against, and ranking on
+      // balance-minus-zero simply crowns the largest holder — which is how
+      // Bithumb was named "highest active accumulator (+1.84B XRP this window)"
+      // on a device holding no baseline at all.
+      const accumulators = measuredMovers((p.wallet_results || []).filter(w => w.status === 'CHECKED'))
+        .filter(w => w.delta > 100_000)
+        .sort((a, b) => b.delta - a.delta);
       if (accumulators.length) {
         const top = accumulators[0];
-        const gained = n(top.balance_xrp) - n(top.prev_balance_xrp);
-        r.push(`• Highest active accumulator: ${_swWho(top.address, top.label, { bare: true })} (+${fmt(gained, 0)} XRP this window)`);
+        r.push(`• Highest active accumulator: ${_swWho(top.address, top.label, { bare: true })} (+${fmt(top.delta, 0)} XRP this window)`);
+      } else if (_dbNoBaseline(p)) {
+        r.push('• Highest active accumulator: not measurable — no prior balances stored on this device, so no wallet can be shown to have gained yet.');
       }
       // Strongest behavioral cluster
       if (hasCluster) {
@@ -14943,6 +15052,29 @@ function buildExecutiveSummary(p, netDelta, news) {
 // Build per-group Shadow Watch bullets with 🟢🟡🔴 indicator
 function shadowWatchSection(buckets, p) {
   const lines = [];
+  // ── MEASURABILITY BEFORE MOVEMENT ────────────────────────────────────────
+  // Every bullet below describes MOVEMENT, and movement needs two readings.
+  // A wallet with no stored prior balance can be reported as neither a mover
+  // NOR as quiet: "Founder Wallets quiet. Historically rare to move.",
+  // "Dormant Whales: still dormant." and "Binance cold nodes flat" are all
+  // positive claims about a comparison that never happened.
+  //
+  // So unmeasurable wallets are removed from the groups rather than defaulted
+  // to zero, and the count is stated at the end. A group that is entirely
+  // unmeasurable produces no bullet at all — omission is honest; "quiet" is
+  // not. On SW-20260907-2GAKH the opposite default made every wallet's whole
+  // holding look like this window's movement.
+  const _unmeasured = [];
+  const _measurableBuckets = {};
+  Object.keys(buckets || {}).forEach(k => {
+    const keep = [];
+    (buckets[k] || []).forEach(w => {
+      if (w && w.delta !== null && w.delta !== undefined) keep.push(w);
+      else if (w) _unmeasured.push(w);
+    });
+    _measurableBuckets[k] = keep;
+  });
+  buckets = _measurableBuckets;
   // Helper: classify a group's biggest move
   function indicator(maxAbsDelta) {
     if (maxAbsDelta >= 5_000_000) return '🔴';
@@ -15076,6 +15208,12 @@ function shadowWatchSection(buckets, p) {
       lines.push(`• 🔴 Dormant Whales: ${movers.join('; ')}. HIGH-SIGNIFICANCE awakening.`);
     }
   }
+  // The omission, stated. Without this line a first scan would simply show
+  // fewer bullets, and a reader could not tell a quiet board from an
+  // unmeasured one.
+  if (_unmeasured.length) {
+    lines.push(`• ⚪ Movement not measurable for ${_unmeasured.length} wallet${_unmeasured.length === 1 ? '' : 's'}: no prior balance stored on this device, so no gain, loss or flat reading can be claimed for ${_unmeasured.length === 1 ? 'it' : 'them'} this run. Balances were read; a second scan measures against them.`);
+  }
   // 9. Failed / invalid — yellow if any
   const failed = (p.wallets_failed || 0);
   const invalid = (p.wallets_invalid || 0);
@@ -15106,12 +15244,20 @@ function shadowWatchSection(buckets, p) {
 // Anomaly detection — picks the biggest non-trivial delta and writes Event + Evidence
 function anomalySection(buckets, p, netDelta) {
   const results = p.wallet_results || [];
-  const sorted = [...results]
-    .map(w => ({ ...w, delta: n(w.balance_xrp) - n(w.prev_balance_xrp) }))
+  const sorted = measuredMovers(results)
     .filter(w => Math.abs(w.delta) >= 100_000)
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
 
   if (!sorted.length) {
+    // "Below the threshold" and "no threshold could be applied" are different
+    // findings. Reporting baseline drift over wallets that were never measured
+    // asserts a comparison that did not happen.
+    if (_dbNoBaseline(p)) {
+      return [
+        '• Event: Balance anomaly detection did not run this window.',
+        '• Evidence: No prior balances stored on this device, so no wallet delta could be computed. This is the first scan here; the next one can measure against it.'
+      ];
+    }
     return [
       '• Event: No statistically significant balance anomaly this window.',
       '• Evidence: Largest delta below the 100k XRP threshold. Board is in baseline drift.'
@@ -15241,8 +15387,7 @@ function missionDebrief(buckets, p, netDelta, news) {
     parts.push(`and the wallet board was relatively quiet.`);
   }
   // Largest mover
-  const results = (p.wallet_results || [])
-    .map(w => ({ ...w, delta: n(w.balance_xrp) - n(w.prev_balance_xrp) }))
+  const results = measuredMovers(p.wallet_results || [])
     .filter(w => Math.abs(w.delta) > 100_000)
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
   if (results.length) {
@@ -20846,6 +20991,9 @@ function playScanCompleteSound() {
 // ── MAIN RUN ──────────────────────────────────────────────────
 async function run() {
   if (state.scanning) { log('Scan already in progress.'); return; }
+  state._balanceFailLogged = 0;
+  state._silentReplacements = 0;
+  state._runAbortReason = null;
   state.scanning = true;
   $('scanBtn').disabled = true;
   $('scanBtn').textContent = '⏳ SCANNING...';
@@ -21166,6 +21314,7 @@ async function run() {
     if ($('report4k')) $('report4k').textContent = 'Scan failed.\n' + e.message + '\n\nCheck the error log in the dev panel (tap "Powered by XMΣMΣ" 9 times).';
   } finally {
     try { if (ws) ws.close(); } catch {}
+    try { if (state._sock && state._sock !== ws) state._sock.close(); } catch {}
     $('scanBtn').disabled = false;
     $('scanBtn').textContent = '▶ RUN SHADOW WATCH';
     $('scanOrbPanel').classList.remove('scanning');
@@ -21645,8 +21794,11 @@ function _swLink() {
 }
 function _swScanning() { var b = document.body.classList; return b.contains('scanning') || b.contains('building'); }
 function _swScanStatusText() {
+  if (state._runAbortReason || (state.xrplRecovery && state.xrplRecovery.exhausted)) return 'Acquisition incomplete';
+  if (_quotaBlocked()) return 'Waiting for XRPL cooldown';
+  if (_swMode() === 'SEALED' && state.pack && (!state.pack.tx_scan_coverage || state.pack.tx_scan_coverage.full_window_complete !== true)) return 'Report incomplete';
   switch (_swMode()) {
-    case 'SCANNING': return 'Running smoothly';
+    case 'SCANNING': return 'Reading ledger evidence';
     case 'BUILDING': return 'Sealing evidence';
     case 'ERROR':    return 'Attention needed';
     case 'SEALED':   return 'Report sealed';
@@ -22244,10 +22396,16 @@ function _swRenderInstruments(p, SP, scanning) {
     var whale = largeArr ? largeArr.length : 0;
     var riskObj = (typeof state !== 'undefined' && state.riskScore) ? state.riskScore : (p && p.risk_score ? p.risk_score : null);
     var rScore = riskObj ? n(riskObj.score) : null;
+    var txCoverage = (p && p.tx_scan_coverage) || state.txScanCoverage;
+    var txComplete = txCoverage && txCoverage.full_window_complete === true;
+    if (!txComplete) rScore = null;
     _swClear(g);
-    g.appendChild(_swGauge('Wallet Coverage', covTxt, 'Scanned this pass', covFrac, 'var(--sw-green)'));
+    g.appendChild(_swGauge('Balance Reads', covTxt, 'Wallet balances acquired', covFrac, covFrac === 1 ? 'var(--sw-green)' : 'var(--sw-gold)'));
+    g.appendChild(_swGauge('Transaction Proof', txCoverage ? n(txCoverage.complete_wallets) + ' / ' + n(txCoverage.target_wallets) : DASH,
+      txComplete ? 'Full window proved' : 'Window proof incomplete', txCoverage && txCoverage.target_wallets ? n(txCoverage.complete_wallets)/txCoverage.target_wallets : 0,
+      txComplete ? 'var(--sw-green)' : 'var(--sw-gold)'));
     g.appendChild(_swGauge('Whale Activity', haveWhale ? _swPad2(whale) : DASH, 'Large transfers', Math.min(1, whale / 10), 'var(--sw-cyan)'));
-    g.appendChild(_swGauge('Activity Risk', rScore === null ? 'WAITING' : (rScore + ' / 100'), 'Elevated signal',
+    g.appendChild(_swGauge('Activity Risk', rScore === null ? (scanning ? 'WAITING' : 'NOT SCORED') : (rScore + ' / 100'), txComplete ? 'Measured signal' : 'Needs complete coverage',
                            rScore === null ? 0 : rScore / 100, rScore === null ? 'var(--sw-text-muted)' : _swRiskColor(rScore)));
   }
   var m = document.getElementById('swMeter');
@@ -22616,6 +22774,8 @@ function renderDashboardV1Live() {
     var wChecked = (scanning && SP && SP.walletsTotal > 0) ? n(SP.walletsChecked) : (p ? n(p.wallets_checked) : 0);
     var qSize = (window.SHADOW_BLOOM_QUEUE && typeof window.SHADOW_BLOOM_QUEUE.size === 'function') ? window.SHADOW_BLOOM_QUEUE.size() : 0;
     var errs = (typeof state !== 'undefined' && Array.isArray(state.errorLog)) ? state.errorLog.length : 0;
+    var proofCoverage = (p && p.tx_scan_coverage) || state.txScanCoverage;
+    if (proofCoverage) errs = Math.max(errs,n(proofCoverage.failed_wallets)+n(proofCoverage.truncated_wallets)+n(proofCoverage.unproven_wallets));
     var helpers = _xaiHelpersCount();
     var riskObj = (typeof state !== 'undefined' && state.riskScore) ? state.riskScore : (p && p.risk_score ? p.risk_score : null);
     // header
@@ -22635,7 +22795,7 @@ function renderDashboardV1Live() {
     _swRenderFlaggedMoves();
     _swRenderHelperJobs();
     _swSetText('swCellErrors', String(errs));
-    _swSetText('swCellRisk', riskObj ? (n(riskObj.score) + ' / 100') : 'WAITING');
+    _swSetText('swCellRisk', proofCoverage && proofCoverage.full_window_complete === true && riskObj ? (n(riskObj.score) + ' / 100') : (scanning ? 'WAITING' : 'NOT SCORED'));
     _swSetText('swCellCoverage', (wChecked || p || scanning) ? (wChecked + ' / ' + wTotal) : '—');
     var fv = document.getElementById('swFootVer');
     if (fv && !fv.textContent) fv.textContent = 'XRPMAN // SHADOWWATCH ' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : '');

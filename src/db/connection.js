@@ -79,6 +79,32 @@ function redactedTarget() {
 // transactions.js are exercised in CI with no database, no network and no
 // browser.
 let _injected = null;
+let _pool = null;
+
+// A transaction owns ONE checked-out Neon WebSocket connection. Separate
+// HTTP queries containing BEGIN/COMMIT do not provide this guarantee.
+function getPool() {
+  if (!isConfigured()) throw new Error('Evidence database is not configured');
+  if (!_pool) {
+    const { Pool, neonConfig } = require('@neondatabase/serverless');
+    neonConfig.webSocketConstructor = require('ws');
+    _pool = new Pool({ connectionString: connectionString(), max: 4, idleTimeoutMillis: 10000 });
+  }
+  return _pool;
+}
+async function transaction(work) {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const result = await work((text, params) => client.query(text, params || []));
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally { client.release(); }
+}
+async function close() { if (_pool) { const p = _pool; _pool = null; await p.end(); } }
 
 function setExecutor(fn) {
   if (fn !== null && typeof fn !== 'function') {
@@ -157,6 +183,9 @@ module.exports = {
   isConfigured,
   redactedTarget,
   getExecutor,
+  getPool,
+  transaction,
+  close,
   setExecutor,
   assertNoSecretMaterial,
   health,

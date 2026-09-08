@@ -395,6 +395,17 @@
       var proofByAccount = Object.create(null);
 
       accountTxWindowDepth = async function (ws, account, startMs, endMs, limit) {
+        if (state.indexRun && state.indexRun.accounts.indexOf(account) >= 0 && state.effectiveWindow &&
+            startMs === state.effectiveWindow.start_ms && endMs === state.effectiveWindow.end_ms) {
+          try {
+            var indexed = await window.SW_EVIDENCE_INDEX.readWallet(state.indexRun, account);
+            proofByAccount[account] = indexed.proof;
+            return indexed.rows;
+          } catch (indexError) {
+            proofByAccount[account] = { status:'FAILED', run_id:state.runId, anchor_ledger:state.runAnchor.anchor_ledger, error:indexError.message };
+            throw indexError;
+          }
+        }
         var rows = [], marker = null, pages = 0;
         var boundaryReached = false, historyExhausted = false;
         // PESSIMISTIC INITIAL VALUE. This was 'COMPLETE', so every path that
@@ -504,6 +515,8 @@
               unprovenReason = 'RESPONSE_NOT_VALIDATED';
               responseMaxSeen = num(res.ledger_index_max);
               responseValidated = false;
+            } else {
+              responseMaxSeen = num(res.ledger_index_max);
             }
             // The server's own retained floor for THIS answer, recorded for
             // diagnosis: it is how a clamped ceiling gets explained.
@@ -516,22 +529,7 @@
             // resumable, it is meaningless. Restart once against the SAME
             // anchor on the new transport; a second change gives up.
             if (transportEpoch() !== epoch0) {
-              if (restartsLeft > 0 && RA && typeof RA.buildRunAnchor === 'function') {
-                restartsLeft--;
-                await reproveOnCurrentTransport(ws, anchorSeq);
-                // Re-read the RUN's anchor, which reproveOnCurrentTransport
-                // updated in place, so this wallet and every later one are
-                // working from the same transport-consistent proof.
-                try { runAnchor = (typeof state !== 'undefined') ? state.runAnchor : runAnchor; } catch (_) {}
-                epoch0 = transportEpoch();
-                marker = null; rows = []; pages = 0;
-                oldestLedger = null; newestLedger = null; rowsWithoutLedger = 0;
-                boundaryReached = false; historyExhausted = false;
-                try { if (typeof log === 'function') log('tx-scan ' + account + ': transport changed mid-walk — marker discarded, restarting on the new socket'); } catch (_) {}
-                continue;
-              }
-              transportConsistent = false;
-              unprovenReason = 'TRANSPORT_CHANGED';
+              if (await restartOnTransportChange()) continue;
               break;
             }
             pages++;
@@ -849,6 +847,16 @@
           return qualifyIncompleteText(out, pack);
         };
         buildMorningStoryText._swTxCompleteness20260819 = true;
+        // CARRY THE V1 MARKER FORWARD. 10-pipeline's _boot re-installs after
+        // 2000ms if window.buildMorningStoryText._pipelineV1Hooked is missing,
+        // and wrapping here dropped it — so the re-install captured THIS
+        // wrapper as `legacy`, called it only to harvest prayer and scripture,
+        // and returned renderPublicReport() instead. The caveat below was
+        // computed and thrown away. Preserving the flag keeps V1 from
+        // reinstalling on top of us. The report's coverage line no longer
+        // depends on winning that race, but losing it should not be silent
+        // either.
+        try { buildMorningStoryText._pipelineV1Hooked = origMorning._pipelineV1Hooked === true; } catch (_) {}
       }
     } catch (_) {}
 
@@ -904,6 +912,11 @@
   installCoverageConsumers();
 
   window.SW_REPORT_SCAN_TUNING_20260816 = {
+    // THE CANONICAL COVERAGE VERDICT, exposed so other surfaces consume it
+    // rather than deriving their own. #57 removed one such divergence (the
+    // database refusing a wallet the Report was certifying); a second copy of
+    // this rule inside the V1 renderer would rebuild it in a different place.
+    coverageFrom: coverageFrom,
     version: VERSION,
     read_only: true,
     promoted_addresses: PROMOTIONS.map(function (p) { return p.address; }),

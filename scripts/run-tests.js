@@ -46,10 +46,13 @@ const SUITES = [
   ['canonical-escrow-model', 'canonical-escrow-model.test.js',   8214],
   // No browser, no port, no database — pure decision logic for the evidence index.
   ['db-foundation',          'db-foundation.test.js',            null],
+  ['evidence-boundary',      'evidence-boundary.test.js',        null],
   // Pure decision logic, no browser and no network.
   ['dex-volume-truth',       'dex-volume-truth.test.js',         null],
   ['xrpl-quota',             'xrpl-quota-backpressure.test.js',  8221],
   ['xrpl-adaptive',          'xrpl-adaptive-recovery.test.js',   8222],
+  ['morning-story-coverage', 'morning-story-coverage-truth.test.js', 8223],
+  ['first-scan-baseline',    'first-scan-baseline-truth.test.js', 8224],
   // Integration: the anchor, the row's ledger_index and the capped window,
   // driven through a fake XRPL server rather than a fake decision layer.
   ['ledger-anchor',          'ledger-anchor-prerequisites.test.js', null]
