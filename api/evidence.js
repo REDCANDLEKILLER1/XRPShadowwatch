@@ -35,7 +35,10 @@ module.exports=async function handler(req,res){
       try{await db.getExecutor()(`UPDATE scan_wallets SET status=$3,error=$4,updated_at=now() WHERE scan_id=$1 AND address=$2 AND status<>'COMPLETE'`,
         [input.scan_id,input.address,e.pending?'PENDING':'FAILED',safe]);}catch(_){}
     }
-    if(e.pending){res.setHeader('Retry-After',Math.ceil((e.retry_after_ms||1000)/1000));return res.status(202).json({pending:true,retry_after_ms:e.retry_after_ms||1000,error:safe});}
-    return res.status(503).json({error:safe});
+    const transport=reader?{...reader.stats,first_failure:reader.stats.first_failure&&{...reader.stats.first_failure,
+      reason:String(reader.stats.first_failure.reason||'').replace(/postgres(?:ql)?:\/\/\S+/gi,'[database connection redacted]')},
+      events:reader.stats.events.map(ev=>({...ev,...(ev.reason?{reason:String(ev.reason).replace(/postgres(?:ql)?:\/\/\S+/gi,'[database connection redacted]')}:{})}))}:null;
+    if(e.pending){res.setHeader('Retry-After',Math.ceil((e.retry_after_ms||1000)/1000));return res.status(202).json({pending:true,retry_after_ms:e.retry_after_ms||1000,error:safe,transport});}
+    return res.status(503).json({error:safe,transport});
   }finally{if(reader)releaseReader(reader);}
 };

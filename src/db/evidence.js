@@ -204,6 +204,8 @@ async function readWindow(id,address,after) {
   return {available:true,scan_id:id,roster_hash:run.roster_hash,decision:{...d,edge_fetch_complete:true},
     next:more?selected[selected.length-1].hash:null,
     proof:{status:'COMPLETE',range_bound_proven:true,range_exhausted:true,covers_window_start:true,edge_fetch_complete:true,
+      proven_reason:'SERVER_RETAINED_RANGE_PROVEN',from_ledger:Number(cov.scan_coverage_from),through_ledger:Number(run.anchor_ledger),
+      retained_from_ledger:Number(cov.evidence_retained_from),retained_through_ledger:Number(cov.evidence_retained_through),
       anchor_ledger:Number(run.anchor_ledger),run_id:id,request_bounded:true,transport_consistent:true,
       window_bounded_by_anchor:true,response_validated:true,source:'NEON_VERIFIED_INDEX',
       response_ledger_index_max:Number(run.anchor_ledger),response_ledger_index_min:Number(cov.scan_coverage_from),pages_scanned:0},

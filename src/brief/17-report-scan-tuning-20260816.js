@@ -277,6 +277,17 @@
         request_bounded: p.request_bounded === true,
         transport_consistent: p.transport_consistent === true,
         run_id: p.run_id || null,
+        source: p.source || 'XRPL_DIRECT',
+        actual_endpoint: p.actual_endpoint || null,
+        transport_epoch: p.transport_epoch == null ? null : p.transport_epoch,
+        from_ledger: p.from_ledger == null ? null : p.from_ledger,
+        through_ledger: p.through_ledger == null ? null : p.through_ledger,
+        retained_from_ledger: p.retained_from_ledger == null ? null : p.retained_from_ledger,
+        retained_through_ledger: p.retained_through_ledger == null ? null : p.retained_through_ledger,
+        edge_fetch_from_ledger: p.edge_fetch_from_ledger == null ? null : p.edge_fetch_from_ledger,
+        edge_fetch_to_ledger: p.edge_fetch_to_ledger == null ? null : p.edge_fetch_to_ledger,
+        xrpl_requests: p.xrpl_requests == null ? null : p.xrpl_requests,
+        index_rows_returned: p.index_rows_returned == null ? null : p.index_rows_returned,
         address: w.address,
         label: w.label,
         status: st,
@@ -402,7 +413,10 @@
             proofByAccount[account] = indexed.proof;
             return indexed.rows;
           } catch (indexError) {
-            proofByAccount[account] = { status:'FAILED', run_id:state.runId, anchor_ledger:state.runAnchor.anchor_ledger, error:indexError.message };
+            proofByAccount[account] = { status:'FAILED', source:'NEON_VERIFIED_INDEX', run_id:state.runId,
+              anchor_ledger:state.runAnchor.anchor_ledger, error:indexError.message,
+              actual_endpoint:indexError.transport&&indexError.transport.actual_endpoint,
+              transport_epoch:indexError.transport&&indexError.transport.transport_epoch };
             throw indexError;
           }
         }

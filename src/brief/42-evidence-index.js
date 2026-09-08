@@ -12,7 +12,7 @@
       ,signal:controller.signal
     }:{cache:'no-store',signal:controller.signal});
     var data;try{data=await response.json();}catch(_){throw new Error('EVIDENCE_STORE_UNAVAILABLE');}
-    if(!response.ok)throw new Error(data.error||'EVIDENCE_REQUEST_FAILED');
+    if(!response.ok){var failure=new Error(data.error||'EVIDENCE_REQUEST_FAILED');failure.transport=data.transport||null;throw failure;}
     return data;
     } catch(e) {if(e.name==='AbortError')throw new Error('EVIDENCE_RESPONSE_TIMEOUT');throw e;}
     finally {clearTimeout(timer);}
@@ -63,10 +63,14 @@
              !result.proof||result.proof.anchor_ledger!==run.anchor_ledger)throw new Error('INDEX_WINDOW_UNPROVEN');
           rows=rows.concat(result.transactions);proof=result.proof;after=result.next||'';metrics.pages_read++;
         }while(after);
+        proof=Object.assign({},proof,{actual_endpoint:acquired.transport&&acquired.transport.actual_endpoint,
+          transport_epoch:acquired.transport&&acquired.transport.transport_epoch,
+          edge_fetch_from_ledger:acquired.fetch_from_ledger,edge_fetch_to_ledger:acquired.fetch_to_ledger,
+          xrpl_requests:Number(acquired.requests)||0,index_rows_returned:rows.length});
         metrics.indexed_wallets++;
         if(typeof log==='function')log('Evidence index '+address+': '+acquired.mode+', '+rows.length+' retained rows, '+(acquired.requests||0)+' XRPL reads');
         return {rows:rows,proof:proof};
-      }catch(e){metrics.errors.push({address:address,error:e.message});throw e;}
+      }catch(e){metrics.errors.push({address:address,error:e.message,transport:e.transport||null});throw e;}
       finally{release();}
     }
   };
