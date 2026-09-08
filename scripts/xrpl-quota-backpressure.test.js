@@ -223,14 +223,79 @@ const QUOTA_MSG = 'rate limit: units quota (10000 per 60s) exhausted, retry in ~
   // BALANCES, TX WINDOWS, OFFERS, RELATED OFFERS — plus the one inside
   // _quotaNote's own guard. Naming the number means adding a dispatcher
   // without gating it fails here.
-  check('all four dispatch loops consult the shared gate',
-        gated === 5, gated);
+  // The four dispatch loops now go through _quotaHold, which waits and THEN
+  // decides; _quotaBlocked stays the raw predicate it and _quotaNote consult.
+  const held = (src.match(/_quotaHold\(/g) || []).length;
+  check('all four dispatch loops go through the shared wait-then-decide gate',
+        // its own definition + the four dispatch loops
+        held === 5 && gated === 3, { held, gated });
   // scanOffers, balanceOne, txOne, and the window export.
   check('and the passes that can be rejected all report it',
         noted === 4, noted);
   check('no dispatcher sleeps or retries inside the cooldown',
         !/_quotaBlocked[\s\S]{0,400}setTimeout/.test(src) &&
         !/await\s+new\s+Promise\([^)]*setTimeout[^)]*\)[\s\S]{0,200}quota/i.test(src), 'a sleeper crept in');
+
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log('\n8. THE POINT: the scan WAITS and finishes, instead of discarding the board');
+  // SW-20260908-ZS25F got "5/255 proved" three runs in a row: the allowance
+  // was exhausted a few seconds in, and 250 wallets were thrown away. The
+  // quota is a RATE limit, so waiting it out finishes the job.
+  const r8 = await page.evaluate(async () => {
+    state._quotaUntil = 0; state._quotaHits = 0; state._quotaCutPasses = [];
+    state._quotaWaits = 0; state._quotaWaitedMs = 0; state._quotaWaiter = null;
+    const roster = Array.from({ length: 255 }, (_, i) => 'w' + i);
+    let done = 0, stopped = false;
+    // The real loop shape: 8 at a time, gate checked before each chunk.
+    for (let i = 0; i < roster.length; i += 8) {
+      if (await window._quotaHold('TX WINDOWS', done, roster.length)) { stopped = true; break; }
+      // The server rejects once, early, with a SHORT cooldown so the test is fast.
+      if (done === 8) window._noteQuota(new Error('rate limit, retry in ~60ms'), 'the window pass');
+      done += Math.min(8, roster.length - i);
+    }
+    return {
+      roster: roster.length, done, stopped,
+      waits: n(state._quotaWaits),
+      waitedMs: n(state._quotaWaitedMs)
+    };
+  });
+  console.log('     ' + JSON.stringify(r8));
+  check('THE REGRESSION — every wallet is scanned, not 8 of 255',
+        r8.done === 255 && r8.stopped === false, r8);
+  check('and it waited exactly once, sharing that wait across the run',
+        r8.waits === 1 && r8.waitedMs > 0, r8);
+
+  console.log('\n9. the wait is bounded — a run can never hang');
+  const r9 = await page.evaluate(async () => {
+    state._quotaUntil = 0; state._quotaHits = 0; state._quotaCutPasses = [];
+    state._quotaWaits = 0; state._quotaWaitedMs = 0; state._quotaWaiter = null;
+    let holds = 0, stoppedAt = null;
+    // A server that refuses forever: every wait is followed by another refusal.
+    for (let i = 0; i < 60; i++) {
+      window._noteQuota(new Error('rate limit, retry in ~30ms'), 'a hostile pass');
+      holds++;
+      if (await window._quotaHold('TX WINDOWS', i, 60)) { stoppedAt = i; break; }
+    }
+    return { holds, stoppedAt, waits: n(state._quotaWaits), cut: (state._quotaCutPasses || []).length };
+  });
+  console.log('     ' + JSON.stringify(r9));
+  check('THE REGRESSION — a server that never relents cannot hang the run',
+        typeof r9.stoppedAt === 'number' && r9.waits === 8, r9);
+  check('and the pass that gave up is still recorded',
+        r9.cut === 1, r9);
+
+  console.log('\n10. eight parallel callers share ONE wait, not eight');
+  const r10 = await page.evaluate(async () => {
+    state._quotaUntil = 0; state._quotaHits = 0; state._quotaCutPasses = [];
+    state._quotaWaits = 0; state._quotaWaitedMs = 0; state._quotaWaiter = null;
+    window._noteQuota(new Error('rate limit, retry in ~80ms'), 'the offer sweep');
+    const t0 = performance.now();
+    await Promise.all(Array.from({ length: 8 }, () => window._quotaHold('OFFERS', 0, 255)));
+    return { elapsed: Math.round(performance.now() - t0), waits: n(state._quotaWaits) };
+  });
+  console.log('     ' + JSON.stringify(r10));
+  check('THE REGRESSION — eight callers cost ONE cooldown, not eight in series',
+        r10.waits === 1 && r10.elapsed < 400, r10);
 
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 

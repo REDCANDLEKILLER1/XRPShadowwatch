@@ -1067,9 +1067,74 @@ function _quotaNote() {
     hits: n(state._quotaHits),
     first_at: state._quotaFirstAt || null,
     first_where: state._quotaWhere || null,
+    waits: n(state._quotaWaits),
+    waited_ms: n(state._quotaWaitedMs),
     passes_cut_short: (state._quotaCutPasses || []).slice()
   };
 }
+// ── WAIT, THEN CARRY ON ─────────────────────────────────────────────────────
+// The quota is a RATE limit — 10,000 units per 60 SECONDS — not a total cap.
+// So the scan CAN finish. It just has to stop asking for the length of the
+// cooldown and then resume, instead of throwing the rest of the board away.
+//
+// SW-20260908-ZS25F: the allowance had fully reset (its rejections start clean
+// and span 11 seconds), one pass exhausted it, and 250 of 255 wallets were
+// discarded in the seconds that followed. The operator got a report reading
+// "5/255 proved" three times in a row. Stopping the pass made the failure
+// honest; it did not make the scan work.
+//
+// ONE waiter for the whole run, never one per caller: every dispatcher that
+// arrives during a cooldown awaits the SAME promise, so eight parallel wallets
+// wait once between them rather than eight times in series.
+//
+// The wait is bounded so a run can never hang: at most QUOTA_MAX_WAITS pauses,
+// each capped by QUOTA_MAX_MS. Past that the pass stops and says so, which is
+// the old behaviour and still the right floor.
+const QUOTA_MAX_WAITS = 8;
+// The real bound is TIME, not a count: a full roster may legitimately need
+// several refills, and four was chosen for a test rather than for a scan.
+// Six minutes of waiting to convert 5/255 into 255/255 is worth it; an
+// unbounded wait never is.
+const QUOTA_MAX_TOTAL_WAIT_MS = 360000;
+
+function _quotaWait() {
+  // Already waiting? Join the existing one. This is what keeps eight callers
+  // from turning one 70-second cooldown into eight of them.
+  if (state._quotaWaiter) return state._quotaWaiter;
+  const until = n(state._quotaUntil);
+  const ms = Math.max(0, until - Date.now());
+  if (ms <= 0) return null;
+  if (n(state._quotaWaits) >= QUOTA_MAX_WAITS) return null;
+  if (n(state._quotaWaitedMs) + ms > QUOTA_MAX_TOTAL_WAIT_MS) return null;
+  state._quotaWaits = n(state._quotaWaits) + 1;
+  log('XRPL quota reached — waiting ' + Math.ceil(ms / 1000) + 's for the allowance to refill (' +
+      state._quotaWaits + '/' + QUOTA_MAX_WAITS + '), then continuing the scan.');
+  state._quotaWaiter = new Promise(res => setTimeout(() => {
+    try { state._quotaWaiter = null; } catch (_) {}
+    try {
+      state._quotaWaitedMs = n(state._quotaWaitedMs) + ms;
+      log('XRPL allowance refilled — resuming.');
+    } catch (_) {}
+    res();
+  }, ms + 250));   // a small margin, so we do not return the instant it expires
+  return state._quotaWaiter;
+}
+
+// What every dispatch loop calls. Returns true if the caller should STOP,
+// false if it may carry on (either the gate was open, or we waited it out).
+async function _quotaHold(name, done, total) {
+  if (!_quotaBlocked()) return false;
+  const w = _quotaWait();
+  if (w) {
+    await w;
+    // The cooldown may have been extended while we slept; if so, that is a
+    // fresh rejection and the next check decides again.
+    if (!_quotaBlocked()) return false;
+  }
+  _quotaCutPass(name, done, total);
+  return true;
+}
+
 function _quotaCutPass(name, done, total) {
   try {
     state._quotaCutPasses = state._quotaCutPasses || [];
@@ -1078,6 +1143,7 @@ function _quotaCutPass(name, done, total) {
   log(name + ': stopped after ' + done + '/' + total + ' — XRPL quota cooldown outstanding.');
 }
 if (typeof window !== 'undefined') {
+  window._quotaHold    = _quotaHold;
   window._isQuotaError = _isQuotaError;
   window._quotaRetryMs = _quotaRetryMs;
   window._noteQuota    = _noteQuota;
@@ -1272,6 +1338,9 @@ async function scanWallets(ws) {
   state._quotaFirstAt = null;
   state._quotaWhere = null;
   state._quotaCutPasses = [];
+  state._quotaWaits = 0;
+  state._quotaWaitedMs = 0;
+  state._quotaWaiter = null;
   try { for (const _w of (state.wallets || [])) { if (_w) delete _w.tx_scan; } } catch (_) {}
 
   // ── ONE VALIDATED ANCHOR FOR THIS ENTIRE RUN ────────────────────────────
@@ -1383,7 +1452,7 @@ async function scanWallets(ws) {
 
   let phase1Done = 0;
   for (let i = 0; i < rows.length; i += SCAN_PARALLEL) {
-    if (_quotaBlocked()) { _quotaCutPass('BALANCES', phase1Done, rows.length); break; }
+    if (await _quotaHold('BALANCES', phase1Done, rows.length)) break;
     const chunk = rows.slice(i, i + SCAN_PARALLEL);
     await Promise.all(chunk.map(balanceOne));
     phase1Done = i + chunk.length;
@@ -1472,7 +1541,7 @@ async function scanWallets(ws) {
 
   let phase2Done = 0;
   for (let i = 0; i < needTx.length; i += SCAN_PARALLEL) {
-    if (_quotaBlocked()) { _quotaCutPass('TX WINDOWS', phase2Done, needTx.length); break; }
+    if (await _quotaHold('TX WINDOWS', phase2Done, needTx.length)) break;
     const chunk = needTx.slice(i, i + SCAN_PARALLEL);
     await Promise.all(chunk.map(txOne));
     phase2Done = i + chunk.length;
@@ -19179,7 +19248,7 @@ async function scanOffers(ws) {
       log('OFFERS: stopped after ' + scanned + '/' + wallets.length + ' — XRPL link down.');
       return;
     }
-    if (_quotaBlocked()) { _quotaCutPass('OFFERS', scanned, wallets.length); return; }
+    if (await _quotaHold('OFFERS', scanned, wallets.length)) return;
     const chunk = wallets.slice(i, i + CHUNK);
     let counts;
     try {
@@ -20037,7 +20106,7 @@ async function runRelatedOfferScan(ws) {
     // Same reason as the offer scan: once the link is confirmed down, every
     // remaining candidate reports the identical failure. Say it once and stop.
     if (_linkDown()) { log('RELATED OFFERS: stopped after ' + attempts + '/' + ranked.length + ' — XRPL link down.'); break; }
-    if (_quotaBlocked()) { _quotaCutPass('RELATED OFFERS', attempts, ranked.length); break; }
+    if (await _quotaHold('RELATED OFFERS', attempts, ranked.length)) break;
     const chunk = ranked.slice(i, i + RELATED_OFFERS_CONFIG.PARALLEL_FETCH);
     let linkGone = false;
     await Promise.all(chunk.map(async c => {
