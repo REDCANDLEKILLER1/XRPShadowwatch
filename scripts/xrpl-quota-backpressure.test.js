@@ -84,6 +84,11 @@ const QUOTA_MSG = 'rate limit: units quota (10000 per 60s) exhausted, retry in ~
       production:  window._isQuotaError(E(msg)),
       http429:     window._isQuotaError(E('429 Too Many Requests')),
       slowDown:    window._isQuotaError(E('slowDown')),
+      // rippled's own refusal, verbatim from SW-20260908-BSQCJ (32 of 77)
+      tooBusy:     window._isQuotaError(E('The server is too busy to help you now.')),
+      tooBusyCode: window._isQuotaError(E('tooBusy')),
+      // …and it carries no hint, so it must fall back rather than guess 0
+      tooBusyWait: window._quotaRetryMs(E('The server is too busy to help you now.')),
       // #59's breaker owns silence. These must NOT be treated as a quota.
       timeout:     window._isQuotaError(E('timeout account_offers')),
       linkDown:    window._isQuotaError(E('XRPL link down')),
@@ -94,6 +99,10 @@ const QUOTA_MSG = 'rate limit: units quota (10000 per 60s) exhausted, retry in ~
   console.log('     ' + JSON.stringify(r1));
   check('THE REGRESSION — the production rejection is recognised',
         r1.production === true && r1.http429 === true && r1.slowDown === true, r1);
+  check('THE REGRESSION — rippled\'s "too busy" is a refusal too, not an empty result',
+        r1.tooBusy === true && r1.tooBusyCode === true, r1);
+  check('and a refusal with no retry hint waits the fallback, not zero',
+        r1.tooBusyWait === 60000, r1);
   check('a timeout is NOT a quota — silence and refusal are different failures',
         r1.timeout === false && r1.linkDown === false && r1.linkClosed === false, r1);
   check('an ordinary XRPL error is not a quota either', r1.actNotFound === false, r1);

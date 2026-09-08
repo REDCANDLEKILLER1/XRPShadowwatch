@@ -1019,7 +1019,16 @@ function _sockOpen(w) { try { return !!w && w.readyState === 1; } catch (_) { re
 // already knows how to report a short pass honestly. What must never happen is
 // the pass ending early and the report claiming it finished.
 const QUOTA_HINT_RE = /retry\s+in\s+~?\s*(\d+)\s*ms/i;
-const QUOTA_ERROR_RE = /rate limit|quota|too many requests|429|slow ?down/i;
+// SW-20260908-BSQCJ carried a THIRD refusal, and this pattern missed it: of
+// its 77 failed windows, 32 were rippled's own
+//
+//     "The server is too busy to help you now."
+//
+// tooBusy is the same class as a quota — the server declining to serve right
+// now — and it arrives with NO retry hint, so it takes the 60s fallback. It is
+// still not a timeout: the other 45 of those 77 were `timeout account_tx`,
+// which is silence and belongs to the dead-socket breaker, not here.
+const QUOTA_ERROR_RE = /rate limit|quota|too many requests|429|slow ?down|too ?busy/i;
 const QUOTA_FALLBACK_MS = 60000;   // only if the server rejects without a hint
 const QUOTA_MAX_MS      = 300000;  // never trust an absurd hint
 
