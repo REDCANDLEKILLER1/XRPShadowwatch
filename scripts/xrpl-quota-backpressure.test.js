@@ -124,8 +124,8 @@ const QUOTA_MSG = 'rate limit: units quota (10000 per 60s) exhausted, retry in ~
         r2.fromHint === 69888 && r2.otherHint === 36547, r2);
   check('a rejection with no hint falls back rather than guessing zero',
         r2.noHint === 60000, r2);
-  check('an absurd or zero hint is bounded, not trusted',
-        r2.absurd === 300000 && r2.zero === 60000, r2);
+  check('a long hint is never shortened into an early retry; zero uses fallback',
+        r2.absurd === 999999999 && r2.zero === 60000, r2);
 
   // ══════════════════════════════════════════════════════════════════════════
   console.log('\n3. ONE decision, shared — the whole point');
@@ -237,10 +237,10 @@ const QUOTA_MSG = 'rate limit: units quota (10000 per 60s) exhausted, retry in ~
   const held = (src.match(/_quotaHold\(/g) || []).length;
   check('all four dispatch loops go through the shared wait-then-decide gate',
         // its own definition + the four dispatch loops
-        held === 5 && gated === 3, { held, gated });
+        held === 6 && gated === 3, { held, gated });
   // scanOffers, balanceOne, txOne, and the window export.
   check('and the passes that can be rejected all report it',
-        noted === 4, noted);
+        noted === 5, noted);
   check('no dispatcher sleeps or retries inside the cooldown',
         !/_quotaBlocked[\s\S]{0,400}setTimeout/.test(src) &&
         !/await\s+new\s+Promise\([^)]*setTimeout[^)]*\)[\s\S]{0,200}quota/i.test(src), 'a sleeper crept in');
@@ -289,7 +289,7 @@ const QUOTA_MSG = 'rate limit: units quota (10000 per 60s) exhausted, retry in ~
   });
   console.log('     ' + JSON.stringify(r9));
   check('THE REGRESSION — a server that never relents cannot hang the run',
-        typeof r9.stoppedAt === 'number' && r9.waits === 8, r9);
+        typeof r9.stoppedAt === 'number' && r9.waits === 30, r9);
   check('and the pass that gave up is still recorded',
         r9.cut === 1, r9);
 

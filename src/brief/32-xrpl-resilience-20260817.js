@@ -65,7 +65,7 @@
   try {
     if (typeof connectXRPL === 'function' && !connectXRPL._swResilience20260817) {
       var originalConnectXRPL = connectXRPL;
-      var resilientConnectXRPL = async function () {
+      var resilientConnectXRPL = async function (options) {
         var preferred = null;
         try {
           var el = (typeof $ === 'function') ? $('xrplServer') : document.getElementById('xrplServer');
@@ -76,6 +76,9 @@
         var servers = uniq([preferred, HONEY].concat(base).concat([
           'wss://xrplcluster.com', 'wss://s1.ripple.com', 'wss://s2.ripple.com'
         ]));
+        var avoid = options && options.avoidServer;
+        if (avoid) servers = servers.filter(function (s) { return s.replace(/\/$/, '') !== avoid.replace(/\/$/, ''); })
+          .concat(servers.filter(function (s) { return s.replace(/\/$/, '') === avoid.replace(/\/$/, ''); }));
         var deadline = Date.now() + MAIN_RECONNECT_BUDGET_MS;
         var rounds = 0;
         var lastErr = null;

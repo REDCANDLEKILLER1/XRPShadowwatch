@@ -49,6 +49,7 @@ const SUITES = [
   // Pure decision logic, no browser and no network.
   ['dex-volume-truth',       'dex-volume-truth.test.js',         null],
   ['xrpl-quota',             'xrpl-quota-backpressure.test.js',  8221],
+  ['xrpl-adaptive',          'xrpl-adaptive-recovery.test.js',   8222],
   // Integration: the anchor, the row's ledger_index and the capped window,
   // driven through a fake XRPL server rather than a fake decision layer.
   ['ledger-anchor',          'ledger-anchor-prerequisites.test.js', null]

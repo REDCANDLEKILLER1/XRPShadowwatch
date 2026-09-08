@@ -955,9 +955,11 @@ function populateScanTarget() {
 }
 
 // ── XRPL CONNECT (with FALLBACK) ───────────────────────────────
-async function connectXRPL() {
+async function connectXRPL(options) {
   const preferred = $('xrplServer') ? $('xrplServer').value : XRPL_SERVERS[0];
-  const servers = [preferred, ...XRPL_SERVERS.filter(s => s !== preferred)];
+  const ordered = [preferred, ...XRPL_SERVERS.filter(s => s !== preferred)];
+  const avoid = options && options.avoidServer;
+  const servers = ordered.filter(s => s !== avoid).concat(ordered.filter(s => s === avoid));
   for (const server of servers) {
     try {
       const ws = await new Promise((res, rej) => {
@@ -1028,7 +1030,7 @@ const QUOTA_HINT_RE = /retry\s+in\s+~?\s*(\d+)\s*ms/i;
 // now — and it arrives with NO retry hint, so it takes the 60s fallback. It is
 // still not a timeout: the other 45 of those 77 were `timeout account_tx`,
 // which is silence and belongs to the dead-socket breaker, not here.
-const QUOTA_ERROR_RE = /rate limit|quota|too many requests|429|slow ?down|too ?busy/i;
+const QUOTA_ERROR_RE = /rate limit|quota|too many requests|\b429\b|slow ?down|too ?busy|placing too much load/i;
 const QUOTA_FALLBACK_MS = 60000;   // only if the server rejects without a hint
 const QUOTA_MAX_MS      = 300000;  // never trust an absurd hint
 
@@ -1036,15 +1038,21 @@ const QUOTA_MAX_MS      = 300000;  // never trust an absurd hint
 // and an explicit rejection are different failures and #59's breaker owns the
 // first one.
 function _isQuotaError(e) {
-  const m = (e && (e.message || e.error_message || e.error)) || '';
-  return QUOTA_ERROR_RE.test(String(m));
+  return QUOTA_ERROR_RE.test(_xrplErrorText(e));
+}
+function _xrplErrorText(e) {
+  return typeof e === 'string' ? e : [e && e.message, e && e.error_message,
+    e && e.error, e && e.code, e && e.result && e.result.error,
+    e && e.result && e.result.error_message].filter(Boolean).join(' ');
 }
 function _quotaRetryMs(e) {
-  const m = String((e && (e.message || e.error_message || e.error)) || '');
+  if (e && Number.isFinite(e.retry_after_ms) && e.retry_after_ms > 0) return e.retry_after_ms;
+  const m = _xrplErrorText(e);
   const hit = QUOTA_HINT_RE.exec(m);
   const ms = hit ? Number(hit[1]) : NaN;
   if (!Number.isFinite(ms) || ms <= 0) return QUOTA_FALLBACK_MS;
-  return Math.min(ms, QUOTA_MAX_MS);
+  // A hint longer than our recovery budget stops the run; never retry early.
+  return ms;
 }
 // Record the rejection ONCE for the whole run. Later rejections inside the same
 // cooldown extend nothing and log nothing: they are the passes already in
@@ -1059,7 +1067,7 @@ function _noteQuota(e, where) {
     state._quotaFirstAt = new Date().toISOString();
     state._quotaWhere = where || 'unknown';
     log('XRPL quota exhausted during ' + (where || 'scan') + ' — the server asked for ' +
-        Math.round(_quotaRetryMs(e) / 1000) + 's. Stopping this pass rather than spending the cooldown on requests it will reject.');
+        Math.round(_quotaRetryMs(e) / 1000) + 's. Pausing requests, then retrying the current read.');
   }
   return true;
 }
@@ -1099,12 +1107,12 @@ function _quotaNote() {
 // The wait is bounded so a run can never hang: at most QUOTA_MAX_WAITS pauses,
 // each capped by QUOTA_MAX_MS. Past that the pass stops and says so, which is
 // the old behaviour and still the right floor.
-const QUOTA_MAX_WAITS = 8;
+const QUOTA_MAX_WAITS = 30;
 // The real bound is TIME, not a count: a full roster may legitimately need
 // several refills, and four was chosen for a test rather than for a scan.
 // Six minutes of waiting to convert 5/255 into 255/255 is worth it; an
 // unbounded wait never is.
-const QUOTA_MAX_TOTAL_WAIT_MS = 360000;
+const QUOTA_MAX_TOTAL_WAIT_MS = 900000;
 
 function _quotaWait() {
   // Already waiting? Join the existing one. This is what keeps eight callers
@@ -1113,7 +1121,7 @@ function _quotaWait() {
   const until = n(state._quotaUntil);
   const ms = Math.max(0, until - Date.now());
   if (ms <= 0) return null;
-  if (n(state._quotaWaits) >= QUOTA_MAX_WAITS) return null;
+  if (n(state._quotaWaits) >= QUOTA_MAX_WAITS || ms > QUOTA_MAX_MS) return null;
   if (n(state._quotaWaitedMs) + ms > QUOTA_MAX_TOTAL_WAIT_MS) return null;
   state._quotaWaits = n(state._quotaWaits) + 1;
   log('XRPL quota reached — waiting ' + Math.ceil(ms / 1000) + 's for the allowance to refill (' +
@@ -1132,16 +1140,19 @@ function _quotaWait() {
 // What every dispatch loop calls. Returns true if the caller should STOP,
 // false if it may carry on (either the gate was open, or we waited it out).
 async function _quotaHold(name, done, total) {
-  if (!_quotaBlocked()) return false;
-  const w = _quotaWait();
-  if (w) {
-    await w;
-    // The cooldown may have been extended while we slept; if so, that is a
-    // fresh rejection and the next check decides again.
-    if (!_quotaBlocked()) return false;
+  if (state.xrplRecovery && state.xrplRecovery.exhausted) {
+    _quotaCutPass(name, done, total);
+    return true;
   }
-  _quotaCutPass(name, done, total);
-  return true;
+  while (_quotaBlocked()) {
+    const w = _quotaWait();
+    if (!w) {
+      _quotaCutPass(name, done, total);
+      return true;
+    }
+    await w;
+  }
+  return false;
 }
 
 function _quotaCutPass(name, done, total) {
@@ -1166,8 +1177,8 @@ function _linkDown() {
 }
 
 async function _ensureSock(ws) {
-  if (_sockOpen(ws)) return ws;
   if (_sockOpen(state._sock)) return state._sock;
+  if (_sockOpen(ws) && !ws._swRetired) return ws;
   // One shared reconnect for the whole scan: 8 parallel wallets hitting a dead
   // socket must not open 8 connections.
   if (state._reconnecting) return await state._reconnecting;
@@ -1175,7 +1186,8 @@ async function _ensureSock(ws) {
   state._reconnecting = (async () => {
     try {
       log('XRPL link dropped — reconnecting…');
-      const nw = await connectXRPL();
+      const nw = await connectXRPL({ avoidServer: state._xrplAvoidServer });
+      state._xrplAvoidServer = null;
       state._sock = nw;
       // TRANSPORT EPOCH. A reconnect may land on a DIFFERENT XRPL server —
       // 32-xrpl-resilience rotates Honeycluster / xrplcluster / s1 / s2 — and
@@ -1214,9 +1226,102 @@ async function _ensureSock(ws) {
   return await state._reconnecting;
 }
 
+// All main-scan RPCs share admission, including pagination and later offer
+// passes. Only a successful response resolves the caller's current read.
+const _xrplTraffic = { active: 0, limit: 8, gap: 25, next: 0, queue: [], timer: null, successes: 0 };
+function _xrplPump() {
+  if (_xrplTraffic.timer || !_xrplTraffic.queue.length || _xrplTraffic.active >= _xrplTraffic.limit) return;
+  const delay = Math.max(0, _xrplTraffic.next - Date.now());
+  _xrplTraffic.timer = setTimeout(() => {
+    _xrplTraffic.timer = null;
+    if (_xrplTraffic.active >= _xrplTraffic.limit) return;
+    const next = _xrplTraffic.queue.shift();
+    if (!next) return;
+    _xrplTraffic.active++;
+    _xrplTraffic.next = Date.now() + _xrplTraffic.gap;
+    next(() => { _xrplTraffic.active--; _xrplPump(); });
+    _xrplPump();
+  }, delay);
+}
+function _xrplSlot() {
+  return new Promise(resolve => { _xrplTraffic.queue.push(resolve); _xrplPump(); });
+}
+function _xrplRecoveryNote(event) {
+  const r = state.xrplRecovery || (state.xrplRecovery = { requests: 0, retries: 0, recovered: 0, rotations: 0, exhausted: false, events: [] });
+  if (event && r.events.length < 100) r.events.push(Object.assign({ at: new Date().toISOString() }, event));
+  return r;
+}
+function _xrplBackoff() {
+  _xrplTraffic.limit = Math.max(1, Math.floor(_xrplTraffic.limit / 2));
+  _xrplTraffic.gap = Math.min(1000, Math.max(100, _xrplTraffic.gap * 2));
+  _xrplTraffic.successes = 0;
+}
+async function _xrplRotate(sock, reason) {
+  // One replacement for a failed socket even when eight callers observed it.
+  if (sock && !sock._swRetired && (!state._sock || state._sock === sock)) {
+    sock._swRetired = true;
+    state._xrplAvoidServer = sock.url;
+    const r = _xrplRecoveryNote({ event: 'rotate', endpoint: sock.url, reason });
+    r.rotations++;
+    log('XRPL recovery: retiring ' + sock.url + ' (' + reason + ')');
+    try { sock.close(); } catch (_) {}
+  }
+  return _ensureSock(null);
+}
 async function xrpl(ws, cmd) {
-  const sock = await _ensureSock(ws);
-  if (!sock) throw new Error('XRPL link down');
+  const startEpoch = n(state._transportEpoch);
+  const stats = _xrplRecoveryNote();
+  let retries = 0;
+  while (true) {
+    if (stats.exhausted || await _quotaHold('RPC ' + cmd.command, 0, 1)) {
+      stats.exhausted = true;
+      throw new Error('XRPL_RECOVERY_EXHAUSTED: server cooldown exceeds the recovery budget');
+    }
+    const release = await _xrplSlot();
+    let sock;
+    try {
+      if (stats.exhausted) throw new Error('XRPL_RECOVERY_EXHAUSTED');
+      // A rejection can arrive while this caller is queued for admission.
+      if (_quotaBlocked()) continue;
+      sock = await _ensureSock(ws);
+      if (!sock) throw new Error('XRPL link down');
+      if (cmd.marker && n(state._transportEpoch) !== startEpoch) {
+        const changed = new Error('XRPL_TRANSPORT_CHANGED: restart pagination on the current socket');
+        changed.code = 'XRPL_TRANSPORT_CHANGED';
+        throw changed;
+      }
+      stats.requests++;
+      const result = await _xrplRequest(sock, cmd);
+      if (retries) { stats.recovered++; log('XRPL recovered ' + cmd.command + ' ' + (cmd.account || '') + ' after ' + retries + ' retry(s)'); }
+      if (++_xrplTraffic.successes >= 64) {
+        _xrplTraffic.successes = 0;
+        _xrplTraffic.limit = Math.min(8, _xrplTraffic.limit + 1);
+        _xrplTraffic.gap = Math.max(25, Math.round(_xrplTraffic.gap * 0.9));
+      }
+      return result;
+    } catch (e) {
+      const quota = _isQuotaError(e);
+      const transient = /timeout |XRPL link (closed|down)|WebSocket.*(closed|not open)/i.test(_xrplErrorText(e));
+      if (!quota && !transient) throw e;
+      if (++retries > 8) {
+        stats.exhausted = true;
+        _xrplRecoveryNote({ event: 'exhausted', command: cmd.command, account: cmd.account, reason: e.message });
+        throw new Error('XRPL_RECOVERY_EXHAUSTED: ' + e.message);
+      }
+      stats.retries++;
+      _xrplBackoff();
+      _xrplRecoveryNote({ event: 'retry', endpoint: sock && sock.url, epoch: n(state._transportEpoch), command: cmd.command, account: cmd.account, code: e.code || null, reason: e.message });
+      if (quota) {
+        _noteQuota(e, cmd.command);
+        // A responsive server refusing load is not a silent socket. Preserve
+        // it and respect its cooldown, including repeated refusals.
+      } else {
+        await _xrplRotate(sock, e.message);
+      }
+    } finally { release(); }
+  }
+}
+function _xrplRequest(sock, cmd) {
   return new Promise((res, rej) => {
     const id = Math.random().toString(36).slice(2);
     let settled = false;
@@ -1231,8 +1336,13 @@ async function xrpl(ws, cmd) {
     function onMsg(ev) {
       let j; try { j = JSON.parse(ev.data); } catch { return; }
       if (j.id !== id) return;
-      j.status === 'success' ? done(res, j.result)
-                             : done(rej, new Error(j.error_message || j.error || 'xrpl error'));
+      if (j.status === 'success' && !(j.result && j.result.error)) return done(res, j.result);
+      const body = j.result && j.result.error ? j.result : j;
+      const err = new Error(body.error_message || body.error || 'xrpl error');
+      err.code = body.error || null;
+      err.error_message = body.error_message || null;
+      err.retry_after_ms = body.retry_after_ms;
+      done(rej, err);
     }
     // Fail the instant the socket goes, instead of waiting out 15s for a reply
     // that can no longer arrive. This is what turns a 12-minute zombie scan into
@@ -1339,10 +1449,8 @@ async function scanWallets(ws) {
   state.runId = 'run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
   state.txScanCoverage = null;
   state.pack = null;
-  // The quota cooldown is RUN-scoped: a new scan is entitled to try, and a
-  // previous run's cooldown must not mute it. The evidence that it happened is
-  // kept separately, so a short run still reports why it was short.
-  state._quotaUntil = 0;
+  // Reset run evidence, but respect a server cooldown that has not expired.
+  state.xrplRecovery = null;
   state._quotaHits = 0;
   state._quotaFirstAt = null;
   state._quotaWhere = null;
@@ -1426,7 +1534,7 @@ async function scanWallets(ws) {
   shadowSay('Phase 1: balance check ' + active.length + ' wallets...', 'BALANCES', 32);
   const rows = active.map(w => ({
     ...w, balance_xrp: 0, prev_balance_xrp: prev[w.address]?.balance_xrp ?? null,
-    delta_xrp: null, status: 'CHECKED', error: '', _needsTx: false
+    delta_xrp: null, status: 'PENDING', error: '', _needsTx: false
   }));
 
   async function balanceOne(row) {
@@ -3615,6 +3723,7 @@ function buildPack(v) {
     // in the pack the report cannot tell the difference, and a quota-shortened
     // scan reads exactly like a quiet one.
     xrpl_quota: _quotaNote(),
+    xrpl_recovery: state.xrplRecovery || null,
     shadow_volume_xrp: shadowVolumeXRP(), total_balance_delta_xrp: totalDeltaXRP(),
     // The measured delta with the escrow-attributable part removed, and the
     // adjustment itself so the two reconcile in the debug pack.

@@ -426,10 +426,31 @@
         var transportConsistent = true;
         var requestBounded = anchorSeq !== null;
         var responseMaxSeen = null, responseMinSeen = null, responseValidated = true;
-        var restartsLeft = 1;
+        var restartsLeft = 3;
+        async function restartOnTransportChange() {
+          if (transportEpoch() === epoch0) return false;
+          if (restartsLeft <= 0 || !RA) {
+            transportConsistent = false;
+            unprovenReason = 'TRANSPORT_CHANGED';
+            return false;
+          }
+          restartsLeft--;
+          await reproveOnCurrentTransport(ws, anchorSeq);
+          runAnchor = state.runAnchor;
+          epoch0 = transportEpoch();
+          marker = null; rows = []; pages = 0;
+          oldestLedger = null; newestLedger = null; rowsWithoutLedger = 0;
+          boundaryReached = false; historyExhausted = false;
+          requestBounded = anchorSeq !== null;
+          responseMaxSeen = null; responseMinSeen = null; responseValidated = true;
+          unprovenReason = 'NOT_DECIDED';
+          if (typeof log === 'function') log('tx-scan ' + account + ': transport changed — re-proved the same anchor, restarting this wallet');
+          return true;
+        }
 
         while (pages < TX_SAFETY_MAX_PAGES) {
           try {
+            if (transportEpoch() !== epoch0 && !await restartOnTransportChange()) break;
             var req = { command: 'account_tx', account: account, ledger_index_min: -1, ledger_index_max: -1, limit: limit, forward: false };
             // NOT wrapped in catch-and-ignore. boundRequest has no throw path
             // for the case that matters — handed a null anchor it returns
@@ -543,6 +564,12 @@
             if (oldest <= startMs) { boundaryReached = true; break; }
             if (!marker) { historyExhausted = true; break; }
           } catch (e) {
+            // The request layer refuses to send an old marker on a replacement
+            // socket. Restart this wallet without committing its partial rows.
+            if (transportEpoch() !== epoch0) {
+              if (await restartOnTransportChange()) continue;
+              break;
+            }
             status = 'FAILED';
             error = e && e.message ? e.message : String(e || 'account_tx failed');
             break;
