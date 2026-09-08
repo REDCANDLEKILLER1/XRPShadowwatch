@@ -1,0 +1,1188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>XRPMAN SHADOW WATCH // v16.7.1-hvt-locker-fix1 [NEXUS INTEGRATED]</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <!-- v16.8: critical splash CSS inlined so the boot screen paints correctly on
+         first frame. Without this, the external stylesheet loads a beat late and
+         the activate-video renders at its native (giant) size for a split second. -->
+    <style>
+      #splash-screen{position:fixed;inset:0;z-index:9999;background:#000;display:flex;flex-direction:column;justify-content:center;align-items:center;}
+      #boot-container{display:flex;flex-direction:column;gap:20px;align-items:center;}
+      #boot-greeter{width:min(380px,90vw);margin:0 auto;}
+      #thumb-scan{display:flex;flex-direction:column;align-items:center;gap:14px;cursor:pointer;padding:4px;}
+      .ts-ring{position:relative;width:140px;height:140px;display:flex;align-items:center;justify-content:center;}
+      .ts-print{position:relative;width:120px;height:120px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle,rgba(0,42,0,0.55) 0%,rgba(0,12,0,0.88) 100%);border:1px solid rgba(0,255,0,0.28);}
+      .ts-print .ts-vid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;pointer-events:none;background:#000;}
+      .ts-print svg{width:60px;height:60px;}
+      .ts-label{font-family:'Orbitron',sans-serif;font-size:13px;font-weight:700;letter-spacing:2px;color:#00ff00;}
+    </style>
+    <link rel="stylesheet" href="src/css/styles.css">
+    <!-- PWA / installable app -->
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#00ff00">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="ShadowWatch">
+    <link rel="icon" type="image/svg+xml" href="src/assets/icon.svg">
+    <link rel="apple-touch-icon" href="src/assets/icon-180.png">
+</head>
+<body> 
+
+    <!-- VIDEO SPLASH SCREEN -->
+    <div id="splash-screen">
+        <div id="boot-container">
+            <div id="boot-greeter">
+                <div class="bg-avatar">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#00ff00" stroke-width="1.6"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c0-3.6 3.6-6.4 8-6.4s8 2.8 8 6.4"></path></svg>
+                    <span class="bg-dot"></span>
+                </div>
+                <div class="bg-tx">
+                    <div class="bg-name">XRPMAN <span>· TRANSMISSION</span></div>
+                    <div class="bg-line"><div id="boot-greeter-text"></div><span class="bg-cursor"></span></div>
+                </div>
+            </div>
+            <div id="thumb-scan" role="button" tabindex="0" aria-label="Hold thumb to activate Shadow Watch">
+                <div class="ts-ring">
+                    <svg class="ts-prog" viewBox="0 0 140 140"><circle class="ts-prog-track" cx="70" cy="70" r="64"></circle><circle class="ts-prog-bar" cx="70" cy="70" r="64"></circle></svg>
+                    <div class="ts-print">
+                        <video class="ts-vid" src="https://ipfs.filebase.io/ipfs/Qma8uSsuAPYqhdwKwZS2h9ChougsR4haiLsHyaPgoJiFEx" autoplay loop muted playsinline preload="auto" disablepictureinpicture></video>
+                        <div class="ts-scanline"></div>
+                    </div>
+                </div>
+                <div class="ts-label">TAP TO ACTIVATE</div>
+                <div class="ts-status">XRPMAN LEDGER ARTIFACT • BIOMETRIC LOCK</div>
+            </div>
+        </div>
+    </div> 
+
+    <!-- TUTORIAL OVERLAY -->
+    <div id="tutorial-overlay">
+        <div id="tut-card">
+            <div class="tut-title" id="tut-title">WELCOME AGENT</div>
+            <div class="tut-text" id="tut-text">
+                Welcome to XRPMAN SHADOW WATCH.
+                This forensic tool tracks the XRP Ledger in real-time.
+                <br><br>Let's calibrate your system.
+            </div>
+            <div class="tut-controls">
+                <button class="tut-btn" onclick="endTutorial()">SKIP</button>
+                <button class="tut-btn" onclick="nextStep()">NEXT ></button>
+            </div>
+        </div>
+    </div> 
+
+    <!-- INTEL DASHBOARD MODAL -->
+    <div id="intel-dashboard">
+        <div id="intel-nav">
+            <div id="intel-title">SHADOW INTEL BRIEFING</div>
+            <button id="intel-close" onclick="closeIntel()">[ CLOSE ]</button>
+        </div>
+        <textarea id="intel-content" readonly></textarea>
+        <div id="intel-actions">
+            <button class="intel-action-btn" onclick="copyIntelText()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg> COPY</button>
+            <button class="intel-action-btn" onclick="exportJSON()" style="border-color:#ffaa00; color:#ffaa00;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> SAVE JSON</button>
+        </div>
+    </div> 
+
+    <!-- TRADINGVIEW CHART WINDOW (NEW) -->
+    <div id="tv-modal">
+        <div id="tv-header">
+            <span>XRP/USD [LIVE]</span>
+            <div class="flex gap-2">
+                <button onclick="minTV()">_</button>
+                <button onclick="minTV()">X</button> <!-- Both act as minimize/close as requested -->
+            </div>
+        </div>
+        <div id="tv-body">
+            <!-- Embedding TradingView Widget via Iframe for maximum compatibility -->
+            <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tradingview_76d87&symbol=BINANCE%3AXRPUSDT&interval=D&hidesidetoolbar=1&hidetoptoolbar=1&symboledit=1&saveimage=1&toolbarbg=f1f3f6&studies=[]&theme=dark&style=1&timezone=Etc%2FUTC&studies_overrides={}&overrides={}&enabled_features=[]&disabled_features=[]&locale=en&utm_source=tradingview.com&utm_medium=widget&utm_campaign=chart&utm_term=BINANCE%3AXRPUSDT" 
+            style="width: 100%; height: 100%; border: none;"></iframe>
+        </div>
+    </div> 
+
+    <!-- NEXUS-9 MODAL (FLOATING) -->
+    <div id="nexus-modal">
+        <div id="nexus-header">
+            <span>NEXUS-9 UPLINK</span>
+            <div class="flex gap-2">
+                <button onclick="toggleNexus()">_</button>
+                <button onclick="toggleNexus()">X</button>
+            </div>
+        </div>
+        <div id="nexus-body">
+            <iframe src="https://redcandlekiller1.github.io/Nexus-9/" style="width:100%; height:100%; border:none;"></iframe>
+        </div>
+    </div>
+
+    <!-- BUBBLE/REPORT DETAIL MODAL -->
+    <div id="bubble-modal">
+        <div id="modal-title" class="text-center text-lg font-bold text-white mb-2 border-b border-green-900 pb-2">TRANSACTION INTEL</div>
+        <div id="modal-content-area">
+            <div class="modal-row"><span class="modal-label">AMOUNT:</span><span id="mod-amt" class="modal-val text-xl text-yellow-400">---</span></div>
+            <div class="modal-row"><span class="modal-label">TYPE:</span><span id="mod-type" class="modal-val">---</span></div>
+            <div class="modal-row"><span class="modal-label">SENDER:</span><span id="mod-from" class="modal-val text-[10px]">---</span></div>
+            <div class="modal-row"><span class="modal-label">TARGET:</span><span id="mod-to" class="modal-val text-[10px]">---</span></div>
+        </div>
+        <div class="modal-grid">
+            <button id="mod-trace-btn" class="mod-btn mod-trace">TRACE</button>
+            <button id="mod-scan-btn" class="mod-btn">SCAN LEDGER</button>
+            <button id="mod-copy-hash" class="mod-btn">COPY HASH</button>
+            <button id="mod-copy-wallet" class="mod-btn">COPY SENDER</button>
+            <button id="mod-hist-btn" class="mod-btn">HISTORY</button>
+            <button id="mod-save-btn" class="mod-btn mod-save">SAVE EVID</button>
+        </div>
+        <button onclick="closeModal()" class="w-full text-red-500 text-xs mt-4">CLOSE INTEL</button>
+    </div> 
+
+    <!-- WALLET HISTORY — real account_tx rows from the live socket. Counterparties
+         are named only when the shared identity registry names them. -->
+    <div id="wallet-history">
+      <div class="wh-head">
+        <div>
+          <div id="wh-title">Wallet history</div>
+          <div id="wh-addr"></div>
+          <div id="wh-sub"></div>
+        </div>
+        <button class="wh-x" onclick="closeWalletHistory()" aria-label="Close wallet history">&times;</button>
+      </div>
+      <div id="wh-rows"></div>
+    </div>
+
+    <div id="toast">NOTIFICATION</div>
+    <div id="app-background"></div>
+    <div id="canvas-container"></div>
+    <div id="alert-layer"></div> 
+
+    <!-- TOP HUD -->
+    <div id="hud-top">
+        <div class="header-section">
+            <div class="hdr-row">
+                <!-- v16.14: the logo mark was a circled ✕. Sitting alone in the
+                     top-left corner of a full-screen app, that is not a logo to
+                     anyone — it is a close button, and people read it as one.
+                     SHADOWWATCH is already spelled out underneath it in 40px
+                     letters, so the mark was carrying no information and one
+                     misleading instruction. Removed; the row keeps its balance
+                     through the ::before spacer in styles.css. -->
+                <div class="hdr-toprow">
+                    <div class="hdr-brand">XRPMAN PRESENTS</div>
+                    <div class="hdr-ctrls">
+                        <button class="hdr-bell" onclick="toggleAlerts()" title="Toggle alerts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg><span class="hdr-bell-dot"></span></button>
+                    </div>
+                </div>
+                <h1 class="glitch"><span class="hdr-big">S</span>HADOWWATC<span class="hdr-big">H</span></h1>
+                <div class="subtitle">REAL TIME XRPL INTELLIGENCE</div>
+            </div>
+
+            <!-- ════ LEDGER BAR — moved above the assistant strip ════ -->
+            <div class="stat-grid">
+                <div class="stat-cell">
+                    <div class="cell-label">LEDGER INDEX</div>
+                    <div id="ledger-display" class="cell-val text-green-700">OFFLINE</div>
+                </div>
+                <div class="stat-cell stat-cell-btn" id="price-box" onclick="toggleTV()" title="Open live XRP/USD chart">
+                    <div class="cell-label" id="price-label">XRP PRICE <svg class="cell-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="3 17 9 11 13 15 21 7"></polyline><polyline points="15 7 21 7 21 13"></polyline></svg></div>
+                    <div id="price-display" class="cell-val">---</div>
+                    <span id="price-source" class="cell-sub">LIVE CHART</span>
+                </div>
+                <div class="stat-cell cell-conn">
+                    <div class="cell-label">CONNECTION</div>
+                    <div class="cell-val conn-val"><span class="conn-dot"></span><span class="conn-state">LIVE</span></div>
+                    <div class="cell-sub">XRPL MAINNET</div>
+                </div>
+                <div class="stat-cell cell-uptime">
+                    <div class="cell-label">UPTIME</div>
+                    <div id="session-timer" class="cell-val">00:00:00</div>
+                </div>
+            </div>
+
+            <!-- ════ XRPMAN AI ASSISTANT STRIP — persistent top-of-app, typewriter, talks to the Commander ════ -->
+            <div id="xrpman-strip">
+                <div class="xrp-scan"></div>
+                <div class="xrp-strip-inner">
+                    <div id="xrpman-avatar">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="#00ff00" stroke-width="1.6"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c0-3.6 3.6-6.4 8-6.4s8 2.8 8 6.4"></path></svg>
+                        <span id="xrpman-dot"></span>
+                    </div>
+                    <div class="xrp-strip-tx">
+                        <div class="xrp-strip-head"><span id="xrpman-name">XRPMAN</span><span id="xrpman-sub">· ASSISTANT ONLINE</span></div>
+                        <div class="xrp-strip-line"><div id="xrpman-text"></div><span id="xrpman-cursor"></span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="tactical-bar">
+                <button id="home-mc-btn" class="tac-btn" onclick="switchView('home')" title="Mission Control">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                </button>
+                <button id="report-btn" class="tac-btn" onclick="switchView('brief'); loadBriefConsole();" title="ShadowWatch Report">
+                    REPORT
+                </button>
+                <button id="session-btn" class="tac-btn" onclick="openIntelDashboard()" title="Session Report — Raw Scanner Export">
+                    SESSION
+                </button>
+                <button id="alert-toggle" class="tac-btn tac-active" onclick="toggleAlerts()" title="Toggle Alerts">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                </button>
+                <button id="mute-btn" class="tac-btn" onclick="toggleMute()" title="Mute Audio">
+                    <svg id="icon-vol" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
+                </button>
+                <button id="song-btn" class="tac-btn tac-active" onclick="toggleSong()" title="Stop / Replay Theme">
+                    <svg id="icon-song" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+                </button>
+                <button id="help-btn" class="tac-btn" onclick="startTutorial()" title="Help">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                </button>
+                <!-- WHAT'S NEW / UPDATE BRIEFING BUTTON -->
+                <button id="whatsnew-btn" class="tac-btn" onclick="showWhatsNew()" title="What's New">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15 9 22 9.5 17 14.5 18.5 21.5 12 17.5 5.5 21.5 7 14.5 2 9.5 9 9 12 2"></polygon></svg>
+                </button>
+                <!-- NEXUS-9 LINK BUTTON -->
+                <button id="nexus-btn" class="tac-btn" onclick="toggleNexus()" title="Nexus-9 Uplink">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                </button>
+                <!-- USER GUIDE BUTTON -->
+                <button id="guide-btn" class="tac-btn" onclick="window.open('https://docs.google.com/document/u/0/d/1VPvtI5Ig_MQ3CTNgnfTqosGvHsZvw99Pl_tnNdXkXK0/mobilebasic', '_blank')" title="Operator Manual">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- BOTTOM DECK -->
+    <div id="hud-bottom">
+        <div id="command-deck">
+            <!-- ICON TAB BAR -->
+            <div class="tab-bar" id="tab-zone">
+                <div id="tab-btn-home" class="tab-btn active" onclick="switchView('home')" title="HOME">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                    HOME
+                </div>
+                <div id="tab-btn-live" class="tab-btn" onclick="switchView('live')" title="LIVE">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                    LIVE
+                </div>
+                <div id="tab-btn-map" class="tab-btn" onclick="switchView('map')" title="MAP">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                    MAP
+                </div>
+                <div id="tab-btn-graph" class="tab-btn" onclick="switchView('graph')" title="GRAPH">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"></circle><line x1="12" y1="9" x2="12" y2="3"></line><line x1="12" y1="15" x2="12" y2="21"></line><line x1="15" y1="12" x2="21" y2="12"></line><line x1="9" y1="12" x2="3" y2="12"></line></svg>
+                    GRAPH
+                </div>
+                <div id="tab-btn-hvt" class="tab-btn" onclick="switchView('hvt')" title="HVT" style="color: var(--gold-hvt);">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><line x1="22" y1="12" x2="18" y2="12"></line><line x1="6" y1="12" x2="2" y2="12"></line><line x1="12" y1="6" x2="12" y2="2"></line><line x1="12" y1="22" x2="12" y2="18"></line></svg>
+                    HVT
+                </div>
+                <div id="tab-btn-chart" class="tab-btn" onclick="toggleTV()" title="XRP Live Chart">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="3 17 9 11 13 15 21 7"></polyline><polyline points="15 7 21 7 21 13"></polyline></svg>
+                    CHART
+                </div>
+                <div id="tab-btn-menu" class="tab-btn" onclick="document.getElementById('menu-modal').style.display='flex';try{XRPManAI.onAction('menu')}catch(e){}" title="MENU">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    MENU
+                </div>
+            </div>
+
+            <!-- HOME / MISSION CONTROL v16.3 -->
+            <div id="view-home" class="view-panel">
+              <div id="mc-wrap">
+                <div id="mc-grid">
+
+                  <!-- DAILY BRIEF — featured hero (v16.6) -->
+                  <div class="mc-card mc-card-featured" onclick="switchView('brief'); loadBriefConsole();">
+                    <div class="mc-hero-icon"><svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"></path><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"></path><line x1="6" y1="1" x2="6" y2="4"></line><line x1="10" y1="1" x2="10" y2="4"></line><line x1="14" y1="1" x2="14" y2="4"></line></svg></div>
+                    <div class="mc-hero-text">
+                      <div class="mc-hero-title">SHADOWWATCH REPORT</div>
+                      <div class="mc-hero-sub">MARKET INTEL &middot; WALLET MOVEMENT &middot; EVIDENCE</div>
+                    </div>
+                    <span class="mc-hero-arrow">&#8250;</span>
+                    <span class="mc-hero-corner"></span>
+                  </div>
+
+                  <!-- LIVE FEED -->
+                  <div class="mc-card" onclick="switchView('live');">
+                    <div class="mc-card-top">
+                      <div class="mc-icon-box"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg></div>
+                      <div class="mc-card-heading">
+                        <div class="mc-card-title">LIVE FEED</div>
+                        <span class="mc-badge badge-live">LIVE</span>
+                      </div>
+                    </div>
+                    <div class="mc-card-desc">Watch XRP Ledger activity in real time.</div>
+                    <span class="mc-card-arrow">&#8250;</span>
+                  </div>
+
+                  <!-- BUBBLE MAP -->
+                  <div class="mc-card" onclick="switchView('map');">
+                    <div class="mc-card-top">
+                      <div class="mc-icon-box"><svg viewBox="0 0 24 24"><circle cx="7" cy="8" r="3"></circle><circle cx="17" cy="7" r="2"></circle><circle cx="15" cy="16" r="3.5"></circle><circle cx="6" cy="17" r="1.5"></circle></svg></div>
+                      <div class="mc-card-heading">
+                        <div class="mc-card-title">BUBBLE MAP</div>
+                        <span class="mc-badge badge-ready">READY</span>
+                      </div>
+                    </div>
+                    <div class="mc-card-desc">Bigger bubbles mean bigger movement. Tap a bubble to inspect, trace, scan, or save.</div>
+                    <span class="mc-card-arrow">&#8250;</span>
+                  </div>
+
+                  <!-- WALLET GRAPH -->
+                  <div class="mc-card" onclick="switchView('graph');">
+                    <div class="mc-card-top">
+                      <div class="mc-icon-box"><svg viewBox="0 0 24 24"><circle cx="5" cy="6" r="2"></circle><circle cx="19" cy="6" r="2"></circle><circle cx="12" cy="18" r="2"></circle><line x1="6.6" y1="7" x2="11" y2="16.5"></line><line x1="17.4" y1="7" x2="13" y2="16.5"></line><line x1="7" y1="6" x2="17" y2="6"></line></svg></div>
+                      <div class="mc-card-heading">
+                        <div class="mc-card-title">WALLET GRAPH</div>
+                        <span class="mc-badge badge-ready">READY</span>
+                      </div>
+                    </div>
+                    <div class="mc-card-desc">Enter a wallet and trace connected wallets and transaction relationships.</div>
+                    <span class="mc-card-arrow">&#8250;</span>
+                  </div>
+
+                  <!-- WATCHLIST / HVT -->
+                  <div class="mc-card" onclick="switchView('hvt');">
+                    <div class="mc-card-top">
+                      <div class="mc-icon-box"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="4.5"></circle><circle cx="12" cy="12" r="1"></circle></svg></div>
+                      <div class="mc-card-heading">
+                        <div class="mc-card-title">WATCHLIST / HVT</div>
+                        <span class="mc-badge badge-review">REVIEW</span>
+                      </div>
+                    </div>
+                    <div class="mc-card-desc">Track important wallets and high-value targets.</div>
+                    <span class="mc-card-arrow">&#8250;</span>
+                  </div>
+
+                  <!-- EVIDENCE LOCKER -->
+                  <div class="mc-card" onclick="switchView('case');">
+                    <div class="mc-card-top">
+                      <div class="mc-icon-box"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg></div>
+                      <div class="mc-card-heading">
+                        <div class="mc-card-title">EVIDENCE LOCKER</div>
+                        <span class="mc-badge badge-synced">SYNCED</span>
+                      </div>
+                    </div>
+                    <div class="mc-card-desc">Save transactions worth reviewing. Export later as receipts.</div>
+                    <span class="mc-card-arrow">&#8250;</span>
+                  </div>
+
+                  <!-- SESSION REPORT -->
+                  <div class="mc-card" onclick="openIntelDashboard();">
+                    <div class="mc-card-top">
+                      <div class="mc-icon-box"><svg viewBox="0 0 24 24"><line x1="6" y1="20" x2="6" y2="13"></line><line x1="12" y1="20" x2="12" y2="6"></line><line x1="18" y1="20" x2="18" y2="10"></line></svg></div>
+                      <div class="mc-card-heading">
+                        <div class="mc-card-title">SESSION REPORT</div>
+                        <span class="mc-badge badge-ready">READY</span>
+                      </div>
+                    </div>
+                    <div class="mc-card-desc">Raw technical export from this scanner session. Whale flow, blackbox totals, saved evidence.</div>
+                    <span class="mc-card-arrow">&#8250;</span>
+                  </div>
+
+                  <!-- WALLET ID RESOLVER (v16.4 live — un-flagged) -->
+                  <div class="mc-card" onclick="openWalletResolver()">
+                    <div class="mc-card-top">
+                      <div class="mc-icon-box"><svg viewBox="0 0 24 24"><path d="M12 4a8 8 0 0 1 8 8"></path><path d="M12 8a4 4 0 0 1 4 4v4"></path><path d="M12 12v5"></path><path d="M8 12a4 4 0 0 1 4-4"></path><path d="M4.5 11a8 8 0 0 1 2.7-5.6"></path><path d="M8 16.5v.5"></path></svg></div>
+                      <div class="mc-card-heading">
+                        <div class="mc-card-title">WALLET ID RESOLVER</div>
+                        <span class="mc-badge badge-active">ACTIVE</span>
+                      </div>
+                    </div>
+                    <div class="mc-card-desc">Look up wallet labels, source confidence, possible owner clues, and public evidence.</div>
+                    <span class="mc-card-arrow">&#8250;</span>
+                  </div>
+
+                  <!-- DISCOVERY INBOX (v16.4 live — un-flagged) -->
+                  <div class="mc-card" onclick="openDiscoveryInbox()">
+                    <div class="mc-card-top">
+                      <div class="mc-icon-box"><svg viewBox="0 0 24 24"><path d="M4 13h4l1.5 3h5L20 13"></path><path d="M4 13V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7"></path><path d="M4 13v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"></path></svg></div>
+                      <div class="mc-card-heading">
+                        <div class="mc-card-title">DISCOVERY INBOX</div>
+                        <span class="mc-badge badge-active">ACTIVE</span>
+                      </div>
+                    </div>
+                    <div class="mc-card-desc">Review wallets Shadow Watch recommends for tracking. Nothing gets added without your approval.</div>
+                    <span class="mc-card-arrow">&#8250;</span>
+                  </div>
+
+                  <!-- SYSTEM STATUS (v16.6 — generic app-state, no scan evidence) -->
+                  <div id="mc-sysstatus">
+                    <div class="sys-head">
+                      <span class="sys-head-title">SYSTEM STATUS</span>
+                      <span class="sys-head-state">ALL SYSTEMS READY</span>
+                    </div>
+                    <div class="sys-grid">
+                      <div class="sys-cell"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg><div class="sys-name">XRPL STREAM</div><div class="sys-state">READY</div></div>
+                      <div class="sys-cell"><svg viewBox="0 0 24 24"><line x1="6" y1="20" x2="6" y2="13"></line><line x1="12" y1="20" x2="12" y2="6"></line><line x1="18" y1="20" x2="18" y2="10"></line></svg><div class="sys-name">ANALYTICS</div><div class="sys-state">READY</div></div>
+                      <div class="sys-cell"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4-3 7-7 8-4-1-7-4-7-8V6z"></path></svg><div class="sys-name">THREAT SCAN</div><div class="sys-state">READY</div></div>
+                      <div class="sys-cell"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="1.5"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg><div class="sys-name">EVIDENCE SYNC</div><div class="sys-state cyan">LOCAL</div></div>
+                      <div class="sys-cell"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"></rect><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"></path></svg><div class="sys-name">AI ENGINE</div><div class="sys-state">READY</div></div>
+                    </div>
+                  </div>
+                </div><!-- /mc-grid -->
+              </div><!-- /mc-wrap -->
+            </div><!-- /view-home -->
+
+            <!-- LIVE TAB -->
+            <div id="view-live" class="view-panel active">
+                <div class="mod-head"><button class="mod-back" onclick="switchView('home')" title="Back to Mission Control">&#8249;</button><span class="mod-title">LIVE // XRPL STREAM</span></div>
+                <div class="filter-bar" id="filter-zone">
+                    <button class="filter-btn active" onclick="setFilter('all', this)" title="Show All">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                    </button>
+                    <button class="filter-btn" onclick="setFilter('small', this)" title="Small TXs">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline><line x1="14" y1="10" x2="21" y2="3"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+                    </button>
+                    <button class="filter-btn" onclick="setFilter('whale', this)" title="Whales">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
+                    </button>
+                    <button class="filter-btn" onclick="setFilter('exchange', this)" title="Exchanges">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>
+                    </button>
+                    <button class="filter-btn" style="border-color:#00ffff; color:#00ffff;" onclick="setFilter('l2', this)" title="Layer 2">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+                    </button>
+                    <label class="flex items-center gap-1 text-[9px] text-green-400 font-bold ml-2">
+                        <input type="checkbox" id="hide-failed" checked class="accent-green-500">
+                    </label>
+                </div>
+                <div class="control-bar">
+                    <span class="text-[10px] text-gray-400">STATUS: <span id="status-text" class="text-green-500">ACTIVE</span></span>
+                    <button id="pause-btn" class="pause-btn" onclick="togglePause()">PAUSE STREAM</button>
+                </div>
+                <div id="feed">
+                    <div class="text-center text-green-800 mt-12 font-tech text-xs tracking-widest">
+                        AWAITING UPLINK...
+                    </div>
+                </div>
+            </div>
+
+            <!-- GRAPH TAB -->
+            <div id="view-graph" class="view-panel">
+                <div class="mod-head"><button class="mod-back" onclick="switchView('home')" title="Back to Mission Control">&#8249;</button><span class="mod-title">WALLET GRAPH</span></div>
+                <button class="view-toggle-btn" onclick="toggleMaximize()">[ ]</button>
+                
+                <!-- NEW MANUAL INPUT FOR GRAPH -->
+                <div style="position: absolute; top: 12px; left: 0; right: 0; display: flex; justify-content: center; gap: 8px; z-index: 50; pointer-events: auto;">
+                    <input type="text" id="graph-input" placeholder="ENTER WALLET (r...)" style="background: rgba(0,0,0,0.8); border: 1px solid #00ff00; color: #00ff00; font-size: 10px; padding: 4px; width: 180px; font-family: 'Share Tech Mono'; outline: none;">
+                    <button onclick="manualGraphTrace()" style="background: rgba(0,50,0,0.5); border: 1px solid #00ff00; color: #00ff00; font-size: 10px; padding: 0 8px; font-weight: bold; cursor: pointer;">SCAN</button>
+                </div>
+
+                <canvas id="graph-canvas"></canvas>
+                <div class="graph-controls">
+                    <button class="g-btn" onclick="adjustZoom(-0.2)">-</button>
+                    <button class="g-btn" onclick="adjustZoom(0.2)">+</button>
+                    <button class="g-btn g-reset" onclick="resetGraphView()">RESET</button>
+                    <div class="text-[10px] text-gray-500 flex items-center ml-2">PINCH/SCROLL ZOOM | DOUBLE TAP</div>
+                </div>
+            </div>
+
+            <!-- HVT TAB (UPDATED v15.4) -->
+            <div id="view-hvt" class="view-panel">
+                <div class="mod-head gold"><button class="mod-back" onclick="switchView('home')" title="Back to Mission Control">&#8249;</button><span class="mod-title">HVT WATCHLIST</span></div>
+                <div class="p-2 border-b border-green-900 bg-black/40 text-center">
+                    <span class="text-xs text-yellow-400 font-bold tracking-widest">>> HIGH VALUE TARGET BLACK BOX <<</span>
+                </div>
+                <!-- HVT CONTROLS -->
+                <div class="p-2 border-b border-yellow-900/30 bg-yellow-900/10 flex flex-col gap-2">
+                    <div class="flex gap-2">
+                        <input id="hvt-addr-input" type="text" placeholder="Target Address (r...)" class="flex-grow bg-black border border-yellow-700 text-yellow-500 text-[10px] p-1 font-mono outline-none">
+                        <input id="hvt-tag-input" type="text" placeholder="Tag (Optional)" class="w-1/3 bg-black border border-yellow-700 text-yellow-500 text-[10px] p-1 font-mono outline-none">
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="addManualHVT()" class="flex-1 bg-yellow-900/20 border border-yellow-600 text-yellow-500 text-[10px] font-bold py-1 hover:bg-yellow-500 hover:text-black transition-colors">ADD TARGET</button>
+                        <button onclick="exportHVTList()" class="flex-1 bg-black border border-yellow-800 text-yellow-700 text-[10px] font-bold py-1 hover:border-yellow-500 hover:text-yellow-500 transition-colors">EXPORT DB</button>
+                        <button onclick="exportHVTHistory()" class="flex-1 bg-black border border-yellow-800 text-yellow-700 text-[10px] font-bold py-1 hover:border-yellow-500 hover:text-yellow-500 transition-colors" title="Download the shared balance baseline to commit">EXPORT HISTORY</button>
+                    </div>
+                </div>
+                <!-- Drain watch: how many targets are holding far less than a
+                     target of their size should. Hidden until something is. -->
+                <div id="hvt-alert-bar" class="hvt-alert-bar" style="display:none" onclick="_hvtScrollToFirstAlert()"></div>
+                <div id="hvt-list">
+                    <div class="text-center text-gray-600 mt-12 font-tech text-xs">LOADING TARGETS...</div>
+                </div>
+            </div>
+
+            <!-- MAP TAB -->
+            <div id="view-map" class="view-panel">
+                <div class="mod-head"><button class="mod-back" onclick="switchView('home')" title="Back to Mission Control">&#8249;</button><span class="mod-title">BUBBLE MAP</span></div>
+                <button class="view-toggle-btn" onclick="toggleMaximize()">[ ]</button>
+                <div id="map-filter-overlay">
+                    <button class="map-filter-btn active" onclick="setMapFilter('all', this)">ALL</button>
+                    <button class="map-filter-btn" onclick="setMapFilter('small', this)">&lt; 100K</button>
+                    <button class="map-filter-btn" onclick="setMapFilter('whale', this)">&gt; 100K</button>
+                    <button class="map-filter-btn" onclick="setMapFilter('l2', this)">L2</button>
+                </div>
+                <canvas id="map-canvas"></canvas>
+                <!-- COMPACT LEGEND AT BOTTOM RIGHT -->
+                <div id="map-legend">
+                    <div class="legend-item" style="color:#00ff00; border-color:#005500;">TSFR</div>
+                    <div class="legend-item" style="color:#ffaa00; border-color:#663300;">DEP</div>
+                    <div class="legend-item" style="color:#ffd700; border-color:#555500;">HVT</div>
+                    <div class="legend-item" style="color:#00ffff; border-color:#005566;">L2</div>
+                </div>
+                <div class="absolute bottom-2 left-2 text-[10px] text-gray-500 pointer-events-none opacity-50">
+                    WHEEL/PINCH TO ZOOM
+                </div>
+            </div>
+
+            <!-- REPORT TAB -->
+            <div id="view-report" class="view-panel">
+                <div class="mod-head"><button class="mod-back" onclick="switchView('home')" title="Back to Mission Control">&#8249;</button><span class="mod-title">WHALE FLOW REPORT</span></div>
+                <div id="report-header">
+                    <div style="width: 25%">AMT</div>
+                    <div style="width: 25%">WALLET</div>
+                    <div class="rep-col-time">TIME</div>
+                    <div class="rep-col-type">CLASS</div>
+                    <div class="rep-col-out">FLOW</div>
+                </div>
+                <div id="report-list">
+                    <div class="text-center text-gray-600 mt-12 font-tech text-xs tracking-widest">WAITING FOR 100K+ TXs...</div>
+                </div>
+            </div>
+
+            <!-- WATCH TAB -->
+            <div id="view-watch" class="view-panel p-4">
+                <div class="flex gap-2 p-2 bg-black/50 border border-green-900 mb-2 flex-shrink-0">
+                    <input type="text" id="watch-input" placeholder="Enter rAddress..." class="flex-grow bg-transparent text-white text-xs outline-none font-tech">
+                    <button onclick="addWatch()" class="text-green-500 font-bold text-xs uppercase">Track</button>
+                </div>
+                <div id="watch-list" class="flex-grow overflow-y-auto space-y-1"></div>
+            </div>
+
+            <!-- CASE TAB -->
+            <div id="view-case" class="view-panel">
+                <div class="mod-head gold"><button class="mod-back" onclick="switchView('home')" title="Back to Mission Control">&#8249;</button><span class="mod-title">EVIDENCE LOCKER</span></div>
+                <div class="flex justify-between p-3 border-b border-green-900 bg-black/20 flex-shrink-0">
+                    <span class="text-xs text-green-700">SAVED ANOMALIES</span>
+                    <!-- UPDATED: Button now calls specific case export -->
+                    <button onclick="exportCasesJSON()" class="text-[10px] text-green-400 border border-green-600 px-3 rounded">EXPORT</button>
+                </div>
+                <div id="case-list" class="flex-grow overflow-y-auto space-y-1 p-2"></div>
+                <button onclick="clearCases()" class="text-red-500 text-xs py-4 bg-red-900/10 font-bold tracking-widest border-t border-red-900 flex-shrink-0">CLEAR LOCKER</button>
+            </div>
+
+            <!-- BRIEF TAB (XRPMan AI Consumer Console - embedded, isolated iframe) -->
+            <div id="view-brief" class="view-panel">
+                <button id="brief-exit" onclick="exitBriefFullscreen()" title="Exit full screen">✕ EXIT</button>
+                <iframe id="brief-frame" title="XRPMan AI Daily Brief"
+                    style="width:100%;height:100%;border:0;background:#000;display:block;"
+                    allow="clipboard-write; clipboard-read"
+                    referrerpolicy="no-referrer"></iframe>
+            </div>
+        </div>
+    </div>
+
+    <!-- Shadow Watch intelligence helpers (read-only; scoring/classification
+         concepts re-implemented from an external reference): escape/util, token
+         identity, flow classification, wallet scoring, watchdog, tx-family
+         counter. Loaded before app.js so the engine can use window.SW.* -->
+    <!-- Shared wallet identity registry — MUST load before app.js, which reads
+         window.SW_WALLET_IDENTITIES at parse time. Also loaded by brief-console.html. -->
+    <script src="src/shared/wallet-identities.js"></script>
+    <!-- The one HVT roster both apps read, the cold balance baseline, and the
+         shared balance store. Same-origin means brief-console.html writes into
+         the same localStorage the wall reads, so the two apps keep each other
+         current without either waiting on the other to run. -->
+    <script src="src/shared/hvt-roster.js"></script>
+    <script src="src/shared/hvt-balance-seed.js"></script>
+    <script src="src/shared/hvt-history.js"></script>
+    <script src="src/js/intel/sw-util.js"></script>
+    <script src="src/js/intel/sw-token-intel.js"></script>
+    <script src="src/js/intel/sw-txn-counter.js"></script>
+    <script src="src/js/intel/sw-flow-intel.js"></script>
+    <script src="src/js/intel/sw-wallet-score.js"></script>
+    <script src="src/js/intel/sw-watchdog-score.js"></script>
+
+    <!-- App theme song — plays ONCE on activation (user gesture); does not loop.
+         Stop/replay via #song-btn (top bar) or the AUDIO menu item. -->
+    <audio id="app-song" preload="auto" playsinline src="https://ipfs.filebase.io/ipfs/QmXNCGkEB3qw5QFZrUNk6yEKY6br4MhBr1LHNVvCEqG9FD"></audio>
+
+    <!-- ════════════════════════════════════════════════════════════
+         THEME PLAYER — movable, always reachable.
+         The stop/replay control used to live only in .tactical-bar, which is
+         display:none below 900px, and the mobile MENU's "AUDIO" item calls
+         toggleMute() (sound effects), not toggleSong(). So on a phone there was
+         no way at all to stop the theme. This floating player is draggable
+         (touch + mouse), remembers where it was put and whether it was hidden,
+         and mirrors the real <audio> state rather than guessing.
+         ════════════════════════════════════════════════════════════ -->
+    <style>
+      #sw-player{position:fixed;z-index:100000;left:auto;right:12px;bottom:calc(84px + env(safe-area-inset-bottom,0px));
+        display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;
+        background:rgba(0,16,6,.94);border:1px solid rgba(0,255,0,.45);
+        box-shadow:0 6px 22px rgba(0,0,0,.5);backdrop-filter:blur(6px);
+        font-family:'Share Tech Mono',ui-monospace,monospace;color:#c9f7d4;
+        touch-action:none;user-select:none;-webkit-user-select:none;max-width:calc(100vw - 24px)}
+      #sw-player.sw-hidden{display:none}
+      #sw-player .swp-grip{cursor:grab;padding:2px 4px;opacity:.65;flex:0 0 auto;line-height:1}
+      #sw-player.swp-dragging .swp-grip{cursor:grabbing}
+      #sw-player .swp-lbl{font-size:10px;letter-spacing:.12em;white-space:nowrap;flex:0 0 auto}
+      #sw-player button{background:transparent;border:1px solid rgba(0,255,0,.35);color:#00ff00;
+        border-radius:8px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;
+        cursor:pointer;flex:0 0 auto;padding:0}
+      #sw-player button:active{transform:scale(.94)}
+      #sw-player button svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2}
+      #sw-player .swp-x{border-color:rgba(255,255,255,.18);color:#8fa79a;width:26px;height:26px}
+      #sw-player .swp-x svg{width:12px;height:12px}
+      @media (prefers-reduced-motion:reduce){#sw-player button:active{transform:none}}
+    </style>
+    <div id="sw-player" class="sw-hidden" role="group" aria-label="Theme music player">
+      <span class="swp-grip" aria-hidden="true">⠿</span>
+      <span class="swp-lbl" id="swp-state">THEME</span>
+      <button type="button" id="swp-toggle" title="Play / stop theme" aria-label="Play or stop theme music">
+        <svg viewBox="0 0 24 24" id="swp-icon"><rect x="6" y="5" width="4" height="14"></rect><rect x="14" y="5" width="4" height="14"></rect></svg>
+      </button>
+      <button type="button" class="swp-x" id="swp-hide" title="Hide this player" aria-label="Hide theme player">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+      </button>
+    </div>
+    <script>
+    (function(){
+      var el=document.getElementById('sw-player'), song=document.getElementById('app-song');
+      if(!el||!song) return;
+      var btn=document.getElementById('swp-toggle'), icon=document.getElementById('swp-icon'),
+          lbl=document.getElementById('swp-state'), hide=document.getElementById('swp-hide'),
+          grip=el.querySelector('.swp-grip');
+      var POS='SW_PLAYER_POS', HID='SW_PLAYER_HIDDEN';
+      var PLAY='<path d="M7 4l12 8-12 8z"></path>',
+          STOP='<rect x="6" y="5" width="4" height="14"></rect><rect x="14" y="5" width="4" height="14"></rect>';
+      function paint(){
+        var playing=!song.paused&&!song.ended;
+        icon.innerHTML=playing?STOP:PLAY;            // static markup only
+        lbl.textContent=playing?'THEME':'MUTED';
+        btn.setAttribute('aria-label',playing?'Stop theme music':'Play theme music');
+      }
+      ['play','pause','ended'].forEach(function(e){song.addEventListener(e,paint);});
+      btn.addEventListener('click',function(ev){
+        ev.stopPropagation();
+        // Reuse the app's own stop/replay logic when present so state stays in
+        // one place; fall back to direct control if it hasn't loaded yet.
+        if(typeof window.toggleSong==='function'){ try{ window.toggleSong(); }catch(_){ } }
+        else if(song.paused){ song.muted=false; song.volume=0.55; try{song.currentTime=0;}catch(_){ } song.play().catch(function(){}); }
+        else { song.pause(); try{song.currentTime=0;}catch(_){ } }
+        setTimeout(paint,60);
+      });
+      hide.addEventListener('click',function(ev){
+        ev.stopPropagation(); el.classList.add('sw-hidden');
+        try{localStorage.setItem(HID,'1');}catch(_){ }
+      });
+      // Reveal once the theme actually starts, unless the user hid it.
+      function reveal(){
+        var hidden=false; try{hidden=localStorage.getItem(HID)==='1';}catch(_){ }
+        if(!hidden) el.classList.remove('sw-hidden');
+        paint();
+      }
+      song.addEventListener('play',reveal);
+      if(!song.paused) reveal();
+      window.showThemePlayer=function(){ try{localStorage.removeItem(HID);}catch(_){ } el.classList.remove('sw-hidden'); paint(); };
+      // ── drag (pointer events cover touch + mouse) ──
+      var dragging=false,sx=0,sy=0,ox=0,oy=0;
+      function clamp(){
+        var r=el.getBoundingClientRect(), m=6;
+        var x=Math.min(Math.max(m,r.left),Math.max(m,window.innerWidth-r.width-m));
+        var y=Math.min(Math.max(m,r.top),Math.max(m,window.innerHeight-r.height-m));
+        el.style.left=x+'px'; el.style.top=y+'px'; el.style.right='auto'; el.style.bottom='auto';
+      }
+      function start(e){
+        if(e.target.closest('button')) return;
+        dragging=true; el.classList.add('swp-dragging');
+        var r=el.getBoundingClientRect();
+        el.style.left=r.left+'px'; el.style.top=r.top+'px'; el.style.right='auto'; el.style.bottom='auto';
+        sx=e.clientX; sy=e.clientY; ox=r.left; oy=r.top;
+        try{el.setPointerCapture(e.pointerId);}catch(_){ }
+        e.preventDefault();
+      }
+      function move(e){
+        if(!dragging) return;
+        el.style.left=(ox+e.clientX-sx)+'px'; el.style.top=(oy+e.clientY-sy)+'px';
+        e.preventDefault();
+      }
+      function end(){
+        if(!dragging) return;
+        dragging=false; el.classList.remove('swp-dragging'); clamp();
+        try{localStorage.setItem(POS,JSON.stringify({l:el.style.left,t:el.style.top}));}catch(_){ }
+      }
+      el.addEventListener('pointerdown',start);
+      el.addEventListener('pointermove',move);
+      el.addEventListener('pointerup',end);
+      el.addEventListener('pointercancel',end);
+      try{
+        var p=JSON.parse(localStorage.getItem(POS)||'null');
+        if(p&&p.l&&p.t){el.style.left=p.l;el.style.top=p.t;el.style.right='auto';el.style.bottom='auto';}
+      }catch(_){ }
+      window.addEventListener('resize',function(){ if(!el.classList.contains('sw-hidden')) clamp(); });
+      paint();
+    })();
+    </script>
+
+    <!-- OUTER APP = live tactical watcher (XRPMAN SHADOW WATCH v16.7.1).
+         Deeper forensic/report engine lives in ./brief-console.html (BRIEF tab). -->
+    <script src="src/js/app.js"></script>
+    <script src="src/js/wallet-history.js"></script>
+    <script src="src/js/risk.js"></script>
+    <script src="src/js/escrow-watch.js"></script>
+
+    <!-- ════════════════════════════════════════════════════════════
+         XRPMan AI DAILY BRIEF - deeper forensic/report console (v3.31).
+         Now a real file: ./brief-console.html, lazy-loaded into #brief-frame
+         on first BRIEF tab tap (see src/js/brief-fullscreen.js).
+         Separate app from the outer live watcher; does not touch its engine.
+         ════════════════════════════════════════════════════════════ -->
+    <script src="src/js/brief-fullscreen.js"></script>
+
+    <!-- v16.6.2 MENU OVERLAY (wired to existing functions only; no fake data) -->
+    <div id="menu-modal" style="display:none;position:fixed;inset:0;z-index:9300;background:rgba(0,0,0,0.93);flex-direction:column;">
+      <div class="menu-head"><span class="menu-title">MENU</span><button class="menu-close" onclick="document.getElementById('menu-modal').style.display='none'">&#10005;</button></div>
+      <div class="menu-body">
+        <div class="menu-sec">TOOLS</div>
+        <button class="menu-item" onclick="document.getElementById('menu-modal').style.display='none';openIntelDashboard()"><span class="menu-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="6" y1="20" x2="6" y2="13"></line><line x1="12" y1="20" x2="12" y2="6"></line><line x1="18" y1="20" x2="18" y2="10"></line></svg></span><span><b>SESSION REPORT</b><i>Raw scanner metrics, whale flow, evidence export</i></span><span class="menu-arr">&#8250;</span></button>
+        <button class="menu-item" onclick="document.getElementById('menu-modal').style.display='none';switchView('report')"><span class="menu-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg></span><span><b>WHALE FLOW REPORT</b><i>100K+ transaction flow log</i></span><span class="menu-arr">&#8250;</span></button>
+        <button class="menu-item" onclick="document.getElementById('menu-modal').style.display='none';switchView('case')"><span class="menu-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="4" y="10" width="16" height="11" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg></span><span><b>EVIDENCE LOCKER</b><i>Saved anomalies &amp; exports</i></span><span class="menu-arr">&#8250;</span></button>
+        <button class="menu-item" onclick="document.getElementById('menu-modal').style.display='none';openWalletResolver()"><span class="menu-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 4a8 8 0 0 1 8 8"></path><path d="M12 8a4 4 0 0 1 4 4v4"></path><path d="M12 12v5"></path><path d="M8 12a4 4 0 0 1 4-4"></path><path d="M4.5 11a8 8 0 0 1 2.7-5.6"></path></svg></span><span><b>WALLET ID RESOLVER</b><i>Resolve labels, sources, confidence</i></span><span class="menu-arr">&#8250;</span></button>
+        <button class="menu-item" onclick="document.getElementById('menu-modal').style.display='none';openRiskPanel()"><span class="menu-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2 4 5v6c0 5 3.4 8.4 8 11 4.6-2.6 8-6 8-11V5z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg></span><span><b>RISK ASSESSMENT</b><i>Score any wallet / token issuer from the live ledger</i></span><span class="menu-arr">&#8250;</span></button>
+        <button class="menu-item" onclick="document.getElementById('menu-modal').style.display='none';openEscrowWatch()"><span class="menu-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="11" width="18" height="10" rx="2"></rect><path d="M7 11V8a5 5 0 0 1 9.9-1"></path></svg></span><span><b>ESCROW WATCH</b><i>Ripple treasury lock / unlock movements (read-only)</i></span><span class="menu-arr">&#8250;</span></button>
+        <button class="menu-item" onclick="document.getElementById('menu-modal').style.display='none';openDiscoveryInbox()"><span class="menu-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 13h4l1.5 3h5L20 13"></path><path d="M4 13V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7"></path><path d="M4 13v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"></path></svg></span><span><b>DISCOVERY INBOX</b><i>Review candidate wallets</i></span><span class="menu-arr">&#8250;</span></button>
+        <div class="menu-sec">CONTROLS</div>
+        <button class="menu-item util" onclick="document.getElementById('menu-modal').style.display='none';toggleAlerts()"><span class="menu-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg></span><span><b>ALERTS</b><i>Toggle whale / HVT alerts</i></span><span class="menu-arr">&#8250;</span></button>
+        <button class="menu-item util" onclick="document.getElementById('menu-modal').style.display='none';toggleMute()"><span class="menu-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="19.07" y1="4.93" x2="19.07" y2="19.07"></line><line x1="15.54" y1="8.46" x2="15.54" y2="15.54"></line></svg></span><span><b>SOUND EFFECTS</b><i>Toggle scanner beeps</i></span><span class="menu-arr">&#8250;</span></button>
+        <button class="menu-item util" onclick="document.getElementById('menu-modal').style.display='none';try{window.showThemePlayer&&window.showThemePlayer()}catch(e){};toggleSong()"><span class="menu-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg></span><span><b>THEME MUSIC</b><i>Stop or replay the theme</i></span><span class="menu-arr">&#8250;</span></button>
+        <button class="menu-item util" onclick="document.getElementById('menu-modal').style.display='none';startTutorial()"><span class="menu-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg></span><span><b>TUTORIAL</b><i>How Shadow Watch works</i></span><span class="menu-arr">&#8250;</span></button>
+        <button class="menu-item util" onclick="document.getElementById('menu-modal').style.display='none';toggleNexus()"><span class="menu-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span><span><b>NEXUS-9 UPLINK</b><i>AI uplink console</i></span><span class="menu-arr">&#8250;</span></button>
+        <button class="menu-item util" onclick="document.getElementById('menu-modal').style.display='none';window.open('https://docs.google.com/document/u/0/d/1VPvtI5Ig_MQ3CTNgnfTqosGvHsZvw99Pl_tnNdXkXK0/mobilebasic','_blank')"><span class="menu-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></span><span><b>OPERATOR MANUAL</b><i>Full documentation</i></span><span class="menu-arr">&#8250;</span></button>
+      </div>
+    </div>
+    <!-- v16.4 WALLET ID RESOLVER MODAL -->
+    <div id="wallet-resolver-modal" style="display:none;position:fixed;inset:0;z-index:9400;background:rgba(0,0,0,0.86);align-items:flex-start;justify-content:center;padding:16px;padding-top:clamp(16px,8vh,80px);">
+      <div style="background:rgba(0,6,0,0.97);border:1px solid #00ff00;border-radius:12px;width:min(430px,95vw);max-height:82vh;overflow-y:auto;font-family:'Share Tech Mono',monospace;box-shadow:0 0 30px rgba(0,255,0,0.25);">
+        <div style="padding:12px 16px;border-bottom:1px solid rgba(0,255,0,0.28);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:rgba(0,6,0,0.97);z-index:1;">
+          <span style="font-family:'Orbitron',monospace;font-size:11px;color:#00ff00;letter-spacing:2px;">WALLET ID RESOLVER</span>
+          <button onclick="closeWalletResolver()" style="color:#558855;background:none;border:none;cursor:pointer;font-size:18px;line-height:1;">&#10005;</button>
+        </div>
+        <div style="padding:14px;">
+          <div style="font-size:8px;color:#336633;margin-bottom:10px;line-height:1.5;">Resolves wallet identity from local database. No owner names invented. Unknown wallets remain UNKNOWN.</div>
+          <div style="display:flex;gap:8px;margin-bottom:14px;">
+            <input id="resolver-addr-input" type="text" placeholder="Enter r-address..." autocomplete="off"
+              style="flex:1;background:rgba(0,18,0,0.85);border:1px solid rgba(0,255,0,0.4);color:#00ff00;padding:8px;font-family:'Share Tech Mono',monospace;font-size:10px;border-radius:4px;outline:none;"
+              onkeydown="if(event.key==='Enter')resolveWallet()">
+            <button onclick="resolveWallet()" style="background:rgba(0,28,0,0.9);border:1px solid #00ff00;color:#00ff00;padding:8px 14px;font-family:'Share Tech Mono',monospace;font-size:9px;cursor:pointer;border-radius:4px;letter-spacing:1px;white-space:nowrap;">RESOLVE</button>
+          </div>
+          <div id="resolver-result-card" style="display:none;border:1px solid rgba(0,255,0,0.28);border-radius:8px;padding:12px;background:rgba(0,12,0,0.85);"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- v16.4 DISCOVERY INBOX MODAL -->
+    <div id="discovery-inbox-modal" style="display:none;position:fixed;inset:0;z-index:9400;background:rgba(0,0,0,0.86);align-items:flex-start;justify-content:center;padding:16px;padding-top:clamp(16px,8vh,80px);">
+      <div style="background:rgba(0,6,0,0.97);border:1px solid rgba(0,255,0,0.6);border-radius:12px;width:min(500px,95vw);max-height:82vh;overflow-y:auto;font-family:'Share Tech Mono',monospace;box-shadow:0 0 30px rgba(0,255,0,0.2);">
+        <div style="padding:12px 16px;border-bottom:1px solid rgba(0,255,0,0.28);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:rgba(0,6,0,0.97);z-index:1;">
+          <span style="font-family:'Orbitron',monospace;font-size:11px;color:#00ff00;letter-spacing:2px;">DISCOVERY INBOX</span>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button onclick="exportDiscoveryJSON()" style="font-size:8px;padding:3px 9px;border:1px solid rgba(0,255,0,0.38);background:transparent;color:#558855;cursor:pointer;border-radius:3px;font-family:'Share Tech Mono',monospace;">EXPORT JSON</button>
+            <button onclick="closeDiscoveryInbox()" style="color:#558855;background:none;border:none;cursor:pointer;font-size:18px;line-height:1;">&#10005;</button>
+          </div>
+        </div>
+        <div style="padding:14px;">
+          <div style="font-size:9px;color:#336633;margin-bottom:12px;line-height:1.5;">Review wallets Shadow Watch recommends for tracking. Nothing gets added to HVT automatically.</div>
+          <div id="discovery-inbox-list" style="min-height:60px;"></div>
+        </div>
+      </div>
+    </div>
+    <script src="src/js/boot-greeter.js"></script>
+    <script src="src/js/boot-scanner.js"></script>
+    <!-- /report — a shareable address for the daily brief. Loaded last: it wraps
+         switchView (app.js) and needs the boot scanner's handlers already bound. -->
+    <script src="src/js/report-route.js"></script>
+    <script src="src/js/pwa.js"></script>
+
+    <!-- ════════════════════════════════════════════════════════════
+         PC LIVE WALL — desktop-only single-screen dashboard.
+         Must be a CLASSIC script loaded AFTER app.js: it assigns app.js's
+         top-level `mapActive` / `graphActive` by bare name (they are global
+         lexical bindings, NOT properties of window, so window.mapActive fails).
+         ════════════════════════════════════════════════════════════ -->
+    <script>
+    (function () {
+      'use strict';
+      var MIN = 1100;
+      var wall = null, adopted = [], started = { map:false, graph:false }, zoomed = null, active = false;
+
+      function desktop() { return window.matchMedia('(min-width: ' + MIN + 'px)').matches; }
+      function el(tag, attrs, html) {
+        var e = document.createElement(tag);
+        if (attrs) for (var k in attrs) { if (k === 'class') e.className = attrs[k]; else e.setAttribute(k, attrs[k]); }
+        if (html != null) e.innerHTML = html;      // static markup only
+        return e;
+      }
+      function tile(area, title, tag) {
+        var t = el('div', { 'class':'wall-tile', 'data-area':area });
+        var head = el('div', { 'class':'wall-head' },
+          '<span class="wall-dot"></span><b></b><span class="wall-sp"></span>' +
+          '<span class="wall-tag"></span>' +
+          '<button type="button" class="wall-x" title="Expand / restore" aria-label="Expand or restore panel">' +
+          '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5"/></svg></button>');
+        head.querySelector('b').textContent = title;
+        head.querySelector('.wall-tag').textContent = tag || '';
+        head.querySelector('.wall-x').addEventListener('click', function (ev) { ev.stopPropagation(); toggleZoom(t); });
+        var body = el('div', { 'class':'wall-body' });
+        t.appendChild(head); t.appendChild(body);
+        t._body = body;
+        return t;
+      }
+      function toggleZoom(t) {
+        if (!wall) return;
+        if (zoomed === t) { zoomed = null; wall.classList.remove('wall-zoom'); t.classList.remove('is-zoom'); }
+        else {
+          if (zoomed) zoomed.classList.remove('is-zoom');
+          zoomed = t; wall.classList.add('wall-zoom'); t.classList.add('is-zoom');
+        }
+        // The canvases re-measure their own box every frame, so no resize call is
+        // needed. The layout change is instant (no CSS transition) on purpose:
+        // an animated expand would reallocate the backing store every frame.
+      }
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && zoomed) toggleZoom(zoomed); });
+
+      // Move a live node into a tile, remembering where it came from.
+      function adopt(node, body) {
+        if (!node || !body) return;
+        adopted.push({ node:node, parent:node.parentNode, next:node.nextSibling,
+                       cssW:node.style.width, cssH:node.style.height });
+        body.appendChild(node);
+      }
+      function restore() {
+        for (var i = adopted.length - 1; i >= 0; i--) {
+          var a = adopted[i];
+          try { a.node.style.width = a.cssW; a.node.style.height = a.cssH;
+                if (a.parent) a.parent.insertBefore(a.node, a.next); } catch (_) {}
+        }
+        adopted = [];
+      }
+
+      function build() {
+        var home = document.getElementById('view-home');
+        if (!home || document.getElementById('swWall')) return document.getElementById('swWall');
+        var w = el('div', { id:'swWall' });
+        var mapT   = tile('map',   'BUBBLE MAP',   'LIVE');
+        var graphT = tile('graph', 'WALLET GRAPH', 'TRACE');
+        var feedT  = tile('feed',  'LIVE FEED',    'XRPL STREAM');
+        var toolT  = tile('tools', 'TOOLS',        'ALL SYSTEMS');
+        [mapT, graphT, feedT, toolT].forEach(function (t) { w.appendChild(t); });
+        w._tiles = { map:mapT, graph:graphT, feed:feedT, tools:toolT };
+        home.insertBefore(w, home.firstChild);
+        wall = w;
+        return w;
+      }
+
+      // ── GRAPH SEEDING ───────────────────────────────────────────────────
+      // On first open the WALLET GRAPH tile was an empty black box: graphNodes
+      // is only filled by traceWallet() -> processTrace(), so before anyone
+      // clicks TRACE there is nothing to draw. Two sources fix that, both REAL
+      // — no invented nodes and no fabricated edges, ever:
+      //   (2) the last trace, persisted and restored, tagged LAST TRACE
+      //   (1) failing that, the largest High Value Target, traced for real over
+      //       the socket the app already has open (one account_tx, the exact
+      //       request the TRACE button makes — not a scan)
+      var GKEY = 'SW_WALL_GRAPH_V1';
+      function graphTag(text) {
+        _graphSrc = text;
+        try {
+          var t = wall && wall._tiles && wall._tiles.graph;
+          var el2 = t && t.querySelector('.wall-tag');
+          if (el2) el2.textContent = text;
+        } catch (_) {}
+      }
+      function saveGraph() {
+        try {
+          if (typeof graphNodes === 'undefined' || !graphNodes.length) return;
+          // Persist only what we drew: real addresses from real account_tx results.
+          localStorage.setItem(GKEY, JSON.stringify({
+            ts: Date.now(),
+            center: (graphNodes.find(function (n) { return n.type === 'CENTER'; }) || {}).id || null,
+            nodes: graphNodes.slice(0, 40).map(function (n) {
+              return { id:n.id, x:n.x, y:n.y, type:n.type, color:n.color };
+            }),
+            edges: (typeof graphEdges !== 'undefined' ? graphEdges : []).slice(0, 80)
+          }));
+        } catch (_) {}
+      }
+      function restoreGraph() {
+        try {
+          var raw = localStorage.getItem(GKEY); if (!raw) return false;
+          var d = JSON.parse(raw);
+          if (!d || !Array.isArray(d.nodes) || !d.nodes.length) return false;
+          graphNodes = d.nodes.map(function (n) { return { id:n.id, x:n.x, y:n.y, type:n.type, color:n.color, vx:0, vy:0 }; });
+          graphEdges = Array.isArray(d.edges) ? d.edges : [];
+          var age = Date.now() - (d.ts || 0);
+          var days = Math.floor(age / 86400000);
+          graphTag(days >= 1 ? ('LAST TRACE · ' + days + 'D AGO') : 'LAST TRACE');
+          return true;
+        } catch (_) { return false; }
+      }
+      // Largest HVT by the size already encoded in its own label (1.7B > 845M).
+      // Reading the existing label is not the same as inventing a balance; if no
+      // label carries a size we simply take the first HVT rather than guess.
+      function topHvt() {
+        try {
+          if (typeof PRELOADED_HVTS === 'undefined' || !PRELOADED_HVTS.length) return null;
+          var best = null, bestVal = -1;
+          PRELOADED_HVTS.forEach(function (h) {
+            if (!h || !h.address || h.address.length < 25) return;
+            var m = String(h.label || '').match(/(\d+(?:\.\d+)?)\s*([BM])/i);
+            var v = m ? (parseFloat(m[1]) * (m[2].toUpperCase() === 'B' ? 1e9 : 1e6)) : 0;
+            if (v > bestVal) { bestVal = v; best = h; }
+          });
+          return best;
+        } catch (_) { return null; }
+      }
+      // What the tile is currently showing, so the tag survives a wall rebuild.
+      // leave() destroys #swWall and build() recreates the tile with its default
+      // 'TRACE' tag; seedGraph() then early-returns because the nodes are still
+      // there, so without this the tag silently reverted on every HOME re-entry.
+      var _graphSrc = null;
+      function graphTagRefresh() { if (_graphSrc) graphTag(_graphSrc); }
+      var _seedTries = 0;
+      function seedGraph() {
+        try {
+          if (typeof graphNodes === 'undefined') return;
+          if (graphNodes.length) { graphTagRefresh(); return; }   // real data already on screen
+          if (restoreGraph()) return;                    // (2) last trace
+          var t = topHvt(); if (!t) return;              // (1) top HVT
+          // Draw the centre immediately so the tile is never blank, then ask the
+          // ledger for its real neighbours. If the trace returns nothing, one
+          // honest labelled node is still better than an empty box.
+          graphNodes.push({ id:t.address, x:0, y:0, type:'CENTER', color:'#ffd700', vx:0, vy:0 });
+          graphTag('TOP HVT · ' + String(t.label || '').slice(0, 18));
+          var s = (typeof socket !== 'undefined') ? socket : null;
+          if (s && s.readyState === 1) {
+            s.send(JSON.stringify({ id:'trace_' + t.address, command:'account_tx', account:t.address, limit:10 }));
+          } else if (_seedTries++ < 10) {
+            setTimeout(function () { if (graphNodes.length <= 1) seedGraph2(t); }, 1500);
+          }
+        } catch (_) {}
+      }
+      // Retry path once the socket comes up — the centre node already exists by
+      // now, so only the ledger request is repeated.
+      function seedGraph2(t) {
+        try {
+          var s = (typeof socket !== 'undefined') ? socket : null;
+          if (s && s.readyState === 1) {
+            s.send(JSON.stringify({ id:'trace_' + t.address, command:'account_tx', account:t.address, limit:10 }));
+          } else if (_seedTries++ < 10) {
+            setTimeout(function () { seedGraph2(t); }, 1500);
+          }
+        } catch (_) {}
+      }
+      // Persist whatever a real trace produces, so the next open has (2).
+      (function hookTrace() {
+        try {
+          if (typeof processTrace !== 'function' || processTrace.__swWall) return;
+          var orig = processTrace;
+          processTrace = function () {
+            var r = orig.apply(this, arguments);
+            try { saveGraph(); graphTag('TRACE'); } catch (_) {}
+            return r;
+          };
+          processTrace.__swWall = true;
+          try { window.processTrace = processTrace; } catch (_) {}
+        } catch (_) {}
+      })();
+
+      function fillTools(body) {
+        var grid = el('div', { 'class':'wall-tools' });
+        // Only wire actions that exist; each is the app's own function.
+        var CARDS = [
+          ['SHADOWWATCH REPORT','Daily forensic brief',    'green', function(){ switchView('brief'); try{ loadBriefConsole(); }catch(_){} }],
+          ['SESSION REPORT',   'Raw scanner export',      'blue',  function(){ openIntelDashboard(); }],
+          ['EVIDENCE LOCKER',  'Saved anomalies',         'gold',  function(){ switchView('case'); }],
+          ['WALLET ID',        'Resolve a wallet label',  'blue',  function(){ openWalletResolver(); }],
+          ['DISCOVERY INBOX',  'Review candidates',       'green', function(){ openDiscoveryInbox(); }],
+          ['HVT WATCHLIST',    'High-value targets',      'gold',  function(){ switchView('hvt'); }],
+          ['ESCROW WATCH',     'Unlock calendar',         'blue',  function(){ try{ openEscrowWatch(); }catch(_){ switchView('report'); } }],
+          ['WHAT’S NEW',  'Latest changes',          'green', function(){ showWhatsNew(); }]
+        ];
+        CARDS.forEach(function (c) {
+          var fn = c[3];
+          var b = el('button', { type:'button', 'class':'wall-card ' + c[2] }, '<b></b><i></i>');
+          b.querySelector('b').textContent = c[0];
+          b.querySelector('i').textContent = c[1];
+          b.addEventListener('click', function () { try { fn(); } catch (e) { try { console.warn('[wall]', e); } catch(_){} } });
+          grid.appendChild(b);
+        });
+        body.appendChild(grid);
+      }
+
+      // ── Loop lifecycle ──────────────────────────────────────────────────
+      // Run BOTH visualisations at once. switchView is exclusive — every call
+      // clears mapActive/graphActive unless the target IS that view — so the
+      // flags must be re-armed after EVERY router pass, not once on entry.
+      //
+      // A FLAG IS NOT A LIVENESS TEST. loopMap()/updateGraph() check their flag
+      // at the TOP of the callback (app.js:1479, :860), so a chain only dies when
+      // its next frame actually runs. switchView clears the flag in the same
+      // synchronous task we then read it in, so "flag is false" does NOT mean the
+      // chain is dead — it means the chain has not looked yet. An earlier version
+      // of this file used the flag as its re-entrancy guard and leaked one extra
+      // rAF chain per HOME<->MAP round trip (measured: 39 concurrent chains on
+      // one canvas, bubble physics stepping 12x per frame).
+      //
+      // So: kill by flag, let a frame boundary pass so every pending callback
+      // observes false and returns without re-queueing, and only THEN start
+      // exactly one chain. Two frames, because a callback queued during the
+      // current frame would not otherwise have run yet. The ~32ms gap is
+      // invisible; a duplicated chain is permanent.
+      var restartToken = 0;
+      function restartLoops(wantMap, wantGraph) {
+        var mine = ++restartToken;              // collapses overlapping restarts
+        try {
+          mapActive = false; graphActive = false;
+          started.map = false; started.graph = false;
+        } catch (e) { try { console.warn('[wall] loop stop failed:', e); } catch (_) {} return; }
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            if (mine !== restartToken) return;  // a newer restart supersedes this one
+            try {
+              if (wantMap)   { mapActive = true;   started.map = true;   loopMap(); }
+              if (wantGraph) { graphActive = true; started.graph = true; updateGraph(); }
+            } catch (e) { try { console.warn('[wall] loop start failed:', e); } catch (_) {} }
+          });
+        });
+      }
+      function assertLoops() { restartLoops(true, true); }
+
+      function enter() {
+        if (!desktop()) return;
+        if (active) { assertLoops(); return; }   // already mounted — just re-arm
+        var w = build(); if (!w) return;
+        active = true;
+        document.body.classList.add('sw-wall');
+        // header height drives where the deck starts
+        try {
+          var ht = document.getElementById('hud-top');
+          if (ht) document.documentElement.style.setProperty('--sw-wall-top', Math.round(ht.getBoundingClientRect().height) + 'px');
+        } catch (_) {}
+
+        // Adopt the REAL canvases. Their panels stay in the DOM; only the
+        // canvases move, so every handler bound to them keeps working.
+        adopt(document.getElementById('map-canvas'),   w._tiles.map._body);
+        adopt(document.getElementById('graph-canvas'), w._tiles.graph._body);
+        // Live feed list
+        adopt(document.getElementById('feed'), w._tiles.feed._body);
+        try { w._tiles.feed._body.firstChild.classList.add('wall-scroll'); } catch (_) {}
+        if (!w._tiles.tools._body.firstChild) fillTools(w._tiles.tools._body);
+
+        assertLoops();
+        // Never present an empty spider graph: restore the last real trace, or
+        // trace the top HVT for real. Runs after adoption so the canvas is sized.
+        seedGraph();
+
+        // The decorative three.js starfield updates 2500 particles and renders a
+        // full-viewport WebGL frame every tick, and it never stops. The wall
+        // covers it completely, so park the work while we are up.
+        try { window.__swStarsPaused = true; } catch (_) {}
+      }
+
+      function leave() {
+        if (!active) return;
+        active = false;
+        if (zoomed) { try { toggleZoom(zoomed); } catch (_) {} }
+        // Stop both chains before the canvases move back, so no frame draws
+        // into a re-parented element. The router sets the correct flag next.
+        try { mapActive = false; graphActive = false; started.map = false; started.graph = false; } catch (_) {}
+        restore();
+        // The scroll class is wall-only styling (position:absolute; inset:0). If
+        // it rides home on #feed it turns the LIVE panel's feed into a full-panel
+        // overlay that paints over the filter bar and swallows its clicks.
+        try {
+          var f = document.getElementById('feed');
+          if (f) f.classList.remove('wall-scroll');
+        } catch (_) {}
+        // Detach the shell too. #swWall's display:none lives inside the >=1100px
+        // media query, so an orphan left in #view-home becomes a visible, unstyled
+        // skeleton (duplicate tool buttons above Mission Control) the moment the
+        // window narrows. build() recreates the whole subtree on the next enter().
+        try {
+          if (wall && wall.parentNode) wall.parentNode.removeChild(wall);
+        } catch (_) {}
+        wall = null; zoomed = null;
+        document.body.classList.remove('sw-wall');
+        try { window.__swStarsPaused = false; } catch (_) {}
+        // Hand control back to the router; it will set the flags for the view
+        // it is switching to.
+      }
+
+      // Wall owns HOME on desktop. Any other view exits it.
+      function sync(id) { if (desktop() && id === 'home') enter(); else leave(); }
+
+      function hook() {
+        if (typeof switchView !== 'function' || switchView.__swWall) return false;
+        var orig = switchView;
+        switchView = function (id) {
+          var wasUp = active;
+          if (id !== 'home') leave();          // release canvases BEFORE the router runs
+          var r = orig.apply(this, arguments);
+          // The router starts the target view's loop itself (app.js:2027-2028) in
+          // this same task — while our chain is still queued for the coming frame.
+          // Left alone that is a second chain on the same canvas. Re-normalise so
+          // exactly one survives. Only when we were actually up: off the wall this
+          // is the app's own untouched path and must stay that way.
+          if (wasUp && id !== 'home' && (id === 'map' || id === 'graph')) {
+            try { restartLoops(id === 'map', id === 'graph'); } catch (_) {}
+          }
+          try { sync(id); } catch (_) {}
+          return r;
+        };
+        switchView.__swWall = true;
+        try { window.switchView = switchView; } catch (_) {}
+        return true;
+      }
+
+      function tutorialOpen() {
+        try {
+          var t = document.getElementById('tutorial-overlay');
+          return !!(t && getComputedStyle(t).display !== 'none' && t.offsetParent !== null);
+        } catch (_) { return false; }
+      }
+      function boot() {
+        if (!hook()) { setTimeout(boot, 200); return; }
+        var home = document.getElementById('view-home');
+        if (home && home.classList.contains('active')) { sync('home'); return; }
+        // On desktop the wall IS the landing screen — that is the whole point of
+        // it. The tutorial drives the app to 'live' during first-run onboarding,
+        // so wait for it to finish rather than fighting it, then land on the
+        // wall. Never do this on a phone.
+        if (!desktop()) return;
+        var tries = 0;
+        (function land() {
+          if (++tries > 40) return;                  // ~20s ceiling
+          if (tutorialOpen()) { setTimeout(land, 500); return; }
+          if (!desktop()) return;
+          var h = document.getElementById('view-home');
+          if (h && !h.classList.contains('active')) { try { switchView('home'); } catch (_) {} }
+          else sync('home');
+        })();
+      }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function(){ setTimeout(boot, 300); });
+      else setTimeout(boot, 300);
+
+      window.addEventListener('resize', function () {
+        if (!desktop()) { leave(); return; }
+        var home = document.getElementById('view-home');
+        if (home && home.classList.contains('active')) {
+          enter();
+          try {
+            var ht = document.getElementById('hud-top');
+            if (ht) document.documentElement.style.setProperty('--sw-wall-top', Math.round(ht.getBoundingClientRect().height) + 'px');
+          } catch (_) {}
+        }
+      });
+      window.swWallEnter = enter; window.swWallLeave = leave;
+      window.swWallSeedGraph = seedGraph;   // exposed for the regression harness
+    })();
+    </script>
+
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "redirects": [
+    {
+      "source": "/report/",
+      "destination": "/report",
+      "permanent": true
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/ladyk",
+      "destination": "/ladyk.html"
+    },
+    {
+      "source": "/lady-k",
+      "destination": "/ladyk.html"
+    },
+    {
+      "source": "/report",
+      "destination": "/index.html"
+    }
+  ]
+}

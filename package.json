@@ -1,0 +1,18 @@
+{
+  "name": "xrpshadowwatch",
+  "version": "16.7.1",
+  "private": true,
+  "description": "XRPMAN Shadow Watch — real-time XRP Ledger forensic / whale-watching console.",
+  "homepage": "https://shadowwatch.xyz",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "npx --yes serve@latest -l 5173 .",
+    "serve": "python3 -m http.server 5173",
+    "check": "node scripts/check-syntax.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/redcandlekiller1/xrpshadowwatch.git"
+  },
+  "license": "MIT"
+}
