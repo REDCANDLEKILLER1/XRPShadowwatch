@@ -310,8 +310,8 @@ function summarizeLargeMoves(pack){
     // promote, so the wording has to stop pretending: "from Kraken to Kraken"
     // reads as a mistake; "between two Kraken wallets" is what happened.
     var headline=_sameEntity(top)
-      ? amt+' XRP moved between two '+senderName+' wallets overnight.'
-      : amt+' XRP moved from '+senderName+' to '+recvName+' overnight.';
+      ? amt+' XRP moved between two '+senderName+' wallets in the scanned window.'
+      : amt+' XRP moved from '+senderName+' to '+recvName+' in the scanned window.';
     var parts=[headline];
     if(sorted.length>1){
       var t2=sorted[1];
@@ -969,36 +969,14 @@ function _buildExecutiveSummary(interps, pack){
   }
 
   var openers=[
-    'I kept watch over the Ledger while you slept. ',
-    'Another night on patrol, and the Ledger tipped its hand: ',
-    'The city sleeps; the Ledger never does. Overnight, ',
-    'XRPMan on the wire — while you were out cold, ',
-    'While the world slept, I worked the Ledger. ',
-    'Morning. Here’s what moved in the dark: ',
-    'I ran the whole board overnight, and here’s the read: ',
-    'Coffee’s hot and the Ledger’s open — overnight, ',
-    'You were sleeping. The whales weren’t. ',
-    'Fresh off the night shift on the Ledger: ',
-    'I never blinked. Here’s what crossed the wire: ',
-    'The Ledger doesn’t clock out, and neither do I. Overnight, ',
-    'Let’s open the books on last night: ',
-    'Straight from the night watch: ',
-    'Kettle on, board up — here’s the overnight: ',
-    'Nothing got past me. Here’s the tape: ',
-    'Sat with the Ledger till the sun came up. Overnight, ',
-    'The wires ran all night. What they carried: ',
-    'Back from the watch, notebook full. Overnight, ',
-    'You slept. I counted. Here’s the count: ',
-    'Same seat, same screens, new night. Overnight, ',
-    'Doors were locked, money still moved. Here it is: ',
-    'I stayed up so this line could be short: ',
-    'Everything below crossed the Ledger while you were out: ',
-    'Long night on the board. Here’s what it gave up: ',
-    'Fresh receipts, still warm. Overnight, ',
-    'No one announced any of this. Overnight, ',
-    'Here’s the honest read from the night shift: ',
-    'Ledger’s open, coffee’s poured — overnight, ',
-    'Quiet hours, loud wallets. Overnight, '
+    'Coffee’s hot and the Ledger’s open. Here’s the acquired record: ',
+    'XRPMan on the wire — here’s what this scan found: ',
+    'Kettle on, board up. Here’s the read: ',
+    'Fresh receipts from the scanned window: ',
+    'Same seat, same screens, a fresh scan. ',
+    'Let’s open the books on this window: ',
+    'Ledger’s open, coffee’s poured. Here’s what I can show: ',
+    'Back at the board, receipts in hand: '
   ];
   var quietOpen=[
     'the Ledger stayed quiet under my watch. No whale broke cover — and a still night on patrol is a good night.',
@@ -1094,9 +1072,9 @@ function _buildWhatMatteredMost(interps, pack){
   // not know — say that instead of dressing an outage up as a calm night.
   var cov=_cov(pack);
   if(cov.severe) return _nvPick([
-    'What mattered most is what I could not see. '+cov.failed+' of '+cov.total+' wallets never reported in, so anything I tell you about "no moves" tonight is about the '+cov.checked+' that answered, and nothing else.',
-    'The thing that mattered tonight was the blackout, not the board. Only '+cov.checked+' wallets came back. I will not dress that up as a quiet shift.',
-    'I cannot tell you what mattered most, because '+cov.failed+' of the '+cov.total+' wallets I watch never answered. That is the finding: the read failed, not the market went still.',
+    'What mattered most is what I could not see. Only '+cov.checked+' of '+cov.total+' wallets '+cov.basis_noun+'. Any absence below describes that acquired evidence alone.',
+    'The gap in coverage leads this report. Only '+cov.checked+' wallets '+cov.basis_noun+'. I will not dress that up as a quiet shift.',
+    'I cannot settle what mattered most, because '+cov.failed+' of the '+cov.total+' watched wallets lack complete acquisition. The rest remains unknown.',
     'The headline tonight is the gap in my own coverage. '+cov.percent+'% of the board reported in. The rest is unknown, and unknown is not the same as quiet.'
   ],seed,2);
   return _nvPick([
@@ -1207,8 +1185,8 @@ function _buildEvidence(interps, pack){
   if(igE.linkLost) return 'No evidence is offered for this run. '+igE.headline+' — the ledger read stopped partway, so anything absent below is unread, not clear.';
   if(!parts.length && covE.severe)
     return _nvPick([
-      'The evidence tonight is the read itself: '+covE.checked+' of '+covE.total+' wallets answered, '+covE.failed+' did not.',
-      'There is no tape to hand you. '+covE.failed+' of '+covE.total+' wallets never responded, so there is nothing to put on the record.',
+      'The evidence is the read itself: '+covE.checked+' of '+covE.total+' wallets '+covE.basis_noun+', '+covE.failed+' did not.',
+      'The acquired record is incomplete. '+covE.failed+' of '+covE.total+' wallets are missing the required coverage.',
       'What I have is a partial ledger — '+covE.checked+' wallets out of '+covE.total+'. I am not going to build a case on that.'
     ],seed,4)+' Nothing crossed my threshold in the part I could read, and I am reporting that as a limit, not a result. '+_nvBeat(seed,3);
   if(!parts.length) return _nvPick(['No move crossed the line big enough to book tonight. I stayed on watch anyway.','Nothing hit the threshold worth booking — but a clean night is still a logged night.','The board gave me nothing to charge tonight. I kept the watch regardless.'],seed,4)+' '+_nvBeat(seed,3);
@@ -1225,7 +1203,7 @@ function _buildWatchNext(interps, pack){
   var ig=_intg(pack);
   if(ig.linkLost) bullets.push('Re-run the scan — the XRPL link dropped mid-pass and this report is NOT SEALED.');
   if(cov.degraded)
-    bullets.push('Re-run the scan — '+cov.failed+' of '+cov.total+' wallets never answered this pass'+
+    bullets.push('Re-run the scan — '+cov.failed+' of '+cov.total+' wallets did not '+(cov.basis==='transaction window'?'prove the transaction window':'return a balance')+' this pass'+
                  (cov.severe?', and nothing below is settled until they do.':'.'));
   if(recv&&recv.has_signal){
     if(recv.summary.indexOf('forwarded')>-1)
@@ -1238,7 +1216,7 @@ function _buildWatchNext(interps, pack){
   if(absorber&&absorber.has_signal)
     bullets.push('Watch the absorbing wallets — are they stacking it, or handing it back out?');
   if(moves&&moves.has_signal)
-    bullets.push('Check whether last night’s big recipient makes a move today.');
+    bullets.push('Check whether the largest recipient in this window makes another move.');
   // Standing watch \u2014 always-true forensic to-dos. Fill out the list (especially
   // on a quiet night) so the section stays substantive instead of a lone line.
   var standing=[

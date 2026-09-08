@@ -10559,6 +10559,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     REPORTING:        function() { return 'I\u2019m building the Coffee \u0026 Crypto brief now.'; },
     SEALED:           function() { return 'Morning Report sealed. I\u2019m putting it on screen now.'; },
     DONE:             function() { return 'Scan complete. You can read, copy, or download the report.'; },
+    INCOMPLETE:       function() { return 'The report is ready, with incomplete acquisition. Review its coverage and errors.'; },
     ERROR_WAIT:       function() { return 'Node is dragging. I\u2019m still working \u2014 waiting on XRPL response.'; },
     FAILED:           function() { return 'Scan hit an error. I saved the details for review.'; }
   };
@@ -10580,6 +10581,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     REPORTING:       84,
     SEALED:          94,
     DONE:            100,
+    INCOMPLETE:      0,
     ERROR_WAIT:      -1,   // hold previous pct
     FAILED:          100   // full bar with error styling
   };
@@ -10599,6 +10601,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     REPORTING:       'scanning',
     SEALED:          'sealed',
     DONE:            'sealed',
+    INCOMPLETE:      'error',
     ERROR_WAIT:      'warning',
     FAILED:          'error'
   };
@@ -10617,6 +10620,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     REPORTING:       'NEXT: Seal evidence',
     SEALED:          'NEXT: Open Morning Report',
     DONE:            'NEXT: Read, copy, or download the report',
+    INCOMPLETE:      'NEXT: Review coverage and retry the scan',
     ERROR_WAIT:      'NEXT: Waiting for ledger response',
     FAILED:          'NEXT: Review error log'
   };
@@ -10653,7 +10657,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         pct = Math.round(15 + (walletPct * 30)); // 15..45%
       }
       _lastRenderedPct = pct;
-      pctEl.textContent = pct + '%';
+      pctEl.textContent = phase === 'INCOMPLETE' ? '—' : pct + '%';
       fillEl.style.width = pct + '%';
       if (wrap) wrap.setAttribute('data-mission-state', phase);
       if (nextEl) nextEl.textContent = NEXT_ACTION_LABEL[phase] || ('NEXT: ' + (XAI_SCAN_PROGRESS.nextAction || ''));
@@ -10828,6 +10832,9 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
   // ─── safeXaiProgress helper ────────────────────────────────
   function safeXaiProgress(phase, st) {
     try {
+      if (/^(SEALED|DONE)$/.test(phase) && typeof state !== 'undefined' && state.pack &&
+          state.pack.tx_scan_coverage && (state.pack.tx_scan_coverage.full_window_complete !== true ||
+          state.pack.wallets_checked !== state.pack.watchlist_total || state.pack.wallets_failed)) phase = 'INCOMPLETE';
       if (window.XAI_PROGRESS_NARRATOR && typeof window.XAI_PROGRESS_NARRATOR.updateProgress === 'function') {
         var payload = { phase: phase };
         if (st) Object.keys(st).forEach(function(k) { payload[k] = st[k]; });
@@ -11912,11 +11919,12 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     _renderVisuals: function(phase) {
       try {
         var pct = Math.round(this.visualPct);
+        if (phase === 'INCOMPLETE') pct = 0;
         // Update legacy mission strip
         var fillEl = document.getElementById('xaiMissionFill');
         var pctEl  = document.getElementById('xaiMissionPct');
         if (fillEl) fillEl.style.width = pct + '%';
-        if (pctEl)  pctEl.textContent  = pct + '%';
+        if (pctEl)  pctEl.textContent  = phase === 'INCOMPLETE' ? '—' : pct + '%';
         // Update new quantum gauge
         var gauge   = document.getElementById('xaiQuantumGauge');
         var gPct    = document.getElementById('xaiGaugePct');
@@ -11928,7 +11936,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
           var isActive = ['INIT','LEDGER','WALLET_PROGRESS','BALANCE','FLOW','NEWS','NEWS_STRONG','NEWS_WEAK','DISCOVERY','REPORTING','SEALED','ERROR_WAIT'].indexOf(phase) >= 0;
           gauge.setAttribute('data-active', isActive ? 'true' : 'false');
         }
-        if (gPct)   gPct.textContent   = pct + '%';
+        if (gPct)   gPct.textContent   = phase === 'INCOMPLETE' ? '—' : pct + '%';
         if (gPhase) gPhase.textContent = phase === 'WALLET_PROGRESS'
           ? ('WALLETS ' + (window.XAI_SCAN_PROGRESS.walletsChecked || 0) + '/' + (window.XAI_SCAN_PROGRESS.walletsTotal || 0))
           : phase;
@@ -14527,7 +14535,10 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       var _orig = window.buildMorningStorySources;
       window.buildMorningStorySources = function(pack) {
         var srcs = _orig.apply(this, arguments) || [];
-        try { return MORNING_NEWS_GOVERNOR.dedupeSources(srcs); } catch (_) { return srcs; }
+        try {
+          if (!MORNING_NEWS_GOVERNOR.publicSourcesCleared(pack)) return [];
+          return MORNING_NEWS_GOVERNOR.dedupeSources(MORNING_NEWS_GOVERNOR.filterClearedSources(srcs, pack)).slice(0,3);
+        } catch (_) { return []; }
       };
       window.buildMorningStorySources._governorWrapped = true;
       window.buildMorningStorySources._original = _orig;
@@ -21361,7 +21372,8 @@ async function run() {
 
     scanSucceeded = !!(p.tx_scan_coverage && p.tx_scan_coverage.full_window_complete === true &&
       p.wallets_checked === p.watchlist_total && !p.wallets_failed);
-    shadowSay(scanSucceeded ? 'Scan complete. Report ready.' : 'Report ready with incomplete acquisition — review coverage.', scanSucceeded ? 'READY' : 'ERROR', 100);
+    shadowSay(scanSucceeded ? 'Scan complete. Report ready.' : 'Report ready with incomplete acquisition — review coverage.', scanSucceeded ? 'READY' : 'INCOMPLETE', scanSucceeded ? 100 : 0);
+    if (!scanSucceeded && typeof window.safeXaiProgress === 'function') window.safeXaiProgress('INCOMPLETE', {reportReady:true});
     log(scanSucceeded ? '✓ Scan complete. Copy or download the public report manually.' : 'REPORT INCOMPLETE: the report records the available evidence and acquisition failures.');
     // Responsive dashboard v1: refresh instruments/feed/network from sealed state.
     try { if (typeof window.renderDashboardV1 === 'function') window.renderDashboardV1(); } catch (_) {}
@@ -22383,7 +22395,7 @@ function _swReadPct() {
 var _SW_SEGS = 26;
 function _swRenderReactor() {
   var pct = _swReadPct();
-  _swSetText('swReactorPct', pct + '%');
+  _swSetText('swReactorPct', window.XAI_SCAN_PROGRESS && window.XAI_SCAN_PROGRESS.phase === 'INCOMPLETE' ? '—' : pct + '%');
   var stepEl = document.getElementById('xaiMissionStep');
   _swSetText('swReactorPhase', (stepEl && (stepEl.textContent || '').trim()) || (_swScanning() ? 'SCANNING' : 'IDLE'));
   var nextEl = document.getElementById('xaiNextStep');

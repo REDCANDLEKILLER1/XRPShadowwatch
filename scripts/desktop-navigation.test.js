@@ -30,6 +30,22 @@ async function main(){
     await page.getByRole('button',{name:'Fill screen',exact:true}).click();
     await page.keyboard.press('Escape');assert.equal(await page.locator('#morningReportFloat').isVisible(),false);
     console.log('PASS report actions are visible and Escape closes the reader');
+    await page.evaluate(()=>{
+      state.pack={wallets_checked:255,watchlist_total:255,wallets_failed:0,
+        tx_scan_coverage:{target_wallets:255,complete_wallets:253,failed_wallets:2,full_window_complete:false}};
+      window.SHADOW_EVENT_BUS.emit('shadow.report.sealed',{});
+    });
+    await page.waitForTimeout(1200);
+    const incomplete=await page.evaluate(()=>({phase:window.XAI_SCAN_PROGRESS.phase,
+      mission:document.getElementById('xaiMissionPct').textContent,
+      reactor:document.getElementById('swReactorPct').textContent,
+      runtime:document.getElementById('swPhaseRuntimeLabel').textContent,
+      runtimePct:document.getElementById('swPhaseRuntimePct').textContent}));
+    assert.equal(incomplete.phase,'INCOMPLETE');
+    assert.equal(incomplete.mission,'—');assert.notEqual(incomplete.reactor,'100%');
+    assert.match(incomplete.runtime,/incomplete acquisition/);assert.equal(incomplete.runtimePct,'—');
+    await page.keyboard.press('Escape');
+    console.log('PASS delayed report sealing preserves incomplete acquisition instead of announcing 100%');
     await page.setViewportSize({width:390,height:844});
     assert.equal(await page.locator('#swDashRail').isVisible(),false);
     assert.equal(await page.locator('#swDashBottomNav').isVisible(),true);

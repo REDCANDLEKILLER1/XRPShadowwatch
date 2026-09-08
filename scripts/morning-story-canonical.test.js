@@ -127,6 +127,9 @@ const check = (name, ok, detail) => {
       const nu = (canonNews.split('\nNEWS USED:')[1] || '');
       out.provBlockNoStale = nu.indexOf(STALE) === -1;
       out.provBlockSample  = nu.split('\n').filter(Boolean).slice(0, 3);
+      const drawerSources=window.buildMorningStorySources(newsPack);
+      out.provDrawerMatches=drawerSources.length>0 && drawerSources.length===nu.split('\n').filter(x=>/^\[\d+\]/.test(x)).length &&
+        drawerSources.every(s=>nu.includes(s.title));
     } catch (e) { out.provErr = String(e && e.message); }
 
     // A pack with enough substance that the wrapper chain actually engages —
@@ -166,6 +169,7 @@ const check = (name, ok, detail) => {
 
     // Produce the canonical render once, exactly as a scan does.
     const canonical = canonicalMorningStory(PACK, { rebuild: true });
+    out.noInventedTransferTiming=!/XRP moved[^\n.]*overnight|last night’s big recipient/.test(canonical);
     out.canonicalLen = (canonical || '').length;
     out.canonicalNonTrivial = out.canonicalLen > 400;   // anti-vacuity
 
@@ -263,6 +267,8 @@ const check = (name, ok, detail) => {
         r.provHasBlock, r.provErr);
   check('it carries the CURRENT pack\u2019s headline', r.provHasFresh, r.provErr);
   check('a rejected speculative headline cannot appear in the spoken body or sources',r.provNoRejected);
+  check('the reader source drawer exactly matches the canonical NEWS USED list',r.provDrawerMatches);
+  check('transfer timing is limited to the scanned window',r.noInventedTransferTiming);
   check('the stale drawer headline does not appear anywhere in the story',
         r.provNoStale, r.provBlockSample);
   check('and specifically not inside the NEWS USED block',
