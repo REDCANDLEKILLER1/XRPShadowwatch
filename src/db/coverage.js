@@ -655,7 +655,7 @@ function checkpointAdvance(input) {
 
   // Never claim coverage of ledgers this run did not read. A gap between the
   // existing checkpoint and the proven range would be exactly that.
-  if (hasProof(c) && effFrom > c.scan_coverage_through + 1) {
+  if (hasProof(c) && (effFrom > c.scan_coverage_through + 1 || through < c.scan_coverage_from - 1)) {
     return refuse('PROOF_RANGE_NOT_CONTIGUOUS');
   }
 

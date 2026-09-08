@@ -308,12 +308,15 @@ CREATE TABLE IF NOT EXISTS coverage_advances (
   scan_id       TEXT        NOT NULL,
   from_through  BIGINT,                  -- checkpoint before the advance (NULL = first ever)
   to_through    BIGINT      NOT NULL,    -- checkpoint after
+  from_floor    BIGINT,
+  to_floor      BIGINT,
   proven_from   BIGINT      NOT NULL,    -- the range this run actually walked
   proven_through BIGINT     NOT NULL,
   rows_stored   INTEGER     NOT NULL DEFAULT 0,
   reason        TEXT        NOT NULL,    -- 'RANGE_PROVEN' | 'EMPTY_RANGE_EXHAUSTED'
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT coverage_advances_forward CHECK (from_through IS NULL OR to_through > from_through),
+  CONSTRAINT coverage_advances_forward CHECK (from_through IS NULL OR to_through > from_through OR
+    (to_through = from_through AND from_floor IS NOT NULL AND to_floor IS NOT NULL AND to_floor < from_floor)),
   CONSTRAINT coverage_advances_range   CHECK (proven_through >= proven_from)
 );
 

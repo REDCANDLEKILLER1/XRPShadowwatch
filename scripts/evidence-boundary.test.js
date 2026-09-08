@@ -25,6 +25,17 @@ async function main(){
   assert.equal(advance.advance,true);assert.equal(advance.reason,'EMPTY_RANGE_EXHAUSTED');
   assert.equal(advance.next_from,109999000);assert.equal(advance.next_from_close_ms,close.getTime());
   console.log('PASS an independently observed empty ledger range advances without a transaction floor');
+  const prior={scan_coverage_from:100,scan_coverage_through:200,
+    scan_coverage_from_close:close,scan_coverage_through_close:new Date(close.getTime()+400000)};
+  const checkRange=(from,through)=>C.checkpointAdvance({coverage:prior,anchorLedger:250,
+    proof:{status:'COMPLETE',range_bound_proven:true,from_ledger:from,through_ledger:through,
+      from_close_ms:close.getTime()+(from-100)*4000,through_close_ms:close.getTime()+(through-100)*4000}});
+  assert.equal(checkRange(50,98).reason,'PROOF_RANGE_NOT_CONTIGUOUS');
+  assert.equal(checkRange(202,250).reason,'PROOF_RANGE_NOT_CONTIGUOUS');
+  assert.equal(checkRange(50,99).reason,'NO_FORWARD_PROGRESS');
+  assert.equal(checkRange(50,100).reason,'NO_FORWARD_PROGRESS');
+  assert.equal(checkRange(201,250).advance,true);
+  console.log('PASS disjoint ranges are refused on both sides while adjacent/overlapping ranges remain valid');
   const proof={status:'COMPLETE',source:'NEON_VERIFIED_INDEX',run_id:'idx-test',anchor_ledger:110000000,
     request_bounded:true,transport_consistent:true,range_bound_proven:true,range_exhausted:true,
     edge_fetch_complete:true,covers_window_start:true,response_validated:true,response_ledger_index_max:110000000};

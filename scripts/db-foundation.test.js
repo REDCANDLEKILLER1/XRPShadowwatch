@@ -75,6 +75,12 @@ function tableBodies(sql) {
     }
     out[name] = src.slice(re.lastIndex, i - 1);
   }
+  // Later migrations add columns to an existing table; include the actual
+  // declaration rather than requiring edits to already-applied migrations.
+  const additions=/ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?([^;]+);/gi;
+  while((m=additions.exec(src))){
+    if(out[m[1]]!==undefined)out[m[1]]+=',\n'+m[2];
+  }
   return out;
 }
 // A column definition is a top-level (paren-depth 0) clause whose first token
@@ -300,10 +306,14 @@ check('no column could hold key material', secretish.length === 0, secretish);
 // belongs in application code, in the same transaction that narrows
 // evidence_retained_*, never in a migration.
 const _m = stripComments(MIGRATION_SQL);
+// Replacing a CHECK expression in the same migration is schema evolution,
+// not row deletion. An unmatched constraint drop remains prohibited.
+const _withoutConstraintReplacement = _m.replace(/ALTER\s+TABLE\s+(\w+)\s+DROP\s+CONSTRAINT\s+(\w+)\s*;/gi,
+  (statement,table,constraint)=>new RegExp('ALTER\\s+TABLE\\s+'+table+'\\s+ADD\\s+CONSTRAINT\\s+'+constraint+'\\s+CHECK\\s*\\(','i').test(_m)?'':statement);
 check('no migration destroys evidence',
       !/\bDROP\s+TABLE\b/i.test(_m) && !/(?:^|;)\s*TRUNCATE\s+(?:TABLE\s+)?\w+/im.test(_m) &&
       !/\bDELETE\s+FROM\b/i.test(_m) && !/\bDROP\s+COLUMN\b/i.test(_m) &&
-      !/\bALTER\s+TABLE\b[\s\S]{0,200}?\bDROP\b/i.test(_m));
+      !/\bALTER\s+TABLE\b[\s\S]{0,200}?\bDROP\b/i.test(_withoutConstraintReplacement));
 
 // ════════════════════════════════════════════════════════════════════════════
 console.log('\n2. ingest is non-lossy, and never fabricates a ledger value');

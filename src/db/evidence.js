@@ -58,8 +58,7 @@ async function persist(run, address, rows, proof, metrics) {
     const current = (await q('SELECT * FROM wallet_coverage WHERE address=$1 FOR UPDATE', [address])).rows[0];
     const c = C.normalizeCoverage(current);
     const advance = C.checkpointAdvance({ coverage:current, anchorLedger:Number(run.anchor_ledger), proof });
-    const completedAlready = decision(run,current).complete_without_fetch;
-    if (!advance.advance && !completedAlready && advance.reason !== 'NO_FORWARD_PROGRESS') throw new Error('CHECKPOINT_REFUSED: ' + advance.reason);
+    if (!advance.advance && advance.reason !== 'NO_FORWARD_PROGRESS') throw new Error('CHECKPOINT_REFUSED: ' + advance.reason);
     for (let offset=0; offset<rows.length; offset+=200) {
       const chunk = rows.slice(offset,offset+200);
       for (const row of chunk) {
@@ -101,8 +100,10 @@ async function persist(run, address, rows, proof, metrics) {
       last_status='COMPLETE',last_scan_id=excluded.last_scan_id`,
     [address,from,through,iso(fromClose),iso(throughClose),retainedFrom,retainedThrough,iso(retainedClose),
       rows.length ? Math.max(...rows.map(r=>r.ledger_index)) : null,run.scan_id]);
-    if (advance.advance) await q(`INSERT INTO coverage_advances(address,scan_id,from_through,to_through,proven_from,proven_through,rows_stored,reason)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, [address,run.scan_id,c.scan_coverage_through,through,proof.from_ledger,proof.through_ledger,rows.length,advance.reason]);
+    const floorExtended=c.scan_coverage_from!==null && from<c.scan_coverage_from;
+    if (advance.advance || floorExtended) await q(`INSERT INTO coverage_advances(address,scan_id,from_through,to_through,proven_from,proven_through,rows_stored,reason,from_floor,to_floor)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [address,run.scan_id,c.scan_coverage_through,through,proof.from_ledger,proof.through_ledger,rows.length,
+        advance.advance?advance.reason:'PROOF_FLOOR_EXTENDED',c.scan_coverage_from,from]);
     const after = (await q('SELECT * FROM wallet_coverage WHERE address=$1',[address])).rows[0];
     const complete=decision(run,after).complete_without_fetch;
     if (!complete && proof.partial !== true) throw new Error('STORED_WINDOW_NOT_SERVABLE');
@@ -158,6 +159,14 @@ async function catchUp(id, address, reader) {
             // last row's ledger. Keep that proven prefix; replay the unfinished
             // ledger on the next invocation, without persisting a socket marker.
             const through=rows[rows.length-1].ledger_index-1;
+            // A partial older backfill is a separate island until it touches
+            // existing proof. Keep walking; never bridge the unread gap with
+            // min/max bounds. If the read budget expires, the old checkpoint
+            // remains unchanged and this wallet resumes with an honest gap.
+            if(priorCoverage.scan_coverage_from!==null && through<priorCoverage.scan_coverage_from-1){
+              if(Date.now()>reader.deadline){const e=new Error('XRPL_READ_PENDING: older prefix has not joined retained proof');e.pending=true;throw e;}
+              continue;
+            }
             const header=await reader.ledger(through);
             const prefix=T.mergeSightings(rows.filter(r=>r.ledger_index<=through));
             if(prefix.some(r=>r.conflicts.length))throw new Error('CONFLICTING_TRANSACTION_SIGHTINGS');

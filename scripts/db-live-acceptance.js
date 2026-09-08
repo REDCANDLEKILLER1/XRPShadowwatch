@@ -20,6 +20,16 @@ async function main(){
       WHERE a.address=w.address AND a.role='observed_via' AND t.ledger_index BETWEEN (w.proof->>'from_ledger')::bigint AND (w.proof->>'through_ledger')::bigint)
     LIMIT 1`,[actual.scan_id])).rows[0];
   assert.ok(empty,'An independently acquired empty wallet range is required');
+  const emptyHeaders=[{ledger:empty.proof.from_ledger,closed:new Date(empty.proof.from_close_ms)}];
+  const interval=empty.proof.through_ledger-empty.proof.from_ledger;
+  assert.ok(interval>6,'The acquired empty range must span enough ledgers for a real gap control');
+  const headerReader=new E.Reader({budgetMs:120000});
+  try{
+    for(const fraction of [1/3,2/3]){
+      const h=await headerReader.ledger(empty.proof.from_ledger+Math.floor(interval*fraction));
+      emptyHeaders.push({ledger:h.ledger,closed:new Date(h.close_ms)});
+    }
+  }finally{headerReader.close();}
   const evidence=(await read(`SELECT t.* FROM transactions t WHERE ledger_index>=$2 AND ledger_index<=$3 AND
     EXISTS(SELECT 1 FROM transaction_accounts a WHERE a.tx_hash=t.hash AND a.address=$1 AND a.role='observed_via')`,
     [actual.address,actual.proof.from_ledger,actual.proof.through_ledger])).rows;
@@ -69,8 +79,30 @@ async function main(){
       assert.equal(Number((await q('SELECT count(*) AS n FROM transaction_accounts')).rows[0].n),participantCount);
       assert.equal(Number((await q('SELECT count(*) AS n FROM coverage_advances')).rows[0].n),1);
       console.log('PASS repeated ingestion deduplicates hashes and preserves every participant role');
+      await assert.rejects(()=>E.persist(run,actual.address,[],{...actual.proof,status:'FAILED'},metrics),/CHECKPOINT_REFUSED/);
+      console.log('PASS already-complete stored coverage cannot bypass a refused incoming proof');
       await q('INSERT INTO scan_wallets(scan_id,address) VALUES($1,$2)',[run.scan_id,empty.address]);
-      await E.persist(run,empty.address,[],empty.proof,{requests:1,rows_fetched:0,fetch_from_ledger:empty.proof.from_ledger});
+      const header=emptyHeaders[2], earlier=emptyHeaders[1];
+      const suffix={...empty.proof,from_ledger:Number(header.ledger),from_close_ms:new Date(header.closed).getTime(),partial:true};
+      const emptyMetrics={requests:1,rows_fetched:0,fetch_from_ledger:empty.proof.from_ledger};
+      await E.persist(run,empty.address,[],suffix,emptyMetrics);
+      const beforeGap=(await q('SELECT * FROM wallet_coverage WHERE address=$1',[empty.address])).rows[0];
+      const gapPrefix={...empty.proof,through_ledger:Number(earlier.ledger),through_close_ms:new Date(earlier.closed).getTime(),partial:true};
+      assert.ok(gapPrefix.through_ledger<suffix.from_ledger-1);
+      await assert.rejects(()=>E.persist(run,empty.address,[],gapPrefix,emptyMetrics),/PROOF_RANGE_NOT_CONTIGUOUS/);
+      assert.deepEqual((await q('SELECT * FROM wallet_coverage WHERE address=$1',[empty.address])).rows[0],beforeGap);
+      assert.equal(Number((await q('SELECT count(*) AS n FROM coverage_advances WHERE address=$1',[empty.address])).rows[0].n),1);
+      console.log('PASS real PostgreSQL writer refuses a disjoint older prefix with proof, retention and audit unchanged');
+      const overlappingPrefix={...empty.proof,through_ledger:Number(header.ledger),through_close_ms:new Date(header.closed).getTime(),partial:true};
+      await E.persist(run,empty.address,[],overlappingPrefix,emptyMetrics);
+      const floorAudit=(await q('SELECT * FROM coverage_advances WHERE address=$1 ORDER BY id DESC LIMIT 1',[empty.address])).rows[0];
+      assert.equal(floorAudit.from_through,floorAudit.to_through);
+      assert.equal(Number(floorAudit.from_floor),suffix.from_ledger);
+      assert.equal(Number(floorAudit.to_floor),empty.proof.from_ledger);
+      assert.equal(floorAudit.reason,'PROOF_FLOOR_EXTENDED');
+      console.log('PASS overlapping historical proof extends the floor with an audit row and unchanged high-water mark');
+      await E.persist(run,empty.address,[],empty.proof,emptyMetrics);
+      assert.equal(Number((await q('SELECT count(*) AS n FROM coverage_advances WHERE address=$1',[empty.address])).rows[0].n),2);
       const emptyCoverage=(await q('SELECT * FROM wallet_coverage WHERE address=$1',[empty.address])).rows[0];
       const emptyDecision=E.decision(run,emptyCoverage);
       assert.equal(emptyDecision.complete_without_fetch,true);

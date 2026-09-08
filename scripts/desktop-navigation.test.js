@@ -30,6 +30,17 @@ async function main(){
     await page.getByRole('button',{name:'Fill screen',exact:true}).click();
     await page.keyboard.press('Escape');assert.equal(await page.locator('#morningReportFloat').isVisible(),false);
     console.log('PASS report actions are visible and Escape closes the reader');
+    const firstFile=page.waitForEvent('download');
+    await page.evaluate(()=>downloadTextFile('evidence-fixture.txt','Exact evidence\n255/255\n'));
+    const firstDownload=await firstFile;
+    assert.equal(fs.readFileSync(await firstDownload.path(),'utf8'),'Exact evidence\n255/255\n');
+    await page.waitForTimeout(1100);
+    const retryFile=page.waitForEvent('download');
+    await page.getByRole('link',{name:'evidence-fixture.txt',exact:true}).click();
+    assert.equal(fs.readFileSync(await (await retryFile).path(),'utf8'),'Exact evidence\n255/255\n');
+    await page.getByRole('button',{name:'Dismiss prepared download',exact:true}).click();
+    assert.equal(await page.locator('#swPreparedDownload').count(),0);
+    console.log('PASS prepared file link retries a byte-identical browser download and can be dismissed');
     await page.evaluate(()=>{
       state.pack={wallets_checked:255,watchlist_total:255,wallets_failed:0,
         tx_scan_coverage:{target_wallets:255,complete_wallets:253,failed_wallets:2,full_window_complete:false}};

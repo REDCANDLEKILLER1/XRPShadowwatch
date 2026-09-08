@@ -18857,8 +18857,26 @@ function downloadTextFile(filename, text) {
     a.download = filename;
     document.body.appendChild(a);
     a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    // Keep a usable file link when an embedded browser declines the automatic
+    // download. Preparing a blob cannot tell us whether the browser saved it.
+    const previous = document.getElementById('swPreparedDownload');
+    if (previous && typeof previous.dismissDownload === 'function') previous.dismissDownload();
+    const notice = document.createElement('div');
+    notice.id = 'swPreparedDownload';
+    notice.setAttribute('role', 'status');
+    notice.style.cssText = 'position:fixed;left:12px;right:12px;bottom:56px;max-width:680px;margin:auto;z-index:100005;padding:12px;background:#061b10;color:#c9f7d5;border:1px solid #3d9160;border-radius:8px;font:13px/1.5 sans-serif;overflow-wrap:anywhere;box-shadow:0 4px 24px #0009';
+    const label = document.createElement('div');
+    label.textContent = 'File ready. If the download did not start, select the file below.';
+    a.textContent = filename;
+    a.style.cssText = 'color:#8cffb0;display:block;margin-top:6px;padding-right:30px';
+    const close = document.createElement('button');
+    close.type = 'button';close.textContent = '×';close.setAttribute('aria-label', 'Dismiss prepared download');
+    close.style.cssText = 'position:absolute;right:8px;top:5px;border:0;background:transparent;color:#c9f7d5;font-size:24px;cursor:pointer';
+    let cleanupTimer;
+    notice.dismissDownload = () => { clearTimeout(cleanupTimer); notice.remove(); URL.revokeObjectURL(url); };
+    close.onclick = notice.dismissDownload;
+    notice.append(label, a, close);document.body.appendChild(notice);
+    cleanupTimer = setTimeout(notice.dismissDownload, 300000);
     return true;
   } catch (e) {
     elog('downloadTextFile', e);
