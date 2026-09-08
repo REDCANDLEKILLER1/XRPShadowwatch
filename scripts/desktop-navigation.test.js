@@ -59,6 +59,10 @@ async function main(){
     await page.getByRole('button',{name:'Morning report',exact:true}).click();
     const iframe=page.frameLocator('#brief-frame');
     await iframe.getByRole('button',{name:'Report & downloads',exact:true}).click({timeout:15000});
+    await iframe.getByRole('button',{name:'Scan overview',exact:true}).click();
+    await page.waitForTimeout(600);
+    const phaseBox=await iframe.locator('#swReactorPhase').boundingBox(),headerBox=await iframe.locator('#swDashHeader').boundingBox();
+    assert.ok(phaseBox.y>=headerBox.y+headerBox.height,'section navigation never hides the scan heading behind the fixed header');
     assert.equal(await page.getByRole('button',{name:'Morning report',exact:true}).getAttribute('aria-current'),'page');
     await page.getByRole('button',{name:'Live activity',exact:true}).click();
     assert.equal(await page.locator('#view-live').isVisible(),true);

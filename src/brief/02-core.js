@@ -22155,7 +22155,10 @@ function _swBuildCockpit() {
     var jumps=_swEl('div',{'class':'sw-report-jumps'});
     [['swReactorPhase','Scan overview'],['swMarketPanel','Market & network'],['swLogPanel','Live scan log'],['swFeed','Activity'],['swDownloads','Report & downloads']].forEach(function(item){
       var jump=_swEl('button',{type:'button','class':'sw-navbtn'},item[1]);
-      jump.addEventListener('click',function(){document.getElementById(item[0])?.scrollIntoView({behavior:'smooth',block:'start'});});
+      jump.addEventListener('click',function(){
+        var target=document.getElementById(item[0]);
+        if(target)window.scrollTo({top:item[0]==='swReactorPhase'?0:Math.max(0,window.scrollY+target.getBoundingClientRect().top-90),behavior:'smooth'});
+      });
       jumps.appendChild(jump);
     });
     rail.appendChild(jumps);
