@@ -614,8 +614,10 @@ function log(msg) {
   el.scrollTop = el.scrollHeight;
 }
 function elog(label, err) {
-  const el = $('errorLog'); if (!el) return;
   const m = '[' + new Date().toISOString().slice(11, 19) + '] ' + label + (err ? ': ' + (err.message || err) : '');
+  if (!Array.isArray(state.errorLog)) state.errorLog=[];
+  state.errorLog.push(m);
+  const el = $('errorLog'); if (!el) return;
   if (el.textContent === 'No errors yet.') el.textContent = '';
   el.textContent += m + '\n';
 }
@@ -739,6 +741,15 @@ const XAI_PHASE_BRIDGE = {
 function shadowSay(status, phase, pctVal) {
   setText('orbStatus', status);
   const rawPhase = (phase || 'SCANNING').toUpperCase();
+  if (state.scanning) {
+    const phases = state.phaseTimings || (state.phaseTimings = []);
+    const previous = phases[phases.length - 1];
+    if (!previous || previous.phase !== rawPhase) {
+      const now = Date.now();
+      if (previous) previous.duration_ms = now - previous.started_ms;
+      phases.push({ phase: rawPhase, started_ms: now, at: new Date(now).toISOString() });
+    }
+  }
   setText('orbPhase', rawPhase);
 
   // Map engine phase → HUD segment and update phase bar
@@ -1482,11 +1493,13 @@ async function scanWallets(ws) {
   // covers it. The reverse order routinely reports a range topping out one
   // below the anchor and refuses a healthy server. See 41-run-anchor.
   state.runAnchor = null;
+  state.anchorAttempts = [];
   state.effectiveWindow = null;
   state.indexRun = null;
   if (window.SW_EVIDENCE_INDEX) {
     try {
       log('Evidence index: establishing the server-owned run and roster…');
+      state.anchorAttempts.push({ source:'SERVER_VERIFIED_INDEX', at:new Date().toISOString() });
       state.indexRun = await window.SW_EVIDENCE_INDEX.begin(getTxWindow(), getActiveWatchlist().map(w => w.address));
       state.runId = state.indexRun.scan_id;
       const ir = state.indexRun;
@@ -1494,11 +1507,15 @@ async function scanWallets(ws) {
         anchor_close_iso:new Date(ir.anchor_close_ms).toISOString(), history_exhaustion_proof:null,
         transport_epoch:0, source:'SERVER_VERIFIED_INDEX' };
       log('Evidence index: run ' + ir.scan_id + ', roster ' + ir.accounts.length + ', anchor ' + ir.anchor_ledger);
-    } catch(e) { log('Evidence index unavailable — direct XRPL acquisition: ' + e.message); }
+    } catch(e) {
+      state.anchorAttempts[state.anchorAttempts.length-1].error=e.message;
+      log('Evidence index unavailable — direct XRPL acquisition: ' + e.message);
+    }
   }
   const RA = (typeof window !== 'undefined') && window.SW_RUN_ANCHOR;
   if (RA && !state.indexRun) {
     let ledgerRes = null, infoRes = null;
+    state.anchorAttempts.push({ source:'DIRECT_XRPL', at:new Date().toISOString(), transport_epoch:n(state._transportEpoch)||0 });
     try { ledgerRes = await xrpl(ws, { command: 'ledger', ledger_index: 'validated' }); }
     catch (e) { log('run anchor: ledger(validated) failed — ' + e.message); }
     if (ledgerRes) {
@@ -3210,13 +3227,15 @@ function riskBand(s) {
 }
 function publicRiskLabel(p) {
   const coverage = p && p.tx_scan_coverage;
-  if (p && (!coverage || coverage.full_window_complete !== true)) {
-    return coverage ? 'NOT SCORED — ' + n(coverage.complete_wallets) + '/' + n(coverage.target_wallets) + ' transaction windows proved' : 'NOT SCORED — transaction coverage not measured';
-  }
   // v3.18: never silently downgrade. Show internal label + score; append
   // softer public framing only as a secondary qualifier.
   const r = (p && p.risk_score) || state.riskScore || {};
   const s = n(r.score);
+  const incomplete = p && (!coverage || coverage.full_window_complete !== true);
+  if (incomplete && s < 25) {
+    return coverage ? 'NOT SCORED — ' + n(coverage.complete_wallets) + '/' + n(coverage.target_wallets) + ' transaction windows proved' : 'NOT SCORED — transaction coverage not measured';
+  }
+  const coverageNote = incomplete ? ' [incomplete transaction coverage]' : '';
   const internal = r.label || (
     s >= 75 ? 'BLACK / EXTREME' :
     s >= 50 ? 'ORANGE / ACTIVE' :
@@ -3228,9 +3247,9 @@ function publicRiskLabel(p) {
   // If internal and softer are different, surface both so users see the
   // real classifier output AND the public-friendly framing.
   if (internal && internal !== softer) {
-    return s + '/100 — ' + internal + ' (' + softer + ')';
+    return s + '/100 — ' + internal + ' (' + softer + ')' + coverageNote;
   }
-  return s + '/100 — ' + (internal || softer);
+  return s + '/100 — ' + (internal || softer) + coverageNote;
 }
 function buildRiskScore(pack) {
   pack = pack || {};
@@ -3826,6 +3845,8 @@ function buildPack(v) {
     // scan reads exactly like a quiet one.
     xrpl_quota: _quotaNote(),
     xrpl_recovery: state.xrplRecovery || null,
+    anchor_attempts: state.anchorAttempts || [],
+    phase_timings: state.phaseTimings || [],
     evidence_index: state.indexRun && window.SW_EVIDENCE_INDEX ? window.SW_EVIDENCE_INDEX.metrics() : null,
     shadow_volume_xrp: shadowVolumeXRP(), total_balance_delta_xrp: totalDeltaXRP(),
     // The measured delta with the escrow-attributable part removed, and the
@@ -9037,7 +9058,7 @@ function _safeReportId() {
       try {
         var el = document.getElementById('xaiTechStrip');
         if (!el) return;
-        var wChecked = (typeof state !== 'undefined' && state.pack && state.pack.wallets_checked) || 0;
+        var wChecked = state.scanning && Array.isArray(state.wallets) ? state.wallets.filter(w=>w.status==='CHECKED').length : ((state.pack && state.pack.wallets_checked) || 0);
         var wTotal   = (typeof KNOWN !== 'undefined') ? Object.keys(KNOWN).length : 0;
         var qSize    = window.SHADOW_BLOOM_QUEUE ? window.SHADOW_BLOOM_QUEUE.size() : 0;
         var helpers  = 0; // GO 2 will populate
@@ -9126,7 +9147,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     try {
       var el = document.getElementById('xaiStatusStrip');
       if (!el) return;
-      var wChecked = (typeof state !== 'undefined' && state.pack && state.pack.wallets_checked) || 0;
+      var wChecked = state.scanning && Array.isArray(state.wallets) ? state.wallets.filter(w=>w.status==='CHECKED').length : ((state.pack && state.pack.wallets_checked) || 0);
       var wTotal   = (typeof KNOWN !== 'undefined') ? Object.keys(KNOWN).length : 0;
       var qSize    = window.SHADOW_BLOOM_QUEUE ? window.SHADOW_BLOOM_QUEUE.size() : 0;
       var helpers  = (typeof _xaiHelpersCount === 'function') ? _xaiHelpersCount()
@@ -15172,7 +15193,7 @@ function shadowWatchSection(buckets, p) {
     } else {
       const movers = topMoversList(msig, 3);
       const arrow = totalDelta > 0 ? '+' : '';
-      lines.push(`• ${indicator(maxAbs)} Linked Multi-sig Cluster: ${movers.join('; ')}. Cluster net ${arrow}${fmt(totalDelta, 0)} XRP — investigate as ONE entity, not three.`);
+      lines.push(`• ${indicator(maxAbs)} Linked Multi-sig Cluster: ${movers.join('; ')}. Cluster net ${arrow}${fmt(totalDelta, 0)} XRP. Shared multisignature pattern; common ownership is unverified.`);
     }
   }
   // v3.10: 6c. Market Makers — high-frequency, treat differently
@@ -18514,7 +18535,7 @@ function buildMasterPaste(p, report, bundle, seal) {
   const prayer = $('prayerBox')?.textContent || '';
   const mainReport = (function(){ try { return buildXRPMainReport(p); } catch { return 'main report unavailable'; }})();
   return `=== XRPMAN SHADOW WATCH // MASTER PACKAGE ${APP_VERSION} ===
-INSTRUCTION_FOR_CHATGPT: Build the final Shadow Watch report from the evidence below. Treat ledger data as scanned evidence. Treat news/macro as operator-supplied context unless independently verified. Failed/invalid wallets are internal only.
+INSTRUCTION_FOR_CHATGPT: Build the final Shadow Watch report from the evidence below. Treat ledger data as scanned evidence. Treat news/macro as operator-supplied context unless independently verified. Disclose incomplete acquisition and distinguish balance reads from proved transaction windows. Never turn missing evidence into an all-clear.
 
 === XRP MAIN REPORT (consolidated, human-readable) ===
 ${mainReport}
@@ -20995,6 +21016,9 @@ async function run() {
   state._silentReplacements = 0;
   state._runAbortReason = null;
   state.scanning = true;
+  state.phaseTimings = [];
+  state.errorLog = [];
+  if ($('errorLog')) $('errorLog').textContent='No errors yet.';
   $('scanBtn').disabled = true;
   $('scanBtn').textContent = '⏳ SCANNING...';
   $('scanOrbPanel').classList.add('scanning');
@@ -21295,14 +21319,15 @@ async function run() {
     saveBlackboxSnapshot(p);
     renderBlackbox();
 
-    shadowSay('Scan complete. Report ready.', 'READY', 100);
-    log('✓ Scan complete. Copy or download the public report manually.');
-    scanSucceeded = true;
+    scanSucceeded = !!(p.tx_scan_coverage && p.tx_scan_coverage.full_window_complete === true &&
+      p.wallets_checked === p.watchlist_total && !p.wallets_failed);
+    shadowSay(scanSucceeded ? 'Scan complete. Report ready.' : 'Report ready with incomplete acquisition — review coverage.', scanSucceeded ? 'READY' : 'ERROR', 100);
+    log(scanSucceeded ? '✓ Scan complete. Copy or download the public report manually.' : 'REPORT INCOMPLETE: the report records the available evidence and acquisition failures.');
     // Responsive dashboard v1: refresh instruments/feed/network from sealed state.
     try { if (typeof window.renderDashboardV1 === 'function') window.renderDashboardV1(); } catch (_) {}
     // v3.17: signal sealed state to cmd-log-state badge
     document.body.classList.remove('scanning','building','error');
-    document.body.classList.add('sealed');
+    document.body.classList.add(scanSucceeded ? 'sealed' : 'error');
     // FIX: no auto-download (was firing every scan in v2.x)
   } catch (e) {
     elog('run() failed', e);
@@ -22397,6 +22422,10 @@ function _swRenderInstruments(p, SP, scanning) {
     var riskObj = (typeof state !== 'undefined' && state.riskScore) ? state.riskScore : (p && p.risk_score ? p.risk_score : null);
     var rScore = riskObj ? n(riskObj.score) : null;
     var txCoverage = (p && p.tx_scan_coverage) || state.txScanCoverage;
+    if (!txCoverage && scanning && state.indexRun && window.SW_EVIDENCE_INDEX) {
+      var indexProgress=window.SW_EVIDENCE_INDEX.metrics();
+      if(indexProgress)txCoverage={target_wallets:indexProgress.target_wallets,complete_wallets:indexProgress.indexed_wallets,full_window_complete:false};
+    }
     var txComplete = txCoverage && txCoverage.full_window_complete === true;
     if (!txComplete) rScore = null;
     _swClear(g);
@@ -22416,6 +22445,10 @@ function _swRenderInstruments(p, SP, scanning) {
       box.appendChild(_swEl('div', { 'class':'sw-nf-head' }, '<span class="sw-nf-ttl">Net Watched Flow</span>'));
       var w = _swEl('div', { 'class':'sw-nf-val' }); w.style.color = 'var(--sw-text-muted)'; w.textContent = 'WAITING';
       box.querySelector('.sw-nf-head').appendChild(w);
+    } else if (_dbNoBaseline(p)) {
+      box.appendChild(_swEl('div', { 'class':'sw-nf-head' }, '<span class="sw-nf-ttl">Net Watched Flow</span>'));
+      box.appendChild(_swEl('div', { 'class':'sw-nf-val' }, 'BASELINE SAVED'));
+      box.appendChild(_swEl('div', { 'class':'sw-nf-scale' }, 'Movement becomes measurable on the next scan.'));
     } else {
       var d = n(p.total_balance_delta_xrp);
       var mag = Math.min(1, Math.abs(d) / 5000000);

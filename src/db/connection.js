@@ -1,13 +1,8 @@
 // XRPMAN Shadow Watch — database connection boundary. Server-side only.
 //
-// ── Why this file has no driver dependency yet ──────────────────────────────
-// This PR is the foundation: schema, migrations, and the decision logic that
-// has to be right before any of it is wired to a live database. It deliberately
-// adds no npm dependency, so `npm ci` and the Vercel build behave exactly as
-// they do today and the existing report keeps working untouched. The Neon
-// driver is required LAZILY, inside a try, and its absence is reported as
-// "not configured" rather than thrown. The PR that actually reads and writes
-// evidence adds the dependency.
+// Neon HTTP queries serve reads. Evidence writes use one checked-out Neon
+// WebSocket client for BEGIN, every write, and COMMIT or ROLLBACK. The optional
+// environment configuration is checked without exposing the connection URL.
 //
 // ── What lives in Neon, and what lives in git ─────────────────────────────
 // Evidence — transactions, participants, coverage, scan runs — lives in Neon

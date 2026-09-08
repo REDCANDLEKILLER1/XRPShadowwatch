@@ -1,6 +1,7 @@
 'use strict';
 const E=require('../src/db/evidence');
 const db=require('../src/db/connection');
+const {acquireReader,releaseReader}=require('../src/db/xrpl-reader');
 module.exports=async function handler(req,res){
   res.setHeader('Cache-Control','private, no-store, max-age=0');
   res.setHeader('CDN-Cache-Control','no-store');
@@ -21,13 +22,13 @@ module.exports=async function handler(req,res){
       const h=await db.health();return res.status(h.reachable?200:503).json({configured:h.configured,reachable:h.reachable});
     }
     if(input.action==='begin'){
-      reader=new E.Reader();return res.json(await E.begin({start_ms:input.start_ms,end_ms:input.end_ms,accounts:input.accounts},reader));
+      reader=acquireReader();return res.json(await E.begin({start_ms:input.start_ms,end_ms:input.end_ms,accounts:input.accounts},reader));
     }
     if(typeof input.scan_id!=='string'||!/^idx-[a-f0-9-]{36}$/.test(input.scan_id))return res.status(400).json({error:'INVALID_SCAN_ID'});
     if(input.action==='summary')return res.json(await E.summary(input.scan_id));
     if(typeof input.address!=='string'||!/^r[1-9A-HJ-NP-Za-km-z]{24,35}$/.test(input.address))return res.status(400).json({error:'INVALID_ADDRESS'});
     if(input.action==='read')return res.json(await E.readWindow(input.scan_id,input.address,input.after));
-    reader=new E.Reader();return res.json(await E.catchUp(input.scan_id,input.address,reader));
+    reader=acquireReader();return res.json(await E.catchUp(input.scan_id,input.address,reader));
   }catch(e){
     const safe=String(e.message||'EVIDENCE_REQUEST_FAILED').replace(/postgres(?:ql)?:\/\/\S+/gi,'[database connection redacted]');
     if(input.scan_id&&input.address){
@@ -36,5 +37,5 @@ module.exports=async function handler(req,res){
     }
     if(e.pending){res.setHeader('Retry-After',Math.ceil((e.retry_after_ms||1000)/1000));return res.status(202).json({pending:true,retry_after_ms:e.retry_after_ms||1000,error:safe});}
     return res.status(503).json({error:safe});
-  }finally{if(reader)reader.close();}
+  }finally{if(reader)releaseReader(reader);}
 };

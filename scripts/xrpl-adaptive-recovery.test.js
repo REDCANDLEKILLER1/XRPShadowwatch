@@ -30,6 +30,7 @@ async function main() {
       send(raw) {
         const q = JSON.parse(raw), now = Date.now();
         peer.sent.push({ ...q, socket: this.number, at: now });
+        if (peer.mode === 'silent') return;
         if (now < peer.cooldown) peer.early++;
         let result = {}, error = null;
         const close = peer.close;
@@ -113,6 +114,20 @@ async function main() {
     catch (e) { return { code: e.code, sent: testPeer.sent.length }; }
   });
   assert.deepEqual(permanent, { code: 'invalidParams', sent: 1 });
+  const silence = await page.evaluate(async () => {
+    testPeer.mode='silent';testPeer.sent=[];state.xrplRecovery=null;
+    state._silentReplacements=0;state._runAbortReason=null;window.SW_XRPL_RPC_TIMEOUT_MS=30;
+    const results=await Promise.allSettled(Array.from({length:8},(_,i)=>xrpl(state._sock,{command:'account_info',account:WATCHLIST[i].address})));
+    return {rejected:results.filter(r=>r.status==='rejected').length,reason:state._runAbortReason,
+      retired:state._silentReplacements,rotations:state.xrplRecovery.rotations,exhausted:state.xrplRecovery.exhausted,
+      sent:testPeer.sent.length};
+  });
+  assert.equal(silence.rejected,8);
+  assert.equal(silence.reason,'XRPL_TRANSPORT_SILENT');
+  assert.equal(silence.retired,3);
+  assert.equal(silence.rotations,3,'concurrent callers retire each silent socket once');
+  assert.equal(silence.exhausted,true);
+  console.log('silence result',JSON.stringify(silence));
   const budget = await page.evaluate(async () => {
     testPeer.sent = []; state.xrplRecovery = null;
     _noteQuota(new Error('rate limit: retry in ~999999999ms'), 'test');

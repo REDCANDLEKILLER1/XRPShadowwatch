@@ -20,7 +20,14 @@ async function begin(input, reader) {
   const anchor = await reader.ledger('validated');
   if (start > anchor.close_ms) throw new Error('WINDOW_AFTER_ANCHOR');
   const end = Math.min(requestedEnd, anchor.close_ms);
-  const floor = await reader.floor(start, anchor);
+  // Reuse a real server-observed header before this window when available.
+  // This is a time/ledger boundary only; it grants no wallet coverage.
+  const known=(await query(`SELECT ledger,closed FROM (
+    SELECT floor_ledger AS ledger,floor_close_time AS closed FROM scan_runs WHERE floor_ledger IS NOT NULL
+    UNION SELECT anchor_ledger,anchor_close_time FROM scan_runs
+    ) h WHERE closed<$1 ORDER BY closed DESC LIMIT 1`,[iso(start)])).rows[0];
+  const floor=known?await reader.ledger(Number(known.ledger)):await reader.floor(start,anchor);
+  if(known && floor.close_ms!==ms(known.closed))throw new Error('STORED_LEDGER_CLOSE_MISMATCH');
   const id = 'idx-' + randomUUID();
   await db.transaction(async q => {
     await q(`INSERT INTO scan_runs(scan_id,anchor_ledger,anchor_close_time,window_start,window_end,target_wallets,
@@ -123,10 +130,10 @@ async function catchUp(id, address, reader) {
     let proof, rows;
     for (let restart=0; restart<4; restart++) {
       rows=[];
-      const verifiedAnchor = await reader.ledger(anchor);
+      const verifiedAnchor = {ledger:anchor,close_ms:ms(run.anchor_close_time)};
       if (verifiedAnchor.close_ms !== ms(run.anchor_close_time)) throw new Error('RUN_ANCHOR_MISMATCH');
-      const verifiedFloor = await reader.ledger(from);
-      const range = await reader.retainedRange();
+      const verifiedFloor = from===Number(run.floor_ledger)?{ledger:from,close_ms:ms(run.floor_close_time)}:await reader.ledger(from);
+      const range = await reader.retainedRange(anchor);
       const epoch = reader.epoch;
       if (!range || !range.some(r=>r[0]<=from && r[1]>=anchor)) throw new Error('REQUESTED_RANGE_NOT_RETAINED');
       let marker, pages=0;

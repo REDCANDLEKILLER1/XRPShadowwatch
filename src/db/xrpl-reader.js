@@ -5,6 +5,23 @@ const db = require('./connection');
 const coverage = require('./coverage');
 const ENDPOINTS = ['wss://xrplcluster.com', 'wss://xrpl.ws', 'wss://s1.ripple.com', 'wss://s2.ripple.com'];
 const validatedHeaders = new Map();
+const idleReaders = [];
+function acquireReader() {
+  const reader=idleReaders.pop()||new Reader();
+  clearTimeout(reader.idleTimer);
+  reader.deadline=Date.now()+240000;
+  reader.stats={requests:0,retries:0,reconnects:0,waits_ms:0,events:[],preferred_endpoint:ENDPOINTS[0],
+    actual_endpoint:reader.sock&&reader.sock.url,transport_epoch:reader.epoch};
+  return reader;
+}
+function releaseReader(reader) {
+  if(idleReaders.length>=2){reader.close();return;}
+  idleReaders.push(reader);
+  reader.idleTimer=setTimeout(()=>{
+    const i=idleReaders.indexOf(reader);if(i>=0){idleReaders.splice(i,1);reader.close();}
+  },120000);
+  reader.idleTimer.unref();
+}
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const rippleMs = value => (Number(value) + 946684800) * 1000;
 const refusal = error => /slowDown|tooBusy|placing too much load|server is too busy|quota|rate.?limit|too many requests|\b429\b/i.test([error.code, error.message].join(' '));
@@ -128,16 +145,16 @@ class Reader {
     if(validatedHeaders.size>2000)validatedHeaders.delete(validatedHeaders.keys().next().value);
     return header;
   }
-  async retainedRange() {
+  async retainedRange(anchor = 0) {
     await this.connect();
-    if(this.retention && this.retention.epoch===this.epoch)return this.retention.ranges;
+    if(this.retention && this.retention.epoch===this.epoch && this.retention.ranges && this.retention.ranges.some(r=>r[1]>=anchor))return this.retention.ranges;
     const epoch=this.epoch;
     const info=await this.request({command:'server_info'},epoch);
     const ranges=coverage.parseCompleteLedgers(info.info && info.info.complete_ledgers);
     this.retention={epoch,ranges};return ranges;
   }
   async floor(startMs, anchor) {
-    const ranges = await this.retainedRange();
+    const ranges = await this.retainedRange(anchor.ledger);
     const span = ranges && ranges.find(r => r[0] <= anchor.ledger && r[1] >= anchor.ledger);
     if (!span) throw new Error('SERVER_RETENTION_UNPROVEN');
     let low = await this.ledger(span[0]), high = anchor.ledger;
@@ -150,4 +167,4 @@ class Reader {
   }
   close() { if (this.sock) { this.sock.close(); this.sock = null; } }
 }
-module.exports = { Reader, refusal, retryMs, rippleMs };
+module.exports = { Reader, acquireReader, releaseReader, refusal, retryMs, rippleMs };

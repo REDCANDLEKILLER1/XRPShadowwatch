@@ -1265,7 +1265,7 @@ function _buildVerdict(interps, pack){
   // number actually measures before anyone reads it on air as an all-clear.
   var cov=_cov(pack);
   if(cov.degraded && !cov.severe){
-    return 'Today’s forensic read is incomplete. '+cov.line+' The acquired evidence is available below, but I am withholding an all-clear until the full transaction window is proved.\n\nI’m XRPMan, and I tell on the banks.';
+    return 'Today’s forensic read is incomplete. '+cov.line+' The acquired evidence is available below, but I am withholding an all-clear until the full transaction window is proved. Not financial advice. XRP-only forensic watch.\n\nI’m XRPMan, and I tell on the banks.';
   }
   var ig=_intg(pack);
   if(ig.linkLost){

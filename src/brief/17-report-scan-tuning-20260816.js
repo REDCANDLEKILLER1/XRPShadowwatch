@@ -726,6 +726,10 @@
           } catch (_) {}
 
           var cov = aggregateCoverage();
+          if (state.indexRun && window.SW_EVIDENCE_INDEX && window.SW_EVIDENCE_INDEX.finish) {
+            try { await window.SW_EVIDENCE_INDEX.finish(state.indexRun); }
+            catch(e) { if(typeof elog==='function')elog('Evidence index summary',e); }
+          }
           try { if (typeof log === 'function') log('tx_scan_coverage ' + JSON.stringify(cov)); } catch (_) {}
           return out;
         } finally {

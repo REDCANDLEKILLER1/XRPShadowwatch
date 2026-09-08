@@ -11,6 +11,11 @@ async function main(){
     WHERE status='COMPLETE' AND EXISTS(SELECT 1 FROM transaction_accounts a WHERE a.address=w.address AND a.role='observed_via') LIMIT 1`)).rows[0];
   assert.ok(actual,'A real acquired wallet is required');
   const run=await E.getRun(actual.scan_id);
+  const empty=(await read(`SELECT w.address,w.proof FROM scan_wallets w WHERE w.scan_id=$1 AND status='COMPLETE'
+    AND NOT EXISTS(SELECT 1 FROM transaction_accounts a JOIN transactions t ON t.hash=a.tx_hash
+      WHERE a.address=w.address AND a.role='observed_via' AND t.ledger_index BETWEEN (w.proof->>'from_ledger')::bigint AND (w.proof->>'through_ledger')::bigint)
+    LIMIT 1`,[actual.scan_id])).rows[0];
+  assert.ok(empty,'An independently acquired empty wallet range is required');
   const evidence=(await read(`SELECT t.* FROM transactions t WHERE ledger_index>=$2 AND ledger_index<=$3 AND
     EXISTS(SELECT 1 FROM transaction_accounts a WHERE a.tx_hash=t.hash AND a.address=$1 AND a.role='observed_via')`,
     [actual.address,actual.proof.from_ledger,actual.proof.through_ledger])).rows;
@@ -54,6 +59,21 @@ async function main(){
       assert.equal(Number((await q('SELECT count(*) AS n FROM transactions')).rows[0].n),rows.length);
       assert.equal(Number((await q('SELECT count(*) AS n FROM coverage_advances')).rows[0].n),1);
       console.log('PASS real evidence and observed ledger-close pairs produce servable coverage');
+      const participantCount=Number((await q('SELECT count(*) AS n FROM transaction_accounts')).rows[0].n);
+      await E.persist(run,actual.address,rows,actual.proof,metrics);
+      assert.equal(Number((await q('SELECT count(*) AS n FROM transactions')).rows[0].n),rows.length);
+      assert.equal(Number((await q('SELECT count(*) AS n FROM transaction_accounts')).rows[0].n),participantCount);
+      assert.equal(Number((await q('SELECT count(*) AS n FROM coverage_advances')).rows[0].n),1);
+      console.log('PASS repeated ingestion deduplicates hashes and preserves every participant role');
+      await q('INSERT INTO scan_wallets(scan_id,address) VALUES($1,$2)',[run.scan_id,empty.address]);
+      await E.persist(run,empty.address,[],empty.proof,{requests:1,rows_fetched:0,fetch_from_ledger:empty.proof.from_ledger});
+      const emptyCoverage=(await q('SELECT * FROM wallet_coverage WHERE address=$1',[empty.address])).rows[0];
+      const emptyDecision=E.decision(run,emptyCoverage);
+      assert.equal(emptyDecision.complete_without_fetch,true);
+      assert.equal(C.mayReportQuiet(emptyDecision,0).quiet,true);
+      assert.equal(Number(emptyCoverage.scan_coverage_from),Number(empty.proof.from_ledger));
+      assert.ok(new Date(emptyCoverage.scan_coverage_from_close).getTime()>0);
+      console.log('PASS real empty-range proof advances with its observed ledger/time boundary and serves a proved quiet result');
       for(const sql of [
         'UPDATE wallet_coverage SET scan_coverage_through=scan_coverage_through-1',
         'UPDATE wallet_coverage SET scan_coverage_through=NULL',
