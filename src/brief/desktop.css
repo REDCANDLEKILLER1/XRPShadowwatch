@@ -65,3 +65,8 @@
   .sw-embedded .sw-report-jumps .sw-navbtn { letter-spacing:0; text-transform:none; font-size:14px; line-height:1.4; }
 }
 @media (min-width:1350px) { .sw-dash-v1 .sw-mktrow { grid-template-columns:repeat(6,minmax(0,1fr)); } }
+@media (max-width:900px) {
+  /* Both coverage counters need their own readable space on a phone. */
+  .sw-dash-v1 .sw-reactor-gauges .sw-gaugerow { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .sw-dash-v1 .sw-reactor-gauges .sw-gauge-val { font-size:16px; }
+}

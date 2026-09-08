@@ -49,6 +49,7 @@ async function main(){
     await page.setViewportSize({width:390,height:844});
     assert.equal(await page.locator('#swDashRail').isVisible(),false);
     assert.equal(await page.locator('#swDashBottomNav').isVisible(),true);
+    assert.equal(await page.locator('#swGauges').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),2,'phone coverage counters have readable separate columns');
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+1));
     console.log('PASS phone navigation and viewport width are preserved');
     await page.setViewportSize({width:1440,height:900});
