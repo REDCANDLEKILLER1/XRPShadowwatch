@@ -409,7 +409,13 @@
         if (state.indexRun && state.indexRun.accounts.indexOf(account) >= 0 && state.effectiveWindow &&
             startMs === state.effectiveWindow.start_ms && endMs === state.effectiveWindow.end_ms) {
           try {
-            var indexed = await window.SW_EVIDENCE_INDEX.readWallet(state.indexRun, account);
+            // Prove the new XRPL edge for this wallet without downloading its
+            // stored history. Once every wallet is proven, scanWallets loads a
+            // single canonical, deduplicated run stream from Neon below.
+            var indexApi = window.SW_EVIDENCE_INDEX;
+            var indexed = indexApi.proveWallet
+              ? await indexApi.proveWallet(state.indexRun, account)
+              : await indexApi.readWallet(state.indexRun, account);
             proofByAccount[account] = indexed.proof;
             return indexed.rows;
           } catch (indexError) {
@@ -738,6 +744,42 @@
               });
             }
           } catch (_) {}
+
+          // The per-wallet calls above exist to prove acquisition coverage.
+          // Report analysis needs each canonical transaction once, rather than
+          // 255 overlapping wallet histories with large raw JSON payloads.
+          if (state.indexRun && window.SW_EVIDENCE_INDEX && window.SW_EVIDENCE_INDEX.readRun) {
+            var facts = await window.SW_EVIDENCE_INDEX.readRun(state.indexRun);
+            var walletByAddress = Object.create(null);
+            (state.wallets || []).forEach(function(w) { if (w && w.address) walletByAddress[w.address] = w; });
+            state.txs = facts.map(function(f) {
+              var observer = null;
+              (f.observed_via || []).some(function(address) {
+                if (walletByAddress[address]) { observer = walletByAddress[address]; return true; }
+                return false;
+              });
+              var amount = Number(f.amount || 0);
+              if ((f.currency || 'XRP') === 'XRP') amount = amount / 1000000;
+              if (!amount && f.escrow_amount_drops) amount = Number(f.escrow_amount_drops) / 1000000;
+              return {
+                account: observer ? observer.address : '',
+                label: observer ? observer.label : '',
+                cat: observer ? observer.cat : '',
+                type: f.type || '', hash: f.hash || '', ledger_index: Number(f.ledger_index) || null,
+                proves_coverage: true, date: f.date || '', from: f.from || '', to: f.to || '',
+                amount: Number.isFinite(amount) ? amount : 0, currency: f.currency || 'XRP',
+                issuer: f.issuer || '', destination_tag: f.destination_tag == null ? '' : f.destination_tag,
+                escrow_owner: f.escrow_owner || '', sig_mode: f.sig_mode || 'unknown',
+                signer_count: Number(f.signer_count) || 0
+              };
+            });
+            try {
+              var im = window.SW_EVIDENCE_INDEX.metrics();
+              if (typeof log === 'function') log('Stored window: ' + state.txs.length +
+                ' canonical transactions loaded in ' + (im.pages_read || 0) +
+                ' compact pages; ' + (im.rows_fetched || 0) + ' new XRPL observations acquired.');
+            } catch (_) {}
+          }
 
           var cov = aggregateCoverage();
           if (state.indexRun && window.SW_EVIDENCE_INDEX && window.SW_EVIDENCE_INDEX.finish) {

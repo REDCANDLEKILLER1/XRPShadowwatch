@@ -85,7 +85,7 @@ async function main(){
     const res={setHeader:(k,v)=>out.headers[k]=v,status:n=>{out.code=n;return res;},json:b=>{out.body=b;return out;}};
     await handler({method:'POST',headers:{host:'shadowwatch.xyz',origin:'https://shadowwatch.xyz'},...req},res);return out;
   }
-  const originalConfigured=db.isConfigured,originalCatchup=E.catchUp;
+  const originalConfigured=db.isConfigured,originalCatchup=E.catchUp,originalReadRun=E.readRunWindow;
   db.isConfigured=()=>true;
   try{
     const denied=await invoke({body:{action:'rpc',url:'http://127.0.0.1',command:'submit'}});
@@ -97,6 +97,10 @@ async function main(){
     await invoke({body:{action:'catchup',scan_id:id,address:selected.accounts[0],proof:{status:'COMPLETE'},anchor_ledger:999999999,transactions:[{fake:true}]}});
     assert.equal(received.id,id);assert.equal(received.address,selected.accounts[0]);assert.ok(received.reader instanceof Reader);
     assert.equal(received.reader.proof,undefined);
+    let runRead;
+    E.readRunWindow=async(scanId,after)=>{runRead={scanId,after};return {available:true,transactions:[]};};
+    const runResponse=await invoke({method:'GET',query:{action:'read-run',scan_id:id,after:'ABC'}});
+    assert.equal(runResponse.code,200);assert.deepEqual(runRead,{scanId:id,after:'ABC'});
     db.setExecutor(async()=>({rows:[]}));
     E.catchUp=async(id,address,reader)=>{
       reader.stats.actual_endpoint='wss://xrplcluster.com';reader.stats.transport_epoch=4;
@@ -108,8 +112,8 @@ async function main(){
     assert.equal(failed.body.transport.transport_epoch,4);
     assert.equal(failed.body.transport.first_failure.reason,'XRPL_TRANSPORT_CHANGED');
     db.setExecutor(null);
-  }finally{db.isConfigured=originalConfigured;E.catchUp=originalCatchup;}
-  console.log('PASS API accepts a wallet request, never caller evidence or a caller checkpoint');
+  }finally{db.isConfigured=originalConfigured;E.catchUp=originalCatchup;E.readRunWindow=originalReadRun;}
+  console.log('PASS API accepts verified wallet catch-up and canonical run-window reads, never caller evidence');
   const vm=require('vm'),fs=require('fs'),path=require('path');
   const run={scan_id:'idx-test',accounts:['wallet-a','wallet-b'],anchor_ledger:100,anchor_close_ms:100000,roster_hash:'test-roster'};
   const transport={actual_endpoint:'wss://xrplcluster.com',transport_epoch:4,requests:1};
@@ -117,10 +121,13 @@ async function main(){
     const p=options.method?JSON.parse(options.body):Object.fromEntries(new URLSearchParams(url.split('?')[1]));
     let data,ok=true;
     if(p.action==='begin')data=run;
-    if(p.action==='catchup'&&p.address==='wallet-a')data={mode:'EDGE_ONLY',fetch_from_ledger:91,fetch_to_ledger:100,requests:1,transport};
+    if(p.action==='catchup'&&p.address==='wallet-a')data={mode:'EDGE_ONLY',fetch_from_ledger:91,fetch_to_ledger:100,requests:1,rows_fetched:3,transport,
+      proof:{status:'COMPLETE',run_id:run.scan_id,anchor_ledger:100,from_ledger:10,through_ledger:100}};
     if(p.action==='catchup'&&p.address==='wallet-b'){ok=false;data={error:'XRPL_TRANSPORT_CHANGED',transport};}
     if(p.action==='read')data={available:true,scan_id:run.scan_id,roster_hash:run.roster_hash,transactions:[{hash:'actual-retained-row'}],
       proof:{status:'COMPLETE',anchor_ledger:100,source:'NEON_VERIFIED_INDEX',proven_reason:'SERVER_RETAINED_RANGE_PROVEN',from_ledger:10,through_ledger:100},next:null};
+    if(p.action==='read-run')data={available:true,scan_id:run.scan_id,roster_hash:run.roster_hash,anchor_ledger:100,
+      complete_wallets:2,target_wallets:2,transactions:[{hash:'canonical-once',observed_via:['wallet-a','wallet-b']}],next:null};
     return {ok,json:async()=>data};
   }};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/brief/42-evidence-index.js'),'utf8'),sandbox);
@@ -129,6 +136,9 @@ async function main(){
   assert.equal(result.proof.from_ledger,10);assert.equal(result.proof.edge_fetch_from_ledger,91);
   assert.equal(result.proof.edge_fetch_to_ledger,100);assert.equal(result.proof.xrpl_requests,1);
   assert.equal(result.proof.index_rows_returned,1);assert.equal(result.proof.actual_endpoint,transport.actual_endpoint);
+  const proved=await index.proveWallet(run,'wallet-a');assert.equal(proved.rows.length,0);assert.equal(proved.proof.status,'COMPLETE');
+  const canonical=await index.readRun(run);assert.equal(canonical.length,1);assert.equal(canonical[0].hash,'canonical-once');
+  assert.equal(index.metrics().stored_transactions_loaded,1);
   await assert.rejects(()=>index.readWallet(run,'wallet-b'),e=>e.message==='XRPL_TRANSPORT_CHANGED'&&e.transport.transport_epoch===4);
   assert.equal(index.metrics().errors[0].transport.actual_endpoint,transport.actual_endpoint);
   console.log('PASS real client bridge preserves retained range, edge requests and failed endpoint diagnostics');

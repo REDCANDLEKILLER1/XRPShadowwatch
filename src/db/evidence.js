@@ -52,6 +52,15 @@ function decision(run, coverage) {
   return C.windowServability({ coverage, windowStartMs:ms(run.window_start), windowEndMs:ms(run.window_end),
     anchorLedger:Number(run.anchor_ledger), anchorCloseMs:ms(run.anchor_close_time) });
 }
+function retainedProof(run, coverage, id) {
+  const cov=C.normalizeCoverage(coverage);
+  return {status:'COMPLETE',range_bound_proven:true,range_exhausted:true,covers_window_start:true,edge_fetch_complete:true,
+    proven_reason:'SERVER_RETAINED_RANGE_PROVEN',from_ledger:cov.scan_coverage_from,through_ledger:Number(run.anchor_ledger),
+    retained_from_ledger:cov.evidence_retained_from,retained_through_ledger:cov.evidence_retained_through,
+    anchor_ledger:Number(run.anchor_ledger),run_id:id,request_bounded:true,transport_consistent:true,
+    window_bounded_by_anchor:true,response_validated:true,source:'NEON_VERIFIED_INDEX',
+    response_ledger_index_max:Number(run.anchor_ledger),response_ledger_index_min:cov.scan_coverage_from,pages_scanned:0};
+}
 async function persist(run, address, rows, proof, metrics) {
   assertConsistentRaw(rows);
   return db.transaction(async q => {
@@ -134,15 +143,16 @@ async function catchUp(id, address, reader) {
   if (!run.roster_accounts.includes(address)) throw new Error('ADDRESS_OUTSIDE_RUN_ROSTER');
   const cov = (await query('SELECT * FROM wallet_coverage WHERE address=$1',[address])).rows[0];
   const d = decision(run,cov), anchor = Number(run.anchor_ledger);
-  const existing=(await query('SELECT status,metrics FROM scan_wallets WHERE scan_id=$1 AND address=$2',[id,address])).rows[0];
-  if(d.complete_without_fetch && existing && existing.status==='COMPLETE')return {scan_id:id,address,...existing.metrics,resumed:true};
+  const existing=(await query('SELECT status,proof,metrics FROM scan_wallets WHERE scan_id=$1 AND address=$2',[id,address])).rows[0];
+  if(d.complete_without_fetch && existing && existing.status==='COMPLETE')return {scan_id:id,address,...existing.metrics,proof:existing.proof,resumed:true};
   const baseline = reader.stats.requests;
   const metrics = { mode:d.reason, fetch_from_ledger:d.fetch_from_ledger, fetch_to_ledger:anchor, requests:0, rows_fetched:0 };
+  let proof;
   if (!d.complete_without_fetch) {
     const priorCoverage=C.normalizeCoverage(cov);
     const from = d.served_from_index ? d.fetch_from_ledger : Math.min(Number(run.floor_ledger),
       priorCoverage.scan_coverage_through===null?Number(run.floor_ledger):priorCoverage.scan_coverage_through+1);
-    let proof, rows;
+    let rows;
     for (let restart=0; restart<4; restart++) {
       rows=[];
       const verifiedAnchor = {ledger:anchor,close_ms:ms(run.anchor_close_time)};
@@ -210,9 +220,11 @@ async function catchUp(id, address, reader) {
     if (merged.some(r=>r.conflicts.length)) throw new Error('CONFLICTING_TRANSACTION_SIGHTINGS');
     await persist(run,address,merged,proof,{...metrics,transport:reader.stats});
   } else {
-    await query(`UPDATE scan_wallets SET status='COMPLETE',metrics=$3,updated_at=now() WHERE scan_id=$1 AND address=$2`,[id,address,JSON.stringify(metrics)]);
+    proof=retainedProof(run,cov,id);
+    await query(`UPDATE scan_wallets SET status='COMPLETE',proof=$3,metrics=$4,updated_at=now() WHERE scan_id=$1 AND address=$2`,
+      [id,address,JSON.stringify(proof),JSON.stringify(metrics)]);
   }
-  return { scan_id:id,address,...metrics,transport:reader.stats };
+  return { scan_id:id,address,...metrics,proof,transport:reader.stats };
 }
 async function readWindow(id,address,after) {
   const run=await getRun(id);
@@ -227,14 +239,51 @@ async function readWindow(id,address,after) {
   const more=rows.length>200;const selected=rows.slice(0,200);
   return {available:true,scan_id:id,roster_hash:run.roster_hash,decision:{...d,edge_fetch_complete:true},
     next:more?selected[selected.length-1].hash:null,
-    proof:{status:'COMPLETE',range_bound_proven:true,range_exhausted:true,covers_window_start:true,edge_fetch_complete:true,
-      proven_reason:'SERVER_RETAINED_RANGE_PROVEN',from_ledger:Number(cov.scan_coverage_from),through_ledger:Number(run.anchor_ledger),
-      retained_from_ledger:Number(cov.evidence_retained_from),retained_through_ledger:Number(cov.evidence_retained_through),
-      anchor_ledger:Number(run.anchor_ledger),run_id:id,request_bounded:true,transport_consistent:true,
-      window_bounded_by_anchor:true,response_validated:true,source:'NEON_VERIFIED_INDEX',
-      response_ledger_index_max:Number(run.anchor_ledger),response_ledger_index_min:Number(cov.scan_coverage_from),pages_scanned:0},
+    proof:retainedProof(run,cov,id),
     transactions:selected.map(r=>({tx_json:{...r.raw_tx,hash:r.hash,ledger_index:Number(r.ledger_index)},meta:r.raw_meta,
       hash:r.hash,ledger_index:Number(r.ledger_index),validated:r.validated,close_time_iso:iso(ms(r.close_time))}))};
+}
+function reportFact(r, observedVia) {
+  const amount = r.currency==='XRP'
+    ? (r.amount_drops===null ? null : String(r.amount_drops))
+    : (r.amount_value===null ? null : String(r.amount_value));
+  const escrowAmount=r.escrow_amount_drops===null?null:String(r.escrow_amount_drops);
+  return {hash:r.hash,ledger_index:Number(r.ledger_index),date:iso(ms(r.close_time)),type:r.tx_type,
+    tx_result:r.tx_result,validated:r.validated===true,from:r.from_account||'',to:r.escrow_destination||r.to_account||'',
+    amount:amount,currency:r.currency||'XRP',issuer:r.issuer||'',destination_tag:r.destination_tag,
+    sig_mode:r.sig_mode||'unknown',signer_count:Number(r.signer_count)||0,escrow_owner:r.escrow_owner||'',
+    escrow_amount_drops:escrowAmount,observed_via:Array.isArray(observedVia)?observedVia:[]};
+}
+// Once every wallet has proved its edge, serve one canonical hash stream for
+// the run. The old browser path reread the same transaction once per observed
+// wallet and downloaded full raw_tx/raw_meta on every report. Those complete
+// payloads remain the evidence of record in Neon; this projection uses the
+// intrinsic facts classified once at ingestion and removes cross-wallet copies.
+async function readRunWindow(id,after) {
+  const run=await getRun(id);
+  const status=(await query(`SELECT count(*)::integer AS total,
+    count(*) FILTER (WHERE status='COMPLETE')::integer AS complete,
+    count(*) FILTER (WHERE status='FAILED')::integer AS failed
+    FROM scan_wallets WHERE scan_id=$1`,[id])).rows[0];
+  if(Number(status.total)!==Number(run.target_wallets)||Number(status.complete)!==Number(run.target_wallets)||Number(status.failed)!==0)
+    return {available:false,scan_id:id,roster_hash:run.roster_hash,target_wallets:Number(run.target_wallets),
+      complete_wallets:Number(status.complete),error:'RUN_WINDOW_NOT_FULLY_PROVEN',transactions:[]};
+  const rosterJson=JSON.stringify(run.roster_accounts);
+  const rows=(await query(`SELECT t.*,
+    ARRAY(SELECT DISTINCT a.address FROM transaction_accounts a
+      WHERE a.tx_hash=t.hash AND a.role='observed_via'
+      AND a.address IN (SELECT jsonb_array_elements_text($5::jsonb)) ORDER BY a.address) AS observed_via
+    FROM transactions t
+    WHERE t.ledger_index<=$1 AND t.close_time>=$2 AND t.close_time<=$3
+      AND ($4::text IS NULL OR t.hash>$4)
+      AND EXISTS(SELECT 1 FROM transaction_accounts a WHERE a.tx_hash=t.hash AND a.role='observed_via'
+        AND a.address IN (SELECT jsonb_array_elements_text($5::jsonb)))
+    ORDER BY t.hash LIMIT 1001`,[run.anchor_ledger,run.window_start,run.window_end,after||null,rosterJson])).rows;
+  const more=rows.length>1000,selected=rows.slice(0,1000);
+  return {available:true,scan_id:id,roster_hash:run.roster_hash,anchor_ledger:Number(run.anchor_ledger),
+    target_wallets:Number(run.target_wallets),complete_wallets:Number(status.complete),
+    next:more?selected[selected.length-1].hash:null,
+    transactions:selected.map(r=>reportFact(r,r.observed_via))};
 }
 async function summary(id) {
   const run=await getRun(id);
@@ -246,4 +295,23 @@ async function summary(id) {
     target_wallets:run.target_wallets,complete_wallets:complete,status,
     requests:wallets.reduce((n,w)=>n+Number(w.metrics.requests||0),0),rows_fetched:wallets.reduce((n,w)=>n+Number(w.metrics.rows_fetched||0),0),wallets};
 }
-module.exports={begin,getRun,decision,persist,catchUp,readWindow,summary,Reader};
+async function archiveFacts(id) {
+  const run=await getRun(id);
+  const wallets=(await query('SELECT status,proof,metrics FROM scan_wallets WHERE scan_id=$1',[id])).rows;
+  const tx=(await query(`SELECT count(DISTINCT t.hash)::integer AS count FROM transactions t
+    WHERE t.ledger_index<=$1 AND t.close_time>=$2 AND t.close_time<=$3
+    AND EXISTS(SELECT 1 FROM transaction_accounts a WHERE a.tx_hash=t.hash AND a.role='observed_via'
+      AND a.address IN (SELECT jsonb_array_elements_text($4::jsonb)))`,
+    [run.anchor_ledger,run.window_start,run.window_end,JSON.stringify(run.roster_accounts)])).rows[0];
+  const count=status=>wallets.filter(w=>(((w.proof&&w.proof.status)||w.status)===status)).length;
+  const complete=count('COMPLETE'),failed=count('FAILED'),truncated=count('TRUNCATED'),unproven=count('UNPROVEN');
+  return {evidence_scan_id:id,generated_at:new Date(run.created_at||run.anchor_close_time).toISOString(),
+    roster_hash:run.roster_hash,target_wallets:Number(run.target_wallets),transaction_windows_proved:complete,
+    failed,truncated,unproven,validated_anchor_ledger:Number(run.anchor_ledger),
+    transactions_in_window:Number(tx&&tx.count)||0,
+    new_observations:wallets.reduce((n,w)=>n+Number(w.metrics&&w.metrics.rows_fetched||0),0),
+    xrpl_requests:wallets.reduce((n,w)=>n+Number(w.metrics&&w.metrics.requests||0),0),
+    stored_history_reused:wallets.some(w=>w.metrics&&w.metrics.mode==='EDGE_ONLY'),
+    coverage_complete:complete===Number(run.target_wallets)&&failed===0&&truncated===0&&unproven===0};
+}
+module.exports={begin,getRun,decision,persist,catchUp,readWindow,readRunWindow,summary,archiveFacts,Reader};

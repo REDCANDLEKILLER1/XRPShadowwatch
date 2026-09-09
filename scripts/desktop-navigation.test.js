@@ -27,10 +27,14 @@ async function main(){
     await page.getByRole('button',{name:'Center window',exact:true}).click();
     const box=await page.locator('#morningReportFloat').boundingBox();assert.ok(box.x>=0&&box.y>=0);
     assert.ok(box.x+box.width<=1440&&box.y+box.height<=900);
+    assert.ok(await page.locator('#morningReportFloat').evaluate(el=>el.classList.contains('mrf-fullscreen')),'desktop reader opens at full usable height');
+    assert.ok(await page.locator('#mrfBody').evaluate(el=>el.clientHeight>500),'desktop report has a tall reading area');
     assert.ok(await page.locator('#mrfBody').evaluate(el=>el.scrollWidth<=el.clientWidth+1),'long source links wrap without horizontal scrolling');
-    await page.getByRole('button',{name:'Fill screen',exact:true}).click();
+    await page.getByRole('button',{name:'Next page',exact:true}).click();await page.waitForTimeout(500);
+    assert.ok(await page.locator('#mrfBody').evaluate(el=>el.scrollTop>0),'Next page moves through the report');
+    await page.getByRole('button',{name:'Previous page',exact:true}).click();
     await page.keyboard.press('Escape');assert.equal(await page.locator('#morningReportFloat').isVisible(),false);
-    console.log('PASS report actions are visible and Escape closes the reader');
+    console.log('PASS full-height report reader scrolls by page and Escape closes it');
     const firstFile=page.waitForEvent('download');
     await page.evaluate(()=>downloadTextFile('evidence-fixture.txt','Exact evidence\n255/255\n'));
     const firstDownload=await firstFile;
@@ -42,25 +46,19 @@ async function main(){
     await page.getByRole('button',{name:'Dismiss prepared download',exact:true}).click();
     assert.equal(await page.locator('#swPreparedDownload').count(),0);
     console.log('PASS prepared file link retries a byte-identical browser download and can be dismissed');
-    await page.evaluate(()=>{
-      state.pack={wallets_checked:255,watchlist_total:255,wallets_failed:0,
-        tx_scan_coverage:{target_wallets:255,complete_wallets:253,failed_wallets:2,full_window_complete:false}};
-      window.SHADOW_EVENT_BUS.emit('shadow.report.sealed',{});
-    });
-    await page.waitForTimeout(1200);
-    const incomplete=await page.evaluate(()=>({phase:window.XAI_SCAN_PROGRESS.phase,
-      mission:document.getElementById('xaiMissionPct').textContent,
-      reactor:document.getElementById('swReactorPct').textContent,
-      runtime:document.getElementById('swPhaseRuntimeLabel').textContent,
-      runtimePct:document.getElementById('swPhaseRuntimePct').textContent}));
-    assert.equal(incomplete.phase,'INCOMPLETE');
-    assert.equal(incomplete.mission,'—');assert.notEqual(incomplete.reactor,'100%');
-    assert.match(incomplete.runtime,/incomplete acquisition/);assert.equal(incomplete.runtimePct,'—');
+    await page.evaluate(()=>window.updateShadowTxProgress({target_wallets:255,indexed_wallets:42,rows_fetched:876,stored_transactions_loaded:12345}));
+    assert.match(await page.locator('#xaiMissionStep').textContent(),/TRANSACTIONS 42\/255 · 876 NEW · 12,345 STORED/);
+    await page.evaluate(()=>window.MORNING_REPORT_FLOAT.showFailure('Transaction evidence incomplete: 253/255 wallets proved.',{}));
+    assert.equal(await page.getByRole('heading',{name:'REPORT NOT CREATED'}).isVisible(),true);
+    assert.equal(await page.getByRole('button',{name:'Rerun scan'}).isVisible(),true);
+    assert.equal(await page.getByRole('button',{name:'Download report'}).isVisible(),false);
+    assert.equal(await page.locator('#mrfBody').textContent().then(t=>t.includes('Layout fixture')),false);
     await page.keyboard.press('Escape');
-    console.log('PASS delayed report sealing preserves incomplete acquisition instead of announcing 100%');
+    console.log('PASS transaction acquisition and stored-analysis progress are distinct; failures expose only rerun');
     await page.setViewportSize({width:390,height:844});
     assert.equal(await page.locator('#swDashRail').isVisible(),false);
     assert.equal(await page.locator('#swDashBottomNav').isVisible(),true);
+    assert.match(await page.locator('#xaiMissionStep').textContent(),/876 NEW · 12,345 STORED/);
     assert.equal(await page.locator('#swGauges').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),2,'phone coverage counters have readable separate columns');
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+1));
     console.log('PASS phone navigation and viewport width are preserved');

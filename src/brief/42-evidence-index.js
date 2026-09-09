@@ -25,7 +25,7 @@
         run.accounts.some(function(a){return accounts.indexOf(a)<0;})||!Number.isInteger(run.anchor_ledger)||
         !Number.isFinite(run.anchor_close_ms)||!run.roster_hash)throw new Error('EVIDENCE_RUN_IDENTITY_UNPROVEN');
       metrics={scan_id:run.scan_id,roster_hash:run.roster_hash,target_wallets:run.accounts.length,
-        requests:0,rows_fetched:0,indexed_wallets:0,pages_read:0,errors:[],transport:run.transport};
+        requests:0,rows_fetched:0,indexed_wallets:0,stored_transactions_loaded:0,pages_read:0,errors:[],transport:run.transport};
       return run;
     },
     metrics:function(){return metrics;},
@@ -36,6 +36,48 @@
       metrics.server_summary={status:result.status,complete_wallets:result.complete_wallets,target_wallets:result.target_wallets,
         requests:result.requests,rows_fetched:result.rows_fetched};
       return metrics.server_summary;
+    },
+    proveWallet:async function(run,address){
+      var release=await slot();
+      try{
+        var resumed=0,started=Date.now(),acquired;
+        do{
+          acquired=await call('catchup',{scan_id:run.scan_id,address:address},true);
+          metrics.requests+=Number(acquired.requests)||0;metrics.rows_fetched+=Number(acquired.rows_fetched)||0;
+          if(acquired.transport){
+            metrics.actual_endpoint=acquired.transport.actual_endpoint;
+            metrics.reconnects=(metrics.reconnects||0)+(acquired.transport.reconnects||0);
+            if(acquired.transport.first_failure&&!metrics.first_failure)metrics.first_failure=acquired.transport.first_failure;
+            metrics.last_transport=acquired.transport;
+          }
+          if(!acquired.pending)break;
+          var wait=Math.max(1000,Number(acquired.retry_after_ms)||1000);
+          if(++resumed>4||Date.now()+wait-started>900000)throw new Error('EVIDENCE_RECOVERY_EXHAUSTED: '+acquired.error);
+          if(typeof log==='function')log('Evidence recovery: pausing '+Math.ceil(wait/1000)+'s before resuming '+address);
+          await new Promise(function(resolve){setTimeout(resolve,wait);});
+        }while(true);
+        var proof=acquired.proof;
+        if(!proof||proof.status!=='COMPLETE'||proof.run_id!==run.scan_id||Number(proof.anchor_ledger)!==Number(run.anchor_ledger))
+          throw new Error('INDEX_WALLET_PROOF_UNPROVEN');
+        metrics.indexed_wallets++;
+        if(typeof window.updateShadowTxProgress==='function')window.updateShadowTxProgress(metrics);
+        if(typeof log==='function')log('Evidence edge '+address+': '+(acquired.mode||'stored')+', '+(acquired.rows_fetched||0)+' new observation(s), '+(acquired.requests||0)+' XRPL read(s)');
+        return {rows:[],proof:proof};
+      }catch(e){metrics.errors.push({address:address,error:e.message,transport:e.transport||null});throw e;}
+      finally{release();}
+    },
+    readRun:async function(run){
+      var rows=[],after='';
+      do{
+        var result=await call('read-run',{scan_id:run.scan_id,after:after},false);
+        if(!result.available||result.scan_id!==run.scan_id||result.roster_hash!==run.roster_hash||
+          result.anchor_ledger!==run.anchor_ledger||result.complete_wallets!==result.target_wallets)
+          throw new Error(result.error||'INDEX_RUN_WINDOW_UNPROVEN');
+        rows=rows.concat(result.transactions||[]);after=result.next||'';metrics.pages_read++;
+        metrics.stored_transactions_loaded=rows.length;
+        if(typeof window.updateShadowTxProgress==='function')window.updateShadowTxProgress(metrics);
+      }while(after);
+      return rows;
     },
     readWallet:async function(run,address){
       var release=await slot();
