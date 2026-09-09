@@ -47,7 +47,9 @@ async function main(){
     assert.equal(await page.locator('#swPreparedDownload').count(),0);
     console.log('PASS prepared file link retries a byte-identical browser download and can be dismissed');
     await page.evaluate(()=>window.updateShadowTxProgress({target_wallets:255,indexed_wallets:42,rows_fetched:876,stored_transactions_loaded:12345}));
+    await page.waitForTimeout(1200);
     assert.match(await page.locator('#xaiMissionStep').textContent(),/TRANSACTIONS 42\/255 · 876 NEW · 12,345 STORED/);
+    assert.ok(parseInt(await page.locator('#xaiMissionPct').textContent(),10)<=58,'transaction phase cannot creep to 98% before its wallets finish');
     await page.evaluate(()=>window.MORNING_REPORT_FLOAT.showFailure('Transaction evidence incomplete: 253/255 wallets proved.',{}));
     assert.equal(await page.getByRole('heading',{name:'REPORT NOT CREATED'}).isVisible(),true);
     assert.equal(await page.getByRole('button',{name:'Rerun scan'}).isVisible(),true);
