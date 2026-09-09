@@ -277,6 +277,17 @@
         request_bounded: p.request_bounded === true,
         transport_consistent: p.transport_consistent === true,
         run_id: p.run_id || null,
+        source: p.source || 'XRPL_DIRECT',
+        actual_endpoint: p.actual_endpoint || null,
+        transport_epoch: p.transport_epoch == null ? null : p.transport_epoch,
+        from_ledger: p.from_ledger == null ? null : p.from_ledger,
+        through_ledger: p.through_ledger == null ? null : p.through_ledger,
+        retained_from_ledger: p.retained_from_ledger == null ? null : p.retained_from_ledger,
+        retained_through_ledger: p.retained_through_ledger == null ? null : p.retained_through_ledger,
+        edge_fetch_from_ledger: p.edge_fetch_from_ledger == null ? null : p.edge_fetch_from_ledger,
+        edge_fetch_to_ledger: p.edge_fetch_to_ledger == null ? null : p.edge_fetch_to_ledger,
+        xrpl_requests: p.xrpl_requests == null ? null : p.xrpl_requests,
+        index_rows_returned: p.index_rows_returned == null ? null : p.index_rows_returned,
         address: w.address,
         label: w.label,
         status: st,
@@ -395,6 +406,20 @@
       var proofByAccount = Object.create(null);
 
       accountTxWindowDepth = async function (ws, account, startMs, endMs, limit) {
+        if (state.indexRun && state.indexRun.accounts.indexOf(account) >= 0 && state.effectiveWindow &&
+            startMs === state.effectiveWindow.start_ms && endMs === state.effectiveWindow.end_ms) {
+          try {
+            var indexed = await window.SW_EVIDENCE_INDEX.readWallet(state.indexRun, account);
+            proofByAccount[account] = indexed.proof;
+            return indexed.rows;
+          } catch (indexError) {
+            proofByAccount[account] = { status:'FAILED', source:'NEON_VERIFIED_INDEX', run_id:state.runId,
+              anchor_ledger:state.runAnchor.anchor_ledger, error:indexError.message,
+              actual_endpoint:indexError.transport&&indexError.transport.actual_endpoint,
+              transport_epoch:indexError.transport&&indexError.transport.transport_epoch };
+            throw indexError;
+          }
+        }
         var rows = [], marker = null, pages = 0;
         var boundaryReached = false, historyExhausted = false;
         // PESSIMISTIC INITIAL VALUE. This was 'COMPLETE', so every path that
@@ -426,10 +451,31 @@
         var transportConsistent = true;
         var requestBounded = anchorSeq !== null;
         var responseMaxSeen = null, responseMinSeen = null, responseValidated = true;
-        var restartsLeft = 1;
+        var restartsLeft = 3;
+        async function restartOnTransportChange() {
+          if (transportEpoch() === epoch0) return false;
+          if (restartsLeft <= 0 || !RA) {
+            transportConsistent = false;
+            unprovenReason = 'TRANSPORT_CHANGED';
+            return false;
+          }
+          restartsLeft--;
+          await reproveOnCurrentTransport(ws, anchorSeq);
+          runAnchor = state.runAnchor;
+          epoch0 = transportEpoch();
+          marker = null; rows = []; pages = 0;
+          oldestLedger = null; newestLedger = null; rowsWithoutLedger = 0;
+          boundaryReached = false; historyExhausted = false;
+          requestBounded = anchorSeq !== null;
+          responseMaxSeen = null; responseMinSeen = null; responseValidated = true;
+          unprovenReason = 'NOT_DECIDED';
+          if (typeof log === 'function') log('tx-scan ' + account + ': transport changed — re-proved the same anchor, restarting this wallet');
+          return true;
+        }
 
         while (pages < TX_SAFETY_MAX_PAGES) {
           try {
+            if (transportEpoch() !== epoch0 && !await restartOnTransportChange()) break;
             var req = { command: 'account_tx', account: account, ledger_index_min: -1, ledger_index_max: -1, limit: limit, forward: false };
             // NOT wrapped in catch-and-ignore. boundRequest has no throw path
             // for the case that matters — handed a null anchor it returns
@@ -483,6 +529,8 @@
               unprovenReason = 'RESPONSE_NOT_VALIDATED';
               responseMaxSeen = num(res.ledger_index_max);
               responseValidated = false;
+            } else {
+              responseMaxSeen = num(res.ledger_index_max);
             }
             // The server's own retained floor for THIS answer, recorded for
             // diagnosis: it is how a clamped ceiling gets explained.
@@ -495,22 +543,7 @@
             // resumable, it is meaningless. Restart once against the SAME
             // anchor on the new transport; a second change gives up.
             if (transportEpoch() !== epoch0) {
-              if (restartsLeft > 0 && RA && typeof RA.buildRunAnchor === 'function') {
-                restartsLeft--;
-                await reproveOnCurrentTransport(ws, anchorSeq);
-                // Re-read the RUN's anchor, which reproveOnCurrentTransport
-                // updated in place, so this wallet and every later one are
-                // working from the same transport-consistent proof.
-                try { runAnchor = (typeof state !== 'undefined') ? state.runAnchor : runAnchor; } catch (_) {}
-                epoch0 = transportEpoch();
-                marker = null; rows = []; pages = 0;
-                oldestLedger = null; newestLedger = null; rowsWithoutLedger = 0;
-                boundaryReached = false; historyExhausted = false;
-                try { if (typeof log === 'function') log('tx-scan ' + account + ': transport changed mid-walk — marker discarded, restarting on the new socket'); } catch (_) {}
-                continue;
-              }
-              transportConsistent = false;
-              unprovenReason = 'TRANSPORT_CHANGED';
+              if (await restartOnTransportChange()) continue;
               break;
             }
             pages++;
@@ -543,6 +576,12 @@
             if (oldest <= startMs) { boundaryReached = true; break; }
             if (!marker) { historyExhausted = true; break; }
           } catch (e) {
+            // The request layer refuses to send an old marker on a replacement
+            // socket. Restart this wallet without committing its partial rows.
+            if (transportEpoch() !== epoch0) {
+              if (await restartOnTransportChange()) continue;
+              break;
+            }
             status = 'FAILED';
             error = e && e.message ? e.message : String(e || 'account_tx failed');
             break;
@@ -701,6 +740,10 @@
           } catch (_) {}
 
           var cov = aggregateCoverage();
+          if (state.indexRun && window.SW_EVIDENCE_INDEX && window.SW_EVIDENCE_INDEX.finish) {
+            try { await window.SW_EVIDENCE_INDEX.finish(state.indexRun); }
+            catch(e) { if(typeof elog==='function')elog('Evidence index summary',e); }
+          }
           try { if (typeof log === 'function') log('tx_scan_coverage ' + JSON.stringify(cov)); } catch (_) {}
           return out;
         } finally {
@@ -822,6 +865,16 @@
           return qualifyIncompleteText(out, pack);
         };
         buildMorningStoryText._swTxCompleteness20260819 = true;
+        // CARRY THE V1 MARKER FORWARD. 10-pipeline's _boot re-installs after
+        // 2000ms if window.buildMorningStoryText._pipelineV1Hooked is missing,
+        // and wrapping here dropped it — so the re-install captured THIS
+        // wrapper as `legacy`, called it only to harvest prayer and scripture,
+        // and returned renderPublicReport() instead. The caveat below was
+        // computed and thrown away. Preserving the flag keeps V1 from
+        // reinstalling on top of us. The report's coverage line no longer
+        // depends on winning that race, but losing it should not be silent
+        // either.
+        try { buildMorningStoryText._pipelineV1Hooked = origMorning._pipelineV1Hooked === true; } catch (_) {}
       }
     } catch (_) {}
 
@@ -877,6 +930,11 @@
   installCoverageConsumers();
 
   window.SW_REPORT_SCAN_TUNING_20260816 = {
+    // THE CANONICAL COVERAGE VERDICT, exposed so other surfaces consume it
+    // rather than deriving their own. #57 removed one such divergence (the
+    // database refusing a wallet the Report was certifying); a second copy of
+    // this rule inside the V1 renderer would rebuild it in a different place.
+    coverageFrom: coverageFrom,
     version: VERSION,
     read_only: true,
     promoted_addresses: PROMOTIONS.map(function (p) { return p.address; }),

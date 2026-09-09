@@ -96,7 +96,16 @@
   function setGateEnabled(on){ try { localStorage.setItem(ENABLED_KEY, on?'1':'0'); } catch(_){} }
 
   // Archive the FIRST good brief of each date (canonical), independent of the lock.
+  function completeEvidence(pack){
+    var c=pack && pack.tx_scan_coverage, total=Number(pack && pack.watchlist_total);
+    return !!(c && total>0 && Number(pack.wallets_checked)===total && !Number(pack.wallets_failed) &&
+      c.full_window_complete===true && c.anchor_ok===true && c.counts_reconcile===true &&
+      Number(c.target_wallets)===total && Number(c.complete_wallets)===total &&
+      !['failed_wallets','truncated_wallets','unproven_wallets','unknown_status_wallets','not_checked_wallets']
+        .some(function(k){return Number(c[k] || 0)!==0;}));
+  }
   function _writeArchive(text, sources, pack){
+    if (!completeEvidence(pack)) return;
     try {
       var now=_now(), date=_ymd(now), a=loadArch();
       if (a[date]) return;
@@ -112,6 +121,7 @@
   // ── COMMIT: heal → lock today → write archive. Shared by every
   //    delivery surface so a brief is committed exactly once per day. ──
   function commit(freshText, sources, pack){
+    if (!completeEvidence(pack)) return null;
     var h = healReport(freshText);
     if (!h.ok){ _log('withheld daily lock — unfit ('+h.reason+')'); return null; }
     var now = _now(), date = _ymd(now), g = loadGate();
@@ -126,6 +136,10 @@
   //    is set on state. Governs BOTH the popup and the full-screen view. ──
   function gateDelivery(freshText, pack){
     try {
+      // An export can request a story before the scan finishes. It must not
+      // consume today's archive/lock or replace its own partial facts with an
+      // older complete report whose evidence belongs to another run.
+      if (!completeEvidence(pack)) return healReport(freshText).text;
       if (devUnlocked()) return healReport(freshText).text;
       // Block OFF: unlimited reports, but keep the daily archive building.
       if (!gateEnabled()) {
@@ -209,6 +223,7 @@
     var _origShow = MRF.show;
     MRF.show = function(reportText, sources, pack){
       try {
+        if (!completeEvidence(pack)) return _origShow.call(MRF, healReport(reportText).text, sources, pack);
         if (devUnlocked() || !gateEnabled()) return _origShow.call(MRF, healReport(reportText).text, sources, pack);
         var ls = lockState();
         if (ls.locked)

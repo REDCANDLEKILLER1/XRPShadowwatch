@@ -614,8 +614,10 @@ function log(msg) {
   el.scrollTop = el.scrollHeight;
 }
 function elog(label, err) {
-  const el = $('errorLog'); if (!el) return;
   const m = '[' + new Date().toISOString().slice(11, 19) + '] ' + label + (err ? ': ' + (err.message || err) : '');
+  if (!Array.isArray(state.errorLog)) state.errorLog=[];
+  state.errorLog.push(m);
+  const el = $('errorLog'); if (!el) return;
   if (el.textContent === 'No errors yet.') el.textContent = '';
   el.textContent += m + '\n';
 }
@@ -739,6 +741,15 @@ const XAI_PHASE_BRIDGE = {
 function shadowSay(status, phase, pctVal) {
   setText('orbStatus', status);
   const rawPhase = (phase || 'SCANNING').toUpperCase();
+  if (state.scanning) {
+    const phases = state.phaseTimings || (state.phaseTimings = []);
+    const previous = phases[phases.length - 1];
+    if (!previous || previous.phase !== rawPhase) {
+      const now = Date.now();
+      if (previous) previous.duration_ms = now - previous.started_ms;
+      phases.push({ phase: rawPhase, started_ms: now, at: new Date(now).toISOString() });
+    }
+  }
   setText('orbPhase', rawPhase);
 
   // Map engine phase → HUD segment and update phase bar
@@ -955,9 +966,11 @@ function populateScanTarget() {
 }
 
 // ── XRPL CONNECT (with FALLBACK) ───────────────────────────────
-async function connectXRPL() {
+async function connectXRPL(options) {
   const preferred = $('xrplServer') ? $('xrplServer').value : XRPL_SERVERS[0];
-  const servers = [preferred, ...XRPL_SERVERS.filter(s => s !== preferred)];
+  const ordered = [preferred, ...XRPL_SERVERS.filter(s => s !== preferred)];
+  const avoid = options && options.avoidServer;
+  const servers = ordered.filter(s => s !== avoid).concat(ordered.filter(s => s === avoid));
   for (const server of servers) {
     try {
       const ws = await new Promise((res, rej) => {
@@ -992,14 +1005,193 @@ function _sockOpen(w) { try { return !!w && w.readyState === 1; } catch (_) { re
 
 // Have we given up on the connection? Used by the batch passes so they stop
 // instead of walking their whole list producing one identical error per wallet.
+// ── THE XRPL QUOTA GATE ─────────────────────────────────────────────────────
+// SW-20260907-UO4N2: the server answered 255 offer requests with
+//
+//     rate limit: units quota (10000 per 60s) exhausted, retry in ~69888ms
+//
+// and the scan issued all 255 anyway, in 32 chunks of 8, with no spacing, every
+// one of them inside the cooldown the server had already stated. A 256th came
+// from runRelatedOfferScan, a second dispatcher with its own copy of the same
+// link-down-only guard — neither pass could tell the other what it had learned.
+//
+// The quota itself is UPSTREAM: the string appears nowhere in this repository,
+// so there is no app-side limiter to have produced it. What is ours is that a
+// quota rejection was indistinguishable from "this wallet has no offers": it
+// was caught, logged, and returned 0, and the loop walked on.
+//
+// ONE decision, shared, for the whole run — the same shape as _ensureSock's
+// single state._reconnecting. Deliberately NOT: a sleeper per caller (that is
+// the same mistake N times), a retry inside the cooldown (that is what we
+// already do), or rotating endpoints to evade a published limit (that is not
+// engineering). The cooldown comes from the server's own hint, never a number
+// invented here.
+//
+// The gate STOPS a pass rather than stalling it. A forensic scan that silently
+// sleeps 70 seconds per pass is a scan nobody can reason about, and the run
+// already knows how to report a short pass honestly. What must never happen is
+// the pass ending early and the report claiming it finished.
+const QUOTA_HINT_RE = /retry\s+in\s+~?\s*(\d+)\s*ms/i;
+// SW-20260908-BSQCJ carried a THIRD refusal, and this pattern missed it: of
+// its 77 failed windows, 32 were rippled's own
+//
+//     "The server is too busy to help you now."
+//
+// tooBusy is the same class as a quota — the server declining to serve right
+// now — and it arrives with NO retry hint, so it takes the 60s fallback. It is
+// still not a timeout: the other 45 of those 77 were `timeout account_tx`,
+// which is silence and belongs to the dead-socket breaker, not here.
+const QUOTA_ERROR_RE = /rate limit|quota|too many requests|\b429\b|slow ?down|too ?busy|placing too much load/i;
+const QUOTA_FALLBACK_MS = 60000;   // only if the server rejects without a hint
+const QUOTA_MAX_MS      = 300000;  // never trust an absurd hint
+
+// Is this error the server telling us to back off? A timeout is not: silence
+// and an explicit rejection are different failures and #59's breaker owns the
+// first one.
+function _isQuotaError(e) {
+  return QUOTA_ERROR_RE.test(_xrplErrorText(e));
+}
+function _xrplErrorText(e) {
+  return typeof e === 'string' ? e : [e && e.message, e && e.error_message,
+    e && e.error, e && e.code, e && e.result && e.result.error,
+    e && e.result && e.result.error_message].filter(Boolean).join(' ');
+}
+function _quotaRetryMs(e) {
+  if (e && Number.isFinite(e.retry_after_ms) && e.retry_after_ms > 0) return e.retry_after_ms;
+  const m = _xrplErrorText(e);
+  const hit = QUOTA_HINT_RE.exec(m);
+  const ms = hit ? Number(hit[1]) : NaN;
+  if (!Number.isFinite(ms) || ms <= 0) return QUOTA_FALLBACK_MS;
+  // A hint longer than our recovery budget stops the run; never retry early.
+  return ms;
+}
+// Record the rejection ONCE for the whole run. Later rejections inside the same
+// cooldown extend nothing and log nothing: they are the passes already in
+// flight discovering what we now know.
+function _noteQuota(e, where) {
+  if (!_isQuotaError(e)) return false;
+  const until = Date.now() + _quotaRetryMs(e);
+  const first = !(state._quotaUntil && Date.now() < state._quotaUntil);
+  if (!state._quotaUntil || until > state._quotaUntil) state._quotaUntil = until;
+  state._quotaHits = (n(state._quotaHits) || 0) + 1;
+  if (first) {
+    state._quotaFirstAt = new Date().toISOString();
+    state._quotaWhere = where || 'unknown';
+    log('XRPL quota exhausted during ' + (where || 'scan') + ' — the server asked for ' +
+        Math.round(_quotaRetryMs(e) / 1000) + 's. Pausing requests, then retrying the current read.');
+  }
+  return true;
+}
+// Every dispatcher asks this BEFORE issuing. One answer, one clock.
+function _quotaBlocked() {
+  return !!(state._quotaUntil && Date.now() < state._quotaUntil);
+}
+// What the run must carry into the report: a pass that stopped early is not a
+// pass that found nothing.
+function _quotaNote() {
+  if (!state._quotaHits) return null;
+  return {
+    hit: true,
+    hits: n(state._quotaHits),
+    first_at: state._quotaFirstAt || null,
+    first_where: state._quotaWhere || null,
+    waits: n(state._quotaWaits),
+    waited_ms: n(state._quotaWaitedMs),
+    passes_cut_short: (state._quotaCutPasses || []).slice()
+  };
+}
+// ── WAIT, THEN CARRY ON ─────────────────────────────────────────────────────
+// The quota is a RATE limit — 10,000 units per 60 SECONDS — not a total cap.
+// So the scan CAN finish. It just has to stop asking for the length of the
+// cooldown and then resume, instead of throwing the rest of the board away.
+//
+// SW-20260908-ZS25F: the allowance had fully reset (its rejections start clean
+// and span 11 seconds), one pass exhausted it, and 250 of 255 wallets were
+// discarded in the seconds that followed. The operator got a report reading
+// "5/255 proved" three times in a row. Stopping the pass made the failure
+// honest; it did not make the scan work.
+//
+// ONE waiter for the whole run, never one per caller: every dispatcher that
+// arrives during a cooldown awaits the SAME promise, so eight parallel wallets
+// wait once between them rather than eight times in series.
+//
+// The wait is bounded so a run can never hang: at most QUOTA_MAX_WAITS pauses,
+// each capped by QUOTA_MAX_MS. Past that the pass stops and says so, which is
+// the old behaviour and still the right floor.
+const QUOTA_MAX_WAITS = 30;
+// The real bound is TIME, not a count: a full roster may legitimately need
+// several refills, and four was chosen for a test rather than for a scan.
+// Six minutes of waiting to convert 5/255 into 255/255 is worth it; an
+// unbounded wait never is.
+const QUOTA_MAX_TOTAL_WAIT_MS = 900000;
+
+function _quotaWait() {
+  // Already waiting? Join the existing one. This is what keeps eight callers
+  // from turning one 70-second cooldown into eight of them.
+  if (state._quotaWaiter) return state._quotaWaiter;
+  const until = n(state._quotaUntil);
+  const ms = Math.max(0, until - Date.now());
+  if (ms <= 0) return null;
+  if (n(state._quotaWaits) >= QUOTA_MAX_WAITS || ms > QUOTA_MAX_MS) return null;
+  if (n(state._quotaWaitedMs) + ms > QUOTA_MAX_TOTAL_WAIT_MS) return null;
+  state._quotaWaits = n(state._quotaWaits) + 1;
+  log('XRPL quota reached — waiting ' + Math.ceil(ms / 1000) + 's for the allowance to refill (' +
+      state._quotaWaits + '/' + QUOTA_MAX_WAITS + '), then continuing the scan.');
+  state._quotaWaiter = new Promise(res => setTimeout(() => {
+    try { state._quotaWaiter = null; } catch (_) {}
+    try {
+      state._quotaWaitedMs = n(state._quotaWaitedMs) + ms;
+      log('XRPL allowance refilled — resuming.');
+    } catch (_) {}
+    res();
+  }, ms + 250));   // a small margin, so we do not return the instant it expires
+  return state._quotaWaiter;
+}
+
+// What every dispatch loop calls. Returns true if the caller should STOP,
+// false if it may carry on (either the gate was open, or we waited it out).
+async function _quotaHold(name, done, total) {
+  if (state.xrplRecovery && state.xrplRecovery.exhausted) {
+    _quotaCutPass(name, done, total);
+    return true;
+  }
+  while (_quotaBlocked()) {
+    const w = _quotaWait();
+    if (!w) {
+      _quotaCutPass(name, done, total);
+      return true;
+    }
+    await w;
+  }
+  return false;
+}
+
+function _quotaCutPass(name, done, total) {
+  try {
+    state._quotaCutPasses = state._quotaCutPasses || [];
+    state._quotaCutPasses.push({ pass: name, completed: n(done), of: n(total) });
+  } catch (_) {}
+  log(name + ': stopped after ' + done + '/' + total + ' — XRPL quota cooldown outstanding.');
+}
+if (typeof window !== 'undefined') {
+  window._quotaHold    = _quotaHold;
+  window._isQuotaError = _isQuotaError;
+  window._quotaRetryMs = _quotaRetryMs;
+  window._noteQuota    = _noteQuota;
+  window._quotaBlocked = _quotaBlocked;
+  window._quotaNote    = _quotaNote;
+}
+
 function _linkDown() {
+  if (state._runAbortReason || (state.xrplRecovery && state.xrplRecovery.exhausted)) return true;
   if (_sockOpen(state._sock)) return false;
   return n(state._reconnectFails) >= 1 && !state._reconnecting;
 }
 
 async function _ensureSock(ws) {
-  if (_sockOpen(ws)) return ws;
+  if (state._runAbortReason) return null;
   if (_sockOpen(state._sock)) return state._sock;
+  if (_sockOpen(ws) && !ws._swRetired) return ws;
   // One shared reconnect for the whole scan: 8 parallel wallets hitting a dead
   // socket must not open 8 connections.
   if (state._reconnecting) return await state._reconnecting;
@@ -1007,7 +1199,8 @@ async function _ensureSock(ws) {
   state._reconnecting = (async () => {
     try {
       log('XRPL link dropped — reconnecting…');
-      const nw = await connectXRPL();
+      const nw = await connectXRPL({ avoidServer: state._xrplAvoidServer });
+      state._xrplAvoidServer = null;
       state._sock = nw;
       // TRANSPORT EPOCH. A reconnect may land on a DIFFERENT XRPL server —
       // 32-xrpl-resilience rotates Honeycluster / xrplcluster / s1 / s2 — and
@@ -1046,9 +1239,109 @@ async function _ensureSock(ws) {
   return await state._reconnecting;
 }
 
+// All main-scan RPCs share admission, including pagination and later offer
+// passes. Only a successful response resolves the caller's current read.
+const _xrplTraffic = { active: 0, limit: 8, gap: 25, next: 0, queue: [], timer: null, successes: 0 };
+function _xrplPump() {
+  if (_xrplTraffic.timer || !_xrplTraffic.queue.length || _xrplTraffic.active >= _xrplTraffic.limit) return;
+  const delay = Math.max(0, _xrplTraffic.next - Date.now());
+  _xrplTraffic.timer = setTimeout(() => {
+    _xrplTraffic.timer = null;
+    if (_xrplTraffic.active >= _xrplTraffic.limit) return;
+    const next = _xrplTraffic.queue.shift();
+    if (!next) return;
+    _xrplTraffic.active++;
+    _xrplTraffic.next = Date.now() + _xrplTraffic.gap;
+    next(() => { _xrplTraffic.active--; _xrplPump(); });
+    _xrplPump();
+  }, delay);
+}
+function _xrplSlot() {
+  return new Promise(resolve => { _xrplTraffic.queue.push(resolve); _xrplPump(); });
+}
+function _xrplRecoveryNote(event) {
+  const r = state.xrplRecovery || (state.xrplRecovery = { requests: 0, retries: 0, recovered: 0, rotations: 0, exhausted: false, events: [] });
+  if (event && r.events.length < 100) r.events.push(Object.assign({ at: new Date().toISOString() }, event));
+  return r;
+}
+function _xrplBackoff() {
+  _xrplTraffic.limit = Math.max(1, Math.floor(_xrplTraffic.limit / 2));
+  _xrplTraffic.gap = Math.min(1000, Math.max(100, _xrplTraffic.gap * 2));
+  _xrplTraffic.successes = 0;
+}
+async function _xrplRotate(sock, reason) {
+  // One replacement for a failed socket even when eight callers observed it.
+  if (sock && !sock._swRetired && (!state._sock || state._sock === sock)) {
+    sock._swRetired = true;
+    if (/^timeout /i.test(reason)) {
+      state._silentReplacements = n(state._silentReplacements) + 1;
+      if (state._silentReplacements >= 3) {
+        state._runAbortReason = 'XRPL_TRANSPORT_SILENT';
+        _xrplRecoveryNote().exhausted = true;
+      }
+    }
+    state._xrplAvoidServer = sock.url;
+    const r = _xrplRecoveryNote({ event: 'rotate', endpoint: sock.url, reason });
+    r.rotations++;
+    log('XRPL recovery: retiring ' + sock.url + ' (' + reason + ')');
+    try { sock.close(); } catch (_) {}
+  }
+  return _ensureSock(null);
+}
 async function xrpl(ws, cmd) {
-  const sock = await _ensureSock(ws);
-  if (!sock) throw new Error('XRPL link down');
+  const startEpoch = n(state._transportEpoch);
+  const stats = _xrplRecoveryNote();
+  let retries = 0;
+  while (true) {
+    if (stats.exhausted || await _quotaHold('RPC ' + cmd.command, 0, 1)) {
+      stats.exhausted = true;
+      throw new Error('XRPL_RECOVERY_EXHAUSTED: server cooldown exceeds the recovery budget');
+    }
+    const release = await _xrplSlot();
+    let sock;
+    try {
+      if (stats.exhausted) throw new Error('XRPL_RECOVERY_EXHAUSTED');
+      // A rejection can arrive while this caller is queued for admission.
+      if (_quotaBlocked()) continue;
+      sock = await _ensureSock(ws);
+      if (!sock) throw new Error('XRPL link down');
+      if (cmd.marker && n(state._transportEpoch) !== startEpoch) {
+        const changed = new Error('XRPL_TRANSPORT_CHANGED: restart pagination on the current socket');
+        changed.code = 'XRPL_TRANSPORT_CHANGED';
+        throw changed;
+      }
+      stats.requests++;
+      const result = await _xrplRequest(sock, cmd);
+      if (retries) { stats.recovered++; log('XRPL recovered ' + cmd.command + ' ' + (cmd.account || '') + ' after ' + retries + ' retry(s)'); }
+      if (++_xrplTraffic.successes >= 64) {
+        _xrplTraffic.successes = 0;
+        _xrplTraffic.limit = Math.min(8, _xrplTraffic.limit + 1);
+        _xrplTraffic.gap = Math.max(25, Math.round(_xrplTraffic.gap * 0.9));
+      }
+      return result;
+    } catch (e) {
+      const quota = _isQuotaError(e);
+      const transient = /timeout |XRPL link (closed|down)|WebSocket.*(closed|not open)/i.test(_xrplErrorText(e));
+      if (!quota && !transient) throw e;
+      if (++retries > 12) {
+        stats.exhausted = true;
+        _xrplRecoveryNote({ event: 'exhausted', command: cmd.command, account: cmd.account, reason: e.message });
+        throw new Error('XRPL_RECOVERY_EXHAUSTED: ' + e.message);
+      }
+      stats.retries++;
+      _xrplBackoff();
+      _xrplRecoveryNote({ event: 'retry', endpoint: sock && sock.url, epoch: n(state._transportEpoch), command: cmd.command, account: cmd.account, code: e.code || null, reason: e.message });
+      if (quota) {
+        _noteQuota(e, cmd.command);
+        // A responsive server refusing load is not a silent socket. Preserve
+        // it and respect its cooldown, including repeated refusals.
+      } else if (!/^timeout /i.test(e.message) || n(sock && sock._swTimeouts) >= 3) {
+        await _xrplRotate(sock, e.message);
+      }
+    } finally { release(); }
+  }
+}
+function _xrplRequest(sock, cmd) {
   return new Promise((res, rej) => {
     const id = Math.random().toString(36).slice(2);
     let settled = false;
@@ -1059,12 +1352,23 @@ async function xrpl(ws, cmd) {
       try { sock.removeEventListener('close', onClose); } catch (_) {}
       fn(arg);
     }
-    const timer = setTimeout(() => done(rej, new Error('timeout ' + cmd.command)), 15000);
+    const configuredTimeout = Number(window.SW_XRPL_RPC_TIMEOUT_MS);
+    const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 15000;
+    const timer = setTimeout(() => {
+      sock._swTimeouts = n(sock._swTimeouts) + 1;
+      done(rej, new Error('timeout ' + cmd.command));
+    }, timeoutMs);
     function onMsg(ev) {
       let j; try { j = JSON.parse(ev.data); } catch { return; }
       if (j.id !== id) return;
-      j.status === 'success' ? done(res, j.result)
-                             : done(rej, new Error(j.error_message || j.error || 'xrpl error'));
+      sock._swTimeouts = 0; // Explicit refusals are replies, not transport silence.
+      if (j.status === 'success' && !(j.result && j.result.error)) return done(res, j.result);
+      const body = j.result && j.result.error ? j.result : j;
+      const err = new Error(body.error_message || body.error || 'xrpl error');
+      err.code = body.error || null;
+      err.error_message = body.error_message || null;
+      err.retry_after_ms = body.retry_after_ms;
+      done(rej, err);
     }
     // Fail the instant the socket goes, instead of waiting out 15s for a reply
     // that can no longer arrive. This is what turns a 12-minute zombie scan into
@@ -1171,6 +1475,15 @@ async function scanWallets(ws) {
   state.runId = 'run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
   state.txScanCoverage = null;
   state.pack = null;
+  // Reset run evidence, but respect a server cooldown that has not expired.
+  state.xrplRecovery = null;
+  state._quotaHits = 0;
+  state._quotaFirstAt = null;
+  state._quotaWhere = null;
+  state._quotaCutPasses = [];
+  state._quotaWaits = 0;
+  state._quotaWaitedMs = 0;
+  state._quotaWaiter = null;
   try { for (const _w of (state.wallets || [])) { if (_w) delete _w.tx_scan; } } catch (_) {}
 
   // ── ONE VALIDATED ANCHOR FOR THIS ENTIRE RUN ────────────────────────────
@@ -1180,10 +1493,29 @@ async function scanWallets(ws) {
   // covers it. The reverse order routinely reports a range topping out one
   // below the anchor and refuses a healthy server. See 41-run-anchor.
   state.runAnchor = null;
+  state.anchorAttempts = [];
   state.effectiveWindow = null;
+  state.indexRun = null;
+  if (window.SW_EVIDENCE_INDEX) {
+    try {
+      log('Evidence index: establishing the server-owned run and roster…');
+      state.anchorAttempts.push({ source:'SERVER_VERIFIED_INDEX', at:new Date().toISOString() });
+      state.indexRun = await window.SW_EVIDENCE_INDEX.begin(getTxWindow(), getActiveWatchlist().map(w => w.address));
+      state.runId = state.indexRun.scan_id;
+      const ir = state.indexRun;
+      state.runAnchor = { ok:true, anchor_ledger:ir.anchor_ledger, anchor_close_ms:ir.anchor_close_ms,
+        anchor_close_iso:new Date(ir.anchor_close_ms).toISOString(), history_exhaustion_proof:null,
+        transport_epoch:0, source:'SERVER_VERIFIED_INDEX' };
+      log('Evidence index: run ' + ir.scan_id + ', roster ' + ir.accounts.length + ', anchor ' + ir.anchor_ledger);
+    } catch(e) {
+      state.anchorAttempts[state.anchorAttempts.length-1].error=e.message;
+      log('Evidence index unavailable — direct XRPL acquisition: ' + e.message);
+    }
+  }
   const RA = (typeof window !== 'undefined') && window.SW_RUN_ANCHOR;
-  if (RA) {
+  if (RA && !state.indexRun) {
     let ledgerRes = null, infoRes = null;
+    state.anchorAttempts.push({ source:'DIRECT_XRPL', at:new Date().toISOString(), transport_epoch:n(state._transportEpoch)||0 });
     try { ledgerRes = await xrpl(ws, { command: 'ledger', ledger_index: 'validated' }); }
     catch (e) { log('run anchor: ledger(validated) failed — ' + e.message); }
     if (ledgerRes) {
@@ -1247,7 +1579,7 @@ async function scanWallets(ws) {
   shadowSay('Phase 1: balance check ' + active.length + ' wallets...', 'BALANCES', 32);
   const rows = active.map(w => ({
     ...w, balance_xrp: 0, prev_balance_xrp: prev[w.address]?.balance_xrp ?? null,
-    delta_xrp: null, status: 'CHECKED', error: '', _needsTx: false
+    delta_xrp: null, status: 'PENDING', error: '', _needsTx: false
   }));
 
   async function balanceOne(row) {
@@ -1273,11 +1605,20 @@ async function scanWallets(ws) {
       row.status = 'CHECKED';
     } catch (e) {
       row.status = 'FAILED'; row.error = e.message;
+      if (n(state._balanceFailLogged) < 3) {
+        state._balanceFailLogged = n(state._balanceFailLogged) + 1;
+        elog('balance ' + row.address, e);
+      }
+      // The wallet still failed — that is real and stays recorded. But if the
+      // server said WHY, the whole run needs to know, or the next 31 chunks
+      // spend the cooldown rediscovering it one wallet at a time.
+      _noteQuota(e, 'the balance pass');
     }
   }
 
   let phase1Done = 0;
   for (let i = 0; i < rows.length; i += SCAN_PARALLEL) {
+    if (await _quotaHold('BALANCES', phase1Done, rows.length)) break;
     const chunk = rows.slice(i, i + SCAN_PARALLEL);
     await Promise.all(chunk.map(balanceOne));
     phase1Done = i + chunk.length;
@@ -1293,7 +1634,7 @@ async function scanWallets(ws) {
     try {
       if (window.XAI_SCAN_PROGRESS) {
         window.XAI_SCAN_PROGRESS.walletsTotal   = rows.length;
-        window.XAI_SCAN_PROGRESS.walletsChecked = phase1Done;
+        window.XAI_SCAN_PROGRESS.walletsChecked = rows.filter(r => r.status === 'CHECKED').length;
         window.XAI_SCAN_PROGRESS.phase          = 'WALLET_PROGRESS';
       }
       if (window.__swDashApplied && typeof window.renderDashboardV1Live === 'function') window.renderDashboardV1Live();
@@ -1359,12 +1700,14 @@ async function scanWallets(ws) {
       }
     } catch (e) {
       // Don't fail the wallet — Phase 1 balance is still valid. Just log.
+      _noteQuota(e, 'the transaction-window pass');
       log('tx-scan miss: ' + row.label + ' (' + e.message + ')');
     }
   }
 
   let phase2Done = 0;
   for (let i = 0; i < needTx.length; i += SCAN_PARALLEL) {
+    if (await _quotaHold('TX WINDOWS', phase2Done, needTx.length)) break;
     const chunk = needTx.slice(i, i + SCAN_PARALLEL);
     await Promise.all(chunk.map(txOne));
     phase2Done = i + chunk.length;
@@ -1373,7 +1716,7 @@ async function scanWallets(ws) {
     try {
       if (window.XAI_SCAN_PROGRESS) {
         window.XAI_SCAN_PROGRESS.walletsTotal   = rows.length;
-        window.XAI_SCAN_PROGRESS.walletsChecked = rows.length;   // balances all read
+        window.XAI_SCAN_PROGRESS.walletsChecked = rows.filter(r => r.status === 'CHECKED').length;
         window.XAI_SCAN_PROGRESS.phase          = 'LEDGER';
       }
       if (window.__swDashApplied && typeof window.renderDashboardV1Live === 'function') window.renderDashboardV1Live();
@@ -2024,14 +2367,15 @@ async function market() {
     state.rlusdSupplySources = { gateway: gwv, coingecko: cgv };
     // Prefer the authoritative on-chain figure; fall back to CoinGecko.
     const chosen = gwv || cgv;
+    state.rlusdSupply = chosen || null;
     if (chosen) {
       state.rlusdSupply = chosen;
       let tag;
-      if (gwv && cgv) tag = 'gateway+gecko ' + (Math.abs(gwv - cgv) / Math.max(gwv, cgv) < 0.02 ? 'agree' : 'diverge');
-      else            tag = gwv ? 'gateway only' : 'gecko only';
+      if (gwv && cgv) tag = 'XRPL issuer obligations; CoinGecko aggregate also available';
+      else            tag = gwv ? 'XRPL issuer obligations only' : 'CoinGecko aggregate only';
       notes.push('✓ RLUSD supply (' + tag + ')');
     } else notes.push('RLUSD supply empty (both sources failed)');
-  } catch (e) { notes.push('RLUSD supply error'); }
+  } catch (e) { state.rlusdSupply = null; state.rlusdSupplySources = {}; notes.push('RLUSD supply error'); }
   // 9. New funded XRPL accounts per day (XRPScan daily metrics, no key).
   try {
     const dm = await fetchXrplDailyMetrics();
@@ -2883,10 +3227,16 @@ function riskBand(s) {
   return 'GREEN / QUIET';
 }
 function publicRiskLabel(p) {
+  const coverage = p && p.tx_scan_coverage;
   // v3.18: never silently downgrade. Show internal label + score; append
   // softer public framing only as a secondary qualifier.
   const r = (p && p.risk_score) || state.riskScore || {};
   const s = n(r.score);
+  const incomplete = p && (!coverage || coverage.full_window_complete !== true);
+  if (incomplete && s < 25) {
+    return coverage ? 'NOT SCORED — ' + n(coverage.complete_wallets) + '/' + n(coverage.target_wallets) + ' transaction windows proved' : 'NOT SCORED — transaction coverage not measured';
+  }
+  const coverageNote = incomplete ? ' [incomplete transaction coverage]' : '';
   const internal = r.label || (
     s >= 75 ? 'BLACK / EXTREME' :
     s >= 50 ? 'ORANGE / ACTIVE' :
@@ -2898,9 +3248,9 @@ function publicRiskLabel(p) {
   // If internal and softer are different, surface both so users see the
   // real classifier output AND the public-friendly framing.
   if (internal && internal !== softer) {
-    return s + '/100 — ' + internal + ' (' + softer + ')';
+    return s + '/100 — ' + internal + ' (' + softer + ')' + coverageNote;
   }
-  return s + '/100 — ' + (internal || softer);
+  return s + '/100 — ' + (internal || softer) + coverageNote;
 }
 function buildRiskScore(pack) {
   pack = pack || {};
@@ -3332,6 +3682,72 @@ function scanIntegrity(pack) {
 // This is the same failure as the coverage bug: absence of data reported as a
 // finding of zero. And it only happens on a fresh profile — which is every
 // stranger handed the /report link, and never the operator's own machine.
+// ── A DELTA NEEDS TWO READINGS ──────────────────────────────────────────────
+// SW-20260907-2GAKH reported "Ripple gained +1.33B XRP", "Bithumb gained
+// +1.84B XRP" and "Highest active accumulator: Bithumb (+1.84B XRP this
+// window)" in the SAME report whose summary said "the tracked wallet board has
+// no prior balances on this device yet, so net flow is not measurable on this
+// run". Both statements came from one scan. Only the second was true.
+//
+// The cause is `n()`: it maps null to 0, so the narrative sections' own
+// recomputation
+//
+//     delta = n(w.balance_xrp) - n(w.prev_balance_xrp)
+//
+// silently became `balance - 0` for every wallet with no stored prior reading,
+// rendering each wallet's ENTIRE HOLDING as this window's movement. The
+// aggregate escaped it only by accident: totalDeltaXRP sums w.delta_xrp, which
+// balanceOne correctly leaves null, so NET DELTA read 0 while the per-wallet
+// lines read in the billions.
+//
+// A first reading is not a gain. It is the baseline the NEXT scan will measure
+// against. So an unmeasurable wallet gets null, never a number — and null is
+// not sortable, rankable, or reportable as movement.
+function walletDelta(w) {
+  if (!w) return null;
+  const prev = w.prev_balance_xrp;
+  if (prev === null || prev === undefined || prev === '') return null;
+  const cur = w.balance_xrp;
+  if (cur === null || cur === undefined || cur === '') return null;
+  if (!Number.isFinite(Number(prev)) || !Number.isFinite(Number(cur))) return null;
+  return Number(cur) - Number(prev);
+}
+// Wallets whose movement this run can actually be measured. Everything that
+// ranks, sorts or names a mover must read from here; a group that is entirely
+// unmeasurable is NOT a quiet group, and must not be described as flat.
+function measuredMovers(list) {
+  return (Array.isArray(list) ? list : [])
+    .map(w => (w && Object.prototype.hasOwnProperty.call(w, 'delta'))
+                ? w
+                : Object.assign({}, w, { delta: walletDelta(w) }))
+    .filter(w => w && w.delta !== null && w.delta !== undefined);
+}
+// True when this device holds no prior reading for ANY checked wallet, so the
+// whole board's movement is unmeasurable rather than zero.
+function _dbNoBaseline(pack) {
+  try { return deltaBaseline(pack || {}).none === true; } catch (_) { return false; }
+}
+// What a group of wallets can honestly be said to have done. Three outcomes,
+// and collapsing any two of them is how a first scan came to read as a
+// billion-XRP accumulation event.
+function groupMovement(walletsInGroup) {
+  const all = Array.isArray(walletsInGroup) ? walletsInGroup : [];
+  const measured = measuredMovers(all);
+  return {
+    total: all.length,
+    measured: measured.length,
+    movers: measured,
+    maxAbs: measured.length ? Math.max(...measured.map(w => Math.abs(w.delta))) : 0,
+    // Nothing to compare against: NOT flat, NOT quiet, NOT a shock.
+    unmeasurable: all.length > 0 && measured.length === 0
+  };
+}
+if (typeof window !== 'undefined') {
+  window.walletDelta = walletDelta;
+  window.measuredMovers = measuredMovers;
+  window.groupMovement = groupMovement;
+}
+
 function deltaBaseline(pack) {
   const p = pack || {};
   const ws = (Array.isArray(p.wallet_results) && p.wallet_results.length) ? p.wallet_results
@@ -3425,6 +3841,14 @@ function buildPack(v) {
     // array in every export.
     wallet_results: state.wallets, tx_24h_count: state.txs.length,
     total_tx_xrp: totalTxXRP(), active_wallets: activeWalletCount(),
+    // A pass that stopped early is not a pass that found nothing. Without this
+    // in the pack the report cannot tell the difference, and a quota-shortened
+    // scan reads exactly like a quiet one.
+    xrpl_quota: _quotaNote(),
+    xrpl_recovery: state.xrplRecovery || null,
+    anchor_attempts: state.anchorAttempts || [],
+    phase_timings: state.phaseTimings || [],
+    evidence_index: state.indexRun && window.SW_EVIDENCE_INDEX ? window.SW_EVIDENCE_INDEX.metrics() : null,
     shadow_volume_xrp: shadowVolumeXRP(), total_balance_delta_xrp: totalDeltaXRP(),
     // The measured delta with the escrow-attributable part removed, and the
     // adjustment itself so the two reconcile in the debug pack.
@@ -3808,7 +4232,7 @@ function buildXRPMainReport(p) {
   results.forEach(w => {
     const grp = getWalletGroup(w.label || w.address);
     if (!buckets[grp]) buckets[grp] = [];
-    buckets[grp].push({ ...w, delta: n(w.balance_xrp) - n(w.prev_balance_xrp) });
+    buckets[grp].push({ ...w, delta: walletDelta(w) });
   });
 
   const netDelta = p.total_balance_delta_xrp || 0;
@@ -3965,13 +4389,19 @@ function buildXRPMainReport(p) {
         r.push(`• Top 10 watched share: ${fmt(hd.combined_top_10_xrp, 0)} XRP (${hd.combined_top_10_pct.toFixed(3)}% of 100B supply)`);
       }
       // Highest active accumulator: top non-dormant wallet with positive delta
-      const accumulators = (p.wallet_results || [])
-        .filter(w => w.status === 'CHECKED' && n(w.balance_xrp) - n(w.prev_balance_xrp) > 100_000)
-        .sort((a, b) => (n(b.balance_xrp) - n(b.prev_balance_xrp)) - (n(a.balance_xrp) - n(a.prev_balance_xrp)));
+      // An "accumulator" is a wallet observed to have GAINED. Without a prior
+      // reading there is nothing to have gained against, and ranking on
+      // balance-minus-zero simply crowns the largest holder — which is how
+      // Bithumb was named "highest active accumulator (+1.84B XRP this window)"
+      // on a device holding no baseline at all.
+      const accumulators = measuredMovers((p.wallet_results || []).filter(w => w.status === 'CHECKED'))
+        .filter(w => w.delta > 100_000)
+        .sort((a, b) => b.delta - a.delta);
       if (accumulators.length) {
         const top = accumulators[0];
-        const gained = n(top.balance_xrp) - n(top.prev_balance_xrp);
-        r.push(`• Highest active accumulator: ${_swWho(top.address, top.label, { bare: true })} (+${fmt(gained, 0)} XRP this window)`);
+        r.push(`• Highest active accumulator: ${_swWho(top.address, top.label, { bare: true })} (+${fmt(top.delta, 0)} XRP this window)`);
+      } else if (_dbNoBaseline(p)) {
+        r.push('• Highest active accumulator: not measurable — no prior balances stored on this device, so no wallet can be shown to have gained yet.');
       }
       // Strongest behavioral cluster
       if (hasCluster) {
@@ -8629,7 +9059,7 @@ function _safeReportId() {
       try {
         var el = document.getElementById('xaiTechStrip');
         if (!el) return;
-        var wChecked = (typeof state !== 'undefined' && state.pack && state.pack.wallets_checked) || 0;
+        var wChecked = state.scanning && Array.isArray(state.wallets) ? state.wallets.filter(w=>w.status==='CHECKED').length : ((state.pack && state.pack.wallets_checked) || 0);
         var wTotal   = (typeof KNOWN !== 'undefined') ? Object.keys(KNOWN).length : 0;
         var qSize    = window.SHADOW_BLOOM_QUEUE ? window.SHADOW_BLOOM_QUEUE.size() : 0;
         var helpers  = 0; // GO 2 will populate
@@ -8718,7 +9148,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     try {
       var el = document.getElementById('xaiStatusStrip');
       if (!el) return;
-      var wChecked = (typeof state !== 'undefined' && state.pack && state.pack.wallets_checked) || 0;
+      var wChecked = state.scanning && Array.isArray(state.wallets) ? state.wallets.filter(w=>w.status==='CHECKED').length : ((state.pack && state.pack.wallets_checked) || 0);
       var wTotal   = (typeof KNOWN !== 'undefined') ? Object.keys(KNOWN).length : 0;
       var qSize    = window.SHADOW_BLOOM_QUEUE ? window.SHADOW_BLOOM_QUEUE.size() : 0;
       var helpers  = (typeof _xaiHelpersCount === 'function') ? _xaiHelpersCount()
@@ -9350,6 +9780,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     el = document.createElement('div');
     el.id = 'morningReportFloat';
     el.className = 'morning-report-float mrf-hidden';
+    el.setAttribute('role','dialog');
+    el.setAttribute('aria-label','Morning report');
     el.innerHTML =
       '<div class="mrf-header" id="mrfHeader">' +
         '<button class="mrf-ico" id="mrfMenuBtn" type="button" title="Menu">\u2630</button>' +
@@ -9369,7 +9801,13 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         '<button class="mrf-menu-item" id="mrfDlWalletsBtn"     type="button">\u2B07 Download wallet suggestions</button>' +
         '<button class="mrf-menu-item" id="mrfDownloadTotalBtn" type="button">\u2B07 Download total report</button>' +
       '</div>' +
-      '<div id="mrfBody"    class="mrf-body"></div>' +
+      '<nav class="sw-desktop-reader-tools" aria-label="Report actions">' +
+        '<button type="button" data-reader-action="copy">Copy report</button>' +
+        '<button type="button" data-reader-action="download">Download</button>' +
+        '<button type="button" data-reader-action="full">Fill screen</button>' +
+        '<button type="button" data-reader-action="center">Center window</button>' +
+        '<button type="button" data-reader-action="close">Close report</button></nav>' +
+      '<div id="mrfBody"    class="mrf-body" tabindex="0" aria-label="Report text"></div>' +
       '<div id="mrfSources" class="mrf-sources"></div>';
     document.body.appendChild(el);
     _mrfDom = el;
@@ -9389,6 +9827,19 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     if (btnMenu)  btnMenu.onclick  = function(e) { if (menu) menu.classList.toggle('mrf-menu-hidden'); if (e) e.stopPropagation(); };
     if (btnDl)    btnDl.onclick     = function() { MORNING_REPORT_FLOAT.download(); };
     if (btnClose) btnClose.onclick  = function() { MORNING_REPORT_FLOAT.hide(); };
+    _mrfDom.querySelectorAll('[data-reader-action]').forEach(function(button){
+      button.onclick=function(){
+        var action=button.dataset.readerAction;
+        if(action==='copy')MORNING_REPORT_FLOAT.copy();
+        if(action==='download')MORNING_REPORT_FLOAT.download();
+        if(action==='full')MORNING_REPORT_FLOAT.toggleFull();
+        if(action==='close')MORNING_REPORT_FLOAT.hide();
+        if(action==='center'){
+          _mrfDom.style.left='';_mrfDom.style.top='';_mrfDom.style.transform='';
+          _mrfDom.style.width='';_mrfDom.style.height='';
+        }
+      };
+    });
     item('mrfFullBtn',          function() { MORNING_REPORT_FLOAT.toggleFull(); });
     item('mrfCollapseBtn',      function() { MORNING_REPORT_FLOAT.collapse(); });
     item('mrfResizeBtn',        function() { MORNING_REPORT_FLOAT.toggleSize(); });
@@ -9411,6 +9862,12 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         if (menu && !menu.classList.contains('mrf-menu-hidden') &&
             !menu.contains(ev.target) && ev.target !== btnMenu &&
             !(btnMenu && btnMenu.contains(ev.target))) closeMenu();
+      });
+      document.addEventListener('keydown',function(ev){
+        if(ev.key!=='Escape'||!_mrfState.open)return;
+        if(menu&&!menu.classList.contains('mrf-menu-hidden'))closeMenu();
+        else MORNING_REPORT_FLOAT.hide();
+        ev.preventDefault();
       });
     }
     _wireMrfDrag();
@@ -9438,8 +9895,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     var move = function(e){
       if (!dragging) return;
       var p = pt(e);
-      _mrfDom.style.left = (p.clientX - ox) + 'px';
-      _mrfDom.style.top  = (p.clientY - oy) + 'px';
+      _mrfDom.style.left = Math.max(0,Math.min(window.innerWidth-_mrfDom.offsetWidth,p.clientX-ox)) + 'px';
+      _mrfDom.style.top  = Math.max(0,Math.min(window.innerHeight-64,p.clientY-oy)) + 'px';
       if (e.cancelable) e.preventDefault();
     };
     var up = function(){ dragging = false; header.style.cursor = 'grab'; };
@@ -9503,6 +9960,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     show: function(reportText, sources, pack) {
       try {
         _ensureMrfDom();
+        if(!_mrfState.open)_mrfState.opener=document.activeElement;
+        ['left','top','transform','width','height'].forEach(function(key){_mrfDom.style[key]='';});
         _mrfState.lastReport  = String(reportText || '');
         _mrfState.lastSources = Array.isArray(sources) ? sources.slice() : [];
         _mrfState.lastPack    = pack || null;
@@ -9515,7 +9974,11 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         try { _renderBody(reportText); _renderSources(sources); } catch (_) {}
       } catch (_) {}
     },
-    hide:     function() { if (_mrfDom) { _mrfDom.classList.add('mrf-hidden'); } _mrfState.open = false; },
+    hide:     function() {
+      if (_mrfDom) _mrfDom.classList.add('mrf-hidden');
+      _mrfState.open = false;
+      try { if(_mrfState.opener&&_mrfState.opener.isConnected)_mrfState.opener.focus(); }catch(_){}
+    },
     collapse: function() {
       _ensureMrfDom();
       _mrfState.collapsed = !_mrfState.collapsed;
@@ -9761,7 +10224,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         if (_num(p.xrp_volume_24h))          row('24H VOLUME',_usd(p.xrp_volume_24h));
         if (_num(p.xrpl_dex_volume_24h_usd)) row('NATIVE DEX',_usd(p.xrpl_dex_volume_24h_usd));
         if (_num(p.xrpl_evm_tvl_usd))        row('EVM TVL',_usd(p.xrpl_evm_tvl_usd));
-        if (_num(p.rlusd_supply))            row('RLUSD SUPPLY',_xrp(p.rlusd_supply)+' tokens');
+        if (_num(p.rlusd_supply))            row(rlusdSupplyLabel(p,false),_xrp(p.rlusd_supply)+' tokens');
         var watched=_num(p.watchlist_total)||_num(p.wallets_checked);
         if (watched)                         row('WALLETS', watched+(_num(p.wallets_checked)?(' ('+_num(p.wallets_checked)+' scanned)'):''));
         var lt=(p.large_transfers||[]).length; if(lt) row('LARGE XFERS', lt);
@@ -10097,6 +10560,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     REPORTING:        function() { return 'I\u2019m building the Coffee \u0026 Crypto brief now.'; },
     SEALED:           function() { return 'Morning Report sealed. I\u2019m putting it on screen now.'; },
     DONE:             function() { return 'Scan complete. You can read, copy, or download the report.'; },
+    INCOMPLETE:       function() { return 'The report is ready, with incomplete acquisition. Review its coverage and errors.'; },
     ERROR_WAIT:       function() { return 'Node is dragging. I\u2019m still working \u2014 waiting on XRPL response.'; },
     FAILED:           function() { return 'Scan hit an error. I saved the details for review.'; }
   };
@@ -10118,6 +10582,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     REPORTING:       84,
     SEALED:          94,
     DONE:            100,
+    INCOMPLETE:      0,
     ERROR_WAIT:      -1,   // hold previous pct
     FAILED:          100   // full bar with error styling
   };
@@ -10137,6 +10602,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     REPORTING:       'scanning',
     SEALED:          'sealed',
     DONE:            'sealed',
+    INCOMPLETE:      'error',
     ERROR_WAIT:      'warning',
     FAILED:          'error'
   };
@@ -10155,6 +10621,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     REPORTING:       'NEXT: Seal evidence',
     SEALED:          'NEXT: Open Morning Report',
     DONE:            'NEXT: Read, copy, or download the report',
+    INCOMPLETE:      'NEXT: Review coverage and retry the scan',
     ERROR_WAIT:      'NEXT: Waiting for ledger response',
     FAILED:          'NEXT: Review error log'
   };
@@ -10191,7 +10658,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         pct = Math.round(15 + (walletPct * 30)); // 15..45%
       }
       _lastRenderedPct = pct;
-      pctEl.textContent = pct + '%';
+      pctEl.textContent = phase === 'INCOMPLETE' ? '—' : pct + '%';
       fillEl.style.width = pct + '%';
       if (wrap) wrap.setAttribute('data-mission-state', phase);
       if (nextEl) nextEl.textContent = NEXT_ACTION_LABEL[phase] || ('NEXT: ' + (XAI_SCAN_PROGRESS.nextAction || ''));
@@ -10366,6 +10833,9 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
   // ─── safeXaiProgress helper ────────────────────────────────
   function safeXaiProgress(phase, st) {
     try {
+      if (/^(SEALED|DONE)$/.test(phase) && typeof state !== 'undefined' && state.pack &&
+          state.pack.tx_scan_coverage && (state.pack.tx_scan_coverage.full_window_complete !== true ||
+          state.pack.wallets_checked !== state.pack.watchlist_total || state.pack.wallets_failed)) phase = 'INCOMPLETE';
       if (window.XAI_PROGRESS_NARRATOR && typeof window.XAI_PROGRESS_NARRATOR.updateProgress === 'function') {
         var payload = { phase: phase };
         if (st) Object.keys(st).forEach(function(k) { payload[k] = st[k]; });
@@ -11450,11 +11920,12 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     _renderVisuals: function(phase) {
       try {
         var pct = Math.round(this.visualPct);
+        if (phase === 'INCOMPLETE') pct = 0;
         // Update legacy mission strip
         var fillEl = document.getElementById('xaiMissionFill');
         var pctEl  = document.getElementById('xaiMissionPct');
         if (fillEl) fillEl.style.width = pct + '%';
-        if (pctEl)  pctEl.textContent  = pct + '%';
+        if (pctEl)  pctEl.textContent  = phase === 'INCOMPLETE' ? '—' : pct + '%';
         // Update new quantum gauge
         var gauge   = document.getElementById('xaiQuantumGauge');
         var gPct    = document.getElementById('xaiGaugePct');
@@ -11466,7 +11937,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
           var isActive = ['INIT','LEDGER','WALLET_PROGRESS','BALANCE','FLOW','NEWS','NEWS_STRONG','NEWS_WEAK','DISCOVERY','REPORTING','SEALED','ERROR_WAIT'].indexOf(phase) >= 0;
           gauge.setAttribute('data-active', isActive ? 'true' : 'false');
         }
-        if (gPct)   gPct.textContent   = pct + '%';
+        if (gPct)   gPct.textContent   = phase === 'INCOMPLETE' ? '—' : pct + '%';
         if (gPhase) gPhase.textContent = phase === 'WALLET_PROGRESS'
           ? ('WALLETS ' + (window.XAI_SCAN_PROGRESS.walletsChecked || 0) + '/' + (window.XAI_SCAN_PROGRESS.walletsTotal || 0))
           : phase;
@@ -14065,7 +14536,10 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       var _orig = window.buildMorningStorySources;
       window.buildMorningStorySources = function(pack) {
         var srcs = _orig.apply(this, arguments) || [];
-        try { return MORNING_NEWS_GOVERNOR.dedupeSources(srcs); } catch (_) { return srcs; }
+        try {
+          if (!MORNING_NEWS_GOVERNOR.publicSourcesCleared(pack)) return [];
+          return MORNING_NEWS_GOVERNOR.dedupeSources(MORNING_NEWS_GOVERNOR.filterClearedSources(srcs, pack)).slice(0,3);
+        } catch (_) { return []; }
       };
       window.buildMorningStorySources._governorWrapped = true;
       window.buildMorningStorySources._original = _orig;
@@ -14644,6 +15118,29 @@ function buildExecutiveSummary(p, netDelta, news) {
 // Build per-group Shadow Watch bullets with 🟢🟡🔴 indicator
 function shadowWatchSection(buckets, p) {
   const lines = [];
+  // ── MEASURABILITY BEFORE MOVEMENT ────────────────────────────────────────
+  // Every bullet below describes MOVEMENT, and movement needs two readings.
+  // A wallet with no stored prior balance can be reported as neither a mover
+  // NOR as quiet: "Founder Wallets quiet. Historically rare to move.",
+  // "Dormant Whales: still dormant." and "Binance cold nodes flat" are all
+  // positive claims about a comparison that never happened.
+  //
+  // So unmeasurable wallets are removed from the groups rather than defaulted
+  // to zero, and the count is stated at the end. A group that is entirely
+  // unmeasurable produces no bullet at all — omission is honest; "quiet" is
+  // not. On SW-20260907-2GAKH the opposite default made every wallet's whole
+  // holding look like this window's movement.
+  const _unmeasured = [];
+  const _measurableBuckets = {};
+  Object.keys(buckets || {}).forEach(k => {
+    const keep = [];
+    (buckets[k] || []).forEach(w => {
+      if (w && w.delta !== null && w.delta !== undefined) keep.push(w);
+      else if (w) _unmeasured.push(w);
+    });
+    _measurableBuckets[k] = keep;
+  });
+  buckets = _measurableBuckets;
   // Helper: classify a group's biggest move
   function indicator(maxAbsDelta) {
     if (maxAbsDelta >= 5_000_000) return '🔴';
@@ -14741,7 +15238,7 @@ function shadowWatchSection(buckets, p) {
     } else {
       const movers = topMoversList(msig, 3);
       const arrow = totalDelta > 0 ? '+' : '';
-      lines.push(`• ${indicator(maxAbs)} Linked Multi-sig Cluster: ${movers.join('; ')}. Cluster net ${arrow}${fmt(totalDelta, 0)} XRP — investigate as ONE entity, not three.`);
+      lines.push(`• ${indicator(maxAbs)} Linked Multi-sig Cluster: ${movers.join('; ')}. Cluster net ${arrow}${fmt(totalDelta, 0)} XRP. Shared multisignature pattern; common ownership is unverified.`);
     }
   }
   // v3.10: 6c. Market Makers — high-frequency, treat differently
@@ -14777,6 +15274,12 @@ function shadowWatchSection(buckets, p) {
       lines.push(`• 🔴 Dormant Whales: ${movers.join('; ')}. HIGH-SIGNIFICANCE awakening.`);
     }
   }
+  // The omission, stated. Without this line a first scan would simply show
+  // fewer bullets, and a reader could not tell a quiet board from an
+  // unmeasured one.
+  if (_unmeasured.length) {
+    lines.push(`• ⚪ Movement not measurable for ${_unmeasured.length} wallet${_unmeasured.length === 1 ? '' : 's'}: no prior balance stored on this device, so no gain, loss or flat reading can be claimed for ${_unmeasured.length === 1 ? 'it' : 'them'} this run. Balances were read; a second scan measures against them.`);
+  }
   // 9. Failed / invalid — yellow if any
   const failed = (p.wallets_failed || 0);
   const invalid = (p.wallets_invalid || 0);
@@ -14807,12 +15310,20 @@ function shadowWatchSection(buckets, p) {
 // Anomaly detection — picks the biggest non-trivial delta and writes Event + Evidence
 function anomalySection(buckets, p, netDelta) {
   const results = p.wallet_results || [];
-  const sorted = [...results]
-    .map(w => ({ ...w, delta: n(w.balance_xrp) - n(w.prev_balance_xrp) }))
+  const sorted = measuredMovers(results)
     .filter(w => Math.abs(w.delta) >= 100_000)
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
 
   if (!sorted.length) {
+    // "Below the threshold" and "no threshold could be applied" are different
+    // findings. Reporting baseline drift over wallets that were never measured
+    // asserts a comparison that did not happen.
+    if (_dbNoBaseline(p)) {
+      return [
+        '• Event: Balance anomaly detection did not run this window.',
+        '• Evidence: No prior balances stored on this device, so no wallet delta could be computed. This is the first scan here; the next one can measure against it.'
+      ];
+    }
     return [
       '• Event: No statistically significant balance anomaly this window.',
       '• Evidence: Largest delta below the 100k XRP threshold. Board is in baseline drift.'
@@ -14942,8 +15453,7 @@ function missionDebrief(buckets, p, netDelta, news) {
     parts.push(`and the wallet board was relatively quiet.`);
   }
   // Largest mover
-  const results = (p.wallet_results || [])
-    .map(w => ({ ...w, delta: n(w.balance_xrp) - n(w.prev_balance_xrp) }))
+  const results = measuredMovers(p.wallet_results || [])
     .filter(w => Math.abs(w.delta) > 100_000)
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
   if (results.length) {
@@ -16426,6 +16936,30 @@ function _patchBuildBundleForV321() {
 // This is the single renderer. It produces the text once, stores it once, and
 // every export reads it. It is deliberately NOT a synchroniser between two
 // renderers — there is only one, and the stored value IS the canonical text.
+function finalizeReportPresentation(text, pack, structured) {
+  // A late legacy renderer can replace an installed wrapper. Apply the pure,
+  // idempotent presentation steps at the seal boundary, before caching/export.
+  let out = String(text || '');
+  const escrow = window.SW_PUBLIC_ESCROW_STORY_20260816;
+  const layers = window.SW_PUBLIC_REPORT_LAYERS_20260816;
+  const terms = window.SW_ESCROW_TERMINOLOGY_20260819;
+  if (escrow) out = structured ? escrow.injectStructured(out) : escrow.inject(out);
+  if (layers) out = structured ? layers.enrichStructured(out, pack) : layers.enrichStory(out, pack);
+  if (terms) out = terms.clarify(out);
+  return out;
+}
+
+function rlusdSupplyLabel(pack, compact) {
+  const p = pack || {};
+  const selected = n(p.rlusd_supply);
+  if (selected > 0 && selected === n(p.rlusd_supply_gateway))
+    return compact ? 'XRPL issued' : 'RLUSD on XRPL (issuer obligations)';
+  if (selected > 0 && selected === n(p.rlusd_supply_coingecko))
+    return compact ? 'CoinGecko aggregate' : 'RLUSD supply (CoinGecko aggregate)';
+  return compact ? 'source unavailable' : 'RLUSD supply (source unavailable)';
+}
+window.rlusdSupplyLabel = rlusdSupplyLabel;
+
 function canonicalMorningStory(pack, opts) {
   opts = opts || {};
   try {
@@ -16441,7 +16975,7 @@ function canonicalMorningStory(pack, opts) {
     const fn = (typeof window !== 'undefined' && typeof window.buildMorningStoryText === 'function')
       ? window.buildMorningStoryText
       : ((typeof buildMorningStoryText === 'function') ? buildMorningStoryText : null);
-    if (fn) t = fn(p) || '';
+    if (fn) t = finalizeReportPresentation(fn(p) || '', p, false);
   } catch (_) {}
   // The daily gate is part of PRODUCING the canonical text, not a per-consumer
   // step. Applied here it applies once; applied by one caller only, the popup
@@ -16469,11 +17003,11 @@ function canonicalMorningStory(pack, opts) {
 // The governor decides whether news may be cited at all; this only formats what
 // it cleared. Returns '' when nothing is cleared, so a quiet news day produces
 // no block rather than an empty heading.
-function _canonicalNewsUsedBlock(pack) {
+function clearedMorningNewsSources(pack) {
   try {
     const G = (typeof window !== 'undefined') && window.MORNING_NEWS_GOVERNOR;
-    if (!G || typeof G.publicSourcesCleared !== 'function') return '';
-    if (!G.publicSourcesCleared(pack)) return '';
+    if (!G || typeof G.publicSourcesCleared !== 'function') return [];
+    if (!G.publicSourcesCleared(pack)) return [];
     // SOURCES COME FROM THE PACK, NOT FROM THE DRAWER.
     //
     // This block used to read MORNING_REPORT_FLOAT._copyLastSources, which is
@@ -16509,11 +17043,18 @@ function _canonicalNewsUsedBlock(pack) {
       else if (typeof rankNewsItems === 'function' && typeof getNewsSources === 'function')
         sources = rankNewsItems(getNewsSources(pack)).slice(0, 8);
     } catch (_) {}
-    if (!Array.isArray(sources) || !sources.length) return '';
+    if (!Array.isArray(sources) || !sources.length) return [];
     const clean = (typeof G.dedupeSources === 'function' && typeof G.filterClearedSources === 'function')
       ? G.dedupeSources(G.filterClearedSources(sources, pack))
       : sources;
-    if (!clean || !clean.length) return '';
+    return Array.isArray(clean) ? clean.slice(0,3) : [];
+  } catch (_) { return []; }
+}
+if(typeof window!=='undefined')window.clearedMorningNewsSources=clearedMorningNewsSources;
+function _canonicalNewsUsedBlock(pack) {
+  try {
+    const clean=clearedMorningNewsSources(pack);
+    if (!clean.length) return '';
     let b = '\n\nNEWS USED:\n';
     clean.slice(0, 10).forEach(function (s, i) {
       b += '[' + (i + 1) + '] ' + (s.source || s.name || '?') +
@@ -18070,7 +18611,7 @@ function buildMasterPaste(p, report, bundle, seal) {
   const prayer = $('prayerBox')?.textContent || '';
   const mainReport = (function(){ try { return buildXRPMainReport(p); } catch { return 'main report unavailable'; }})();
   return `=== XRPMAN SHADOW WATCH // MASTER PACKAGE ${APP_VERSION} ===
-INSTRUCTION_FOR_CHATGPT: Build the final Shadow Watch report from the evidence below. Treat ledger data as scanned evidence. Treat news/macro as operator-supplied context unless independently verified. Failed/invalid wallets are internal only.
+INSTRUCTION_FOR_CHATGPT: Build the final Shadow Watch report from the evidence below. Treat ledger data as scanned evidence. Treat news/macro as operator-supplied context unless independently verified. Disclose incomplete acquisition and distinguish balance reads from proved transaction windows. Never turn missing evidence into an all-clear.
 
 === XRP MAIN REPORT (consolidated, human-readable) ===
 ${mainReport}
@@ -18341,8 +18882,26 @@ function downloadTextFile(filename, text) {
     a.download = filename;
     document.body.appendChild(a);
     a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    // Keep a usable file link when an embedded browser declines the automatic
+    // download. Preparing a blob cannot tell us whether the browser saved it.
+    const previous = document.getElementById('swPreparedDownload');
+    if (previous && typeof previous.dismissDownload === 'function') previous.dismissDownload();
+    const notice = document.createElement('div');
+    notice.id = 'swPreparedDownload';
+    notice.setAttribute('role', 'status');
+    notice.style.cssText = 'position:fixed;left:12px;right:12px;bottom:56px;max-width:680px;margin:auto;z-index:100005;padding:12px;background:#061b10;color:#c9f7d5;border:1px solid #3d9160;border-radius:8px;font:13px/1.5 sans-serif;overflow-wrap:anywhere;box-shadow:0 4px 24px #0009';
+    const label = document.createElement('div');
+    label.textContent = 'File ready. If the download did not start, select the file below.';
+    a.textContent = filename;
+    a.style.cssText = 'color:#8cffb0;display:block;margin-top:6px;padding-right:30px';
+    const close = document.createElement('button');
+    close.type = 'button';close.textContent = '×';close.setAttribute('aria-label', 'Dismiss prepared download');
+    close.style.cssText = 'position:absolute;right:8px;top:5px;border:0;background:transparent;color:#c9f7d5;font-size:24px;cursor:pointer';
+    let cleanupTimer;
+    notice.dismissDownload = () => { clearTimeout(cleanupTimer); notice.remove(); URL.revokeObjectURL(url); };
+    close.onclick = notice.dismissDownload;
+    notice.append(label, a, close);document.body.appendChild(notice);
+    cleanupTimer = setTimeout(notice.dismissDownload, 300000);
     return true;
   } catch (e) {
     elog('downloadTextFile', e);
@@ -19052,6 +19611,10 @@ async function scanOffers(ws) {
       // error log. The fail-fast added yesterday is what makes them arrive
       // instantly; this is what stops them arriving at all.
       if (/link down|link closed/i.test(e && e.message || '')) throw e;
+      // A quota rejection was indistinguishable from "no offers here" — caught,
+      // logged, return 0, loop on. Record it once for the whole run instead, so
+      // the next chunk's gate check stops the walk.
+      if (_noteQuota(e, 'the offer sweep')) return 0;
       elog('scanOffers ' + w.label, e);
       return 0;
     }
@@ -19063,6 +19626,7 @@ async function scanOffers(ws) {
       log('OFFERS: stopped after ' + scanned + '/' + wallets.length + ' — XRPL link down.');
       return;
     }
+    if (await _quotaHold('OFFERS', scanned, wallets.length)) return;
     const chunk = wallets.slice(i, i + CHUNK);
     let counts;
     try {
@@ -19920,6 +20484,7 @@ async function runRelatedOfferScan(ws) {
     // Same reason as the offer scan: once the link is confirmed down, every
     // remaining candidate reports the identical failure. Say it once and stop.
     if (_linkDown()) { log('RELATED OFFERS: stopped after ' + attempts + '/' + ranked.length + ' — XRPL link down.'); break; }
+    if (await _quotaHold('RELATED OFFERS', attempts, ranked.length)) break;
     const chunk = ranked.slice(i, i + RELATED_OFFERS_CONFIG.PARALLEL_FETCH);
     let linkGone = false;
     await Promise.all(chunk.map(async c => {
@@ -20541,7 +21106,13 @@ function playScanCompleteSound() {
 // ── MAIN RUN ──────────────────────────────────────────────────
 async function run() {
   if (state.scanning) { log('Scan already in progress.'); return; }
+  state._balanceFailLogged = 0;
+  state._silentReplacements = 0;
+  state._runAbortReason = null;
   state.scanning = true;
+  state.phaseTimings = [];
+  state.errorLog = [];
+  if ($('errorLog')) $('errorLog').textContent='No errors yet.';
   $('scanBtn').disabled = true;
   $('scanBtn').textContent = '⏳ SCANNING...';
   $('scanOrbPanel').classList.add('scanning');
@@ -20791,7 +21362,7 @@ async function run() {
     document.body.classList.add('building');
 
     report = buildPublicReport(p);
-    const mainReport = buildXRPMainReport(p);  // v3.8: consolidated categorical report
+    const mainReport = finalizeReportPresentation(buildXRPMainReport(p), p, true);
 
     // v3.23/v3.24: Morning Story built AFTER intelligence — uses live discovery + pattern memory
     try {
@@ -20842,14 +21413,16 @@ async function run() {
     saveBlackboxSnapshot(p);
     renderBlackbox();
 
-    shadowSay('Scan complete. Report ready.', 'READY', 100);
-    log('✓ Scan complete. Copy or download the public report manually.');
-    scanSucceeded = true;
+    scanSucceeded = !!(p.tx_scan_coverage && p.tx_scan_coverage.full_window_complete === true &&
+      p.wallets_checked === p.watchlist_total && !p.wallets_failed);
+    shadowSay(scanSucceeded ? 'Scan complete. Report ready.' : 'Report ready with incomplete acquisition — review coverage.', scanSucceeded ? 'READY' : 'INCOMPLETE', scanSucceeded ? 100 : 0);
+    if (!scanSucceeded && typeof window.safeXaiProgress === 'function') window.safeXaiProgress('INCOMPLETE', {reportReady:true});
+    log(scanSucceeded ? '✓ Scan complete. Copy or download the public report manually.' : 'REPORT INCOMPLETE: the report records the available evidence and acquisition failures.');
     // Responsive dashboard v1: refresh instruments/feed/network from sealed state.
     try { if (typeof window.renderDashboardV1 === 'function') window.renderDashboardV1(); } catch (_) {}
     // v3.17: signal sealed state to cmd-log-state badge
     document.body.classList.remove('scanning','building','error');
-    document.body.classList.add('sealed');
+    document.body.classList.add(scanSucceeded ? 'sealed' : 'error');
     // FIX: no auto-download (was firing every scan in v2.x)
   } catch (e) {
     elog('run() failed', e);
@@ -20861,6 +21434,7 @@ async function run() {
     if ($('report4k')) $('report4k').textContent = 'Scan failed.\n' + e.message + '\n\nCheck the error log in the dev panel (tap "Powered by XMΣMΣ" 9 times).';
   } finally {
     try { if (ws) ws.close(); } catch {}
+    try { if (state._sock && state._sock !== ws) state._sock.close(); } catch {}
     $('scanBtn').disabled = false;
     $('scanBtn').textContent = '▶ RUN SHADOW WATCH';
     $('scanOrbPanel').classList.remove('scanning');
@@ -21340,8 +21914,11 @@ function _swLink() {
 }
 function _swScanning() { var b = document.body.classList; return b.contains('scanning') || b.contains('building'); }
 function _swScanStatusText() {
+  if (state._runAbortReason || (state.xrplRecovery && state.xrplRecovery.exhausted)) return 'Acquisition incomplete';
+  if (_quotaBlocked()) return 'Waiting for XRPL cooldown';
+  if (_swMode() === 'SEALED' && state.pack && (!state.pack.tx_scan_coverage || state.pack.tx_scan_coverage.full_window_complete !== true)) return 'Report incomplete';
   switch (_swMode()) {
-    case 'SCANNING': return 'Running smoothly';
+    case 'SCANNING': return 'Reading ledger evidence';
     case 'BUILDING': return 'Sealing evidence';
     case 'ERROR':    return 'Attention needed';
     case 'SEALED':   return 'Report sealed';
@@ -21616,6 +22193,19 @@ function _swBuildCockpit() {
 
   // ── left rail ──
   var rail = _swEl('nav', { id:'swDashRail', 'aria-label':'Shadow Watch sections' });
+  if(window.parent!==window){
+    document.body.classList.add('sw-embedded');
+    var jumps=_swEl('div',{'class':'sw-report-jumps'});
+    [['swReactorPhase','Scan overview'],['swMarketPanel','Market & network'],['swLogPanel','Live scan log'],['swFeed','Activity'],['swDownloads','Report & downloads']].forEach(function(item){
+      var jump=_swEl('button',{type:'button','class':'sw-navbtn'},item[1]);
+      jump.addEventListener('click',function(){
+        var target=document.getElementById(item[0]);
+        if(target)window.scrollTo({top:item[0]==='swReactorPhase'?0:Math.max(0,window.scrollY+target.getBoundingClientRect().top-90),behavior:'smooth'});
+      });
+      jumps.appendChild(jump);
+    });
+    rail.appendChild(jumps);
+  }
   SW_NAV_ITEMS.forEach(function (it, i) { rail.appendChild(_swNavBtn(it, i === 0)); });
   var menuNav = _swEl('button', { type:'button', 'class':'sw-navbtn sw-dev-only' }, _swIcon('menu') + '<span>MENU</span>');
   menuNav.addEventListener('click', function () { _swClickCmd('open-system'); });
@@ -21851,7 +22441,7 @@ function _swReadPct() {
 var _SW_SEGS = 26;
 function _swRenderReactor() {
   var pct = _swReadPct();
-  _swSetText('swReactorPct', pct + '%');
+  _swSetText('swReactorPct', window.XAI_SCAN_PROGRESS && window.XAI_SCAN_PROGRESS.phase === 'INCOMPLETE' ? '—' : pct + '%');
   var stepEl = document.getElementById('xaiMissionStep');
   _swSetText('swReactorPhase', (stepEl && (stepEl.textContent || '').trim()) || (_swScanning() ? 'SCANNING' : 'IDLE'));
   var nextEl = document.getElementById('xaiNextStep');
@@ -21939,10 +22529,20 @@ function _swRenderInstruments(p, SP, scanning) {
     var whale = largeArr ? largeArr.length : 0;
     var riskObj = (typeof state !== 'undefined' && state.riskScore) ? state.riskScore : (p && p.risk_score ? p.risk_score : null);
     var rScore = riskObj ? n(riskObj.score) : null;
+    var txCoverage = (p && p.tx_scan_coverage) || state.txScanCoverage;
+    if (!txCoverage && scanning && state.indexRun && window.SW_EVIDENCE_INDEX) {
+      var indexProgress=window.SW_EVIDENCE_INDEX.metrics();
+      if(indexProgress)txCoverage={target_wallets:indexProgress.target_wallets,complete_wallets:indexProgress.indexed_wallets,full_window_complete:false};
+    }
+    var txComplete = txCoverage && txCoverage.full_window_complete === true;
+    if (!txComplete) rScore = null;
     _swClear(g);
-    g.appendChild(_swGauge('Wallet Coverage', covTxt, 'Scanned this pass', covFrac, 'var(--sw-green)'));
+    g.appendChild(_swGauge('Balance Reads', covTxt, 'Wallet balances acquired', covFrac, covFrac === 1 ? 'var(--sw-green)' : 'var(--sw-gold)'));
+    g.appendChild(_swGauge('Transaction Proof', txCoverage ? n(txCoverage.complete_wallets) + ' / ' + n(txCoverage.target_wallets) : DASH,
+      txComplete ? 'Full window proved' : 'Window proof incomplete', txCoverage && txCoverage.target_wallets ? n(txCoverage.complete_wallets)/txCoverage.target_wallets : 0,
+      txComplete ? 'var(--sw-green)' : 'var(--sw-gold)'));
     g.appendChild(_swGauge('Whale Activity', haveWhale ? _swPad2(whale) : DASH, 'Large transfers', Math.min(1, whale / 10), 'var(--sw-cyan)'));
-    g.appendChild(_swGauge('Activity Risk', rScore === null ? 'WAITING' : (rScore + ' / 100'), 'Elevated signal',
+    g.appendChild(_swGauge('Activity Risk', rScore === null ? (scanning ? 'WAITING' : 'NOT SCORED') : (rScore + ' / 100'), txComplete ? 'Measured signal' : 'Needs complete coverage',
                            rScore === null ? 0 : rScore / 100, rScore === null ? 'var(--sw-text-muted)' : _swRiskColor(rScore)));
   }
   var m = document.getElementById('swMeter');
@@ -21953,6 +22553,10 @@ function _swRenderInstruments(p, SP, scanning) {
       box.appendChild(_swEl('div', { 'class':'sw-nf-head' }, '<span class="sw-nf-ttl">Net Watched Flow</span>'));
       var w = _swEl('div', { 'class':'sw-nf-val' }); w.style.color = 'var(--sw-text-muted)'; w.textContent = 'WAITING';
       box.querySelector('.sw-nf-head').appendChild(w);
+    } else if (_dbNoBaseline(p)) {
+      box.appendChild(_swEl('div', { 'class':'sw-nf-head' }, '<span class="sw-nf-ttl">Net Watched Flow</span>'));
+      box.appendChild(_swEl('div', { 'class':'sw-nf-val' }, 'BASELINE SAVED'));
+      box.appendChild(_swEl('div', { 'class':'sw-nf-scale' }, 'Movement becomes measurable on the next scan.'));
     } else {
       var d = n(p.total_balance_delta_xrp);
       var mag = Math.min(1, Math.abs(d) / 5000000);
@@ -22036,7 +22640,7 @@ function _swRenderMarket(p) {
   var dex = p ? n(p.xrpl_dex_volume_24h_usd) : 0;
   el.appendChild(box('XRPL DEX', dex > 0 ? ('$' + _swCompact(dex)) : '—', 'native 24h', BLUE));
   var rl = p ? n(p.rlusd_supply) : 0;
-  el.appendChild(box('RLUSD', rl > 0 ? _swCompact(rl) : '—', 'supply', BLUE));
+  el.appendChild(box('RLUSD', rl > 0 ? _swCompact(rl) : '—', rlusdSupplyLabel(p, true), BLUE));
   var acc = p ? n(p.xrpl_accounts_created) : 0;
   el.appendChild(box('NEW ACCOUNTS', acc > 0 ? ('+' + fmt(acc, 0)) : '—',
     (p && p.xrpl_metrics_date) ? String(p.xrpl_metrics_date) : 'funded/day', CYAN));
@@ -22311,6 +22915,8 @@ function renderDashboardV1Live() {
     var wChecked = (scanning && SP && SP.walletsTotal > 0) ? n(SP.walletsChecked) : (p ? n(p.wallets_checked) : 0);
     var qSize = (window.SHADOW_BLOOM_QUEUE && typeof window.SHADOW_BLOOM_QUEUE.size === 'function') ? window.SHADOW_BLOOM_QUEUE.size() : 0;
     var errs = (typeof state !== 'undefined' && Array.isArray(state.errorLog)) ? state.errorLog.length : 0;
+    var proofCoverage = (p && p.tx_scan_coverage) || state.txScanCoverage;
+    if (proofCoverage) errs = Math.max(errs,n(proofCoverage.failed_wallets)+n(proofCoverage.truncated_wallets)+n(proofCoverage.unproven_wallets));
     var helpers = _xaiHelpersCount();
     var riskObj = (typeof state !== 'undefined' && state.riskScore) ? state.riskScore : (p && p.risk_score ? p.risk_score : null);
     // header
@@ -22330,7 +22936,7 @@ function renderDashboardV1Live() {
     _swRenderFlaggedMoves();
     _swRenderHelperJobs();
     _swSetText('swCellErrors', String(errs));
-    _swSetText('swCellRisk', riskObj ? (n(riskObj.score) + ' / 100') : 'WAITING');
+    _swSetText('swCellRisk', proofCoverage && proofCoverage.full_window_complete === true && riskObj ? (n(riskObj.score) + ' / 100') : (scanning ? 'WAITING' : 'NOT SCORED'));
     _swSetText('swCellCoverage', (wChecked || p || scanning) ? (wChecked + ' / ' + wTotal) : '—');
     var fv = document.getElementById('swFootVer');
     if (fv && !fv.textContent) fv.textContent = 'XRPMAN // SHADOWWATCH ' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : '');

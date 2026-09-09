@@ -20,7 +20,8 @@
     'DISCOVERY_SCORING',
     'REPORT_GENERATION',
     'EXPORT_SEALING',
-    'COMPLETE'
+    'COMPLETE',
+    'INCOMPLETE'
   ];
   var LABEL = {
     INIT: 'Initialization',
@@ -32,7 +33,8 @@
     DISCOVERY_SCORING: 'Discovery Scoring',
     REPORT_GENERATION: 'Report Generation',
     EXPORT_SEALING: 'Export Sealing',
-    COMPLETE: 'Complete'
+    COMPLETE: 'Complete',
+    INCOMPLETE: 'Report ready — incomplete acquisition'
   };
 
   var runtime = {
@@ -66,6 +68,11 @@
   }
 
   function setPhase(name, pct, detail) {
+    if (/^(COMPLETE|EXPORT_SEALING)$/.test(name) && typeof state !== 'undefined' && state.pack &&
+        state.pack.tx_scan_coverage && (state.pack.tx_scan_coverage.full_window_complete !== true ||
+        state.pack.wallets_checked !== state.pack.watchlist_total || state.pack.wallets_failed)) {
+      name = 'INCOMPLETE'; pct = 0; detail = 'Review transaction coverage and acquisition errors';
+    }
     if (ORDER.indexOf(name) < 0) return false;
     if (runtime.phase !== name) {
       if (runtime.scanActive) remember(runtime.phase);
@@ -80,6 +87,7 @@
       runtime.pct = 100;
       runtime.scanActive = false;
     }
+    if (name === 'INCOMPLETE') { runtime.pct = 0; runtime.scanActive = false; }
     try {
       if (window.XAI_SCAN_PROGRESS) {
         window.XAI_SCAN_PROGRESS.runtimePhase = name;
@@ -150,11 +158,11 @@
     var label = LABEL[runtime.phase] || runtime.phase;
     var detail = runtime.detail ? ' · ' + runtime.detail : '';
     setText('swPhaseRuntimeLabel', label + detail);
-    setText('swPhaseRuntimePct', runtime.pct + '%');
+    setText('swPhaseRuntimePct', runtime.phase === 'INCOMPLETE' ? '—' : runtime.pct + '%');
     setText('swPhaseRuntimeCompleted', 'Completed: ' + (runtime.completed.length ? runtime.completed.map(function (p) { return '✓ ' + LABEL[p]; }).join(' · ') : '—'));
-    setText('swPhaseRuntimeRunning', runtime.phase === 'COMPLETE' ? 'Running: —' : 'Running: → ' + label);
+    setText('swPhaseRuntimeRunning', /^(COMPLETE|INCOMPLETE)$/.test(runtime.phase) ? 'Running: —' : 'Running: → ' + label);
     setText('xaiPhaseRuntimeLabel', label);
-    setText('xaiPhaseRuntimePct', runtime.pct + '%');
+    setText('xaiPhaseRuntimePct', runtime.phase === 'INCOMPLETE' ? '—' : runtime.pct + '%');
     try { var fill = document.getElementById('swPhaseRuntimeFill'); if (fill) fill.style.width = runtime.pct + '%'; } catch (_) {}
   }
 
@@ -169,6 +177,7 @@
     if (/^(SEAL|BUILDING)$/.test(p)) return 'REPORT_GENERATION';
     if (p === 'SEALED') return 'EXPORT_SEALING';
     if (/^(DONE|READY)$/.test(p)) return 'COMPLETE';
+    if (p === 'INCOMPLETE') return 'INCOMPLETE';
     return null;
   }
 
@@ -252,6 +261,7 @@
         var out = original.apply(this, arguments);
         try {
           if (payload && payload.phase === 'DONE') setPhase('COMPLETE', 100);
+          else if (payload && payload.phase === 'INCOMPLETE') setPhase('INCOMPLETE', 0);
           else if (payload && payload.phase === 'SEALED') setPhase('EXPORT_SEALING', 100);
         } catch (_) {}
         render();

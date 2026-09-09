@@ -122,8 +122,10 @@
       '────────────',
       positionSentence(),
       // "Last 96h" alone read as the whole ledger's escrow activity. Say whose.
-      'Ripple, last ' + r.lookback_h + 'h: ' + r.releases + ' release' + (r.releases === 1 ? '' : 's') +
-        ' · ' + r.locks + ' new lock' + (r.locks === 1 ? '' : 's') + '.'
+      r.releases || r.locks
+        ? 'Observed Ripple escrow, last ' + r.lookback_h + 'h: ' + r.releases + ' release' + (r.releases === 1 ? '' : 's') +
+          ' · ' + r.locks + ' new lock' + (r.locks === 1 ? '' : 's') + '.'
+        : 'No Ripple escrow events are present in the acquired record for the last ' + r.lookback_h + 'h; this alone does not prove an event-free window.'
     ];
     if (o.groups.length) {
       lines.push('Other XRPL escrow, last ' + o.lookback_h + 'h: ' +
@@ -139,7 +141,7 @@
           (g.releases ? g.releases + ' release' + (g.releases === 1 ? '' : 's') + ' ' + compactXrp(g.released) + ' XRP' : ''));
       });
     } else {
-      lines.push('Other XRPL escrow, last ' + o.lookback_h + 'h: none detected in scanned scope.');
+      lines.push('No other XRPL escrow events are present in the acquired record for the last ' + o.lookback_h + 'h; this is not a complete XRPL escrow sweep.');
     }
     // Three separate measurements that had been blurring together, plus the
     // scope limit: this is the escrow this scan observed, not the whole XRPL.

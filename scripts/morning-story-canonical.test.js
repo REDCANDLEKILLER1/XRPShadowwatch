@@ -106,6 +106,7 @@ const check = (name, ok, detail) => {
       // headlines or the gate opens on a list the report never prints.
       news_articles: [{ title: FRESH }, { title: 'XRP Ledger validator set expands again' }],
       news_intel: { top_headlines: [
+        {title:'XRP Price Prediction: We Asked Grok Where XRP Ends September',source:'speculation',url:'https://example.test/prediction'},
         { title: FRESH, source: 'coindesk', url: 'https://example.test/fresh' },
         { title: 'XRP Ledger validator set expands again', source: 'u.today',
           url: 'https://example.test/fresh2' }
@@ -122,9 +123,13 @@ const check = (name, ok, detail) => {
       out.provHasBlock   = /\nNEWS USED:/.test(canonNews);
       out.provHasFresh   = canonNews.indexOf(FRESH) > -1;
       out.provNoStale    = canonNews.indexOf(STALE) === -1;
+      out.provNoRejected = canonNews.indexOf('We Asked Grok') === -1;
       const nu = (canonNews.split('\nNEWS USED:')[1] || '');
       out.provBlockNoStale = nu.indexOf(STALE) === -1;
       out.provBlockSample  = nu.split('\n').filter(Boolean).slice(0, 3);
+      const drawerSources=window.buildMorningStorySources(newsPack);
+      out.provDrawerMatches=drawerSources.length>0 && drawerSources.length===nu.split('\n').filter(x=>/^\[\d+\]/.test(x)).length &&
+        drawerSources.every(s=>nu.includes(s.title));
     } catch (e) { out.provErr = String(e && e.message); }
 
     // A pack with enough substance that the wrapper chain actually engages —
@@ -164,6 +169,7 @@ const check = (name, ok, detail) => {
 
     // Produce the canonical render once, exactly as a scan does.
     const canonical = canonicalMorningStory(PACK, { rebuild: true });
+    out.noInventedTransferTiming=!/XRP moved[^\n.]*overnight|last night’s big recipient/.test(canonical);
     out.canonicalLen = (canonical || '').length;
     out.canonicalNonTrivial = out.canonicalLen > 400;   // anti-vacuity
 
@@ -241,6 +247,36 @@ const check = (name, ok, detail) => {
     out.rebuildDoesRender = builderCalls === 1;
     window.buildMorningStoryText = realBuilder;
 
+    // QT8AU proved all wallets, yet a later pipeline wrapper dropped the flow
+    // sections and registry wording. Force that real renderer to be outermost;
+    // no timer/event repair may run between replacing it and sealing the text.
+    const previousPosition = state.rippleEscrowPosition;
+    state.rippleEscrowPosition = { complete:true, locked_xrp:31700000000,
+      active_objects:100, answered_owners:20, expected_owners:20 };
+    window.buildMorningStoryText = p => window.PUBLIC_REPORT_PIPELINE_V1.render(p);
+    const aggregatePack = {...PACK, rlusd_supply:2441445609,
+      rlusd_supply_gateway:0, rlusd_supply_coingecko:2441445609};
+    const late = canonicalMorningStory(aggregatePack,{rebuild:true});
+    out.lateHasFlow = late.includes('Under the Surface\n') && late.includes('How to Read It\n');
+    out.lateHasRegistry = late.includes('registry check 20/20 known Ripple-labeled addresses') &&
+      !late.includes('20/20 public owners');
+    out.lateEscrowOnce = (late.match(/^Escrow Watch$/gm)||[]).length === 1;
+    out.aggregateNamed = late.includes('RLUSD supply (CoinGecko aggregate): 2.44B tokens');
+    const xrplPack = {...aggregatePack, rlusd_supply:1040000000, rlusd_supply_gateway:1040000000};
+    const xrplStory = canonicalMorningStory(xrplPack,{rebuild:true});
+    out.xrplNamed = xrplStory.includes('RLUSD on XRPL (issuer obligations): 1.04B tokens') &&
+      !xrplStory.includes('CoinGecko aggregate): 1.04B');
+    out.finalizationStable = finalizeReportPresentation(xrplStory,xrplPack,false) === xrplStory;
+    window.buildMorningStoryText = realBuilder;
+    state.rippleEscrowPosition = previousPosition;
+    state.xrplDaily = {accounts_created:2291,date:'2026-09-08',transaction_count:1000};
+    state.rlusdSupplySources = {gateway:1040000000,coingecko:2441445609};
+    document.getElementById('swDbgRefresh').click();
+    const debugMarket = document.getElementById('swDbgMkt').textContent;
+    out.debugUsesScanState = debugMarket.includes('new XRPL accounts: +2,291 on 2026-09-08') &&
+      debugMarket.includes('XRPL issuer obligations=1.04B') &&
+      debugMarket.includes('CoinGecko aggregate supply=2.44B');
+
     return out;
   });
 
@@ -260,6 +296,9 @@ const check = (name, ok, detail) => {
   check('a NEWS USED block is produced with NO prior MRF.show()',
         r.provHasBlock, r.provErr);
   check('it carries the CURRENT pack\u2019s headline', r.provHasFresh, r.provErr);
+  check('a rejected speculative headline cannot appear in the spoken body or sources',r.provNoRejected);
+  check('the reader source drawer exactly matches the canonical NEWS USED list',r.provDrawerMatches);
+  check('transfer timing is limited to the scanned window',r.noInventedTransferTiming);
   check('the stale drawer headline does not appear anywhere in the story',
         r.provNoStale, r.provBlockSample);
   check('and specifically not inside the NEWS USED block',
@@ -293,6 +332,13 @@ const check = (name, ok, detail) => {
   check('repeated reads return the same text', r.stableAcrossReads);
   check('reading does not re-render', r.readsDoNotRerender);
   check('an explicit rebuild still renders', r.rebuildDoesRender);
+  check('late renderer replacement preserves the flow explanation', r.lateHasFlow);
+  check('late renderer replacement preserves precise escrow registry wording', r.lateHasRegistry);
+  check('finalization retains exactly one escrow section', r.lateEscrowOnce);
+  check('aggregate RLUSD source is named beside its amount', r.aggregateNamed);
+  check('XRPL-only RLUSD obligations are distinguished from aggregate supply', r.xrplNamed);
+  check('finalization is idempotent', r.finalizationStable);
+  check('debug summary reads acquired metrics from the actual scan state', r.debugUsesScanState);
 
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 

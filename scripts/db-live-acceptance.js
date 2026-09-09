@@ -1,0 +1,145 @@
+'use strict';
+const assert=require('assert/strict');
+const {randomUUID}=require('crypto');
+const db=require('../src/db/connection');
+const E=require('../src/db/evidence');
+const T=require('../src/db/transactions');
+const C=require('../src/db/coverage');
+async function main(){
+  db.getPool().emit('error',new Error('INJECTED_IDLE_CONNECTION_CLOSE'));
+  assert.ok((await db.health()).idle_connection_recoveries>=1);
+  assert.equal(Number((await db.transaction(q=>q('SELECT 1 AS ok'))).rows[0].ok),1);
+  console.log('PASS an idle pool failure is handled and the next real Neon transaction succeeds');
+  const read=db.getExecutor();
+  const actual=(await read(`SELECT w.scan_id,w.address,w.proof FROM scan_wallets w
+    WHERE status='COMPLETE' AND EXISTS(SELECT 1 FROM transaction_accounts a WHERE a.address=w.address AND a.role='observed_via') LIMIT 1`)).rows[0];
+  assert.ok(actual,'A real acquired wallet is required');
+  const run=await E.getRun(actual.scan_id);
+  const empty=(await read(`SELECT w.address,w.proof FROM scan_wallets w WHERE w.scan_id=$1 AND status='COMPLETE'
+    AND NOT EXISTS(SELECT 1 FROM transaction_accounts a JOIN transactions t ON t.hash=a.tx_hash
+      WHERE a.address=w.address AND a.role='observed_via' AND t.ledger_index BETWEEN (w.proof->>'from_ledger')::bigint AND (w.proof->>'through_ledger')::bigint)
+    LIMIT 1`,[actual.scan_id])).rows[0];
+  assert.ok(empty,'An independently acquired empty wallet range is required');
+  const emptyHeaders=[{ledger:empty.proof.from_ledger,closed:new Date(empty.proof.from_close_ms)}];
+  const interval=empty.proof.through_ledger-empty.proof.from_ledger;
+  assert.ok(interval>6,'The acquired empty range must span enough ledgers for a real gap control');
+  const headerReader=new E.Reader({budgetMs:120000});
+  try{
+    for(const fraction of [1/3,2/3]){
+      const h=await headerReader.ledger(empty.proof.from_ledger+Math.floor(interval*fraction));
+      emptyHeaders.push({ledger:h.ledger,closed:new Date(h.close_ms)});
+    }
+  }finally{headerReader.close();}
+  const evidence=(await read(`SELECT t.* FROM transactions t WHERE ledger_index>=$2 AND ledger_index<=$3 AND
+    EXISTS(SELECT 1 FROM transaction_accounts a WHERE a.tx_hash=t.hash AND a.address=$1 AND a.role='observed_via')`,
+    [actual.address,actual.proof.from_ledger,actual.proof.through_ledger])).rows;
+  const rows=evidence.map(r=>T.rowFromAccountTx({tx_json:r.raw_tx,meta:r.raw_meta,hash:r.hash,ledger_index:Number(r.ledger_index),validated:r.validated},
+    {observedVia:actual.address,rosterVersion:run.roster_hash}));
+  const namespace='sw_acceptance_'+randomUUID().replace(/-/g,'');
+  const transaction=db.transaction;let injected=false;
+  try{
+    await transaction(async q=>{
+      await q('CREATE SCHEMA '+namespace);
+      for(const table of ['transactions','transaction_accounts','wallet_coverage','coverage_advances','scan_runs','scan_wallets'])
+        await q('CREATE TABLE '+namespace+'.'+table+' (LIKE public.'+table+' INCLUDING ALL)');
+      await q('SET LOCAL search_path TO '+namespace+', public');
+      await q(`CREATE TRIGGER monotonic BEFORE UPDATE OR DELETE ON wallet_coverage FOR EACH ROW EXECUTE FUNCTION public.wallet_coverage_monotonic()`);
+      await q(`CREATE TRIGGER no_truncate BEFORE TRUNCATE ON wallet_coverage FOR EACH STATEMENT EXECUTE FUNCTION public.wallet_coverage_monotonic()`);
+      await q(`CREATE TRIGGER prune BEFORE DELETE ON transactions FOR EACH ROW EXECUTE FUNCTION public.invalidate_pruned_evidence()`);
+      await q(`INSERT INTO scan_runs SELECT * FROM public.scan_runs WHERE scan_id=$1`,[run.scan_id]);
+      await q(`INSERT INTO scan_wallets(scan_id,address) VALUES($1,$2)`,[run.scan_id,actual.address]);
+      const ids=new Set();
+      db.transaction=async work=>{
+        await q('SAVEPOINT evidence_write');
+        try{
+          const result=await work(async(sql,params)=>{
+            ids.add(String((await q('SELECT txid_current() AS id')).rows[0].id));
+            if(injected && sql.includes('INSERT INTO coverage_advances'))throw new Error('INJECTED_FAILURE_BEFORE_AUDIT');
+            return q(sql,params);
+          });
+          await q('RELEASE SAVEPOINT evidence_write');return result;
+        }catch(e){await q('ROLLBACK TO SAVEPOINT evidence_write');throw e;}
+      };
+      const metrics={requests:1,rows_fetched:rows.length,fetch_from_ledger:actual.proof.from_ledger};
+      const conflicting=JSON.parse(JSON.stringify(rows[0]));
+      conflicting.raw_meta.TransactionIndex=Number(conflicting.raw_meta.TransactionIndex||0)+1;
+      await assert.rejects(()=>E.persist(run,actual.address,[rows[0],conflicting],actual.proof,metrics),/CONFLICTING_TRANSACTION_SIGHTINGS/);
+      for(const table of ['transactions','transaction_accounts','wallet_coverage','coverage_advances'])
+        assert.equal(Number((await q('SELECT count(*) AS n FROM '+table)).rows[0].n),0,table+' unchanged after raw disagreement');
+      console.log('PASS equal-size raw metadata disagreement cannot disappear through deduplication or advance coverage');
+      injected=true;
+      await assert.rejects(()=>E.persist(run,actual.address,rows,actual.proof,metrics),/INJECTED_FAILURE/);
+      for(const table of ['transactions','transaction_accounts','wallet_coverage','coverage_advances'])
+        assert.equal(Number((await q('SELECT count(*) AS n FROM '+table)).rows[0].n),0,table+' rolled back');
+      console.log('PASS actual Neon transaction rolls back evidence, participants, checkpoint and audit together');
+      injected=false;await E.persist(run,actual.address,rows,actual.proof,metrics);
+      assert.equal(ids.size,1,'All evidence writes share one PostgreSQL transaction');
+      const covered=(await q('SELECT * FROM wallet_coverage WHERE address=$1',[actual.address])).rows[0];
+      assert.equal(E.decision(run,covered).complete_without_fetch,true,'Raw PostgreSQL timestamps round-trip as servable coverage');
+      assert.equal(Number((await q('SELECT count(*) AS n FROM transactions')).rows[0].n),rows.length);
+      assert.equal(Number((await q('SELECT count(*) AS n FROM coverage_advances')).rows[0].n),1);
+      console.log('PASS real evidence and observed ledger-close pairs produce servable coverage');
+      const participantCount=Number((await q('SELECT count(*) AS n FROM transaction_accounts')).rows[0].n);
+      await E.persist(run,actual.address,rows,actual.proof,metrics);
+      assert.equal(Number((await q('SELECT count(*) AS n FROM transactions')).rows[0].n),rows.length);
+      assert.equal(Number((await q('SELECT count(*) AS n FROM transaction_accounts')).rows[0].n),participantCount);
+      assert.equal(Number((await q('SELECT count(*) AS n FROM coverage_advances')).rows[0].n),1);
+      console.log('PASS repeated ingestion deduplicates hashes and preserves every participant role');
+      await assert.rejects(()=>E.persist(run,actual.address,[],{...actual.proof,status:'FAILED'},metrics),/CHECKPOINT_REFUSED/);
+      console.log('PASS already-complete stored coverage cannot bypass a refused incoming proof');
+      await q('INSERT INTO scan_wallets(scan_id,address) VALUES($1,$2)',[run.scan_id,empty.address]);
+      const header=emptyHeaders[2], earlier=emptyHeaders[1];
+      const suffix={...empty.proof,from_ledger:Number(header.ledger),from_close_ms:new Date(header.closed).getTime(),partial:true};
+      const emptyMetrics={requests:1,rows_fetched:0,fetch_from_ledger:empty.proof.from_ledger};
+      await E.persist(run,empty.address,[],suffix,emptyMetrics);
+      const beforeGap=(await q('SELECT * FROM wallet_coverage WHERE address=$1',[empty.address])).rows[0];
+      const gapPrefix={...empty.proof,through_ledger:Number(earlier.ledger),through_close_ms:new Date(earlier.closed).getTime(),partial:true};
+      assert.ok(gapPrefix.through_ledger<suffix.from_ledger-1);
+      await assert.rejects(()=>E.persist(run,empty.address,[],gapPrefix,emptyMetrics),/PROOF_RANGE_NOT_CONTIGUOUS/);
+      assert.deepEqual((await q('SELECT * FROM wallet_coverage WHERE address=$1',[empty.address])).rows[0],beforeGap);
+      assert.equal(Number((await q('SELECT count(*) AS n FROM coverage_advances WHERE address=$1',[empty.address])).rows[0].n),1);
+      console.log('PASS real PostgreSQL writer refuses a disjoint older prefix with proof, retention and audit unchanged');
+      const overlappingPrefix={...empty.proof,through_ledger:Number(header.ledger),through_close_ms:new Date(header.closed).getTime(),partial:true};
+      await E.persist(run,empty.address,[],overlappingPrefix,emptyMetrics);
+      const floorAudit=(await q('SELECT * FROM coverage_advances WHERE address=$1 ORDER BY id DESC LIMIT 1',[empty.address])).rows[0];
+      assert.equal(floorAudit.from_through,floorAudit.to_through);
+      assert.equal(Number(floorAudit.from_floor),suffix.from_ledger);
+      assert.equal(Number(floorAudit.to_floor),empty.proof.from_ledger);
+      assert.equal(floorAudit.reason,'PROOF_FLOOR_EXTENDED');
+      console.log('PASS overlapping historical proof extends the floor with an audit row and unchanged high-water mark');
+      await E.persist(run,empty.address,[],empty.proof,emptyMetrics);
+      assert.equal(Number((await q('SELECT count(*) AS n FROM coverage_advances WHERE address=$1',[empty.address])).rows[0].n),2);
+      const emptyCoverage=(await q('SELECT * FROM wallet_coverage WHERE address=$1',[empty.address])).rows[0];
+      const emptyDecision=E.decision(run,emptyCoverage);
+      assert.equal(emptyDecision.complete_without_fetch,true);
+      assert.equal(C.mayReportQuiet(emptyDecision,0).quiet,true);
+      assert.equal(Number(emptyCoverage.scan_coverage_from),Number(empty.proof.from_ledger));
+      assert.ok(new Date(emptyCoverage.scan_coverage_from_close).getTime()>0);
+      console.log('PASS real empty-range proof advances with its observed ledger/time boundary and serves a proved quiet result');
+      for(const sql of [
+        'UPDATE wallet_coverage SET scan_coverage_through=scan_coverage_through-1',
+        'UPDATE wallet_coverage SET scan_coverage_through=NULL',
+        'DELETE FROM wallet_coverage',
+        'TRUNCATE wallet_coverage'
+      ]){
+        await q('SAVEPOINT guard_test');
+        await assert.rejects(()=>q(sql));
+        await q('ROLLBACK TO SAVEPOINT guard_test');
+      }
+      console.log('PASS checkpoint regression, clearing, deletion and truncation are rejected');
+      await q('DELETE FROM transactions');
+      const pruned=(await q('SELECT * FROM wallet_coverage WHERE address=$1',[actual.address])).rows[0];
+      const unavailable=E.decision(run,pruned);
+      assert.equal(unavailable.reason,'EVIDENCE_PRUNED');
+      assert.equal(C.mayReportQuiet(unavailable,0).quiet,false);
+      assert.equal(pruned.scan_coverage_through,covered.scan_coverage_through);
+      console.log('PASS pruning retains historical proof and refuses an empty-query all-clear');
+      throw new Error('ROLLBACK_ACCEPTANCE_SCHEMA');
+    });
+  }catch(e){if(e.message!=='ROLLBACK_ACCEPTANCE_SCHEMA')throw e;}
+  finally{db.transaction=transaction;}
+  assert.equal((await read('SELECT to_regnamespace($1) AS name',[namespace])).rows[0].name,null);
+  console.log('PASS acceptance schema rolled back; production evidence preserved');
+  console.log('ALL LIVE NEON ACCEPTANCE CHECKS PASS');
+}
+main().catch(e=>{console.error(e.message);process.exitCode=1;}).finally(()=>db.close());

@@ -1,13 +1,8 @@
 // XRPMAN Shadow Watch — database connection boundary. Server-side only.
 //
-// ── Why this file has no driver dependency yet ──────────────────────────────
-// This PR is the foundation: schema, migrations, and the decision logic that
-// has to be right before any of it is wired to a live database. It deliberately
-// adds no npm dependency, so `npm ci` and the Vercel build behave exactly as
-// they do today and the existing report keeps working untouched. The Neon
-// driver is required LAZILY, inside a try, and its absence is reported as
-// "not configured" rather than thrown. The PR that actually reads and writes
-// evidence adds the dependency.
+// Neon HTTP queries serve reads. Evidence writes use one checked-out Neon
+// WebSocket client for BEGIN, every write, and COMMIT or ROLLBACK. The optional
+// environment configuration is checked without exposing the connection URL.
 //
 // ── What lives in Neon, and what lives in git ─────────────────────────────
 // Evidence — transactions, participants, coverage, scan runs — lives in Neon
@@ -79,6 +74,37 @@ function redactedTarget() {
 // transactions.js are exercised in CI with no database, no network and no
 // browser.
 let _injected = null;
+let _pool = null;
+let _idlePoolErrors = 0;
+
+// A transaction owns ONE checked-out Neon WebSocket connection. Separate
+// HTTP queries containing BEGIN/COMMIT do not provide this guarantee.
+function getPool() {
+  if (!isConfigured()) throw new Error('Evidence database is not configured');
+  if (!_pool) {
+    const { Pool, neonConfig } = require('@neondatabase/serverless');
+    neonConfig.webSocketConstructor = require('ws');
+    _pool = new Pool({ connectionString: connectionString(), max: 4, idleTimeoutMillis: 10000 });
+    // The driver removes a failed idle client, then emits this event. Without
+    // a listener Node terminates the whole scan and dumps the client object.
+    // Active-query failures still reject their transaction normally.
+    _pool.on('error', () => { _idlePoolErrors++; });
+  }
+  return _pool;
+}
+async function transaction(work) {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const result = await work((text, params) => client.query(text, params || []));
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* preserve the original failure */ }
+    throw error;
+  } finally { client.release(); }
+}
+async function close() { if (_pool) { const p = _pool; _pool = null; await p.end(); } }
 
 function setExecutor(fn) {
   if (fn !== null && typeof fn !== 'function') {
@@ -142,6 +168,7 @@ async function health() {
     reachable: false,
     error: null
   };
+  out.idle_connection_recoveries = _idlePoolErrors;
   const exec = getExecutor();
   if (!exec) return out;
   try {
@@ -157,6 +184,9 @@ module.exports = {
   isConfigured,
   redactedTarget,
   getExecutor,
+  getPool,
+  transaction,
+  close,
   setExecutor,
   assertNoSecretMaterial,
   health,

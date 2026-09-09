@@ -310,8 +310,8 @@ function summarizeLargeMoves(pack){
     // promote, so the wording has to stop pretending: "from Kraken to Kraken"
     // reads as a mistake; "between two Kraken wallets" is what happened.
     var headline=_sameEntity(top)
-      ? amt+' XRP moved between two '+senderName+' wallets overnight.'
-      : amt+' XRP moved from '+senderName+' to '+recvName+' overnight.';
+      ? amt+' XRP moved between two '+senderName+' wallets in the scanned window.'
+      : amt+' XRP moved from '+senderName+' to '+recvName+' in the scanned window.';
     var parts=[headline];
     if(sorted.length>1){
       var t2=sorted[1];
@@ -428,6 +428,10 @@ function summarizeNewsImpact(pack){
         if(Array.isArray(a)) items=items.concat(a);
       });
     }
+    // The spoken headlines and NEWS USED must share the same cleared list.
+    // Topic-matching the unfiltered news pool here used to quote rejected
+    // headlines while the final provenance block named a different article.
+    if(typeof window.clearedMorningNewsSources==='function')items=window.clearedMorningNewsSources(pack);
     // XRP-only filter, dedup, top 3
     var seen={};
     var xrp=[];
@@ -447,7 +451,7 @@ function summarizeNewsImpact(pack){
              provenance:'news_router'};
     });
     var titles=xrp.map(function(it){return it.title;});
-    var summary='Ledger-matched context: '+titles.join(' \u00B7 ')+'.';
+    var summary='Published news context: '+titles.join(' \u00B7 ')+'.';
     if(titles.length===1) summary='Relevant headline: '+titles[0]+'.';
     return _contract({
       headline:lead.title.slice(0,110),
@@ -825,13 +829,16 @@ function _cov(pack){
   base.basis_noun='answered';
   try{
     var t=pack&&pack.tx_scan_coverage;
+    var coverageApi=typeof window!=='undefined' && window.SW_REPORT_SCAN_TUNING_20260816;
+    if(coverageApi && typeof coverageApi.coverageFrom==='function') t=coverageApi.coverageFrom(pack);
     var tTotal=t?Number(t.target_wallets)||0:0;
     // ABSENCE IS NOT HEALTH. A missing or zero-target coverage object used to
     // fall straight through to BALANCE coverage with degraded:false and an
     // empty caveat, so "we never measured the transaction window" rendered
     // identically to "the transaction window was fine".
-    if(!t||tTotal<=0){
+    if(!t||tTotal<=0||t.measured===false){
       base.degraded=true; base.severe=false;
+      base.checked=0; base.failed=base.total; base.pct=0; base.percent=0;
       base.basis='transaction window'; base.basis_noun='proved the transaction window';
       base.caveat='Transaction-window coverage was not measured this run. Nothing below can be read as an all-clear.';
       base.line='Transaction-window coverage NOT MEASURED this run.';
@@ -840,18 +847,18 @@ function _cov(pack){
     if(tTotal>0){
       var tOk=Number(t.complete_wallets)||0;
       var tPct=tOk/tTotal;
-      if(tPct<base.pct){
+      if(tPct<base.pct || t.full_window_complete!==true){
         var pc=Math.round(tPct*100);
         return {
           checked:tOk, failed:tTotal-tOk, total:tTotal, pct:tPct, percent:pc,
-          degraded:tPct<0.95, severe:tPct<0.60,
+          degraded:t.full_window_complete!==true, severe:tPct<0.60,
           basis:'transaction window', basis_noun:'proved the transaction window',
           line:tOk+' of '+tTotal+' watched wallet'+(tTotal===1?'':'s')+
                ' proved the transaction window ('+pc+'%)'+
                ((tTotal-tOk)>0?'; '+(tTotal-tOk)+' did not':'')+'.',
           caveat:tPct<0.60
             ? 'Most of the board never proved its transaction window, so a low reading here is unread, not clear. Nothing below can be treated as an all-clear until the scan is re-run.'
-            : (tPct<0.95
+            : (t.full_window_complete!==true
               ? 'Part of the board never proved its transaction window. Every movement total below is of what was reachable, not of the whole list.'
               : '')
         };
@@ -880,14 +887,8 @@ function _covLead(cov, seed){
     'I would rather hand you a short report than a confident wrong one. ',
     'Read this part first, because it changes how you read the rest: '
   ], seed, 9) +
-  'only ' + cov.checked + ' of ' + cov.total + ' watched wallets answered tonight (' +
-  cov.percent + '%). ' + cov.failed + ' never came back. ' +
-  _nvPick([
-    'The link to the Ledger went down mid-scan and most of the board went dark with it.',
-    'Most of the board was unreachable when I ran it — that is a connection problem, not a market one.',
-    'The servers stopped answering partway through and took the rest of the list with them.',
-    'I lost the wire before I got through the list.'
-  ], seed, 10) +
+  'only ' + cov.checked + ' of ' + cov.total + ' watched wallets ' + cov.basis_noun + ' (' +
+  cov.percent + '%). ' + cov.failed + ' did not complete that check. Acquisition was incomplete. ' +
   ' So I am not calling this a quiet night. I could not see most of it, and an unread wallet is not a still one. ' +
   'Re-run the scan before you trust a single total below.';
 }
@@ -901,7 +902,7 @@ function _buildExecutiveSummary(interps, pack){
   // A scan that lost most of the board reports the outage, not the calm.
   if(cov.severe) return _covLead(cov, seed)+' '+_nvBeat(seed,0);
   var covNote=cov.degraded
-    ? ' Coverage note: '+cov.checked+' of '+cov.total+' wallets answered — the numbers below are of what was reachable, not the whole list.'
+    ? ' Coverage note: '+cov.checked+' of '+cov.total+' wallets '+cov.basis_noun+' — totals describe the acquired evidence.'
     : '';
 
   // Issue #26: when aggregate whale activity is material, the public lead must
@@ -971,36 +972,14 @@ function _buildExecutiveSummary(interps, pack){
   }
 
   var openers=[
-    'I kept watch over the Ledger while you slept. ',
-    'Another night on patrol, and the Ledger tipped its hand: ',
-    'The city sleeps; the Ledger never does. Overnight, ',
-    'XRPMan on the wire — while you were out cold, ',
-    'While the world slept, I worked the Ledger. ',
-    'Morning. Here’s what moved in the dark: ',
-    'I ran the whole board overnight, and here’s the read: ',
-    'Coffee’s hot and the Ledger’s open — overnight, ',
-    'You were sleeping. The whales weren’t. ',
-    'Fresh off the night shift on the Ledger: ',
-    'I never blinked. Here’s what crossed the wire: ',
-    'The Ledger doesn’t clock out, and neither do I. Overnight, ',
-    'Let’s open the books on last night: ',
-    'Straight from the night watch: ',
-    'Kettle on, board up — here’s the overnight: ',
-    'Nothing got past me. Here’s the tape: ',
-    'Sat with the Ledger till the sun came up. Overnight, ',
-    'The wires ran all night. What they carried: ',
-    'Back from the watch, notebook full. Overnight, ',
-    'You slept. I counted. Here’s the count: ',
-    'Same seat, same screens, new night. Overnight, ',
-    'Doors were locked, money still moved. Here it is: ',
-    'I stayed up so this line could be short: ',
-    'Everything below crossed the Ledger while you were out: ',
-    'Long night on the board. Here’s what it gave up: ',
-    'Fresh receipts, still warm. Overnight, ',
-    'No one announced any of this. Overnight, ',
-    'Here’s the honest read from the night shift: ',
-    'Ledger’s open, coffee’s poured — overnight, ',
-    'Quiet hours, loud wallets. Overnight, '
+    'Coffee’s hot and the Ledger’s open. Here’s the acquired record: ',
+    'XRPMan on the wire — here’s what this scan found: ',
+    'Kettle on, board up. Here’s the read: ',
+    'Fresh receipts from the scanned window: ',
+    'Same seat, same screens, a fresh scan. ',
+    'Let’s open the books on this window: ',
+    'Ledger’s open, coffee’s poured. Here’s what I can show: ',
+    'Back at the board, receipts in hand: '
   ];
   var quietOpen=[
     'the Ledger stayed quiet under my watch. No whale broke cover — and a still night on patrol is a good night.',
@@ -1015,6 +994,7 @@ function _buildExecutiveSummary(interps, pack){
     'no heavy hands on the board. I would rather tell you that plainly than dress up a slow night.'
   ];
   var factRaw=(moves&&moves.has_signal)?(moves.headline||moves.summary):(best?best.summary:'');
+  if(!factRaw && cov.degraded) return 'The ledger record is incomplete. '+cov.line+' I cannot establish whether this window was quiet. Complete the scan before treating missing activity as a finding.';
   if(!factRaw) return _nvPick(openers,seed,0)+_nvPick(quietOpen,seed,7)+covNote+' '+_nvBeat(seed,0);
   var _open = _nvPick(openers,seed,0);
   var _fact = _lc1(_firstSentence(factRaw));
@@ -1025,7 +1005,7 @@ function _buildExecutiveSummary(interps, pack){
              :score>=50?_nvPick(['My instincts are up — something’s moving out there.','The Ledger’s running warm tonight, and I’m watching close.','Not a siren yet, but the needle’s twitching. I’m leaning in.','Enough motion to keep me honest — I’m tracking it.','Warm, not hot. But warm is how the big ones start.','A few wallets stretched their legs. Worth a second look tomorrow.','Nothing alarming, but the shape of it has my attention.','More motion than usual and no obvious reason for it yet.','Middle of the dial. I am staying in the chair.'],seed,1)
              :score>=25?_nvPick(['Nothing villainous, but I kept one eye open.','A quiet patrol — steady, nothing extreme.','Low hum on the board. I logged it and moved on.','Mostly calm, a little chatter. Nothing I’d wake you for.','Slow night — but slow is when you catch the sloppy ones.','Routine traffic, logged and filed. No drama to sell you.','A working night. Nothing that changes the picture.','Ordinary motion on an ordinary board. I still read every line.','Gentle night. The interesting ones usually follow these.'],seed,1)
              :_nvPick(['Otherwise the Ledger behaved itself.','The rest of the board stayed in line.','A still night — the rails were quiet and honest.','Nothing else tried to slip past. Good.','Calm water tonight — I still counted every ripple.','Flat board, honest hours. Nothing to report is a report.','Everything sat exactly where it was left.','No movement worth your time — and I checked all of it.','Dead quiet, start to finish. I will take it.'],seed,1);
-  return line+(posture?' '+posture:'')+covNote+' '+_nvBeat(seed,0);
+  return line+(cov.degraded?' The rest of the requested window remains unverified.':(posture?' '+posture:''))+covNote+' '+_nvBeat(seed,0);
 }
 
 function _buildWhatMatteredMost(interps, pack){
@@ -1095,10 +1075,11 @@ function _buildWhatMatteredMost(interps, pack){
   // board was read. With most of the list dark, the honest answer is that we do
   // not know — say that instead of dressing an outage up as a calm night.
   var cov=_cov(pack);
+  if(cov.degraded && !cov.severe) return 'Coverage is the unresolved finding. '+cov.line+' I cannot call the unread part calm or clear.';
   if(cov.severe) return _nvPick([
-    'What mattered most is what I could not see. '+cov.failed+' of '+cov.total+' wallets never reported in, so anything I tell you about "no moves" tonight is about the '+cov.checked+' that answered, and nothing else.',
-    'The thing that mattered tonight was the blackout, not the board. Only '+cov.checked+' wallets came back. I will not dress that up as a quiet shift.',
-    'I cannot tell you what mattered most, because '+cov.failed+' of the '+cov.total+' wallets I watch never answered. That is the finding: the read failed, not the market went still.',
+    'What mattered most is what I could not see. Only '+cov.checked+' of '+cov.total+' wallets '+cov.basis_noun+'. Any absence below describes that acquired evidence alone.',
+    'The gap in coverage leads this report. Only '+cov.checked+' wallets '+cov.basis_noun+'. I will not dress that up as a quiet shift.',
+    'I cannot settle what mattered most, because '+cov.failed+' of the '+cov.total+' watched wallets lack complete acquisition. The rest remains unknown.',
     'The headline tonight is the gap in my own coverage. '+cov.percent+'% of the board reported in. The rest is unknown, and unknown is not the same as quiet.'
   ],seed,2);
   return _nvPick([
@@ -1207,10 +1188,11 @@ function _buildEvidence(interps, pack){
   var covE=_cov(pack);
   var igE=_intg(pack);
   if(igE.linkLost) return 'No evidence is offered for this run. '+igE.headline+' — the ledger read stopped partway, so anything absent below is unread, not clear.';
+  if(!parts.length && covE.degraded && !covE.severe) return 'No qualifying movement is established by the available record. '+covE.line+' An incomplete read cannot establish that no movement occurred.';
   if(!parts.length && covE.severe)
     return _nvPick([
-      'The evidence tonight is the read itself: '+covE.checked+' of '+covE.total+' wallets answered, '+covE.failed+' did not.',
-      'There is no tape to hand you. '+covE.failed+' of '+covE.total+' wallets never responded, so there is nothing to put on the record.',
+      'The evidence is the read itself: '+covE.checked+' of '+covE.total+' wallets '+covE.basis_noun+', '+covE.failed+' did not.',
+      'The acquired record is incomplete. '+covE.failed+' of '+covE.total+' wallets are missing the required coverage.',
       'What I have is a partial ledger — '+covE.checked+' wallets out of '+covE.total+'. I am not going to build a case on that.'
     ],seed,4)+' Nothing crossed my threshold in the part I could read, and I am reporting that as a limit, not a result. '+_nvBeat(seed,3);
   if(!parts.length) return _nvPick(['No move crossed the line big enough to book tonight. I stayed on watch anyway.','Nothing hit the threshold worth booking — but a clean night is still a logged night.','The board gave me nothing to charge tonight. I kept the watch regardless.'],seed,4)+' '+_nvBeat(seed,3);
@@ -1227,7 +1209,7 @@ function _buildWatchNext(interps, pack){
   var ig=_intg(pack);
   if(ig.linkLost) bullets.push('Re-run the scan — the XRPL link dropped mid-pass and this report is NOT SEALED.');
   if(cov.degraded)
-    bullets.push('Re-run the scan — '+cov.failed+' of '+cov.total+' wallets never answered this pass'+
+    bullets.push('Re-run the scan — '+cov.failed+' of '+cov.total+' wallets did not '+(cov.basis==='transaction window'?'prove the transaction window':'return a balance')+' this pass'+
                  (cov.severe?', and nothing below is settled until they do.':'.'));
   if(recv&&recv.has_signal){
     if(recv.summary.indexOf('forwarded')>-1)
@@ -1240,7 +1222,7 @@ function _buildWatchNext(interps, pack){
   if(absorber&&absorber.has_signal)
     bullets.push('Watch the absorbing wallets — are they stacking it, or handing it back out?');
   if(moves&&moves.has_signal)
-    bullets.push('Check whether last night’s big recipient makes a move today.');
+    bullets.push('Check whether the largest recipient in this window makes another move.');
   // Standing watch \u2014 always-true forensic to-dos. Fill out the list (especially
   // on a quiet night) so the section stays substantive instead of a lone line.
   var standing=[
@@ -1270,6 +1252,9 @@ function _buildVerdict(interps, pack){
   // v16.10: a low score off an unread board is not a verdict. Say what the
   // number actually measures before anyone reads it on air as an all-clear.
   var cov=_cov(pack);
+  if(cov.degraded && !cov.severe){
+    return 'Today’s forensic read is incomplete. '+cov.line+' The acquired evidence is available below, but I am withholding an all-clear until the full transaction window is proved. Not financial advice. XRP-only forensic watch.\n\nI’m XRPMan, and I tell on the banks.';
+  }
   var ig=_intg(pack);
   if(ig.linkLost){
     return _nvPick(['Today’s forensic read: ','The read, straight up: ','Bottom line off the Ledger: ','My call this morning: '],seed,32)+
@@ -1361,7 +1346,8 @@ function _buildLedgerDiagnostics(pack){
     var parts=[]; if(evm>0) parts.push(_usdC(evm)+' DEX'); if(tvl>0) parts.push(_usdC(tvl)+' TVL');
     L.push('\u2022 XRPL EVM: '+parts.join(' \u00b7 '));
   }
-  var rlusd=_num(p.rlusd_supply);            if(rlusd>0) L.push('\u2022 RLUSD supply: '+_xrpFmt(rlusd)+' tokens');
+  var rlusd=_num(p.rlusd_supply);
+  if(rlusd>0) L.push('\u2022 '+window.rlusdSupplyLabel(p,false)+': '+_xrpFmt(rlusd)+' tokens');
   // New funded XRPL accounts created network-wide on the most recent day
   // (XRPScan daily metrics). Unfunded/vanity keypairs never hit the Ledger.
   var accts=_num(p.xrpl_accounts_created);
@@ -1486,7 +1472,7 @@ function _buildSources(interpretations, pack){
   var legacySources='';
   if(typeof window.renderPlainTextSources==='function'){
     legacySources=_safe(function(){
-      var items=(typeof window.getNewsSources==='function')
+      var items=typeof window.clearedMorningNewsSources==='function'?window.clearedMorningNewsSources(pack):(typeof window.getNewsSources==='function')
         ? window.getNewsSources(pack)
         : [];
       if(typeof window.filterSourcesForReport==='function'){
@@ -2116,6 +2102,52 @@ function _setFallbackBanner(n){
   });
 }
 
+// ── The canonical coverage line, for the text that is READ ALOUD ───────────
+//
+// The spoken Morning Story carried no transaction-window coverage caveat at
+// all. Layer 17 wraps buildMorningStoryText to prepend one, but _boot's
+// 2000ms re-install (below) captures 17's wrapper as `legacy`, calls it only
+// to harvest prayer and scripture, and returns renderPublicReport(pack)
+// instead — so 17's caveat was computed and thrown away. The structured
+// report said INCOMPLETE while the on-air text said nothing.
+//
+// The durable fix is not to win that race. It is for the renderer that
+// actually produces the spoken text to consume the canonical verdict itself.
+//
+// THE VERDICT IS NOT RE-DERIVED HERE. coverageFrom comes from layer 17 — the
+// same function the structured report and the X export use. #57 removed one
+// divergence of exactly this kind; a second copy of the rule living in the V1
+// renderer would rebuild it somewhere new.
+//
+// ── Wording is load-bearing ────────────────────────────────────────────────
+// sanitizePublicNarrative DELETES every match, WARN included (body.replace
+// with ''), so a caveat containing a forbidden pattern is silently gutted
+// rather than rejected. This text must avoid:
+//   cat 4  ALL_CAPS_UNDERSCORE tokens  -> never put a reason code in here
+//   cat 6  { } and [ ]
+//   cat 8  "partial coverage"
+//   cat 12 "threshold", "heuristic", "confidence score"
+// A test asserts the rendered line survives sanitization byte for byte.
+function _canonicalCoverageLine(pack){
+  var c=null;
+  try{
+    var L17=(typeof window!=='undefined') && window.SW_REPORT_SCAN_TUNING_20260816;
+    if(L17 && typeof L17.coverageFrom==='function') c=L17.coverageFrom(pack);
+  }catch(_){}
+  // No canonical rule loaded means no claim may be made about coverage. Saying
+  // nothing is what produced this defect in the first place.
+  if(!c) return '\u26A0\uFE0F Transaction window coverage was not established this run. Nothing below can be read as an all-clear.';
+  if(c.measured===false)
+    return '\u26A0\uFE0F Transaction window coverage was not established this run. Nothing below can be read as an all-clear.';
+  if(c.full_window_complete===true) return '';
+  var causes=_num(c.failed_wallets)+' failed, '+_num(c.truncated_wallets)+' truncated, '+
+             _num(c.unproven_wallets)+' unproven';
+  if(_num(c.unknown_status_wallets)>0) causes+=', '+_num(c.unknown_status_wallets)+' unrecognised';
+  return '\u26A0\uFE0F Transaction window coverage: '+_num(c.complete_wallets)+' of '+
+         _num(c.target_wallets)+' watched wallets proved the requested window \u2014 '+causes+
+         '. Nothing below can be read as an all-clear.';
+}
+
 function renderPublicReport(pack){
   if(!_isEnabled()) return null;
 
@@ -2125,11 +2157,24 @@ function renderPublicReport(pack){
     var rawText=assembled.text;
     var interps=assembled.interpretations;
 
+    // Canonical coverage, BEFORE sanitization, so the sanitizer sees it and
+    // the test proves it survives rather than assuming it would.
+    var _covLine=_canonicalCoverageLine(pack);
+    if(_covLine) rawText=_covLine+'\n\n'+rawText;
+
     // Store for prayer/scripture extraction by later builds
     window._pipelineLegacyText=rawText;
 
     // Sanitize
     var sanitized=sanitizePublicNarrative(rawText, interps);
+
+    // FAIL CLOSED IF THE SANITIZER ATE IT. The wording above is chosen to
+    // survive, and a test proves it — but the sanitizer deletes silently, so
+    // if a future category ever matches the caveat the report must not simply
+    // go quiet about coverage. Re-assert rather than lose the claim.
+    if(_covLine && sanitized.text.indexOf('Transaction window coverage')<0){
+      sanitized.text='\u26A0\uFE0F Transaction window coverage could not be stated safely this run. Nothing below can be read as an all-clear.\n\n'+sanitized.text;
+    }
 
     // Audit
     var audit=auditPublicReport(sanitized.text, sanitized.violations, interps, false);

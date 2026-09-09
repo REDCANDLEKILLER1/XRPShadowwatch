@@ -1,0 +1,72 @@
+/* Desktop reading space. Mobile keeps the existing compact layout. */
+.sw-desktop-reader-tools { display:none; }
+.sw-report-jumps { display:none; }
+@media (min-width:901px) {
+  body.sw-dash-v1 { overflow-y:auto!important; overflow-x:hidden!important; height:auto!important; max-height:none!important; }
+  .sw-dash-v1 #screenStage { overflow:visible!important; max-height:none!important; }
+  .sw-dash-v1 #screen-command { height:auto!important; max-height:none!important; overflow:visible!important; }
+  .sw-dash-v1 #screen-command>#swDash { height:auto!important; min-height:100vh; max-height:none!important; overflow:visible!important;
+    max-width:1680px; margin:auto!important; grid-template-rows:60px auto 28px; grid-template-columns:170px minmax(0,1fr);
+    gap:16px; padding:16px; align-items:start; }
+  .sw-dash-v1 #swDashHeader { position:fixed; top:12px; left:max(16px,calc((100vw - 1680px)/2 + 16px));
+    right:max(16px,calc((100vw - 1680px)/2 + 16px)); height:60px; z-index:20; background:#0a1117; }
+  .sw-dash-v1 #swDashRail { position:fixed; top:88px; left:max(16px,calc((100vw - 1680px)/2 + 16px));
+    box-sizing:border-box; width:170px; height:calc(100vh - 110px); padding:12px 8px; z-index:19; }
+  .sw-dash-v1 .sw-navbtn { font-size:13px; padding:12px; letter-spacing:.04em; }
+  .sw-dash-v1 #swDashMain { grid-template-rows:none; overflow:visible; gap:16px; }
+  .sw-dash-v1 #swDashMain [id] { scroll-margin-top:90px; }
+  .sw-dash-v1 .sw-panel { padding:18px; }
+  .sw-dash-v1 .sw-panel-title { font-size:13px; line-height:1.4; letter-spacing:.08em; margin-bottom:14px; }
+  .sw-dash-v1 .sw-panel-title .sw-tag { font-size:11px; }
+  .sw-dash-v1 .sw-reactor { display:grid; grid-template-columns:minmax(0,1fr) 180px; gap:18px 24px; }
+  .sw-dash-v1 .sw-reactor-left { grid-column:1; }
+  .sw-dash-v1 .sw-runbtn { grid-column:2; grid-row:1; align-self:center; min-height:48px; }
+  .sw-dash-v1 .sw-reactor-gauges { grid-column:1/-1; }
+  .sw-dash-v1 .sw-reactor-gauges .sw-gaugerow { grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+  .sw-dash-v1 .sw-reactor-gauges .sw-gauge svg { max-width:100px; }
+  .sw-dash-v1 .sw-reactor-gauges .sw-gauge-cap { font-size:11px; }
+  .sw-dash-v1 .sw-reactor-gauges .sw-gauge-sub { font-size:10px; line-height:1.5; }
+  .sw-dash-v1 .sw-reactor-gauges .sw-gauge-val { font-size:18px; }
+  .sw-dash-v1 .sw-hstat span,.sw-dash-v1 .sw-tile-cap,.sw-dash-v1 .sw-mkt-cap { font-size:10px; }
+  .sw-dash-v1 .sw-hstat b { font-size:13px; }
+  .sw-dash-v1 .sw-mktrow { grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+  .sw-dash-v1 .sw-row-cols { grid-template-columns:minmax(0,1fr) minmax(0,1fr); align-items:start; }
+  .sw-dash-v1 .sw-col-mid,.sw-dash-v1 .sw-col3 { grid-template-rows:auto auto; gap:16px; }
+  .sw-dash-v1 #swLogPanel { min-height:230px; max-height:300px; }
+  .sw-dash-v1 .sw-logbody { font-size:12px; line-height:1.7; }
+  .sw-dash-v1 #swFeed { min-height:260px; max-height:420px; }
+  .sw-dash-v1 #swNetwork { min-height:280px; }
+  .sw-dash-v1 .sw-netmap { min-height:200px; }
+  .sw-dash-v1 .sw-scroll { scrollbar-width:thin; scrollbar-color:#476b60 #0a1117; }
+  .sw-dash-v1 #swDashFooter { font-size:11px; }
+  .sw-dash-v1 button:focus-visible,.sw-desktop-reader-tools button:focus-visible { outline:2px solid #b9ffdb; outline-offset:3px; }
+  #morningReportFloat { width:min(1080px,calc(100vw - 64px)); height:84vh; max-height:calc(100vh - 40px);
+    background:#0b1313; border-color:#365b4a; box-shadow:0 24px 100px #000b; color:#d9ebe1; }
+  #morningReportFloat.mrf-fullscreen { height:calc(100vh - 24px); max-height:calc(100vh - 24px); }
+  #morningReportFloat #mrfBody { min-height:0; flex:1 1 auto; max-height:none; padding:24px 32px; font-size:15px!important;
+    line-height:1.8; color:#d9ebe1; text-shadow:none; scrollbar-width:thin; scrollbar-color:#527d66 #0b1313; }
+  #morningReportFloat #mrfHeader { min-height:60px; box-sizing:border-box; background:#101e1a; }
+  #morningReportFloat .mrf-title { font-size:15px!important; text-shadow:none; }
+  #morningReportFloat .mrf-subtitle { color:#91b5a1; letter-spacing:.04em; }
+  #morningReportFloat .mrf-menu-item { padding:10px 14px; font-size:13px; }
+  #morningReportFloat #mrfSources { flex:0 0 auto; max-height:150px; overflow:auto; font-size:12px; }
+  #morningReportFloat .sw-desktop-reader-tools { display:flex; flex:0 0 auto; gap:8px; padding:10px 16px; border-bottom:1px solid #284536; }
+  .sw-desktop-reader-tools button { background:#13261c; color:#c1e8d0; border:1px solid #375c46; border-radius:6px; padding:8px 12px;
+    font:600 12px Arial,sans-serif; cursor:pointer; }
+  .sw-desktop-reader-tools button:last-child { margin-left:auto; }
+  #morningReportFloat.mrf-collapsed .sw-desktop-reader-tools { display:none; }
+  #swDebugOverlay.open { overflow-y:auto; padding:24px max(24px,calc((100vw - 1300px)/2)); }
+  #swDebugOverlay .dbg-head { position:sticky; top:0; background:#08120c; padding:12px; z-index:2; }
+  #swDebugOverlay pre { min-height:80px; max-height:300px; font-size:13px; line-height:1.6; }
+}
+@media (min-width:1100px) {
+  .sw-embedded #swDashRail>.sw-navbtn { display:none; }
+  .sw-embedded #swDashRail>.sw-report-jumps { display:flex; flex-direction:column; gap:6px; }
+  .sw-embedded .sw-report-jumps .sw-navbtn { letter-spacing:0; text-transform:none; font-size:14px; line-height:1.4; }
+}
+@media (min-width:1350px) { .sw-dash-v1 .sw-mktrow { grid-template-columns:repeat(6,minmax(0,1fr)); } }
+@media (max-width:900px) {
+  /* Both coverage counters need their own readable space on a phone. */
+  .sw-dash-v1 .sw-reactor-gauges .sw-gaugerow { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .sw-dash-v1 .sw-reactor-gauges .sw-gauge-val { font-size:16px; }
+}

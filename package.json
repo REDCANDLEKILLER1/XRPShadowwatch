@@ -19,5 +19,9 @@
   "license": "MIT",
   "devDependencies": {
     "playwright": "1.56.1"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.2",
+    "ws": "^8.18.3"
   }
 }

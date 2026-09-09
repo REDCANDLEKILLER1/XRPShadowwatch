@@ -58,7 +58,7 @@ const MIGRATION_SQL = MIGRATIONS.map(f => fs.readFileSync(path.join(MIGRATION_DI
 // same tables. Comments are stripped first so a column named only inside a
 // comment cannot satisfy the parity check.
 function stripComments(sql) {
-  return sql.split('\n').map(l => l.replace(/--.*$/, '')).join('\n');
+  return sql.split(/\r?\n/).map(l => l.replace(/--.*$/, '')).join('\n');
 }
 function tableBodies(sql) {
   const out = {};
@@ -74,6 +74,12 @@ function tableBodies(sql) {
       i++;
     }
     out[name] = src.slice(re.lastIndex, i - 1);
+  }
+  // Later migrations add columns to an existing table; include the actual
+  // declaration rather than requiring edits to already-applied migrations.
+  const additions=/ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?([^;]+);/gi;
+  while((m=additions.exec(src))){
+    if(out[m[1]]!==undefined)out[m[1]]+=',\n'+m[2];
   }
   return out;
 }
@@ -300,10 +306,14 @@ check('no column could hold key material', secretish.length === 0, secretish);
 // belongs in application code, in the same transaction that narrows
 // evidence_retained_*, never in a migration.
 const _m = stripComments(MIGRATION_SQL);
+// Replacing a CHECK expression in the same migration is schema evolution,
+// not row deletion. An unmatched constraint drop remains prohibited.
+const _withoutConstraintReplacement = _m.replace(/ALTER\s+TABLE\s+(\w+)\s+DROP\s+CONSTRAINT\s+(\w+)\s*;/gi,
+  (statement,table,constraint)=>new RegExp('ALTER\\s+TABLE\\s+'+table+'\\s+ADD\\s+CONSTRAINT\\s+'+constraint+'\\s+CHECK\\s*\\(','i').test(_m)?'':statement);
 check('no migration destroys evidence',
-      !/\bDROP\s+TABLE\b/i.test(_m) && !/\bTRUNCATE\b/i.test(_m) &&
+      !/\bDROP\s+TABLE\b/i.test(_m) && !/(?:^|;)\s*TRUNCATE\s+(?:TABLE\s+)?\w+/im.test(_m) &&
       !/\bDELETE\s+FROM\b/i.test(_m) && !/\bDROP\s+COLUMN\b/i.test(_m) &&
-      !/\bALTER\s+TABLE\b[\s\S]{0,200}?\bDROP\b/i.test(_m));
+      !/\bALTER\s+TABLE\b[\s\S]{0,200}?\bDROP\b/i.test(_withoutConstraintReplacement));
 
 // ════════════════════════════════════════════════════════════════════════════
 console.log('\n2. ingest is non-lossy, and never fabricates a ledger value');
@@ -962,6 +972,57 @@ check('a Postgres row of NULLs + zero rows is NOT quiet',
 check('proven-but-pruned + zero rows is NOT quiet',
       COV.mayReportQuiet(pruned, 0).quiet === false &&
       COV.mayReportQuiet(pruned, 0).reason === COV.REASON.EVIDENCE_PRUNED);
+// ── A WINDOW ENTIRELY AFTER THE ANCHOR ───────────────────────────────────
+// capWindowToAnchor lowers the END and says nothing about the START, so a
+// window lying past the anchor survived the cap INVERTED — start greater than
+// end. Every coverage test then passed vacuously, because a proof covering
+// real history trivially covers an empty interval. Confirmed by execution
+// before the fix: FULLY_SERVABLE, window_start_ms > window_end_ms, and
+// mayReportQuiet -> { quiet: true, reason: 'PROVEN_QUIET' }. "Nothing
+// happened", certified over an interval that cannot contain anything.
+//
+// Reachable from a clock running ahead of the ledger, a stale browser window,
+// or an operator-chosen range. None of those is exotic.
+{
+  const ac = 1788393600000, A = 106799000;
+  const proven = {
+    address: 'rAFTER',
+    scan_coverage_from: 32570, scan_coverage_through: A,
+    scan_coverage_from_close_ms: 0, scan_coverage_through_close_ms: ac,
+    evidence_retained_from: 32570, evidence_retained_through: A,
+    evidence_retained_from_close_ms: 0
+  };
+  const after = COV.windowServability({
+    coverage: proven, windowStartMs: ac + 3600000, windowEndMs: ac + 7200000,
+    anchorLedger: A, anchorCloseMs: ac });
+
+  check('THE REGRESSION — a window entirely after the anchor is refused',
+        after.reason === COV.REASON.WINDOW_AFTER_ANCHOR, after.reason);
+  check('and it is never servable from the index',
+        after.served_from_index === false && after.complete_without_fetch === false, after);
+  check('and zero rows in it may NOT be reported quiet',
+        COV.mayReportQuiet(after, 0).quiet === false &&
+        COV.mayReportQuiet(after, 0).reason === COV.REASON.WINDOW_AFTER_ANCHOR,
+        COV.mayReportQuiet(after, 0));
+
+  // CONTROL: the same coverage over a real window must still certify, or the
+  // guard would be indistinguishable from breaking servability outright.
+  const good = COV.windowServability({
+    coverage: proven, windowStartMs: ac - 86400000, windowEndMs: ac,
+    anchorLedger: A, anchorCloseMs: ac });
+  check('CONTROL: the same proof over a REAL window is still fully servable',
+        good.reason === COV.REASON.FULLY_SERVABLE &&
+        COV.mayReportQuiet(good, 0).quiet === true, good.reason);
+
+  // The boundary itself: a zero-width window ending exactly at the anchor
+  // close is degenerate but not inverted, and must not be swept up.
+  const edgeCase = COV.windowServability({
+    coverage: proven, windowStartMs: ac, windowEndMs: ac,
+    anchorLedger: A, anchorCloseMs: ac });
+  check('a window starting exactly at the anchor close is not treated as inverted',
+        edgeCase.reason !== COV.REASON.WINDOW_AFTER_ANCHOR, edgeCase.reason);
+}
+
 check('a window predating proven history + zero rows is NOT quiet',
       COV.mayReportQuiet(frontGap, 0).quiet === false);
 check('history served but the EDGE not yet fetched is NOT quiet',
@@ -1271,8 +1332,8 @@ check('a boundary-reached walk still bootstraps despite unproven exhaustion',
         proof: Object.assign({}, bootProof, { history_exhausted: true,
           history_exhaustion_proof: proofPartial })
       }).reason === 'BOOTSTRAP_BOUNDARY_REACHED');
-check('and its coverage reaches back past any window start',
-      bootExh.next_from_close_ms === 0, bootExh.next_from_close_ms);
+check('exhaustion stores an observed ledger close, never a synthetic epoch-zero timestamp',
+      bootExh.next_from_close_ms === EXH_BASE.oldest_close_ms, bootExh.next_from_close_ms);
 const exhServ = COV.windowServability({
   coverage: { address: 'rNew',
     scan_coverage_from: bootExh.next_from, scan_coverage_through: bootExh.next_through,
@@ -1281,8 +1342,8 @@ const exhServ = COV.windowServability({
     evidence_retained_from: bootExh.next_from, evidence_retained_through: bootExh.next_through,
     evidence_retained_from_close_ms: bootExh.next_from_close_ms },
   windowStartMs: WIN_START, windowEndMs: WIN_END, anchorLedger: ANCHOR, anchorCloseMs: ANCHOR_CLOSE_OK });
-check('a young account on a full-history server is covered, not re-walked',
-      exhServ.reason === COV.REASON.FULLY_SERVABLE, exhServ.reason);
+check('a young account needs an independently observed ledger boundary to cover an earlier window',
+      exhServ.reason === COV.REASON.PROOF_GAP_AT_START, exhServ.reason);
 
 // The bootstrap does NOT open a hole. Each refusal is its own reason.
 check('a walk that stopped for no stated reason still never bootstraps',
