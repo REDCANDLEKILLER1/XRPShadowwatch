@@ -45,6 +45,7 @@
   #morningReportFloat.mrf-fullscreen { height:calc(100vh - 24px); max-height:calc(100vh - 24px); }
   #morningReportFloat #mrfBody { min-height:0; flex:1 1 auto; max-height:none; padding:24px 32px; font-size:15px!important;
     line-height:1.8; color:#d9ebe1; text-shadow:none; scrollbar-width:thin; scrollbar-color:#527d66 #0b1313; }
+  #morningReportFloat #mrfBody, #morningReportFloat #mrfSources { overflow-wrap:anywhere; }
   #morningReportFloat #mrfHeader { min-height:60px; box-sizing:border-box; background:#101e1a; }
   #morningReportFloat .mrf-title { font-size:15px!important; text-shadow:none; }
   #morningReportFloat .mrf-subtitle { color:#91b5a1; letter-spacing:.04em; }

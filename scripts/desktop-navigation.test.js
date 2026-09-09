@@ -23,10 +23,11 @@ async function main(){
     assert.ok((await page.locator('#swDashRail').boundingBox()).y>=0,'section navigation remains in the viewport');
     assert.ok((await page.locator('#swDashHeader').boundingBox()).y>=0,'header remains in the viewport');
     console.log('PASS desktop panels scroll without collapsing and navigation remains reachable');
-    await page.evaluate(()=>window.MORNING_REPORT_FLOAT.show('Layout fixture: report text.\n'.repeat(180),[],{}));
+    await page.evaluate(()=>window.MORNING_REPORT_FLOAT.show('Layout fixture: report text.\n'.repeat(180)+'\nSources\nhttps://news.google.com/rss/articles/'+ 'a'.repeat(2000),[],{}));
     await page.getByRole('button',{name:'Center window',exact:true}).click();
     const box=await page.locator('#morningReportFloat').boundingBox();assert.ok(box.x>=0&&box.y>=0);
     assert.ok(box.x+box.width<=1440&&box.y+box.height<=900);
+    assert.ok(await page.locator('#mrfBody').evaluate(el=>el.scrollWidth<=el.clientWidth+1),'long source links wrap without horizontal scrolling');
     await page.getByRole('button',{name:'Fill screen',exact:true}).click();
     await page.keyboard.press('Escape');assert.equal(await page.locator('#morningReportFloat').isVisible(),false);
     console.log('PASS report actions are visible and Escape closes the reader');
