@@ -285,3 +285,17 @@
     document.body.appendChild(tx);
   } catch (_) {}
 })();
+
+// Live canonical watchlist promotion is a late report-only layer. Load it from
+// the same guaranteed entrypoint as the historical repair chain so no giant
+// 02-core.js edit is required and no existing scanner logic is rewritten.
+(function () {
+  try {
+    if (document.querySelector && document.querySelector('script[data-sw-live-watchlist-promotion="2026-09-09.1"]')) return;
+    var s = document.createElement('script');
+    s.src = '/src/brief/43-live-watchlist-promotion-20260909.js';
+    s.async = false;
+    s.setAttribute('data-sw-live-watchlist-promotion', '2026-09-09.1');
+    document.body.appendChild(s);
+  } catch (_) {}
+})();

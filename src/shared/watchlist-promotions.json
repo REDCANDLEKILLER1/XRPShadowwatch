@@ -1,0 +1,11 @@
+[
+  {
+    "address": "r3kcWLCLaqVaC9VeLDakKHW26LuYcYHZpZ",
+    "label": "LARGE_RECV_r3kcWL",
+    "cat": "discovered_receiver",
+    "source_report": "SW-20260909-CUK9R",
+    "source_scan": "SC-MTU3SZS4",
+    "promoted_at": "2026-09-09T12:58:13.223Z",
+    "source": "canonical_add"
+  }
+]
