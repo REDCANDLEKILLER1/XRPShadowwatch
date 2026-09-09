@@ -1,0 +1,80 @@
+🩸 ℜᴇᴅᴄᴀɴᴅʟᴇᴋɪʟʟᴇR 🩸
+ＳＨＡＤＯＷ ＷＡＴＣＨ
+✨ 𝐹𝑒𝑎𝑡𝑢𝑟𝑖𝑛𝑔 ✨
+𝓛𝓪𝓭𝔂 𝓚'𝓼
+🄴🅇🄲🄴🄻🄻🄴🄽🅃!
+𝖂𝖍𝖎𝖑𝖊 𝖄𝖔𝖚 𝖂ᴇʀᴇ 𝕾𝖑𝖊𝖊𝔭𝖎𝖓𝖌
+𝗫𝗥𝗣𝗟  𝕌ℙ𝔻𝔸𝕋𝔼 ✨✨ on
+☕ COFFEE & CRYPTO with 𝐒𝐓ΟΝΕ
+September 8, 2026
+
+Executive Summary
+─────────────────
+156.25M XRP moved across 50 large transfers in the window. Binance ×17 and Bithumb ×4 and +3 more absorbed 94.60M XRP this scan. The standout individual anomaly was 20.59M XRP moved from Kraken to Binance in the scanned window. These classifications describe observed movement only; they do not prove intent.
+
+What Mattered Most
+──────────────────
+The tell of the night: Binance ×17 and Bithumb ×4 and +3 more absorbed 94.60M XRP this scan, and Ripple CLO Urges Senators to Hear From Crypto Holders Before CLARITY Act Vote. That’s the move under the move — the part the ticker never shows you.
+
+Evidence
+────────
+Here are the receipts, straight off the Ledger. 20.59M XRP moved from Kraken to Binance in the scanned window. A second transfer of 6.28M XRP reached Upbit. In the discovery queue right now: 7 flagged candidates — 7 found this scan, 0 recommended for review, separate from the 255 wallets on the permanent watch list — behavioral evidence only, not ownership proof; a wallet gets on that pile by what it did, never by whose name is on it. And where the news lives, relevant headline: Ripple CLO Urges Senators to Hear From Crypto Holders Before CLARITY Act Vote. The banks write the headlines. The Ledger writes the record.
+
+
+Escrow Watch
+────────────
+Ripple escrow: 31.70B XRP locked now across 100 active validated-ledger escrow objects · registry check 20/20 known Ripple-labeled addresses.
+No Ripple escrow events are present in the acquired record for the last 36h; this alone does not prove an event-free window.
+Other XRPL escrow, last 36h: 2 new locks totalling 10.00M XRP · 0 releases, across 2 owner wallets.
+• Flare Core Vault: 1 lock 10.00M XRP
+• rP1Kot…1L4a: 1 lock 1 XRP
+Ripple and non-Ripple escrow are separate. Active escrow objects are ledger objects, not owner wallets. Scope is escrow observed by this scan, not every escrow on the XRPL.
+
+Under the Surface
+─────────────────
+Here’s the part the ≥1M whale counter can miss. Shadow Volume is the big-move spotlight: 156.25M XRP in 50 individual moves of at least 1M. Another 92.61M XRP moved in 430 payments from 100K to under 1M. 81.60M XRP across 379 of those payments matched 41 repeat-route, fan-in, or fan-out patterns. That is a signal to trace, not proof somebody was hiding funds.
+
+How to Read It
+──────────────
+New here? Shadow Volume shows the obvious ≥1M moves. Mid-size Flow catches 100K–<1M moves. Clustered Flow asks whether those smaller high-value payments keep using common routes. Net watched flow tells whether the tracked wallet board gained or lost XRP versus its prior snapshot.
+
+What To Watch Next
+──────────────────
+• Watch the absorbing wallets — are they stacking it, or handing it back out?
+• Check whether the largest recipient in this window makes another move.
+• Keep tracing the chains we’ve already opened; they tend to extend another hop.
+
+Verdict
+───────
+My call this morning: the board’s warm; something’s in play. (54/100). The flags that lit up: large transfer count, shadow volume, receiver forwarding. I’m not calling anyone guilty. I’m calling the transfer what it was. Not financial advice. XRP-only forensic watch.
+
+I’m XRPMan, and I tell on the banks.
+
+LEDGER DIAGNOSTICS
+──────────────────
+• XRP price: ~$1.4164 (24h firm)
+• Market volume (exchanges, 24h): $1.99B
+• Native XRPL DEX reported volume (third-party aggregator, 24h): ~$4M
+• XRPL EVM: $32.8K TVL
+• RLUSD on XRPL (issuer obligations): 1.04B tokens
+• New funded XRPL accounts (2026-09-08): +2,291
+• Watched wallets: 255
+• Watched activity (all sizes, LAST 24H): 48487 transactions · 331.87M XRP moved · 148 wallets active
+• Shadow volume (whale moves ≥1M, LAST 24H): 156.25M XRP · 50 transfers
+
+🙏 THE DAILY PRAYER
+───────────────────
+Father, every chart and every wallet is dust before you. Keep our hearts from worshipping either. Anchor us in what is eternal.
+
+📖 THE DAILY SCRIPTURE
+──────────────────────
+Proverbs 14:15 (KJV)
+“The simple believeth every word: but the prudent man looketh well to his going.”
+
+Sources
+───────
+[1] Ripple CLO Urges Senators to Hear From Crypto Holders Before CLARITY Act Vote — https://news.google.com/rss/articles/CBMiVEFVX3lxTE8yOU83UjkxcWhXSG9MZ1JKUDJ2Y2ZzYmFjaUg1Y1FrekNsNU9BMEU1bndoOWIzUXkzdi1RbHRXbGoxTWV6VEdWMFh2TXB6cjNCVUYyaQ?oc=5
+
+
+NEWS USED:
+[1] google_news@self — Ripple CLO Urges Senators to Hear From Crypto Holders Before CLARITY Act Vote
