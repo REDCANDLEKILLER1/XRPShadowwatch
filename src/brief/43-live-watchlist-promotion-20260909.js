@@ -214,7 +214,9 @@
       F.exportSuggestedWalletsJSON = function () {
         var out = json.apply(this, arguments) || {};
         out.safety = Object.assign({}, out.safety || {}, {
-          permanent_additions_require_review: false,
+          permanent_additions_require_review: true,
+          manual_second_review_required: false,
+          review_basis: 'canonical recommended_action ADD',
           labels_are_suggestions_only: true,
           no_auto_add: false,
           canonical_additions_auto_promote: true,
@@ -347,6 +349,7 @@
     };
     wrapped._swPreservePriorSeal20260909 = true;
     wrapped._swOriginal = fn;
+    wrapped._original = fn._original || fn;
     window.run = wrapped;
     try { if (btn) btn.onclick = wrapped; } catch (_) {}
     return true;
