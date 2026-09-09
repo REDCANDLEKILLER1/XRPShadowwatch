@@ -2371,8 +2371,8 @@ async function market() {
     if (chosen) {
       state.rlusdSupply = chosen;
       let tag;
-      if (gwv && cgv) tag = 'gateway+gecko ' + (Math.abs(gwv - cgv) / Math.max(gwv, cgv) < 0.02 ? 'agree' : 'diverge');
-      else            tag = gwv ? 'gateway only' : 'gecko only';
+      if (gwv && cgv) tag = 'XRPL issuer obligations; CoinGecko aggregate also available';
+      else            tag = gwv ? 'XRPL issuer obligations only' : 'CoinGecko aggregate only';
       notes.push('✓ RLUSD supply (' + tag + ')');
     } else notes.push('RLUSD supply empty (both sources failed)');
   } catch (e) { state.rlusdSupply = null; state.rlusdSupplySources = {}; notes.push('RLUSD supply error'); }

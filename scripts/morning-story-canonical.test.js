@@ -269,6 +269,13 @@ const check = (name, ok, detail) => {
     out.finalizationStable = finalizeReportPresentation(xrplStory,xrplPack,false) === xrplStory;
     window.buildMorningStoryText = realBuilder;
     state.rippleEscrowPosition = previousPosition;
+    state.xrplDaily = {accounts_created:2291,date:'2026-09-08',transaction_count:1000};
+    state.rlusdSupplySources = {gateway:1040000000,coingecko:2441445609};
+    document.getElementById('swDbgRefresh').click();
+    const debugMarket = document.getElementById('swDbgMkt').textContent;
+    out.debugUsesScanState = debugMarket.includes('new XRPL accounts: +2,291 on 2026-09-08') &&
+      debugMarket.includes('XRPL issuer obligations=1.04B') &&
+      debugMarket.includes('CoinGecko aggregate supply=2.44B');
 
     return out;
   });
@@ -331,6 +338,7 @@ const check = (name, ok, detail) => {
   check('aggregate RLUSD source is named beside its amount', r.aggregateNamed);
   check('XRPL-only RLUSD obligations are distinguished from aggregate supply', r.xrplNamed);
   check('finalization is idempotent', r.finalizationStable);
+  check('debug summary reads acquired metrics from the actual scan state', r.debugUsesScanState);
 
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 

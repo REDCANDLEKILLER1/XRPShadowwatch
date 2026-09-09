@@ -2,6 +2,7 @@
   function $one(id){ return document.getElementById(id); }
   function txtOf(id){ var el=$one(id); return el ? (el.textContent||'').trim() : ''; }
   function valOf(id){ var el=$one(id); return el ? String(el.value!=null&&el.value!=='' ? el.value : (el.textContent||'')).trim() : ''; }
+  function scanState(){ return typeof state !== 'undefined' && state ? state : (window.state || {}); }
   function marketBlock(){
     var out='';
     try {
@@ -11,16 +12,15 @@
       out+='price: '+(valOf('inPrice')||'—')+'   24h vol: '+(valOf('inVolume')||'—')+'\n';
       out+='native DEX: '+(valOf('inXrpldex')||'—')+'   EVM DEX: '+(valOf('inDexvol')||'—')+
            '   EVM TVL: '+(valOf('inTvl')||'—');
-      // RLUSD supply — show both sources + whether they agree.
-      var src=(window.state&&window.state.rlusdSupplySources)||null;
+      // These sources have different scopes; a difference is not a conflict.
+      var src=scanState().rlusdSupplySources||null;
       if(src){
         var g=src.gateway, c=src.coingecko;
         var fm=function(v){ return (v==null||v===0)?'—':(v>=1e9?(v/1e9).toFixed(2)+'B':(v/1e6).toFixed(2)+'M'); };
-        var agree=(g&&c)?(Math.abs(g-c)/Math.max(g,c)<0.02?'agree':'DIVERGE'):(g||c?'single-source':'both failed');
-        out+='\nRLUSD supply: gateway='+fm(g)+'  gecko='+fm(c)+'  ('+agree+')';
+        out+='\nRLUSD: XRPL issuer obligations='+fm(g)+'  CoinGecko aggregate supply='+fm(c);
       }
       // New funded XRPL accounts per day (XRPScan daily metrics).
-      var xd=(window.state&&window.state.xrplDaily)||null;
+      var xd=scanState().xrplDaily||null;
       if(xd) out+='\nnew XRPL accounts: +'+Number(xd.accounts_created||0).toLocaleString('en-US')+' on '+(xd.date||'—')+'  (xrpscan daily metrics, '+Number(xd.transaction_count||0).toLocaleString('en-US')+' tx that day)';
       else   out+='\nnew XRPL accounts: — (source empty this scan)';
     } catch(e){}
@@ -31,7 +31,7 @@
     try {
       var badge=txtOf('hudNewsBadge'), cnt=txtOf('hudNewsCount');
       out='headlines: '+(cnt||'0')+'  ·  badge: '+(badge||'—')+'\n';
-      var ni=(window.state&&window.state.newsIntel)||null;
+      var ni=scanState().newsIntel||null;
       if(ni&&ni.source_status) out+=JSON.stringify(ni.source_status,null,2);
     } catch(e){}
     return out||'No news status yet.';
