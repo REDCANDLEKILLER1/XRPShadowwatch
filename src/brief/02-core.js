@@ -2367,6 +2367,7 @@ async function market() {
     state.rlusdSupplySources = { gateway: gwv, coingecko: cgv };
     // Prefer the authoritative on-chain figure; fall back to CoinGecko.
     const chosen = gwv || cgv;
+    state.rlusdSupply = chosen || null;
     if (chosen) {
       state.rlusdSupply = chosen;
       let tag;
@@ -2374,7 +2375,7 @@ async function market() {
       else            tag = gwv ? 'gateway only' : 'gecko only';
       notes.push('✓ RLUSD supply (' + tag + ')');
     } else notes.push('RLUSD supply empty (both sources failed)');
-  } catch (e) { notes.push('RLUSD supply error'); }
+  } catch (e) { state.rlusdSupply = null; state.rlusdSupplySources = {}; notes.push('RLUSD supply error'); }
   // 9. New funded XRPL accounts per day (XRPScan daily metrics, no key).
   try {
     const dm = await fetchXrplDailyMetrics();
@@ -10223,7 +10224,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         if (_num(p.xrp_volume_24h))          row('24H VOLUME',_usd(p.xrp_volume_24h));
         if (_num(p.xrpl_dex_volume_24h_usd)) row('NATIVE DEX',_usd(p.xrpl_dex_volume_24h_usd));
         if (_num(p.xrpl_evm_tvl_usd))        row('EVM TVL',_usd(p.xrpl_evm_tvl_usd));
-        if (_num(p.rlusd_supply))            row('RLUSD SUPPLY',_xrp(p.rlusd_supply)+' tokens');
+        if (_num(p.rlusd_supply))            row(rlusdSupplyLabel(p,false),_xrp(p.rlusd_supply)+' tokens');
         var watched=_num(p.watchlist_total)||_num(p.wallets_checked);
         if (watched)                         row('WALLETS', watched+(_num(p.wallets_checked)?(' ('+_num(p.wallets_checked)+' scanned)'):''));
         var lt=(p.large_transfers||[]).length; if(lt) row('LARGE XFERS', lt);
@@ -16935,6 +16936,30 @@ function _patchBuildBundleForV321() {
 // This is the single renderer. It produces the text once, stores it once, and
 // every export reads it. It is deliberately NOT a synchroniser between two
 // renderers — there is only one, and the stored value IS the canonical text.
+function finalizeReportPresentation(text, pack, structured) {
+  // A late legacy renderer can replace an installed wrapper. Apply the pure,
+  // idempotent presentation steps at the seal boundary, before caching/export.
+  let out = String(text || '');
+  const escrow = window.SW_PUBLIC_ESCROW_STORY_20260816;
+  const layers = window.SW_PUBLIC_REPORT_LAYERS_20260816;
+  const terms = window.SW_ESCROW_TERMINOLOGY_20260819;
+  if (escrow) out = structured ? escrow.injectStructured(out) : escrow.inject(out);
+  if (layers) out = structured ? layers.enrichStructured(out, pack) : layers.enrichStory(out, pack);
+  if (terms) out = terms.clarify(out);
+  return out;
+}
+
+function rlusdSupplyLabel(pack, compact) {
+  const p = pack || {};
+  const selected = n(p.rlusd_supply);
+  if (selected > 0 && selected === n(p.rlusd_supply_gateway))
+    return compact ? 'XRPL issued' : 'RLUSD on XRPL (issuer obligations)';
+  if (selected > 0 && selected === n(p.rlusd_supply_coingecko))
+    return compact ? 'CoinGecko aggregate' : 'RLUSD supply (CoinGecko aggregate)';
+  return compact ? 'source unavailable' : 'RLUSD supply (source unavailable)';
+}
+window.rlusdSupplyLabel = rlusdSupplyLabel;
+
 function canonicalMorningStory(pack, opts) {
   opts = opts || {};
   try {
@@ -16950,7 +16975,7 @@ function canonicalMorningStory(pack, opts) {
     const fn = (typeof window !== 'undefined' && typeof window.buildMorningStoryText === 'function')
       ? window.buildMorningStoryText
       : ((typeof buildMorningStoryText === 'function') ? buildMorningStoryText : null);
-    if (fn) t = fn(p) || '';
+    if (fn) t = finalizeReportPresentation(fn(p) || '', p, false);
   } catch (_) {}
   // The daily gate is part of PRODUCING the canonical text, not a per-consumer
   // step. Applied here it applies once; applied by one caller only, the popup
@@ -21337,7 +21362,7 @@ async function run() {
     document.body.classList.add('building');
 
     report = buildPublicReport(p);
-    const mainReport = buildXRPMainReport(p);  // v3.8: consolidated categorical report
+    const mainReport = finalizeReportPresentation(buildXRPMainReport(p), p, true);
 
     // v3.23/v3.24: Morning Story built AFTER intelligence — uses live discovery + pattern memory
     try {
@@ -22615,7 +22640,7 @@ function _swRenderMarket(p) {
   var dex = p ? n(p.xrpl_dex_volume_24h_usd) : 0;
   el.appendChild(box('XRPL DEX', dex > 0 ? ('$' + _swCompact(dex)) : '—', 'native 24h', BLUE));
   var rl = p ? n(p.rlusd_supply) : 0;
-  el.appendChild(box('RLUSD', rl > 0 ? _swCompact(rl) : '—', 'supply', BLUE));
+  el.appendChild(box('RLUSD', rl > 0 ? _swCompact(rl) : '—', rlusdSupplyLabel(p, true), BLUE));
   var acc = p ? n(p.xrpl_accounts_created) : 0;
   el.appendChild(box('NEW ACCOUNTS', acc > 0 ? ('+' + fmt(acc, 0)) : '—',
     (p && p.xrpl_metrics_date) ? String(p.xrpl_metrics_date) : 'funded/day', CYAN));

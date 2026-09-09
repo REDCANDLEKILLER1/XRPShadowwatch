@@ -1346,7 +1346,8 @@ function _buildLedgerDiagnostics(pack){
     var parts=[]; if(evm>0) parts.push(_usdC(evm)+' DEX'); if(tvl>0) parts.push(_usdC(tvl)+' TVL');
     L.push('\u2022 XRPL EVM: '+parts.join(' \u00b7 '));
   }
-  var rlusd=_num(p.rlusd_supply);            if(rlusd>0) L.push('\u2022 RLUSD supply: '+_xrpFmt(rlusd)+' tokens');
+  var rlusd=_num(p.rlusd_supply);
+  if(rlusd>0) L.push('\u2022 '+window.rlusdSupplyLabel(p,false)+': '+_xrpFmt(rlusd)+' tokens');
   // New funded XRPL accounts created network-wide on the most recent day
   // (XRPScan daily metrics). Unfunded/vanity keypairs never hit the Ledger.
   var accts=_num(p.xrpl_accounts_created);

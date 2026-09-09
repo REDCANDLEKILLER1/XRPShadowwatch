@@ -247,6 +247,29 @@ const check = (name, ok, detail) => {
     out.rebuildDoesRender = builderCalls === 1;
     window.buildMorningStoryText = realBuilder;
 
+    // QT8AU proved all wallets, yet a later pipeline wrapper dropped the flow
+    // sections and registry wording. Force that real renderer to be outermost;
+    // no timer/event repair may run between replacing it and sealing the text.
+    const previousPosition = state.rippleEscrowPosition;
+    state.rippleEscrowPosition = { complete:true, locked_xrp:31700000000,
+      active_objects:100, answered_owners:20, expected_owners:20 };
+    window.buildMorningStoryText = p => window.PUBLIC_REPORT_PIPELINE_V1.render(p);
+    const aggregatePack = {...PACK, rlusd_supply:2441445609,
+      rlusd_supply_gateway:0, rlusd_supply_coingecko:2441445609};
+    const late = canonicalMorningStory(aggregatePack,{rebuild:true});
+    out.lateHasFlow = late.includes('Under the Surface\n') && late.includes('How to Read It\n');
+    out.lateHasRegistry = late.includes('registry check 20/20 known Ripple-labeled addresses') &&
+      !late.includes('20/20 public owners');
+    out.lateEscrowOnce = (late.match(/^Escrow Watch$/gm)||[]).length === 1;
+    out.aggregateNamed = late.includes('RLUSD supply (CoinGecko aggregate): 2.44B tokens');
+    const xrplPack = {...aggregatePack, rlusd_supply:1040000000, rlusd_supply_gateway:1040000000};
+    const xrplStory = canonicalMorningStory(xrplPack,{rebuild:true});
+    out.xrplNamed = xrplStory.includes('RLUSD on XRPL (issuer obligations): 1.04B tokens') &&
+      !xrplStory.includes('CoinGecko aggregate): 1.04B');
+    out.finalizationStable = finalizeReportPresentation(xrplStory,xrplPack,false) === xrplStory;
+    window.buildMorningStoryText = realBuilder;
+    state.rippleEscrowPosition = previousPosition;
+
     return out;
   });
 
@@ -302,6 +325,12 @@ const check = (name, ok, detail) => {
   check('repeated reads return the same text', r.stableAcrossReads);
   check('reading does not re-render', r.readsDoNotRerender);
   check('an explicit rebuild still renders', r.rebuildDoesRender);
+  check('late renderer replacement preserves the flow explanation', r.lateHasFlow);
+  check('late renderer replacement preserves precise escrow registry wording', r.lateHasRegistry);
+  check('finalization retains exactly one escrow section', r.lateEscrowOnce);
+  check('aggregate RLUSD source is named beside its amount', r.aggregateNamed);
+  check('XRPL-only RLUSD obligations are distinguished from aggregate supply', r.xrplNamed);
+  check('finalization is idempotent', r.finalizationStable);
 
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 

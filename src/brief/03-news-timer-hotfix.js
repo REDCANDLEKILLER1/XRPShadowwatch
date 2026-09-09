@@ -19,6 +19,7 @@
     '/src/brief/25-ripple-escrow-position-20260816.js?v=20260816.2',
     '/src/brief/23-public-report-layers-20260816.js?v=20260816.2',
     '/src/brief/26-public-escrow-story-20260816.js?v=20260816.2',
+    '/src/brief/33-escrow-terminology-20260819.js?v=20260819.1',
     '/src/brief/27-tx-count-integrity-20260816.js?v=20260817.1',
     '/src/brief/28-runtime-integrity-and-genesis-debug-20260816.js?v=20260817.1'
   ];

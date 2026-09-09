@@ -4,6 +4,7 @@
    look like currently active/publicized escrow wallets. */
 (function () {
   'use strict';
+  if (window.SW_ESCROW_TERMINOLOGY_20260819) return;
 
   var VERSION = '2026.08.19.1';
 
