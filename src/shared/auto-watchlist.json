@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "updated_at": "2026-09-09T12:58:13.223Z",
+  "entries": [
+    {
+      "address": "r3kcWLCLaqVaC9VeLDakKHW26LuYcYHZpZ",
+      "handle": "AUTO_RECV_r3kcWL_HZpZ",
+      "cat": "discovered_receiver",
+      "identified": false,
+      "source": "auto_wallet_finder",
+      "source_report": "SW-20260909-CUK9R",
+      "source_scan": "SC-MTU3SZS4",
+      "classification": "LARGE_TRANSFER_RECEIVER",
+      "score": 125,
+      "action_tier": "RECOMMEND_FOR_WATCH",
+      "server_evidence": null,
+      "added_at": "2026-09-09T12:58:13.223Z"
+    }
+  ]
+}
