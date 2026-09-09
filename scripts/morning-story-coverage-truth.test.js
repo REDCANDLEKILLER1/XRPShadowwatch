@@ -83,10 +83,14 @@ const EVAL = `(() => {
   const story = (p) => { try { return String(window.buildMorningStoryText(p)||''); } catch(e){ return 'ERR '+e.message; } };
   const cov = (t) => (String(t).split('\\n').find(l => /Transaction window coverage/i.test(l)) || '');
   const goodText = story(mk(full));
+  const idle = mk(null); idle.wallets_checked=0; idle.watchlist_total=0;
+  const idleText = story(idle);
+  const partialText = story(mk(Object.assign({}, full, {complete_wallets:235,failed_wallets:16,full_window_complete:false})));
   return {
     v1Enabled: window.SW_PIPELINE_V1_KILL !== true,
     goodQuiet: !/Transaction window coverage/i.test(goodText),
     goodLen: goodText.length,
+    idleText, partialText, anchorlessText:story(mk(noAnchor)), missingKeyText:story(mk(noKey)),
     unproven: cov(story(mk(unprovenOnly))),
     noAnchor: cov(story(mk(noAnchor))),
     absentKey: cov(story(mk(noKey)))
@@ -175,6 +179,17 @@ async function runMode(killV1) {
 
   check('no page errors, V1 ON',  on.errs.length === 0,  on.errs.slice(0, 3));
   check('no page errors, V1 OFF', off.errs.length === 0, off.errs.slice(0, 3));
+
+  console.log('\n5. missing evidence cannot sound like a quiet completed scan');
+  for (const [label, text] of [['idle', on.idleText], ['partially acquired', on.partialText], ['anchorless', on.anchorlessText], ['missing proof status', on.missingKeyText]]) {
+    check(label+' narrative withholds a quiet conclusion',
+      !/nothing crossed that was worth waking|Calm rails|rails stayed calm|board sat still|rails ran quiet|No move crossed|Nothing hit the threshold|nothing to charge tonight|Nobody big blinked|Nothing forced my hand/i.test(text), text);
+    check(label+' narrative explicitly states the unresolved read',
+      /cannot establish whether|Coverage is the unresolved finding|acquired record is incomplete/i.test(text), text);
+  }
+  check('idle escrow does not manufacture measured zero releases or locks',
+    !/Ripple, last .*: 0 releases|Other XRPL escrow, last .*none detected/i.test(on.idleText) &&
+    /No Ripple escrow events are present in the acquired record/.test(on.idleText), on.idleText);
 
   srv.close();
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' CHECKS PASS'));

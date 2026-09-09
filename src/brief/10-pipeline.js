@@ -829,13 +829,16 @@ function _cov(pack){
   base.basis_noun='answered';
   try{
     var t=pack&&pack.tx_scan_coverage;
+    var coverageApi=typeof window!=='undefined' && window.SW_REPORT_SCAN_TUNING_20260816;
+    if(coverageApi && typeof coverageApi.coverageFrom==='function') t=coverageApi.coverageFrom(pack);
     var tTotal=t?Number(t.target_wallets)||0:0;
     // ABSENCE IS NOT HEALTH. A missing or zero-target coverage object used to
     // fall straight through to BALANCE coverage with degraded:false and an
     // empty caveat, so "we never measured the transaction window" rendered
     // identically to "the transaction window was fine".
-    if(!t||tTotal<=0){
+    if(!t||tTotal<=0||t.measured===false){
       base.degraded=true; base.severe=false;
+      base.checked=0; base.failed=base.total; base.pct=0; base.percent=0;
       base.basis='transaction window'; base.basis_noun='proved the transaction window';
       base.caveat='Transaction-window coverage was not measured this run. Nothing below can be read as an all-clear.';
       base.line='Transaction-window coverage NOT MEASURED this run.';
@@ -991,6 +994,7 @@ function _buildExecutiveSummary(interps, pack){
     'no heavy hands on the board. I would rather tell you that plainly than dress up a slow night.'
   ];
   var factRaw=(moves&&moves.has_signal)?(moves.headline||moves.summary):(best?best.summary:'');
+  if(!factRaw && cov.degraded) return 'The ledger record is incomplete. '+cov.line+' I cannot establish whether this window was quiet. Complete the scan before treating missing activity as a finding.';
   if(!factRaw) return _nvPick(openers,seed,0)+_nvPick(quietOpen,seed,7)+covNote+' '+_nvBeat(seed,0);
   var _open = _nvPick(openers,seed,0);
   var _fact = _lc1(_firstSentence(factRaw));
@@ -1001,7 +1005,7 @@ function _buildExecutiveSummary(interps, pack){
              :score>=50?_nvPick(['My instincts are up — something’s moving out there.','The Ledger’s running warm tonight, and I’m watching close.','Not a siren yet, but the needle’s twitching. I’m leaning in.','Enough motion to keep me honest — I’m tracking it.','Warm, not hot. But warm is how the big ones start.','A few wallets stretched their legs. Worth a second look tomorrow.','Nothing alarming, but the shape of it has my attention.','More motion than usual and no obvious reason for it yet.','Middle of the dial. I am staying in the chair.'],seed,1)
              :score>=25?_nvPick(['Nothing villainous, but I kept one eye open.','A quiet patrol — steady, nothing extreme.','Low hum on the board. I logged it and moved on.','Mostly calm, a little chatter. Nothing I’d wake you for.','Slow night — but slow is when you catch the sloppy ones.','Routine traffic, logged and filed. No drama to sell you.','A working night. Nothing that changes the picture.','Ordinary motion on an ordinary board. I still read every line.','Gentle night. The interesting ones usually follow these.'],seed,1)
              :_nvPick(['Otherwise the Ledger behaved itself.','The rest of the board stayed in line.','A still night — the rails were quiet and honest.','Nothing else tried to slip past. Good.','Calm water tonight — I still counted every ripple.','Flat board, honest hours. Nothing to report is a report.','Everything sat exactly where it was left.','No movement worth your time — and I checked all of it.','Dead quiet, start to finish. I will take it.'],seed,1);
-  return line+(posture?' '+posture:'')+covNote+' '+_nvBeat(seed,0);
+  return line+(cov.degraded?' The rest of the requested window remains unverified.':(posture?' '+posture:''))+covNote+' '+_nvBeat(seed,0);
 }
 
 function _buildWhatMatteredMost(interps, pack){
@@ -1071,6 +1075,7 @@ function _buildWhatMatteredMost(interps, pack){
   // board was read. With most of the list dark, the honest answer is that we do
   // not know — say that instead of dressing an outage up as a calm night.
   var cov=_cov(pack);
+  if(cov.degraded && !cov.severe) return 'Coverage is the unresolved finding. '+cov.line+' I cannot call the unread part calm or clear.';
   if(cov.severe) return _nvPick([
     'What mattered most is what I could not see. Only '+cov.checked+' of '+cov.total+' wallets '+cov.basis_noun+'. Any absence below describes that acquired evidence alone.',
     'The gap in coverage leads this report. Only '+cov.checked+' wallets '+cov.basis_noun+'. I will not dress that up as a quiet shift.',
@@ -1183,6 +1188,7 @@ function _buildEvidence(interps, pack){
   var covE=_cov(pack);
   var igE=_intg(pack);
   if(igE.linkLost) return 'No evidence is offered for this run. '+igE.headline+' — the ledger read stopped partway, so anything absent below is unread, not clear.';
+  if(!parts.length && covE.degraded && !covE.severe) return 'No qualifying movement is established by the available record. '+covE.line+' An incomplete read cannot establish that no movement occurred.';
   if(!parts.length && covE.severe)
     return _nvPick([
       'The evidence is the read itself: '+covE.checked+' of '+covE.total+' wallets '+covE.basis_noun+', '+covE.failed+' did not.',
