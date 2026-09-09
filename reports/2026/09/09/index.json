@@ -1,5 +1,13 @@
 [
   {
+    "report_id": "SW-20260909-2C40U",
+    "generated_at": "2026-09-09T05:34:10.000Z",
+    "coverage_complete": true,
+    "anchor": 106861182,
+    "transactions": 48584,
+    "report_hash": "f4c72316bd07594c9c6fb7038822edc7166b3e82f0122b460563e6d00b0f31ff"
+  },
+  {
     "report_id": "SW-20260909-2OV7M",
     "generated_at": "2026-09-09T03:07:50.000Z",
     "coverage_complete": true,
