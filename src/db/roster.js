@@ -3,10 +3,11 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { createHash } = require('crypto');
+const BASE58_RE = /^r[1-9A-HJ-NP-Za-km-z]{24,35}$/;
 
 // Read the same committed roster definitions the report loads. No committed
 // balance or cursor enters the database proof path. Local discovery remains
-// in the browser; an unknown address cannot silently alter this server roster.
+// local unless a candidate passes the server-verified GitHub promotion gate.
 function roster() {
   const core = fs.readFileSync(path.join(__dirname, '../brief/02-core.js'), 'utf8');
   const begin = core.indexOf('const WATCHLIST = [');
@@ -19,6 +20,24 @@ function roster() {
   for (const t of shared.window.SW_HVT_ROSTER.targets) {
     if (!list.some(w => w.address === t.address)) list.push({ address: t.address, label: t.handle || t.label, cat: cats[t.type] || 'whale' });
   }
+
+  // Machine-managed, data-only additions. This file can be updated by the
+  // production promotion endpoint, but it cannot alter proof/checkpoint state
+  // and it is parsed as JSON rather than executed as code.
+  const autoPath = path.join(__dirname, '../shared/auto-watchlist.json');
+  if (fs.existsSync(autoPath)) {
+    let auto;
+    try { auto = JSON.parse(fs.readFileSync(autoPath, 'utf8')); }
+    catch (_) { throw new Error('AUTO_WATCHLIST_INVALID_JSON'); }
+    if (!auto || auto.version !== 1 || !Array.isArray(auto.entries)) throw new Error('AUTO_WATCHLIST_INVALID');
+    for (const entry of auto.entries) {
+      if (!entry || !BASE58_RE.test(String(entry.address || ''))) throw new Error('AUTO_WATCHLIST_INVALID_ADDRESS');
+      const label = String(entry.handle || ('AUTO_' + entry.address.slice(0, 6) + '_' + entry.address.slice(-4))).slice(0, 80);
+      const cat = String(entry.cat || 'discovered_receiver').slice(0, 40);
+      if (!list.some(w => w.address === entry.address)) list.push({ address: entry.address, label, cat });
+    }
+  }
+
   for (const [file, variable, boundary] of [
     ['17-report-scan-tuning-20260816.js', 'PROMOTIONS', 'function promoteOne'],
     ['38-na2tm-acceptance-cleanup-20260820.js', 'PROMOTION', 'function promoteWallet']
