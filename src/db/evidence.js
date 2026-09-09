@@ -268,18 +268,17 @@ async function readRunWindow(id,after) {
   if(Number(status.total)!==Number(run.target_wallets)||Number(status.complete)!==Number(run.target_wallets)||Number(status.failed)!==0)
     return {available:false,scan_id:id,roster_hash:run.roster_hash,target_wallets:Number(run.target_wallets),
       complete_wallets:Number(status.complete),error:'RUN_WINDOW_NOT_FULLY_PROVEN',transactions:[]};
-  const rosterJson=JSON.stringify(run.roster_accounts);
   const rows=(await query(`SELECT t.*,
     ARRAY(SELECT DISTINCT a.address FROM transaction_accounts a
       WHERE a.tx_hash=t.hash AND a.role='observed_via'
-      AND a.address IN (SELECT jsonb_array_elements_text($5::jsonb)) ORDER BY a.address) AS observed_via
+      AND a.address=ANY($5::text[]) ORDER BY a.address) AS observed_via
     FROM transactions t
     WHERE t.ledger_index<=$1 AND t.close_time>=$2 AND t.close_time<=$3
       AND ($4::text IS NULL OR t.hash>$4)
       AND EXISTS(SELECT 1 FROM transaction_accounts a WHERE a.tx_hash=t.hash AND a.role='observed_via'
-        AND a.address IN (SELECT jsonb_array_elements_text($5::jsonb)))
-    ORDER BY t.hash LIMIT 1001`,[run.anchor_ledger,run.window_start,run.window_end,after||null,rosterJson])).rows;
-  const more=rows.length>1000,selected=rows.slice(0,1000);
+        AND a.address=ANY($5::text[]))
+    ORDER BY t.hash LIMIT 5001`,[run.anchor_ledger,run.window_start,run.window_end,after||null,run.roster_accounts])).rows;
+  const more=rows.length>5000,selected=rows.slice(0,5000);
   return {available:true,scan_id:id,roster_hash:run.roster_hash,anchor_ledger:Number(run.anchor_ledger),
     target_wallets:Number(run.target_wallets),complete_wallets:Number(status.complete),
     next:more?selected[selected.length-1].hash:null,
@@ -301,8 +300,8 @@ async function archiveFacts(id) {
   const tx=(await query(`SELECT count(DISTINCT t.hash)::integer AS count FROM transactions t
     WHERE t.ledger_index<=$1 AND t.close_time>=$2 AND t.close_time<=$3
     AND EXISTS(SELECT 1 FROM transaction_accounts a WHERE a.tx_hash=t.hash AND a.role='observed_via'
-      AND a.address IN (SELECT jsonb_array_elements_text($4::jsonb)))`,
-    [run.anchor_ledger,run.window_start,run.window_end,JSON.stringify(run.roster_accounts)])).rows[0];
+      AND a.address=ANY($4::text[]))`,
+    [run.anchor_ledger,run.window_start,run.window_end,run.roster_accounts])).rows[0];
   const count=status=>wallets.filter(w=>(((w.proof&&w.proof.status)||w.status)===status)).length;
   const complete=count('COMPLETE'),failed=count('FAILED'),truncated=count('TRUNCATED'),unproven=count('UNPROVEN');
   return {evidence_scan_id:id,generated_at:new Date(run.created_at||run.anchor_close_time).toISOString(),

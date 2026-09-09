@@ -11910,6 +11910,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     INIT:            15,
     LEDGER:          26,
     WALLET_PROGRESS: 45,
+    TX_PROGRESS:     58,
     BALANCE:         55,
     FLOW:            63,
     NEWS:            72,
