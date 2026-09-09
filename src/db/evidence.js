@@ -1,5 +1,6 @@
 'use strict';
 const { randomUUID } = require('crypto');
+const { isDeepStrictEqual } = require('node:util');
 const db = require('./connection');
 const C = require('./coverage');
 const T = require('./transactions');
@@ -52,6 +53,7 @@ function decision(run, coverage) {
     anchorLedger:Number(run.anchor_ledger), anchorCloseMs:ms(run.anchor_close_time) });
 }
 async function persist(run, address, rows, proof, metrics) {
+  assertConsistentRaw(rows);
   return db.transaction(async q => {
     // Serialize this address across runs, including its first-ever insertion.
     await q('SELECT pg_advisory_xact_lock(hashtextextended($1,9134))', [address]);
@@ -114,6 +116,18 @@ async function persist(run, address, rows, proof, metrics) {
     await q(`UPDATE scan_wallets SET status=$5,proof=$3,metrics=$4,error=NULL,updated_at=now() WHERE scan_id=$1 AND address=$2`,
       [run.scan_id,address,JSON.stringify(proof),JSON.stringify(combined),complete?'COMPLETE':'PENDING']);
   });
+}
+// Validated account_tx pages carry full raw evidence. Unlike legacy enrichment
+// sightings, duplicate hashes on this path must agree, even when node counts
+// match. Check before deduplication and before either partial or final writes.
+function assertConsistentRaw(rows) {
+  const seen=new Map();
+  for(const row of rows){
+    const prior=seen.get(row.hash);
+    if(prior && (!isDeepStrictEqual(prior.raw_tx,row.raw_tx) || !isDeepStrictEqual(prior.raw_meta,row.raw_meta)))
+      throw new Error('CONFLICTING_TRANSACTION_SIGHTINGS');
+    seen.set(row.hash,row);
+  }
 }
 async function catchUp(id, address, reader) {
   const run = await getRun(id);
@@ -191,6 +205,7 @@ async function catchUp(id, address, reader) {
         break;
       } catch(e) { if(e.message==='XRPL_TRANSPORT_CHANGED'&&restart<3) continue; throw e; }
     }
+    assertConsistentRaw(rows);
     const merged=T.mergeSightings(rows);
     if (merged.some(r=>r.conflicts.length)) throw new Error('CONFLICTING_TRANSACTION_SIGHTINGS');
     await persist(run,address,merged,proof,{...metrics,transport:reader.stats});

@@ -117,8 +117,9 @@ const check = (name, ok, detail) => {
       if (api && typeof api.section === 'function') esc = api.section();
     } catch (e) { out.escErr = String(e && e.message); }
     out.escrow = esc;
-    // Ripple's own 0/0 must still be stated, and attributed to Ripple.
-    out.escRippleAttributed = /Ripple, last \d+h: 0 release/.test(esc);
+    // No acquired Ripple events must remain separate from non-Ripple activity;
+    // zero observations alone cannot prove an event-free window.
+    out.escRippleAttributed = /No Ripple escrow events are present in the acquired record for the last \d+h; this alone does not prove an event-free window\./.test(esc);
     // The 40M must appear.
     out.escOtherReported = /Other XRPL escrow/i.test(esc) && /40\.00M XRP/.test(esc);
     // Owner wallets counted as owners, objects as objects.
@@ -369,7 +370,7 @@ const check = (name, ok, detail) => {
   console.log('1. escrow categories are separate');
   console.log(String(r.escrow || '(none)').split('\n').map(l => '     ' + l).join('\n'));
   check('escrow section was produced', !!r.escrow, r.escErr);
-  check('Ripple 0/0 is stated AND attributed to Ripple', r.escRippleAttributed);
+  check('no acquired Ripple events are stated without claiming a proved empty window', r.escRippleAttributed);
   check('non-Ripple 40M locks are reported', r.escOtherReported);
   check('owner wallets are counted as owners', r.escOwnerCount);
   check('objects are not presented as owner wallets', r.escObjectsNotOwners);

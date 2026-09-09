@@ -61,6 +61,12 @@ async function main(){
         }catch(e){await q('ROLLBACK TO SAVEPOINT evidence_write');throw e;}
       };
       const metrics={requests:1,rows_fetched:rows.length,fetch_from_ledger:actual.proof.from_ledger};
+      const conflicting=JSON.parse(JSON.stringify(rows[0]));
+      conflicting.raw_meta.TransactionIndex=Number(conflicting.raw_meta.TransactionIndex||0)+1;
+      await assert.rejects(()=>E.persist(run,actual.address,[rows[0],conflicting],actual.proof,metrics),/CONFLICTING_TRANSACTION_SIGHTINGS/);
+      for(const table of ['transactions','transaction_accounts','wallet_coverage','coverage_advances'])
+        assert.equal(Number((await q('SELECT count(*) AS n FROM '+table)).rows[0].n),0,table+' unchanged after raw disagreement');
+      console.log('PASS equal-size raw metadata disagreement cannot disappear through deduplication or advance coverage');
       injected=true;
       await assert.rejects(()=>E.persist(run,actual.address,rows,actual.proof,metrics),/INJECTED_FAILURE/);
       for(const table of ['transactions','transaction_accounts','wallet_coverage','coverage_advances'])

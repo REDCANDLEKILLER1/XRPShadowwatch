@@ -7,6 +7,21 @@ const E=require('../src/db/evidence');
 const handler=require('../api/evidence');
 const {Reader,refusal,retryMs}=require('../src/db/xrpl-reader');
 async function main(){
+  const txBoundary=db.transaction;
+  try{
+    db.transaction=async()=>{throw new Error('WRITE_BOUNDARY_REACHED');};
+    const original={hash:'A'.repeat(64),raw_tx:{Amount:'9007199254740993',TransactionType:'Payment'},
+      raw_meta:{TransactionResult:'tesSUCCESS',AffectedNodes:[{ModifiedNode:{FinalFields:{Balance:'7'}}}]}};
+    for(const field of ['raw_tx','raw_meta']){
+      const rival=JSON.parse(JSON.stringify(original));
+      if(field==='raw_tx') rival.raw_tx.Amount='9007199254740994';
+      else rival.raw_meta.AffectedNodes[0].ModifiedNode.FinalFields.Balance='8';
+      await assert.rejects(()=>E.persist({},'unused',[original,rival],{},{}),/CONFLICTING_TRANSACTION_SIGHTINGS/);
+    }
+    const reordered={...original,raw_tx:{TransactionType:'Payment',Amount:'9007199254740993'}};
+    await assert.rejects(()=>E.persist({},'unused',[original,reordered],{},{}),/WRITE_BOUNDARY_REACHED/);
+    console.log('PASS raw transaction and equal-node-count metadata conflicts are refused before writes; key order is harmless');
+  }finally{db.transaction=txBoundary;}
   const selected=roster.select();
   assert.equal(selected.accounts.length,255);
   assert.equal(selected.hash,roster.identity([...selected.accounts].reverse()));
