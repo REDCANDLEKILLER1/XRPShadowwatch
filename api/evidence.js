@@ -13,7 +13,7 @@ module.exports=async function handler(req,res){
     let origin;try{origin=new URL(req.headers.origin).host;}catch(_){return res.status(403).json({error:'INVALID_ORIGIN'});}
     if(origin!==req.headers.host)return res.status(403).json({error:'CROSS_ORIGIN_WRITE_REFUSED'});
   }
-  const allowed=req.method==='GET'?['health','read','summary']:['begin','catchup'];
+  const allowed=req.method==='GET'?['health','read','read-run','summary']:['begin','catchup'];
   if(!allowed.includes(input.action))return res.status(400).json({error:'ACTION_NOT_ALLOWED'});
   let reader;
   try{
@@ -26,6 +26,7 @@ module.exports=async function handler(req,res){
     }
     if(typeof input.scan_id!=='string'||!/^idx-[a-f0-9-]{36}$/.test(input.scan_id))return res.status(400).json({error:'INVALID_SCAN_ID'});
     if(input.action==='summary')return res.json(await E.summary(input.scan_id));
+    if(input.action==='read-run')return res.json(await E.readRunWindow(input.scan_id,input.after));
     if(typeof input.address!=='string'||!/^r[1-9A-HJ-NP-Za-km-z]{24,35}$/.test(input.address))return res.status(400).json({error:'INVALID_ADDRESS'});
     if(input.action==='read')return res.json(await E.readWindow(input.scan_id,input.address,input.after));
     reader=acquireReader();return res.json(await E.catchUp(input.scan_id,input.address,reader));

@@ -1,6 +1,10 @@
 /* Desktop reading space. Mobile keeps the existing compact layout. */
 .sw-desktop-reader-tools { display:none; }
 .sw-report-jumps { display:none; }
+#morningReportFloat.mrf-failure .sw-desktop-reader-tools,
+#morningReportFloat.mrf-failure #mrfDlBtn,
+#morningReportFloat.mrf-failure #mrfMenuBtn,
+#morningReportFloat.mrf-failure #mrfSources { display:none!important; }
 @media (min-width:901px) {
   body.sw-dash-v1 { overflow-y:auto!important; overflow-x:hidden!important; height:auto!important; max-height:none!important; }
   .sw-dash-v1 #screenStage { overflow:visible!important; max-height:none!important; }
@@ -42,9 +46,14 @@
   .sw-dash-v1 button:focus-visible,.sw-desktop-reader-tools button:focus-visible { outline:2px solid #b9ffdb; outline-offset:3px; }
   #morningReportFloat { width:min(1080px,calc(100vw - 64px)); height:84vh; max-height:calc(100vh - 40px);
     background:#0b1313; border-color:#365b4a; box-shadow:0 24px 100px #000b; color:#d9ebe1; }
-  #morningReportFloat.mrf-fullscreen { height:calc(100vh - 24px); max-height:calc(100vh - 24px); }
+  #morningReportFloat.mrf-fullscreen { left:12px!important; right:12px!important; top:12px!important; width:auto!important;
+    height:calc(100vh - 24px); max-height:calc(100vh - 24px); transform:none!important; }
   #morningReportFloat #mrfBody { min-height:0; flex:1 1 auto; max-height:none; padding:24px 32px; font-size:15px!important;
-    line-height:1.8; color:#d9ebe1; text-shadow:none; scrollbar-width:thin; scrollbar-color:#527d66 #0b1313; }
+    line-height:1.8; color:#d9ebe1; text-shadow:none; overflow-y:scroll!important; overscroll-behavior:contain; touch-action:pan-y;
+    scrollbar-width:auto; scrollbar-color:#7fc9a1 #0b1313; }
+  #morningReportFloat #mrfBody::-webkit-scrollbar { width:14px; }
+  #morningReportFloat #mrfBody::-webkit-scrollbar-track { background:#0b1313; }
+  #morningReportFloat #mrfBody::-webkit-scrollbar-thumb { background:#527d66; border:3px solid #0b1313; border-radius:10px; }
   #morningReportFloat #mrfBody, #morningReportFloat #mrfSources { overflow-wrap:anywhere; }
   #morningReportFloat #mrfHeader { min-height:60px; box-sizing:border-box; background:#101e1a; }
   #morningReportFloat .mrf-title { font-size:15px!important; text-shadow:none; }
@@ -56,10 +65,21 @@
     font:600 12px Arial,sans-serif; cursor:pointer; }
   .sw-desktop-reader-tools button:last-child { margin-left:auto; }
   #morningReportFloat.mrf-collapsed .sw-desktop-reader-tools { display:none; }
+  #morningReportFloat.mrf-failure .sw-desktop-reader-tools,
+  #morningReportFloat.mrf-failure #mrfDlBtn,
+  #morningReportFloat.mrf-failure #mrfMenuBtn,
+  #morningReportFloat.mrf-failure #mrfSources { display:none!important; }
   #swDebugOverlay.open { overflow-y:auto; padding:24px max(24px,calc((100vw - 1300px)/2)); }
   #swDebugOverlay .dbg-head { position:sticky; top:0; background:#08120c; padding:12px; z-index:2; }
   #swDebugOverlay pre { min-height:80px; max-height:300px; font-size:13px; line-height:1.6; }
 }
+.mrf-failure-card { max-width:620px; margin:auto; padding:36px; text-align:center; border:1px solid #814747;
+  border-radius:12px; background:#1d1113; color:#f6d9d9; font:15px/1.7 Arial,sans-serif; }
+.mrf-failure-mark { width:56px; height:56px; margin:0 auto 18px; border:2px solid #ff6b6b; border-radius:50%;
+  color:#ff8585; font:700 36px/52px Arial,sans-serif; }
+.mrf-failure-card h2 { margin:0 0 12px; color:#ff9a9a; letter-spacing:.08em; }
+.mrf-failure-card button { margin-top:18px; padding:13px 24px; border:1px solid #6dca92; border-radius:7px;
+  background:#173824; color:#d8ffe5; font:700 14px Arial,sans-serif; cursor:pointer; }
 @media (min-width:1100px) {
   .sw-embedded #swDashRail>.sw-navbtn { display:none; }
   .sw-embedded #swDashRail>.sw-report-jumps { display:flex; flex-direction:column; gap:6px; }

@@ -730,7 +730,7 @@ const XAI_PHASE_BRIDGE = {
   BOOT: 'INIT', INIT: 'INIT', MARKET: 'INIT', WAITING: 'INIT', SCANNING: 'INIT',
   BALANCES: 'LEDGER', LEDGER: 'LEDGER',
   WALLETS: 'WALLET_PROGRESS',
-  TX_SCAN: 'BALANCE',
+  TX_SCAN: 'TX_PROGRESS',
   ESCROW: 'FLOW', FLOW: 'FLOW', TX: 'FLOW',
   OFFERS: 'DISCOVERY', AMM: 'DISCOVERY', DEX: 'DISCOVERY',
   MEMORY: 'DISCOVERY', ANALYSIS: 'DISCOVERY', PATTERN: 'DISCOVERY', DISCOVERY: 'DISCOVERY',
@@ -1717,7 +1717,9 @@ async function scanWallets(ws) {
       if (window.XAI_SCAN_PROGRESS) {
         window.XAI_SCAN_PROGRESS.walletsTotal   = rows.length;
         window.XAI_SCAN_PROGRESS.walletsChecked = rows.filter(r => r.status === 'CHECKED').length;
-        window.XAI_SCAN_PROGRESS.phase          = 'LEDGER';
+        window.XAI_SCAN_PROGRESS.txWalletsTotal = needTx.length;
+        window.XAI_SCAN_PROGRESS.txWalletsChecked = phase2Done;
+        window.XAI_SCAN_PROGRESS.phase          = 'TX_PROGRESS';
       }
       if (window.__swDashApplied && typeof window.renderDashboardV1Live === 'function') window.renderDashboardV1Live();
     } catch (_) {}
@@ -9802,6 +9804,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         '<button class="mrf-menu-item" id="mrfDownloadTotalBtn" type="button">\u2B07 Download total report</button>' +
       '</div>' +
       '<nav class="sw-desktop-reader-tools" aria-label="Report actions">' +
+        '<button type="button" data-reader-action="previous">Previous page</button>' +
+        '<button type="button" data-reader-action="next">Next page</button>' +
         '<button type="button" data-reader-action="copy">Copy report</button>' +
         '<button type="button" data-reader-action="download">Download</button>' +
         '<button type="button" data-reader-action="full">Fill screen</button>' +
@@ -9832,6 +9836,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         var action=button.dataset.readerAction;
         if(action==='copy')MORNING_REPORT_FLOAT.copy();
         if(action==='download')MORNING_REPORT_FLOAT.download();
+        if(action==='previous')MORNING_REPORT_FLOAT.page(-1);
+        if(action==='next')MORNING_REPORT_FLOAT.page(1);
         if(action==='full')MORNING_REPORT_FLOAT.toggleFull();
         if(action==='close')MORNING_REPORT_FLOAT.hide();
         if(action==='center'){
@@ -9966,12 +9972,34 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
         _mrfState.lastSources = Array.isArray(sources) ? sources.slice() : [];
         _mrfState.lastPack    = pack || null;
         // Un-hide + size FIRST so a render hiccup can't leave the window hidden.
-        _mrfDom.classList.remove('mrf-hidden','mrf-collapsed','mrf-large','mrf-fullscreen');
+        _mrfDom.classList.remove('mrf-hidden','mrf-collapsed','mrf-large','mrf-fullscreen','mrf-failure');
         _mrfState.open = true; _mrfState.collapsed = false; _mrfState.large = false; _mrfState.full = false;
-        // On PC, open at the larger size so the report reads without cramped scrolling.
-        if (window.innerWidth < 760) { _mrfDom.classList.add('mrf-fullscreen'); _mrfState.full = true; _mrfDom.style.transform = 'none'; }
-        else { _mrfDom.classList.add('mrf-large'); _mrfState.large = true; }
+        // Use the whole embedded viewport by default on phones and desktops.
+        // The old 84vh floating window left only ~320px for a multi-page report.
+        _mrfDom.classList.add('mrf-fullscreen'); _mrfState.full = true; _mrfDom.style.transform = 'none';
         try { _renderBody(reportText); _renderSources(sources); } catch (_) {}
+        try { var body=_mrfDom.querySelector('#mrfBody'); if(body){body.scrollTop=0;body.focus();} } catch (_) {}
+      } catch (_) {}
+    },
+    showFailure: function(message, pack) {
+      try {
+        _ensureMrfDom();
+        ['left','top','transform','width','height'].forEach(function(key){_mrfDom.style[key]='';});
+        _mrfState.lastReport=''; _mrfState.lastSources=[]; _mrfState.lastPack=pack||null;
+        _mrfState.open=true; _mrfState.collapsed=false; _mrfState.full=true;
+        _mrfDom.classList.remove('mrf-hidden','mrf-collapsed','mrf-large');
+        _mrfDom.classList.add('mrf-fullscreen','mrf-failure');
+        var body=_mrfDom.querySelector('#mrfBody');
+        if(body){
+          body.innerHTML='<section class="mrf-failure-card"><div class="mrf-failure-mark">!</div>'+
+            '<h2>REPORT NOT CREATED</h2><p>'+_esc(message||'The scan did not prove every required wallet.')+'</p>'+
+            '<p>No partial report was sealed, copied, or offered for download.</p>'+
+            '<button type="button" id="mrfRerunBtn">Rerun scan</button></section>';
+          var rerun=body.querySelector('#mrfRerunBtn');
+          if(rerun)rerun.onclick=function(){MORNING_REPORT_FLOAT.hide();setTimeout(function(){var b=document.getElementById('scanBtn');if(b&&!b.disabled)b.click();},0);};
+          body.scrollTop=0;body.focus();
+        }
+        var sources=_mrfDom.querySelector('#mrfSources');if(sources)sources.innerHTML='';
       } catch (_) {}
     },
     hide:     function() {
@@ -9997,6 +10025,10 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       _mrfState.full = !_mrfState.full;
       if (_mrfState.full) { _mrfDom.classList.add('mrf-fullscreen'); _mrfDom.style.transform = 'none'; }
       else                { _mrfDom.classList.remove('mrf-fullscreen'); }
+    },
+    page: function(direction) {
+      var body=_mrfDom&&_mrfDom.querySelector('#mrfBody');
+      if(body)body.scrollBy({top:(Number(direction)||1)*Math.max(240,body.clientHeight*.82),behavior:'smooth'});
     },
     renderSources: function(srcs) { _renderSources(srcs); },
     copy: function() {
@@ -10529,6 +10561,10 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     phase:          'IDLE',
     walletsTotal:   0,
     walletsChecked: 0,
+    txWalletsTotal: 0,
+    txWalletsChecked: 0,
+    newXrplObservations: 0,
+    storedTransactionsAnalyzed: 0,
     queueCount:     0,
     errors:         0,
     headlineCount:  0,
@@ -10551,6 +10587,9 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       if (pct >= 50)         return 'Halfway through the wallet board.';
       return 'I\u2019ve checked ' + s.walletsChecked + ' of ' + s.walletsTotal + ' wallets. Still watching for balance changes.';
     },
+    TX_PROGRESS:      function(s) { return 'Transaction evidence: ' + (s.txWalletsChecked||0) + ' of ' +
+      (s.txWalletsTotal||s.walletsTotal||0) + ' wallets proved, ' + (s.newXrplObservations||0).toLocaleString() +
+      ' new XRPL observations, ' + (s.storedTransactionsAnalyzed||0).toLocaleString() + ' stored transactions loaded.'; },
     BALANCE:          function() { return 'Checking balances against local memory.'; },
     FLOW:             function() { return 'Wallet scan is complete. I\u2019m checking large transfers and receiver behavior.'; },
     NEWS:             function() { return 'I\u2019m checking the news lane now.'; },
@@ -10573,6 +10612,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     INIT:            5,
     LEDGER:          15,
     WALLET_PROGRESS: 45,   // dynamic 15..45 in render
+    TX_PROGRESS:     54,   // dynamic 50..58 in render
     BALANCE:         50,
     FLOW:            58,
     NEWS:            66,
@@ -10593,6 +10633,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     INIT:            'listening',
     LEDGER:          'scanning',
     WALLET_PROGRESS: 'scanning',
+    TX_PROGRESS:     'scanning',
     BALANCE:         'thinking',
     FLOW:            'warning',
     NEWS:            'thinking',
@@ -10612,6 +10653,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     INIT:            'NEXT: Loading watched wallets',
     LEDGER:          'NEXT: Wallet balance check',
     WALLET_PROGRESS: 'NEXT: Balance memory comparison',
+    TX_PROGRESS:     'NEXT: Finish transaction evidence',
     BALANCE:         'NEXT: Large transfer + receiver review',
     FLOW:            'NEXT: News lane check',
     NEWS:            'NEXT: Suggested wallet discovery',
@@ -10647,7 +10689,11 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       var phase = XAI_SCAN_PROGRESS.phase || 'IDLE';
       stepEl.textContent = phase === 'WALLET_PROGRESS'
         ? 'WALLETS ' + XAI_SCAN_PROGRESS.walletsChecked + '/' + XAI_SCAN_PROGRESS.walletsTotal
-        : phase;
+        : phase === 'TX_PROGRESS'
+          ? 'TRANSACTIONS ' + XAI_SCAN_PROGRESS.txWalletsChecked + '/' + (XAI_SCAN_PROGRESS.txWalletsTotal||XAI_SCAN_PROGRESS.walletsTotal) +
+            ' · ' + XAI_SCAN_PROGRESS.newXrplObservations.toLocaleString() + ' NEW · ' +
+            XAI_SCAN_PROGRESS.storedTransactionsAnalyzed.toLocaleString() + ' STORED'
+          : phase;
       var pct = PHASE_PROGRESS_PCT[phase];
       if (typeof pct === 'undefined') pct = 0;
       // ERROR_WAIT: hold previous percent, just style degraded
@@ -10656,6 +10702,10 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       if (phase === 'WALLET_PROGRESS' && XAI_SCAN_PROGRESS.walletsTotal > 0) {
         var walletPct = XAI_SCAN_PROGRESS.walletsChecked / XAI_SCAN_PROGRESS.walletsTotal;
         pct = Math.round(15 + (walletPct * 30)); // 15..45%
+      }
+      if (phase === 'TX_PROGRESS' && XAI_SCAN_PROGRESS.txWalletsTotal > 0) {
+        var txPct = XAI_SCAN_PROGRESS.txWalletsChecked / XAI_SCAN_PROGRESS.txWalletsTotal;
+        pct = Math.round(50 + (txPct * 8));
       }
       _lastRenderedPct = pct;
       pctEl.textContent = phase === 'INCOMPLETE' ? '—' : pct + '%';
@@ -10667,6 +10717,15 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     } catch (_) {}
   }
   if (typeof window !== 'undefined') window.renderXaiMissionUI = _renderMissionUI;
+  if (typeof window !== 'undefined') window.updateShadowTxProgress = function(m) {
+    m=m||{};
+    XAI_SCAN_PROGRESS.txWalletsTotal=Number(m.target_wallets)||XAI_SCAN_PROGRESS.walletsTotal||0;
+    XAI_SCAN_PROGRESS.txWalletsChecked=Number(m.indexed_wallets)||0;
+    XAI_SCAN_PROGRESS.newXrplObservations=Number(m.rows_fetched)||0;
+    XAI_SCAN_PROGRESS.storedTransactionsAnalyzed=Number(m.stored_transactions_loaded)||0;
+    XAI_SCAN_PROGRESS.phase='TX_PROGRESS';
+    _renderMissionUI();
+  };
 
   // ─── XAI_PROGRESS_NARRATOR ─────────────────────────────────
   var XAI_PROGRESS_NARRATOR = {
@@ -10688,6 +10747,10 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
           XAI_SCAN_PROGRESS.walletsTotal = Object.keys(KNOWN).length;
         }
         XAI_SCAN_PROGRESS.walletsChecked = 0;
+        XAI_SCAN_PROGRESS.txWalletsChecked = 0;
+        XAI_SCAN_PROGRESS.txWalletsTotal = XAI_SCAN_PROGRESS.walletsTotal;
+        XAI_SCAN_PROGRESS.newXrplObservations = 0;
+        XAI_SCAN_PROGRESS.storedTransactionsAnalyzed = 0;
         XAI_SCAN_PROGRESS.reportReady = false;
         this.lastWalletSpoken = 0;
         this.lastPhase = null;
@@ -11934,13 +11997,18 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
           gauge.style.setProperty('--xai-pct', pct + '%');
           gauge.setAttribute('data-mission-state', phase || 'IDLE');
           // active state: any phase between INIT and REPORTING (sweep on)
-          var isActive = ['INIT','LEDGER','WALLET_PROGRESS','BALANCE','FLOW','NEWS','NEWS_STRONG','NEWS_WEAK','DISCOVERY','REPORTING','SEALED','ERROR_WAIT'].indexOf(phase) >= 0;
+          var isActive = ['INIT','LEDGER','WALLET_PROGRESS','TX_PROGRESS','BALANCE','FLOW','NEWS','NEWS_STRONG','NEWS_WEAK','DISCOVERY','REPORTING','SEALED','ERROR_WAIT'].indexOf(phase) >= 0;
           gauge.setAttribute('data-active', isActive ? 'true' : 'false');
         }
         if (gPct)   gPct.textContent   = phase === 'INCOMPLETE' ? '—' : pct + '%';
         if (gPhase) gPhase.textContent = phase === 'WALLET_PROGRESS'
           ? ('WALLETS ' + (window.XAI_SCAN_PROGRESS.walletsChecked || 0) + '/' + (window.XAI_SCAN_PROGRESS.walletsTotal || 0))
-          : phase;
+          : phase === 'TX_PROGRESS'
+            ? ('TRANSACTIONS ' + (window.XAI_SCAN_PROGRESS.txWalletsChecked || 0) + '/' +
+              (window.XAI_SCAN_PROGRESS.txWalletsTotal || window.XAI_SCAN_PROGRESS.walletsTotal || 0) + ' · ' +
+              (window.XAI_SCAN_PROGRESS.newXrplObservations || 0).toLocaleString() + ' NEW · ' +
+              (window.XAI_SCAN_PROGRESS.storedTransactionsAnalyzed || 0).toLocaleString() + ' STORED')
+            : phase;
       } catch (_) {}
     },
 
@@ -12513,7 +12581,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       try {
         // Reset only if not already scanning
         var alreadyScanning = (window.XAI_SCAN_PROGRESS &&
-          ['INIT','LEDGER','WALLET_PROGRESS','BALANCE','FLOW','NEWS','DISCOVERY','REPORTING'].indexOf(window.XAI_SCAN_PROGRESS.phase) >= 0);
+          ['INIT','LEDGER','WALLET_PROGRESS','TX_PROGRESS','BALANCE','FLOW','NEWS','DISCOVERY','REPORTING'].indexOf(window.XAI_SCAN_PROGRESS.phase) >= 0);
         if (!alreadyScanning) {
           this.reset();
           if (window.XAI_SCAN_PROGRESS) {
@@ -15706,10 +15774,12 @@ async function sha256(text) {
 async function buildEvidenceSeal(p, report, bundle) {
   const reportId = 'SW-' + today().replace(/-/g, '') + '-' + Math.random().toString(36).slice(2, 7).toUpperCase();
   const scanId = 'SC-' + Date.now().toString(36).toUpperCase();
-  const [pubHash, fullHash] = await Promise.all([sha256(report), sha256(bundle)]);
+  const morningText=(state&&state.morningStoryReport)||'';
+  const [pubHash, fullHash, morningHash] = await Promise.all([sha256(report), sha256(bundle), sha256(morningText)]);
   const master = await sha256(pubHash + fullHash + reportId);
   const seal = { report_id: reportId, scan_id: scanId, version: APP_VERSION, date: today(),
-    public_hash: pubHash.slice(0, 32), full_hash: fullHash.slice(0, 32), master_hash: master.slice(0, 32),
+    public_hash: pubHash.slice(0, 32), full_hash: fullHash.slice(0, 32), morning_hash: morningHash,
+    master_hash: master.slice(0, 32),
     chars_4k: report.length, generated_at: new Date().toISOString() };
   setText('sealReportId', seal.report_id);
   setText('sealScanId', seal.scan_id);
@@ -15722,6 +15792,29 @@ async function buildEvidenceSeal(p, report, bundle) {
   state.seal = seal;   // v3.15: stash for SHADOW_EXPORTS / shadowFileBase
   return seal;
 }
+
+async function archiveSealedReport(p, seal) {
+  const started={attempted:true,status:'PENDING',report_id:seal&&seal.report_id||null,
+    branch:'shadowwatch-report-archive',commit_sha:null,archived_at:null,files_written:0,bytes_written:0,retry_count:0,error:null};
+  state.githubArchive=started;if(p)p.github_archive=started;
+  try {
+    if(!seal||!seal.report_id||!seal.scan_id||!state.indexRun||!state.indexRun.scan_id||!state.morningStoryReport)
+      throw new Error('ARCHIVE_SEAL_INCOMPLETE');
+    const response=await fetch('/api/report-archive',{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',
+      body:JSON.stringify({report_id:seal.report_id,scan_id:seal.scan_id,evidence_scan_id:state.indexRun.scan_id,
+        generated_at:seal.generated_at,morning_report:state.morningStoryReport,morning_hash:seal.morning_hash,
+        public_hash:seal.public_hash,full_hash:seal.full_hash})});
+    const result=await response.json().catch(function(){return {status:'FAILED',error:'ARCHIVE_RESPONSE_INVALID'};});
+    state.githubArchive=Object.assign(started,result,{attempted:true});if(p)p.github_archive=state.githubArchive;
+    if(!response.ok&&state.githubArchive.status!=='ARCHIVE_CONFLICT')state.githubArchive.status='FAILED';
+    log('GitHub archive: '+state.githubArchive.status+(state.githubArchive.commit_sha?' · '+state.githubArchive.commit_sha.slice(0,12):''));
+  } catch(e) {
+    state.githubArchive=Object.assign(started,{status:'FAILED',error:String(e&&e.message||e)});if(p)p.github_archive=state.githubArchive;
+    log('GitHub archive pending retry: '+state.githubArchive.error);
+  }
+  return state.githubArchive;
+}
+if(typeof window!=='undefined')window.retryGithubArchive=function(){return state.pack&&state.seal?archiveSealedReport(state.pack,state.seal):Promise.resolve({status:'NOT_ATTEMPTED'});};
 
 // ── TONE + PRAYER ─────────────────────────────────────────────
 // v3.8: Pools expanded to 32 scriptures + 30 prayers, both date-seeded for
@@ -19066,6 +19159,10 @@ function _resolveReportSource(kind) {
       const t = txt('errorLog');
       return { text: t, ext: 'txt', ok: !!(t && !/^No errors yet/i.test(t)) };
     }
+    case 'github-archive': {
+      const a=state.githubArchive||{attempted:false,status:'NOT_ATTEMPTED'};
+      return {text:JSON.stringify({github_archive:a},null,2),ext:'json',ok:true};
+    }
     case 'full-json': {
       if (state.pack) return { text: JSON.stringify(state.pack, null, 2), ext: 'json', ok: true };
       return { text: '{}', ext: 'json', ok: false };
@@ -19275,7 +19372,8 @@ const _TOTAL_DEBUG_SECTIONS = [
   { num: '16', label: 'SHADOW DECISION TRACE',              kind: 'decision-trace' },
   { num: '17', label: 'SHADOW BLOOM QUEUE',                 kind: 'bloom-queue' },
   { num: '18', label: 'SHADOW JOURNAL SUMMARY',             kind: 'journal-summary' },
-  { num: '19', label: 'BUILDER HARD-CODE RECOMMENDATIONS',  kind: 'builder-recs' }
+  { num: '19', label: 'BUILDER HARD-CODE RECOMMENDATIONS',  kind: 'builder-recs' },
+  { num: '20', label: 'GITHUB REPORT ARCHIVE',              kind: 'github-archive' }
 ];
 
 function _buildTotalFile(sections, modeLabel) {
@@ -21112,6 +21210,15 @@ async function run() {
   state.scanning = true;
   state.phaseTimings = [];
   state.errorLog = [];
+  // A new attempt may never inherit publishable output from the prior run.
+  // Acquisition failure before scanWallets used to leave yesterday's seal and
+  // report available through the reader/export controls.
+  state.pack = null;
+  state.seal = null;
+  state.morningStoryReport = '';
+  state.structuredReport = null;
+  state.githubArchive = {attempted:false,status:'NOT_ATTEMPTED',branch:'shadowwatch-report-archive'};
+  try { if (window.MORNING_REPORT_FLOAT) window.MORNING_REPORT_FLOAT.hide(); } catch (_) {}
   if ($('errorLog')) $('errorLog').textContent='No errors yet.';
   $('scanBtn').disabled = true;
   $('scanBtn').textContent = '⏳ SCANNING...';
@@ -21234,6 +21341,23 @@ async function run() {
     renderHolderDominancePanel();
     state.dailyTone = buildDailyTone(p);
     p.macro_link_matrix = macroLinkMatrix(p);
+
+    // Publishing is fail-closed. A partial wallet roster can still be kept in
+    // memory for diagnostics, but it must never be made to look like a report,
+    // receive a seal, enter the daily archive, or expose copy/download actions.
+    scanSucceeded = !!(p.tx_scan_coverage && p.tx_scan_coverage.full_window_complete === true &&
+      p.wallets_checked === p.watchlist_total && !p.wallets_failed);
+    if (!scanSucceeded) {
+      state.failedPack = p;
+      var coverage = p.tx_scan_coverage || {};
+      var incomplete = new Error('Transaction evidence incomplete: ' + (coverage.complete_wallets || 0) + '/' +
+        (coverage.target_wallets || p.watchlist_total || 0) + ' wallets proved; ' +
+        (coverage.failed_wallets || p.wallets_failed || 0) + ' failed; ' +
+        (coverage.truncated_wallets || 0) + ' truncated. Rerun the scan.');
+      incomplete.scanIncomplete = true;
+      incomplete.pack = p;
+      throw incomplete;
+    }
     // v3.26-hotfix3: buildIntelBrief moved BELOW Stage 1-3 — it needs to read
     // pack.news_health which is only populated after news fetch + router run.
 
@@ -21388,6 +21512,9 @@ async function run() {
     if ($('masterPaste')) $('masterPaste').textContent = master;
     if ($('bundleBox'))   $('bundleBox').textContent = bundle;
     if ($('briefBox'))    $('briefBox').textContent = state.intelBrief;
+    // The report and Neon evidence are already sealed. Archive failure is
+    // recorded separately and can be retried without another XRPL scan.
+    await archiveSealedReport(p, seal);
     renderHudFromPack(p);
     // v3.4 render new panels
     renderFloorAnalysis(state.floorAnalysis);
@@ -21413,11 +21540,8 @@ async function run() {
     saveBlackboxSnapshot(p);
     renderBlackbox();
 
-    scanSucceeded = !!(p.tx_scan_coverage && p.tx_scan_coverage.full_window_complete === true &&
-      p.wallets_checked === p.watchlist_total && !p.wallets_failed);
-    shadowSay(scanSucceeded ? 'Scan complete. Report ready.' : 'Report ready with incomplete acquisition — review coverage.', scanSucceeded ? 'READY' : 'INCOMPLETE', scanSucceeded ? 100 : 0);
-    if (!scanSucceeded && typeof window.safeXaiProgress === 'function') window.safeXaiProgress('INCOMPLETE', {reportReady:true});
-    log(scanSucceeded ? '✓ Scan complete. Copy or download the public report manually.' : 'REPORT INCOMPLETE: the report records the available evidence and acquisition failures.');
+    shadowSay('Scan complete. Report ready.', 'READY', 100);
+    log('✓ Scan complete. Copy or download the public report manually.');
     // Responsive dashboard v1: refresh instruments/feed/network from sealed state.
     try { if (typeof window.renderDashboardV1 === 'function') window.renderDashboardV1(); } catch (_) {}
     // v3.17: signal sealed state to cmd-log-state badge
@@ -21425,13 +21549,24 @@ async function run() {
     document.body.classList.add(scanSucceeded ? 'sealed' : 'error');
     // FIX: no auto-download (was firing every scan in v2.x)
   } catch (e) {
+    scanSucceeded = false;
+    state.pack = null;
+    state.seal = null;
+    state.morningStoryReport = '';
+    state.structuredReport = null;
     elog('run() failed', e);
     log('SCAN_FAILED: ' + e.message);
-    shadowSay('Scan failed — check error log.', 'ERROR', 0);
+    shadowSay(e.scanIncomplete ? 'Scan incomplete — rerun required.' : 'Scan failed — rerun required.', 'ERROR', 0);
+    try {
+      if (window.MORNING_REPORT_FLOAT && window.MORNING_REPORT_FLOAT.showFailure)
+        window.MORNING_REPORT_FLOAT.showFailure(e.message, e.pack || null);
+      if (typeof window.safeEmitShadowEvent === 'function')
+        window.safeEmitShadowEvent('shadow.error.scan_failed', {message:e.message,incomplete:!!e.scanIncomplete});
+    } catch (_) {}
     // v3.17: signal error state to cmd-log-state badge
     document.body.classList.remove('scanning','building','sealed');
     document.body.classList.add('error');
-    if ($('report4k')) $('report4k').textContent = 'Scan failed.\n' + e.message + '\n\nCheck the error log in the dev panel (tap "Powered by XMΣMΣ" 9 times).';
+    if ($('report4k')) $('report4k').textContent = 'REPORT NOT CREATED\n' + e.message + '\n\nRerun the scan.';
   } finally {
     try { if (ws) ws.close(); } catch {}
     try { if (state._sock && state._sock !== ws) state._sock.close(); } catch {}
