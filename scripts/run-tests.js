@@ -5,7 +5,7 @@
    Why a runner rather than a list of steps in the workflow YAML: the suites are
    browser-driven and each binds a port, so they run in sequence with a distinct
    port each. Keeping that here means `npm test` locally and CI run exactly the
-   same thing — a contributor cannot be green locally and red in CI because the
+   same thing — a contributor cannot be green locally and red here because the
    workflow ran a different set.
 
    This file is deliberately dumb. It discovers nothing and infers nothing: the
@@ -50,6 +50,7 @@ const SUITES = [
   ['desktop-navigation',     'desktop-navigation.test.js',       8230],
   ['daily-archive-proof',    'daily-archive-proof.test.js',        null],
   ['github-report-archive',  'github-report-archive.test.js',      null],
+  ['auto-watchlist-promotion','auto-watchlist-promotion.test.js',  null],
   // Pure decision logic, no browser and no network.
   ['dex-volume-truth',       'dex-volume-truth.test.js',         null],
   ['xrpl-quota',             'xrpl-quota-backpressure.test.js',  8221],
