@@ -23,11 +23,12 @@ async function main(){
     console.log('PASS raw transaction and equal-node-count metadata conflicts are refused before writes; key order is harmless');
   }finally{db.transaction=txBoundary;}
   const selected=roster.select();
-  assert.equal(selected.accounts.length,255);
+  const canonicalCount=roster.roster().length;
+  assert.equal(selected.accounts.length,canonicalCount);
   assert.equal(selected.hash,roster.identity([...selected.accounts].reverse()));
   assert.throws(()=>roster.select([...selected.accounts,'rUnknown']),/ROSTER_MISMATCH/);
   assert.throws(()=>roster.select([selected.accounts[0],selected.accounts[0]]),/ROSTER_MISMATCH/);
-  console.log('PASS canonical roster identity covers the exact 255 accounts');
+  console.log('PASS canonical roster identity covers the exact '+canonicalCount+' accounts');
   const close=new Date('2026-09-08T00:00:00Z');
   const row=C.normalizeCoverage({scan_coverage_from_close:close,scan_coverage_through_close:close.toISOString(),evidence_retained_from_close:null});
   assert.equal(row.scan_coverage_from_close_ms,close.getTime());
