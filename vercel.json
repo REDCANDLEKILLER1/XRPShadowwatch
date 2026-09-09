@@ -1,7 +1,8 @@
 {
   "functions": {
     "api/evidence.js": { "maxDuration": 300, "includeFiles": "src/{brief,shared}/**" },
-    "api/report-archive.js": { "maxDuration": 60 }
+    "api/report-archive.js": { "maxDuration": 60 },
+    "api/roster-promotion.js": { "maxDuration": 60, "includeFiles": "src/{brief,shared}/**" }
   },
   "redirects": [
     {
