@@ -60,14 +60,15 @@
 //   node scripts/db-prune.js --raw-hours 24 --apply # aggressive reclaim at the ceiling
 
 const db = require('../src/db/connection');
+// The payload floor is imported, never restated. evidence.js stamps
+// expires_at from the same module, and a writer and a pruner disagreeing about
+// this number fails silently in both directions.
+const R = require('../src/db/retention');
 
 const MIN_RETENTION_DAYS = 2;
 const DEFAULT_RETENTION_DAYS = 7;
-// A report reads the last 24 hours and readWindow serves complete payloads for
-// it. Stripping payloads inside that window would make the legacy read path
-// refuse — correctly, but for a reason we caused.
-const MIN_RAW_HOURS = 24;
-const DEFAULT_RAW_HOURS = 48;
+const MIN_RAW_HOURS = R.MIN_RAW_RETENTION_HOURS;
+const DEFAULT_RAW_HOURS = R.DEFAULT_RAW_RETENTION_HOURS;
 const DEFAULT_BATCH = 2000;
 
 function args(argv) {
@@ -107,9 +108,8 @@ async function assertMigrated(q) {
   const present = (await q(`SELECT to_regclass('public.transaction_raw') IS NOT NULL AS ok`)).rows[0].ok;
   if (!present) {
     throw new Error('MIGRATION_005_NOT_APPLIED: transaction_raw does not exist. Run ' +
-      '`node scripts/db-migrate.js` first. If the project is already at its size ceiling and ' +
-      'cannot accept the migration, use the single-phase prune on agent/evidence-retention-prune ' +
-      'to free space, then migrate.');
+      '`node scripts/db-migrate.js` first — it needs no headroom, because 005 copies no ' +
+      'payloads unless SHADOWWATCH_RAW_BACKFILL_HOURS asks it to.');
   }
 }
 

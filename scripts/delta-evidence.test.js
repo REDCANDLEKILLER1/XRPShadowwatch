@@ -202,13 +202,14 @@ check('the transactions insert column list has no raw_tx or raw_meta',
 check('the payload is written to transaction_raw with an expiry',
   /INSERT INTO transaction_raw\(hash,raw_tx,raw_meta,expires_at\)/.test(EVIDENCE_SRC) &&
   /now\(\)\+\(\$2\|\|' hours'\)::interval/.test(EVIDENCE_SRC));
-check('the payload retention default is 48 hours',
-  /SHADOWWATCH_RAW_RETENTION_HOURS\) \|\| 48/.test(EVIDENCE_SRC));
+check('the payload retention window is resolved through the shared policy, not parsed inline',
+  /R\.rawRetention\(process\.env\)/.test(EVIDENCE_SRC) &&
+  !/Number\(process\.env\.SHADOWWATCH_RAW_RETENTION_HOURS\)/.test(EVIDENCE_SRC));
 // Once the payload expires, the conflict guard would have had nothing left to
 // compare. The normalized facts are compared instead, for as long as the event
 // is stored, and the payload comparison stays for as long as the payload is.
 check('a conflicting response is refused on normalized facts, not only on the payload',
-  /factColumns = \[/.test(EVIDENCE_SRC) &&
+  /const factColumns = columns\.filter/.test(EVIDENCE_SRC) &&
   /t\.\$\{c\} IS NOT NULL AND r\.\$\{c\} IS NOT NULL AND t\.\$\{c\}<>r\.\$\{c\}/.test(EVIDENCE_SRC) &&
   /FROM transaction_raw x/.test(EVIDENCE_SRC));
 // An absent field is not a disagreement. One sighting of a hash can carry a
@@ -251,15 +252,18 @@ async function persistOnce(rows, opts = {}) {
       if (/pg_advisory_xact_lock/.test(t)) return { rows: [] };
       if (/SELECT \* FROM wallet_coverage WHERE address=\$1 FOR UPDATE/.test(t)) return { rows: [] };
       if (/SELECT \* FROM wallet_coverage WHERE address=\$1$/.test(t)) return { rows: [COVERAGE_AFTER] };
-      if (/INSERT INTO transactions\(/.test(t)) {
-        // Only the FIRST hash is accepted; the second was already stored by an
-        // earlier run, exactly as a resume would find it.
-        return { rows: (opts.accepted || [rows[0] && rows[0].hash]).filter(Boolean).map(h => ({ hash: h })) };
+      if (/INSERT INTO transaction_accounts/.test(t)) {
+        // What the database ACCEPTED, which is what the rollup counts. The
+        // table is unique on (tx_hash, address, role), so a triple already
+        // stored comes back in no rows at all.
+        const offered = JSON.parse(params[0]);
+        const accepted = opts.acceptObservations ? opts.acceptObservations(offered) : offered;
+        return { rows: accepted, rowCount: accepted.length };
       }
       if (/SELECT metrics FROM scan_wallets/.test(t)) return { rows: [] };
       return { rows: [], rowCount: 0 };
     });
-    await E.persist(RUN, ADDR, rows, PROOF, { requests: 3, rows_fetched: rows.length, mode: 'EDGE_ONLY' },
+    await E.persist(RUN, opts.observedVia || ADDR, rows, PROOF, { requests: 3, rows_fetched: rows.length, mode: 'EDGE_ONLY' },
       opts.state === undefined ? { balance: { drops: '18000000000000', ledger: 1000 },
         reconciliation: explained } : opts.state);
     return { calls, error: null };
@@ -288,8 +292,8 @@ check('the route rollup is written', iRoutes > iEvent);
 const eventStatement = written.calls[iEvent].text;
 check('the slim insert names no payload column',
   !/raw_tx|raw_meta/.test(eventStatement), eventStatement.slice(0, 160));
-check('and it asks the database which hashes it actually accepted',
-  /ON CONFLICT\(hash\) DO NOTHING RETURNING hash/.test(eventStatement));
+check('and it asks the database which OBSERVATIONS it accepted, not which hashes',
+  /ON CONFLICT DO NOTHING RETURNING tx_hash,address,role/.test(written.calls[iAccounts].text));
 const eventPayload = JSON.parse(written.calls[iEvent].params[0]);
 check('no payload is shipped in the slim statement either',
   eventPayload.every(r => r.raw_tx === undefined && r.raw_meta === undefined));
@@ -298,11 +302,9 @@ check('the payload statement carries both halves for every row',
   rawPayload.length === 2 && rawPayload.every(r => r.raw_tx && r.raw_meta && r.hash));
 check('the payload expiry is a parameter, not a hard-coded literal in the SQL',
   written.calls[iRaw].params[1] === '48');
-// THE IDEMPOTENCE PROPERTY. Resume re-persists rows routinely; a rollup built
-// from the input rather than from RETURNING would double-count every one.
 const routes = JSON.parse(written.calls[iRoutes].params[0]);
-check('the route rollup counts only the hash the insert accepted, not the one it skipped',
-  routes.length === 1 && routes[0].observed_via === ADDR && routes[0].to_account === 'rDest', routes);
+check('a route is rolled up for every accepted observation',
+  routes.length === 2 && routes.every(r => r.observed_via === ADDR && r.to_account === 'rDest'), routes);
 check('a route carries its day, so it stays meaningful after both prunes',
   routes[0].day === '2026-09-10' && routes[0].ledger === 900, routes[0]);
 check('wallet_state is written with the pinned balance', iState > 0 &&
@@ -329,6 +331,89 @@ const none = await persistOnce([], { accepted: [] });
 check('a wallet with nothing new still records its state and writes no route',
   none.error === null && none.calls.findIndex(c => /INSERT INTO wallet_state/.test(c.text)) > 0 &&
   none.calls.findIndex(c => /INSERT INTO wallet_routes/.test(c.text)) < 0, none.error);
+
+console.log('\n7. a watched-to-watched transfer keeps BOTH observers');
+// The provenance hole this test exists for. One transaction between two
+// watched wallets is returned by both wallets' walks. Wallet A persists first
+// and inserts the hash; wallet B's persist hits ON CONFLICT and the row is
+// already there. Keying the rollup off the transactions insert therefore
+// dropped B's observed_via entirely — and the pair disappeared from exactly
+// the rollup that exists to show pairs.
+//
+// transaction_accounts is unique on (tx_hash, address, role), so accepted
+// OBSERVATIONS are the right idempotence key: B's is new even though the
+// transaction is not.
+const WATCHED_B = 'rXRPMANTESTWALLETB0000000000000000';
+// B's walk produces the same transactions, stamped with B's own provenance —
+// which is what catchUp does: rowFromAccountTx(..., {observedVia: address}).
+const ROWS_B = ROWS.map(r => ({ ...r, observed_via: [WATCHED_B] }));
+const secondObserver = await persistOnce(ROWS_B, {
+  // The transaction and its submitter/destination rows already exist from
+  // wallet A's run; only B's own observation is new.
+  acceptObservations: parts => parts.filter(p => p.role === 'observed_via' && p.address === WATCHED_B),
+  observedVia: WATCHED_B
+});
+const iRoutesB = secondObserver.calls.findIndex(c => /INSERT INTO wallet_routes/.test(c.text));
+check('the second watched wallet still gets its route rows', iRoutesB > 0, secondObserver.error);
+const routesB = iRoutesB > 0 ? JSON.parse(secondObserver.calls[iRoutesB].params[0]) : [];
+check('and they are attributed to the SECOND observer, not the first',
+  routesB.length === 2 && routesB.every(r => r.observed_via === WATCHED_B), routesB);
+
+// The other half of the same property: nothing new accepted, nothing counted.
+const replayed = await persistOnce(ROWS, { acceptObservations: () => [] });
+check('re-persisting a wallet whose observations are all stored adds no route at all',
+  replayed.error === null &&
+  replayed.calls.findIndex(c => /INSERT INTO wallet_routes/.test(c.text)) < 0, replayed.error);
+
+console.log('\n8. the retention floor is one number, enforced on both sides');
+const R = require(path.join(ROOT, 'src/db/retention.js'));
+const PRUNE_SRC = fs.readFileSync(path.join(ROOT, 'scripts/db-prune.js'), 'utf8');
+check('a payload window below the 24-hour floor is refused, and refusal means the LONGER default',
+  R.rawRetention({ SHADOWWATCH_RAW_RETENTION_HOURS: '12' }).hours === 48 &&
+  R.rawRetention({ SHADOWWATCH_RAW_RETENTION_HOURS: '12' }).source === 'ENV_REFUSED');
+// `Number(env) || 48` accepted this. -5 would have made every payload INSERT
+// fail the expires_at > stored_at CHECK; 12 would have stamped payloads to
+// expire half a day inside the window the report reads.
+check('a negative window is refused rather than stamped',
+  R.rawRetention({ SHADOWWATCH_RAW_RETENTION_HOURS: '-5' }).hours === 48);
+check('so is a non-numeric one',
+  R.rawRetention({ SHADOWWATCH_RAW_RETENTION_HOURS: 'abc' }).hours === 48 &&
+  R.rawRetention({ SHADOWWATCH_RAW_RETENTION_HOURS: '0' }).hours === 48);
+check('exactly the floor is accepted — it is inclusive on both sides',
+  R.rawRetention({ SHADOWWATCH_RAW_RETENTION_HOURS: '24' }).hours === 24);
+check('a longer window is honoured',
+  R.rawRetention({ SHADOWWATCH_RAW_RETENTION_HOURS: '96' }).hours === 96);
+check('an unset window is the documented default, not a refusal',
+  R.rawRetention({}).hours === 48 && R.rawRetention({}).source === 'DEFAULT');
+// The floor cannot drift because neither side owns it.
+check('the prune imports the floor rather than restating it',
+  /R\.MIN_RAW_RETENTION_HOURS/.test(PRUNE_SRC) && !/const MIN_RAW_HOURS = 24/.test(PRUNE_SRC));
+check('and so does the write path',
+  /require\('\.\/retention'\)/.test(EVIDENCE_SRC));
+
+console.log('\n9. every immutable stored fact is compared, by subtraction');
+// An allowlist here would quietly stop covering each new column nobody
+// remembered to add — the same defect shape as the `evidence` allowlist this
+// project already removed once. So the guard is `columns` MINUS an explicitly
+// named provenance set, and a new column is protected by default.
+const _decl = src => (src.match(/const columns = \[([\s\S]*?)\];/) || [])[1] || '';
+const declaredColumns = _decl(EVIDENCE_SRC).match(/'([a-z_]+)'/g).map(x => x.replace(/'/g, ''));
+const provenance = ((EVIDENCE_SRC.match(/const PROVENANCE_COLUMNS = \[([\s\S]*?)\];/) || [])[1] || '')
+  .match(/'([a-z_]+)'/g).map(x => x.replace(/'/g, ''));
+const compared = declaredColumns.filter(c => provenance.indexOf(c) < 0);
+check('every persisted column is either compared or explicitly named as provenance',
+  declaredColumns.every(c => compared.indexOf(c) >= 0 || provenance.indexOf(c) >= 0));
+// The fields the payload comparison used to cover implicitly and the
+// normalized one did not, until this was widened.
+for (const field of ['destination_tag','source_tag','sig_mode','signer_count','sequence','tx_flags','evidence'])
+  check('  ' + field + ' is compared once the payload has expired', compared.indexOf(field) >= 0, compared);
+// And the three that must NOT be, because two honest observations of one
+// transaction legitimately disagree about them.
+check('provenance is excluded, and it is exactly these three',
+  provenance.length === 3 && ['hash','roster_version','first_seen_scan_id'].every(c => provenance.indexOf(c) >= 0),
+  provenance);
+check('the excluded set is justified in the source, not silently listed',
+  /PROVENANCE is the exception/.test(EVIDENCE_SRC));
 
 console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA EVIDENCE CHECKS PASS'));
 process.exit(fail ? 1 : 0);

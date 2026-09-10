@@ -20,10 +20,11 @@ BEGIN;
 -- (7 days) still fires it and still needs the in-transaction repair in
 -- scripts/db-prune.js.
 --
--- OPERATOR NOTE. If the project is already at its size ceiling, run
---   node scripts/db-prune.js --days 2 --apply
--- BEFORE applying this migration. The backfill below writes a copy of the last
--- 48 hours of payloads, and a full database cannot write anything at all.
+-- OPERATOR NOTE. This migration needs no headroom: by default it copies
+-- nothing and the column drop is metadata-only, so it applies on a project
+-- that is already at its ceiling. See the block below for what that costs and
+-- for SHADOWWATCH_RAW_BACKFILL_HOURS, which carries the payloads across when
+-- there IS room.
 
 CREATE TABLE IF NOT EXISTS transaction_raw (
   -- The FK is what makes the two tables one fact. Deleting a slim event takes
@@ -40,22 +41,82 @@ CREATE TABLE IF NOT EXISTS transaction_raw (
 );
 CREATE INDEX IF NOT EXISTS transaction_raw_expires_at ON transaction_raw(expires_at);
 
--- Move what is still inside the 48-hour window, then retire the columns.
--- Payloads older than that are already past the policy this migration
--- introduces; they are dropped rather than copied, which is also what keeps
--- the backfill small enough to run on a nearly full project.
+-- ── RETIRING THE OLD COLUMNS, WITHOUT NEEDING ROOM FOR A SECOND COPY ───────
+--
+-- The obvious migration copies the last 48 hours of payloads into the new
+-- table and then drops the columns. On a project at a hard size ceiling that
+-- is the one thing it must not do: the copy needs as many bytes again as the
+-- payloads already occupy, and DROP COLUMN gives none of them back — Postgres
+-- marks the attribute dropped and leaves the heap alone until the rows are
+-- rewritten. Worse on Neon, where deleting rows does not shrink the project
+-- either: the pages stay in history until they age out of the retention
+-- window. So a migration that needs headroom to run is a migration that fails
+-- exactly when it is most needed.
+--
+-- Therefore the copy is OPT-IN and copies NOTHING by default. The payload is,
+-- as of this migration, a 48-hour cache with a declared expiry — not permanent
+-- record — so applying that policy immediately to what is already stored is
+-- the policy working, not evidence being lost. Every slim event, participant
+-- row, derived `evidence` (balance deltas included) and coverage proof is
+-- untouched. What the next run does is re-fetch its edge and store fresh
+-- payloads; the only visible effect is that the legacy per-wallet read path
+-- refuses for up to one report cycle, saying so rather than inventing a
+-- tx_json it does not have.
+--
+-- An operator who HAS headroom can carry the payloads across:
+--
+--   SHADOWWATCH_RAW_BACKFILL_HOURS=48 node scripts/db-migrate.js
+--
+-- and then the preflight below refuses the whole migration — in one
+-- transaction, so nothing partial survives — if the copy would not fit.
+--
+-- That preflight is a LOWER BOUND, not a proof: pg_database_size() measures
+-- the live heap, while a Neon project's size also carries history it has not
+-- collected yet. It can pass and the copy can still hit the ceiling. Which is
+-- the other reason the default is zero.
 DO $$
+DECLARE
+  backfill_hours numeric := COALESCE(NULLIF(current_setting('shadowwatch.raw_backfill_hours', true), '')::numeric, 0);
+  limit_mb       numeric := COALESCE(NULLIF(current_setting('shadowwatch.size_limit_mb', true), '')::numeric, 512);
+  payload_bytes  numeric := 0;
+  live_bytes     numeric := 0;
 BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.columns
-              WHERE table_name = 'transactions' AND column_name = 'raw_tx') THEN
+  -- Already applied. The columns are gone, so nothing below would parse
+  -- against them anyway.
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_name = 'transactions' AND column_name = 'raw_tx') THEN
+    RETURN;
+  END IF;
+
+  IF backfill_hours > 0 THEN
+    SELECT COALESCE(sum(pg_column_size(raw_tx) + pg_column_size(raw_meta)), 0)
+      INTO payload_bytes
+      FROM transactions
+     WHERE ingested_at > now() - (backfill_hours || ' hours')::interval;
+    live_bytes := pg_database_size(current_database());
+    -- 1.4x covers the new relation's tuple headers, its primary-key index and
+    -- the WAL the copy generates.
+    IF live_bytes + payload_bytes * 1.4 > limit_mb * 1024 * 1024 THEN
+      RAISE EXCEPTION
+        'RAW_BACKFILL_WOULD_EXCEED_SIZE_LIMIT: copying % hours of payloads needs about % MB on top of the % MB already stored, against a % MB ceiling. Nothing has been changed. Prune first, or re-run without SHADOWWATCH_RAW_BACKFILL_HOURS to migrate without copying.',
+        backfill_hours,
+        round(payload_bytes * 1.4 / 1024 / 1024),
+        round(live_bytes / 1024 / 1024),
+        limit_mb;
+    END IF;
     INSERT INTO transaction_raw(hash, raw_tx, raw_meta, stored_at, expires_at)
       SELECT hash, raw_tx, raw_meta, ingested_at, ingested_at + interval '48 hours'
         FROM transactions
-       WHERE ingested_at > now() - interval '48 hours'
+       WHERE ingested_at > now() - (backfill_hours || ' hours')::interval
       ON CONFLICT (hash) DO NOTHING;
-    ALTER TABLE transactions DROP COLUMN raw_tx;
-    ALTER TABLE transactions DROP COLUMN raw_meta;
   END IF;
+
+  -- Metadata-only and instant. It reclaims nothing, and is not expected to:
+  -- what stops the growth is that new payloads now land in a table with an
+  -- expiry, and what reclaims space is the prune plus Neon's own history
+  -- collection.
+  ALTER TABLE transactions DROP COLUMN raw_tx;
+  ALTER TABLE transactions DROP COLUMN raw_meta;
 END $$;
 
 -- ============================================================================

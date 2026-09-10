@@ -6,6 +6,7 @@ const C = require('./coverage');
 const T = require('./transactions');
 const roster = require('./roster');
 const B = require('./balance');
+const R = require('./retention');
 const { Reader } = require('./xrpl-reader');
 const iso = ms => new Date(ms).toISOString();
 const ms = value => new Date(value).getTime();
@@ -22,15 +23,34 @@ const columns = ['hash','ledger_index','close_time','tx_type','tx_result','valid
   'roster_version','evidence','first_seen_scan_id'];
 // How long a complete ledger payload is kept. Long enough that every report
 // window (24h) is fully re-derivable and yesterday's is still auditable;
-// short enough that ~2 kB a transaction stops being a permanent cost.
-const RAW_RETENTION_HOURS = Number(process.env.SHADOWWATCH_RAW_RETENTION_HOURS) || 48;
+// short enough that ~2 kB a transaction stops being a permanent cost. The
+// floor and the resolution live in src/db/retention.js because the prune
+// enforces the same number from the other side, and a writer stamping 12 hours
+// against a pruner refusing to go below 24 fails silently in both directions.
+const RAW_RETENTION = R.rawRetention(process.env);
+const RAW_RETENTION_HOURS = RAW_RETENTION.hours;
+
+// ── What may not change once a hash is stored ──────────────────────────────
 // Comparing the normalized facts is what keeps a conflicting response from
 // rewriting an existing row once its payload has expired. Before 005 this was
 // a raw_tx/raw_meta comparison and nothing else, which would have silently
 // stopped protecting anything older than the payload retention.
-const factColumns = ['ledger_index','close_time','tx_type','tx_result','from_account','to_account',
-  'amount_drops','amount_value','currency','issuer','escrow_owner','escrow_destination',
-  'escrow_amount_drops','fee_drops','transaction_index'];
+//
+// It is derived by SUBTRACTION rather than listed, so a column added to
+// `columns` in future is protected by default and can only escape by being
+// named below. An allowlist here would have quietly stopped covering every new
+// field nobody remembered to add — the same shape of defect as the `evidence`
+// allowlist this project already removed once.
+//
+// PROVENANCE is the exception, and it is not a property of the transaction:
+//   hash                 the join key itself
+//   roster_version       which roster was current when THIS observation landed
+//   first_seen_scan_id   which run stored it first
+// Two honest observations of one transaction legitimately disagree on those,
+// and comparing them would fail every second sighting of a watched-to-watched
+// transfer.
+const PROVENANCE_COLUMNS = ['hash','roster_version','first_seen_scan_id'];
+const factColumns = columns.filter(c => PROVENANCE_COLUMNS.indexOf(c) < 0);
 
 async function begin(input, reader) {
   const selected = roster.select(input.accounts);
@@ -177,11 +197,8 @@ async function persist(run, address, rows, proof, metrics, state) {
         JOIN jsonb_to_recordset($1::jsonb) AS r(hash text,raw_tx jsonb,raw_meta jsonb) USING(hash)
         WHERE x.raw_tx<>r.raw_tx OR x.raw_meta<>r.raw_meta LIMIT 1`, [JSON.stringify(rawPayload)]);
       if (rawConflict.rows.length) throw new Error('CONFLICTING_TRANSACTION_EVIDENCE: '+rawConflict.rows[0].hash);
-      // RETURNING names the hashes this statement actually accepted. The route
-      // rollup is built from those and only those, so re-running a wallet —
-      // which the resume path does routinely — can never inflate a count.
-      const inserted = await q(`INSERT INTO transactions(${columns.join(',')}) SELECT ${columns.join(',')} FROM
-        jsonb_populate_recordset(NULL::transactions,$1::jsonb) ON CONFLICT(hash) DO NOTHING RETURNING hash`, [JSON.stringify(payload)]);
+      await q(`INSERT INTO transactions(${columns.join(',')}) SELECT ${columns.join(',')} FROM
+        jsonb_populate_recordset(NULL::transactions,$1::jsonb) ON CONFLICT(hash) DO NOTHING`, [JSON.stringify(payload)]);
       // After the event exists: the foreign key makes the payload a dependent
       // of the row it describes, never an orphan.
       await q(`INSERT INTO transaction_raw(hash,raw_tx,raw_meta,expires_at)
@@ -189,11 +206,25 @@ async function persist(run, address, rows, proof, metrics, state) {
         FROM jsonb_to_recordset($1::jsonb) AS r(hash text,raw_tx jsonb,raw_meta jsonb)
         WHERE EXISTS(SELECT 1 FROM transactions t WHERE t.hash=r.hash)
         ON CONFLICT(hash) DO NOTHING`, [JSON.stringify(rawPayload), String(RAW_RETENTION_HOURS)]);
-      await q(`INSERT INTO transaction_accounts(tx_hash,address,role)
+      // RETURNING names the (hash, address, role) triples this statement
+      // actually accepted, and THAT is what the route rollup counts.
+      //
+      // Keying it off the transactions insert instead lost provenance: a
+      // watched-to-watched transfer is returned by both wallets' walks, the
+      // first wallet's persist inserts the hash and the second hits ON
+      // CONFLICT — so the second wallet's observed_via route was never
+      // recorded, and the pair vanished from exactly the rollup that exists to
+      // show pairs. transaction_accounts is unique on (tx_hash, address, role),
+      // so this is idempotent per OBSERVATION rather than per transaction: a
+      // resume re-persisting the same wallet still adds nothing.
+      const observed = await q(`INSERT INTO transaction_accounts(tx_hash,address,role)
         SELECT tx_hash,address,role FROM jsonb_to_recordset($1::jsonb) AS p(tx_hash text,address text,role text)
-        ON CONFLICT DO NOTHING`, [JSON.stringify(chunk.flatMap(T.participantsOf))]);
-      const fresh = new Set(inserted.rows.map(r => r.hash));
-      const routes = chunk.filter(r => fresh.has(r.hash)).map(r => routeOf(r, address)).filter(Boolean);
+        ON CONFLICT DO NOTHING RETURNING tx_hash,address,role`, [JSON.stringify(chunk.flatMap(T.participantsOf))]);
+      const byHash = new Map(chunk.map(r => [r.hash, r]));
+      const routes = observed.rows
+        .filter(o => o.role === T.ROLE.OBSERVED_VIA)
+        .map(o => routeOf(byHash.get(o.tx_hash), o.address))
+        .filter(Boolean);
       if (routes.length) await q(ROUTE_ROLLUP, [JSON.stringify(routes)]);
     }
     // Extend proof monotonically. A wider cold rescan may restore pruned
