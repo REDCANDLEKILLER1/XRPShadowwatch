@@ -36,13 +36,56 @@ function client(token,repo,fetchImpl){
   };
 }
 
-async function archiveReport(raw,deps={}){
-  const input=validate(raw),env=deps.env||process.env;
+// ── One fast-forward commit ────────────────────────────────────────────────
+// Factored out because the evidence export commits through the same branch and
+// the same token, and two implementations of "write files to the archive"
+// would drift. Files may be strings (UTF-8) or Buffers: the report path writes
+// text, the export path writes gzip shards.
+//
+// A 422 on the ref PATCH means someone else moved the branch first, and it is
+// the ONLY failure the caller may retry — so it is tagged rather than left for
+// the caller to infer from a status code that other calls could also produce.
+async function commitFiles(gh,branch,parentSha,files,message){
+  const commit=await gh('GET','/git/commits/'+parentSha);
+  const entries=[];
+  for(const [filePath,content] of Object.entries(files)){
+    const buffer=Buffer.isBuffer(content)?content:Buffer.from(content,'utf8');
+    const blob=await gh('POST','/git/blobs',{content:buffer.toString('base64'),encoding:'base64'});
+    entries.push({path:filePath,mode:'100644',type:'blob',sha:blob.sha});
+  }
+  const tree=await gh('POST','/git/trees',{base_tree:commit.tree.sha,tree:entries});
+  const made=await gh('POST','/git/commits',{message,tree:tree.sha,parents:[parentSha]});
+  try{await gh('PATCH','/git/refs/heads/'+branch,{sha:made.sha,force:false});}
+  catch(e){if(e.status===422)e.refConflict=true;throw e;}
+  return {commit_sha:made.sha,files_written:entries.length,
+    bytes_written:Object.values(files).reduce((n,c)=>n+(Buffer.isBuffer(c)?c.length:Buffer.byteLength(c,'utf8')),0)};
+}
+
+// Resolve the archive branch, creating it from the default branch the first
+// time. Shared for the same reason commitFiles is.
+async function archiveRef(gh,branch){
+  let ref=await gh('GET','/git/ref/heads/'+branch,undefined,true);
+  if(ref)return ref;
+  const metadata=await gh('GET','');
+  const source=await gh('GET','/git/ref/heads/'+metadata.default_branch);
+  try{return await gh('POST','/git/refs',{ref:'refs/heads/'+branch,sha:source.object.sha});}
+  catch(e){if(e.status!==422)throw e;return await gh('GET','/git/ref/heads/'+branch);}
+}
+
+// The pinned target, refused if an environment tries to redirect it. Shared so
+// the export cannot be pointed somewhere the report archive would not go.
+function archiveTarget(env){
   const token=env.SHADOWWATCH_GITHUB_ARCHIVE_TOKEN;
   if(!token)throw new Error('GITHUB_ARCHIVE_NOT_CONFIGURED');
   const repo=env.SHADOWWATCH_GITHUB_ARCHIVE_REPOSITORY||REPO;
   const branch=env.SHADOWWATCH_GITHUB_ARCHIVE_BRANCH||BRANCH;
   if(repo!==REPO||branch!==BRANCH)throw new Error('GITHUB_ARCHIVE_TARGET_REFUSED');
+  return {token,repo,branch};
+}
+
+async function archiveReport(raw,deps={}){
+  const input=validate(raw),env=deps.env||process.env;
+  const {token,repo,branch}=archiveTarget(env);
   const facts=await (deps.archiveFacts||E.archiveFacts)(input.evidence_scan_id);
   if(!facts||!facts.target_wallets)throw new Error('ARCHIVE_RUN_NOT_FOUND');
   const reportHash=sha(input.morning_report);
@@ -62,13 +105,7 @@ async function archiveReport(raw,deps={}){
   const files={[root+'/receipt.json']:json(receipt),[root+'/morning-report.txt']:input.morning_report,
     [root+'/summary.json']:json(summary)};
   const fetchImpl=deps.fetch||fetch,gh=client(token,repo,fetchImpl);
-  let ref=await gh('GET','/git/ref/heads/'+branch,undefined,true);
-  if(!ref){
-    const metadata=await gh('GET','');
-    const source=await gh('GET','/git/ref/heads/'+metadata.default_branch);
-    try{ref=await gh('POST','/git/refs',{ref:'refs/heads/'+branch,sha:source.object.sha});}
-    catch(e){if(e.status!==422)throw e;ref=await gh('GET','/git/ref/heads/'+branch);}
-  }
+  let ref=await archiveRef(gh,branch);
   for(let attempt=0;attempt<4;attempt++){
     ref=await gh('GET','/git/ref/heads/'+branch);
     const existing=await gh('GET','/contents/'+root+'/receipt.json?ref='+encodeURIComponent(branch),undefined,true);
@@ -87,22 +124,15 @@ async function archiveReport(raw,deps={}){
     if(!index.some(row=>row.report_id===input.report_id))index.push({report_id:input.report_id,generated_at:generatedAt,
       coverage_complete:facts.coverage_complete,anchor:facts.validated_anchor_ledger,transactions:facts.transactions_in_window,report_hash:reportHash});
     files[dayRoot+'/index.json']=json(index.sort((a,b)=>String(a.report_id).localeCompare(String(b.report_id))));
-    const commit=await gh('GET','/git/commits/'+ref.object.sha);
-    const entries=[];
-    for(const [path,content] of Object.entries(files)){
-      const blob=await gh('POST','/git/blobs',{content:b64(content),encoding:'base64'});
-      entries.push({path,mode:'100644',type:'blob',sha:blob.sha});
-    }
-    const tree=await gh('POST','/git/trees',{base_tree:commit.tree.sha,tree:entries});
-    const made=await gh('POST','/git/commits',{message:'report: '+input.report_id+' — '+facts.transaction_windows_proved+'/'+facts.target_wallets+
-      ' — ledger '+facts.validated_anchor_ledger,tree:tree.sha,parents:[ref.object.sha]});
     try{
-      await gh('PATCH','/git/refs/heads/'+branch,{sha:made.sha,force:false});
-      return {attempted:true,status:'ARCHIVED',report_id:input.report_id,branch,commit_sha:made.sha,archived_at:new Date().toISOString(),
-        archive_path:root,files_written:Object.keys(files).length,bytes_written:Object.values(files).reduce((n,s)=>n+Buffer.byteLength(s),0),retry_count:attempt};
-    }catch(e){if(e.status!==422||attempt===3)throw e;}
+      const written=await commitFiles(gh,branch,ref.object.sha,files,
+        'report: '+input.report_id+' — '+facts.transaction_windows_proved+'/'+facts.target_wallets+
+        ' — ledger '+facts.validated_anchor_ledger);
+      return {attempted:true,status:'ARCHIVED',report_id:input.report_id,branch,commit_sha:written.commit_sha,archived_at:new Date().toISOString(),
+        archive_path:root,files_written:written.files_written,bytes_written:written.bytes_written,retry_count:attempt};
+    }catch(e){if(!e.refConflict||attempt===3)throw e;}
   }
   throw new Error('GITHUB_ARCHIVE_RETRY_EXHAUSTED');
 }
 
-module.exports={archiveReport,validate,sha,BRANCH,REPO,MAX_REPORT_BYTES};
+module.exports={archiveReport,validate,sha,client,commitFiles,archiveRef,archiveTarget,BRANCH,REPO,MAX_REPORT_BYTES};
