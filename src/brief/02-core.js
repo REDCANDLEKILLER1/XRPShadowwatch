@@ -1496,20 +1496,70 @@ async function scanWallets(ws) {
   state.anchorAttempts = [];
   state.effectiveWindow = null;
   state.indexRun = null;
+  state.evidenceIndexFailure = null;
   if (window.SW_EVIDENCE_INDEX) {
-    try {
-      log('Evidence index: establishing the server-owned run and roster…');
-      state.anchorAttempts.push({ source:'SERVER_VERIFIED_INDEX', at:new Date().toISOString() });
-      state.indexRun = await window.SW_EVIDENCE_INDEX.begin(getTxWindow(), getActiveWatchlist().map(w => w.address));
-      state.runId = state.indexRun.scan_id;
-      const ir = state.indexRun;
-      state.runAnchor = { ok:true, anchor_ledger:ir.anchor_ledger, anchor_close_ms:ir.anchor_close_ms,
-        anchor_close_iso:new Date(ir.anchor_close_ms).toISOString(), history_exhaustion_proof:null,
-        transport_epoch:0, source:'SERVER_VERIFIED_INDEX' };
-      log('Evidence index: run ' + ir.scan_id + ', roster ' + ir.accounts.length + ', anchor ' + ir.anchor_ledger);
-    } catch(e) {
-      state.anchorAttempts[state.anchorAttempts.length-1].error=e.message;
-      log('Evidence index unavailable — direct XRPL acquisition: ' + e.message);
+    // THE EVIDENCE INDEX IS THE ACQUISITION PATH, NOT AN OPTIMISATION.
+    //
+    // SW-20260910: begin() returned 503, this block swallowed it, and the run
+    // fell through to the legacy direct account_tx walk — which cannot finish a
+    // 255-wallet board and is the exact architecture the 2026-09-08 incident
+    // retired. The screen read "0/255 · 0 NEW · 0 STORED" while the legacy
+    // scanner crawled 2,791 transactions underneath it: two acquisition paths
+    // disagreeing, with only the losing one visible. Neon already held ~49,000
+    // proven transactions; none of them were used.
+    //
+    // The cause was unreadable because the message went to log(), which the
+    // status feed shows and the TOTAL_DEBUG export does not, and to
+    // state.anchorAttempts, which only ships inside a pack a failed run never
+    // builds. Both paths are closed below.
+    const EVIDENCE_BEGIN_ATTEMPTS = 3;
+    let lastEvidenceError = null;
+    for (let attempt = 1; attempt <= EVIDENCE_BEGIN_ATTEMPTS && !state.indexRun; attempt++) {
+      const record = { source:'SERVER_VERIFIED_INDEX', at:new Date().toISOString(), attempt };
+      state.anchorAttempts.push(record);
+      try {
+        log('Evidence index: establishing the server-owned run and roster…' +
+            (attempt > 1 ? ' (attempt ' + attempt + ' of ' + EVIDENCE_BEGIN_ATTEMPTS + ')' : ''));
+        state.indexRun = await window.SW_EVIDENCE_INDEX.begin(getTxWindow(), getActiveWatchlist().map(w => w.address));
+        state.runId = state.indexRun.scan_id;
+        const ir = state.indexRun;
+        state.runAnchor = { ok:true, anchor_ledger:ir.anchor_ledger, anchor_close_ms:ir.anchor_close_ms,
+          anchor_close_iso:new Date(ir.anchor_close_ms).toISOString(), history_exhaustion_proof:null,
+          transport_epoch:0, source:'SERVER_VERIFIED_INDEX' };
+        log('Evidence index: run ' + ir.scan_id + ', roster ' + ir.accounts.length + ', anchor ' + ir.anchor_ledger);
+      } catch(e) {
+        lastEvidenceError = e;
+        record.error = e.message;
+        // elog, not log: the reason has to survive into TOTAL_DEBUG's error log.
+        // A 503 whose cause is only ever spoken to the screen is why this took a
+        // day to identify.
+        elog('evidence index begin (attempt ' + attempt + ' of ' + EVIDENCE_BEGIN_ATTEMPTS + ')', e);
+        state.evidenceIndexFailure = { error:e.message, attempts:attempt, at:new Date().toISOString(),
+          transport:(e && e.transport) || null };
+        if (attempt < EVIDENCE_BEGIN_ATTEMPTS) {
+          const backoffMs = 2000 * attempt;
+          log('Evidence index retry in ' + Math.round(backoffMs / 1000) + 's — ' + e.message);
+          await new Promise(r => setTimeout(r, backoffMs));
+        }
+      }
+    }
+    if (!state.indexRun) {
+      // A run that cannot reach its own evidence must stop, not quietly restart
+      // the acquisition method it replaced. Grinding account_tx here produces a
+      // report that looks like it is working, takes half an hour, and ends with
+      // nothing sealed.
+      if (!window.SW_ALLOW_DIRECT_XRPL) {
+        const stop = new Error('EVIDENCE_SERVICE_UNAVAILABLE: ' + (lastEvidenceError && lastEvidenceError.message || 'unknown') +
+          ' — the stored-evidence index could not start after ' + EVIDENCE_BEGIN_ATTEMPTS +
+          ' attempts. Stopping instead of falling back to a direct account_tx walk.' +
+          ' Check /api/evidence?action=health, then re-run. To override for one page session,' +
+          ' set window.SW_ALLOW_DIRECT_XRPL = true (expect a slow, likely-throttled scan).');
+        stop.evidenceUnavailable = true;
+        stop.scanIncomplete = true;
+        throw stop;
+      }
+      elog('evidence index bypassed', new Error('SW_ALLOW_DIRECT_XRPL set — direct account_tx acquisition, operator override'));
+      log('Evidence index unavailable and overridden — direct XRPL acquisition. This is the slow path.');
     }
   }
   const RA = (typeof window !== 'undefined') && window.SW_RUN_ANCHOR;
@@ -3851,6 +3901,8 @@ function buildPack(v) {
     anchor_attempts: state.anchorAttempts || [],
     phase_timings: state.phaseTimings || [],
     evidence_index: state.indexRun && window.SW_EVIDENCE_INDEX ? window.SW_EVIDENCE_INDEX.metrics() : null,
+    // Why the index was not used, when it was not used. Null on a healthy run.
+    evidence_index_failure: state.evidenceIndexFailure || null,
     shadow_volume_xrp: shadowVolumeXRP(), total_balance_delta_xrp: totalDeltaXRP(),
     // The measured delta with the escrow-attributable part removed, and the
     // adjustment itself so the two reconcile in the debug pack.
