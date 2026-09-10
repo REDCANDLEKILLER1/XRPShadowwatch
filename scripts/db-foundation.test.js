@@ -81,11 +81,20 @@ function tableBodies(sql) {
   while((m=additions.exec(src))){
     if(out[m[1]]!==undefined)out[m[1]]+=',\n'+m[2];
   }
+  // And a later migration may RETIRE one. 005 moves raw_tx/raw_meta out of
+  // `transactions` into `transaction_raw`; without this the parity check would
+  // compare two files that both still describe a column neither database has.
+  // A drop is applied to the accumulated body, so a column added and later
+  // dropped disappears the same way one declared in CREATE TABLE does.
+  const drops=/ALTER\s+TABLE\s+(\w+)\s+DROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?(\w+)/gi;
+  while((m=drops.exec(src))){
+    if(out[m[1]]!==undefined)out[m[1]]=withoutColumn(out[m[1]],m[2]);
+  }
   return out;
 }
-// A column definition is a top-level (paren-depth 0) clause whose first token
-// is an identifier and is not a constraint keyword.
-function columnsOf(body) {
+// Split a table body into its top-level (paren-depth 0) clauses. Column
+// definitions, table constraints and everything else are one clause each.
+function topLevelClauses(body) {
   const parts = [];
   let depth = 0, cur = '';
   for (const ch of body) {
@@ -95,7 +104,22 @@ function columnsOf(body) {
     cur += ch;
   }
   parts.push(cur);
-  return parts
+  return parts;
+}
+function withoutColumn(body, column) {
+  return topLevelClauses(body)
+    .filter(clause => {
+      const t = clause.trim();
+      if (!t) return true;
+      if (/^(CONSTRAINT|PRIMARY\s+KEY|UNIQUE|CHECK|FOREIGN\s+KEY|EXCLUDE)\b/i.test(t)) return true;
+      return ((t.match(/^"?(\w+)"?/) || [])[1] || '').toLowerCase() !== column.toLowerCase();
+    })
+    .join(',');
+}
+// A column definition is a top-level (paren-depth 0) clause whose first token
+// is an identifier and is not a constraint keyword.
+function columnsOf(body) {
+  return topLevelClauses(body)
     .map(s => s.trim())
     .filter(Boolean)
     .filter(s => !/^(CONSTRAINT|PRIMARY\s+KEY|UNIQUE|CHECK|FOREIGN\s+KEY|EXCLUDE)\b/i.test(s))
@@ -106,16 +130,7 @@ function columnsOf(body) {
 // collapsed. Comparing these is what makes a type change visible.
 function columnDefsOf(body) {
   const out = {};
-  const parts = [];
-  let depth = 0, cur = '';
-  for (const ch of body) {
-    if (ch === '(') { depth++; cur += ch; continue; }
-    if (ch === ')') { depth--; cur += ch; continue; }
-    if (ch === ',' && depth === 0) { parts.push(cur); cur = ''; continue; }
-    cur += ch;
-  }
-  parts.push(cur);
-  for (const raw of parts) {
+  for (const raw of topLevelClauses(body)) {
     const t = raw.trim();
     if (!t) continue;
     if (/^(CONSTRAINT|PRIMARY\s+KEY|UNIQUE|CHECK|FOREIGN\s+KEY|EXCLUDE)\b/i.test(t)) continue;
@@ -262,11 +277,44 @@ check('a checkpoint can never be moved backwards by an UPDATE',
 // letting the check's name overclaim.
 check('the clearing guard is also a real expression',
       /NEW\.scan_coverage_through\s+IS\s+NULL\s+THEN/i.test(_fnBody));
-// The complete payload is the forensic source of truth, so it may not be
-// optional. A nullable raw column is an allowlist with extra steps.
-check('raw_tx and raw_meta are NOT NULL',
-      /raw_tx\s+JSONB\s+NOT NULL/i.test(stripComments(migrationTables.transactions || '')) &&
-      /raw_meta\s+JSONB\s+NOT NULL/i.test(stripComments(migrationTables.transactions || '')));
+// The complete payload is the forensic source of truth for as long as it is
+// kept, so it may not be optional. A nullable raw column is an allowlist with
+// extra steps -- and worse, it cannot tell "never stored" from "expired on
+// schedule". Migration 005 moves the payload into its own table for exactly
+// that reason, so NOT NULL is asserted THERE and its absence is asserted here.
+check('raw_tx and raw_meta are NOT NULL in transaction_raw',
+      /raw_tx\s+JSONB\s+NOT NULL/i.test(stripComments(migrationTables.transaction_raw || '')) &&
+      /raw_meta\s+JSONB\s+NOT NULL/i.test(stripComments(migrationTables.transaction_raw || '')));
+check('the payload is NOT a nullable column on transactions',
+      !/\braw_tx\b/i.test(stripComments(migrationTables.transactions || '')) &&
+      !/\braw_meta\b/i.test(stripComments(migrationTables.transactions || '')),
+      Object.keys(columnDefsOf(migrationTables.transactions || '')));
+// Expiring a payload must never disturb the event or the proof. The FK is what
+// makes the reverse direction true as well: deleting a slim event takes its
+// payload with it, so a payload can never outlive the event it describes.
+check('an expiring payload is keyed to its event by a cascading foreign key',
+      /hash\s+TEXT\s+PRIMARY KEY\s+REFERENCES\s+transactions\(hash\)\s+ON DELETE CASCADE/i
+        .test(stripComments(migrationTables.transaction_raw || '')));
+check('every stored payload carries its own expiry',
+      /expires_at\s+TIMESTAMPTZ\s+NOT NULL/i.test(stripComments(migrationTables.transaction_raw || '')));
+// The trigger that NULLs a wallet's retained range fires on `transactions`
+// only. If it were ever extended to transaction_raw, expiring a payload would
+// send every wallet cold against the same throttled public endpoint the index
+// exists to avoid -- the exact failure this split was built to prevent.
+check('expiring a payload does not fire the coverage-invalidating trigger',
+      !/ON\s+transaction_raw/i.test(
+        (stripComments(MIGRATION_SQL).match(/CREATE TRIGGER[^;]+invalidate_pruned_evidence[^;]*;/gi) || []).join(' ')) &&
+      /BEFORE DELETE ON transactions\b/i.test(stripComments(MIGRATION_SQL)));
+// Balance is a cross-check on the walk, never a gate on it. A schema that let
+// wallet_state decide anything would reintroduce the hiding place a
+// pass-through bot needs: receive five million XRP, send five million XRP,
+// net zero by the next snapshot.
+check('a delta checkpoint cannot move backwards',
+      /A delta checkpoint cannot move backwards/i.test(stripComments(MIGRATION_SQL)) &&
+      /BEFORE UPDATE ON wallet_state/i.test(stripComments(MIGRATION_SQL)));
+check('a balance observation is always pinned to a ledger',
+      /\(balance_drops IS NULL\) = \(balance_ledger IS NULL\)/i
+        .test(stripComments(migrationTables.wallet_state || '')));
 // Half an anchor is not an anchor: a ledger index with no close time cannot be
 // compared against a report window at all.
 check('scan_runs.anchor_close_time is NOT NULL',
@@ -310,10 +358,28 @@ const _m = stripComments(MIGRATION_SQL);
 // not row deletion. An unmatched constraint drop remains prohibited.
 const _withoutConstraintReplacement = _m.replace(/ALTER\s+TABLE\s+(\w+)\s+DROP\s+CONSTRAINT\s+(\w+)\s*;/gi,
   (statement,table,constraint)=>new RegExp('ALTER\\s+TABLE\\s+'+table+'\\s+ADD\\s+CONSTRAINT\\s+'+constraint+'\\s+CHECK\\s*\\(','i').test(_m)?'':statement);
+// Moving a column's contents to another table in the SAME migration is
+// relocation, not destruction: 005 copies raw_tx/raw_meta into transaction_raw
+// and only then drops them. The exemption is narrow on purpose -- it requires
+// an INSERT ... SELECT in this same text that names the column being dropped
+// and reads it from the table being altered. A bare DROP COLUMN, or one whose
+// preserving INSERT is deleted later, fails this check exactly as before.
+const _preserved = (table, column) => new RegExp(
+  'INSERT\\s+INTO\\s+\\w+\\s*\\([^)]*\\b' + column + '\\b[^)]*\\)\\s*SELECT' +
+  '[\\s\\S]{0,400}?\\b' + column + '\\b[\\s\\S]{0,400}?FROM\\s+' + table + '\\b', 'i').test(_m);
+const _dropRe = /ALTER\s+TABLE\s+(\w+)\s+DROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?(\w+)\s*;/gi;
+const _withoutPreservedDrops = _withoutConstraintReplacement.replace(_dropRe,
+  (statement, table, column) => _preserved(table, column) ? '' : statement);
 check('no migration destroys evidence',
       !/\bDROP\s+TABLE\b/i.test(_m) && !/(?:^|;)\s*TRUNCATE\s+(?:TABLE\s+)?\w+/im.test(_m) &&
-      !/\bDELETE\s+FROM\b/i.test(_m) && !/\bDROP\s+COLUMN\b/i.test(_m) &&
-      !/\bALTER\s+TABLE\b[\s\S]{0,200}?\bDROP\b/i.test(_withoutConstraintReplacement));
+      !/\bDELETE\s+FROM\b/i.test(_m) &&
+      !/\bDROP\s+COLUMN\b/i.test(_m.replace(_dropRe, (st, t, c) => _preserved(t, c) ? '' : st)) &&
+      !/\bALTER\s+TABLE\b[\s\S]{0,200}?\bDROP\b/i.test(_withoutPreservedDrops));
+// The exemption above is only safe while it is actually checked, so prove it
+// discriminates: the drop 005 performs is preserved, and an invented one is not.
+check('a relocated column is exempt, an unrelocated one is not',
+      _preserved('transactions', 'raw_tx') && _preserved('transactions', 'raw_meta') &&
+      !_preserved('transactions', 'ledger_index') && !_preserved('transactions', 'tx_result'));
 
 // ════════════════════════════════════════════════════════════════════════════
 console.log('\n2. ingest is non-lossy, and never fabricates a ledger value');

@@ -1,0 +1,336 @@
+#!/usr/bin/env node
+'use strict';
+/* ── DELTA ACQUISITION, AND THE CROSS-CHECK THAT KEEPS IT HONEST ────────────
+   The evidence store keeps a slim event permanently (for the retention
+   window), a complete ledger payload for 48 hours, and a compact route rollup
+   forever. Acquisition asks XRPL only for [last_proven_ledger+1 .. anchor].
+
+   The saving is real but it is NOT where it first appears to be: a day of
+   ledger activity is a day of ledger activity either way, so delta
+   acquisition removes RE-FETCHING, not rows. The bytes come from the payload
+   split. Both facts are load-bearing and both are asserted here.
+
+   The danger the delta model introduces is subtler. Once a wallet has a
+   balance and a checkpoint, it is tempting to skip the walk when the balance
+   has not moved. That would build a hiding place for the only wallet this
+   project genuinely cares about: a routing bot that receives five million XRP
+   and forwards five million XRP inside a day is net-zero at both ends.
+
+   So the rule is inverted here. The walk is unconditional; the BALANCE is the
+   cross-check on the walk. Between two balances pinned to two known ledgers
+   the XRP delta is an exact identity against the AccountRoot deltas of the
+   transactions in between, and a mismatch means evidence is MISSING from a
+   range this run claims to have proven.
+
+   No database, no browser, no network.
+
+   Run: node scripts/delta-evidence.test.js
+──────────────────────────────────────────────────────────────────────────── */
+const fs = require('fs');
+const path = require('path');
+const ROOT = path.join(__dirname, '..');
+const B = require(path.join(ROOT, 'src/db/balance.js'));
+const C = require(path.join(ROOT, 'src/db/coverage.js'));
+const db = require(path.join(ROOT, 'src/db/connection.js'));
+const E = require(path.join(ROOT, 'src/db/evidence.js'));
+
+let pass = 0, fail = 0;
+const check = (name, ok, detail) => {
+  if (ok) { pass++; console.log('  PASS  ' + name); }
+  else { fail++; console.log('  FAIL  ' + name + (detail !== undefined ? '  -> ' + JSON.stringify(detail) : '')); }
+};
+
+const EVIDENCE_SRC = fs.readFileSync(path.join(ROOT, 'src/db/evidence.js'), 'utf8');
+const READER_SRC   = fs.readFileSync(path.join(ROOT, 'src/db/xrpl-reader.js'), 'utf8');
+const ADDR = 'rXRPMANTESTWALLET00000000000000000';
+const hash = n => String(n).padStart(64, 'A');
+
+// One acquired row, carrying the AccountRoot projection that survives payload
+// expiry because it lives in `evidence`, not in raw_meta.
+function row(n, ledger, deltas) {
+  return { hash: hash(n), ledger_index: ledger, validated: true, tx_result: 'tesSUCCESS',
+    close_time_ms: 1757462400000 + ledger, close_time_iso: '2026-09-10T00:00:00.000Z',
+    tx_type: 'Payment', from_account: ADDR, to_account: 'rDest', currency: 'XRP',
+    amount_drops: '1000000', amount_value: null, escrow_destination: null,
+    evidence: { balance_deltas: deltas } };
+}
+const moves = (account, prev, final) => [{ account, prev: String(prev), final: String(final) }];
+
+// ════════════════════════════════════════════════════════════════════════════
+console.log('\n1. balance is a cross-check, and the arithmetic is exact');
+
+const base = { address: ADDR, edge: { from_ledger: 101, through_ledger: 110 },
+  previous: { drops: '20000000000000', ledger: 100 }, current: { drops: '18000000000000', ledger: 110 } };
+
+const explained = B.reconcile({ ...base, rows: [row(1, 105, moves(ADDR, '20000000000000', '18000000000000'))] });
+check('a balance change fully explained by the walked evidence reconciles',
+  explained.status === B.STATUS.RECONCILED && explained.observed_delta_drops === '-2000000000000' &&
+  explained.explained_delta_drops === '-2000000000000', explained);
+
+// THE CASE THE WHOLE DESIGN EXISTS FOR. 5,000,000 XRP in and 5,000,000 XRP out
+// inside one day: the balance is identical at both ends, and the transactions
+// are still there because the walk never asked the balance for permission.
+const passthrough = B.reconcile({ address: ADDR, edge: { from_ledger: 101, through_ledger: 110 },
+  previous: { drops: '20000000000000', ledger: 100 }, current: { drops: '20000000000000', ledger: 110 },
+  rows: [row(1, 104, moves(ADDR, '20000000000000', '25000000000000')),
+         row(2, 108, moves(ADDR, '25000000000000', '20000000000000'))] });
+check('a net-zero pass-through wallet reconciles WITH its two transactions intact',
+  passthrough.status === B.STATUS.RECONCILED && passthrough.observed_delta_drops === '0' &&
+  passthrough.transactions_considered === 2 && passthrough.transactions_moving_balance === 2, passthrough);
+
+const unexplained = B.reconcile({ ...base, rows: [] });
+check('a balance that moved with no evidence at all is a contradiction',
+  unexplained.status === B.STATUS.CONTRADICTION &&
+  unexplained.reason === 'BALANCE_MOVED_WITH_NO_EVIDENCE' &&
+  unexplained.unexplained_drops === '-2000000000000', unexplained);
+
+const partial = B.reconcile({ ...base, rows: [row(1, 105, moves(ADDR, '20000000000000', '19000000000000'))] });
+check('a balance only partly explained is a contradiction too, with the exact shortfall',
+  partial.status === B.STATUS.CONTRADICTION &&
+  partial.reason === 'BALANCE_PARTIALLY_UNEXPLAINED' &&
+  partial.unexplained_drops === '-1000000000000', partial);
+
+// 1e17 drops is the XRP supply and is past Number.MAX_SAFE_INTEGER. A Number()
+// anywhere on this path would round evidence into agreement.
+const huge = B.reconcile({ address: ADDR, edge: { from_ledger: 101, through_ledger: 110 },
+  previous: { drops: '100000000000000001', ledger: 100 }, current: { drops: '100000000000000000', ledger: 110 },
+  rows: [row(1, 105, moves(ADDR, '100000000000000001', '100000000000000000'))] });
+check('one drop of difference is visible at 1e17 drops — no float rounds it away',
+  huge.status === B.STATUS.RECONCILED && huge.observed_delta_drops === '-1', huge);
+const hugeOff = B.reconcile({ address: ADDR, edge: { from_ledger: 101, through_ledger: 110 },
+  previous: { drops: '100000000000000002', ledger: 100 }, current: { drops: '100000000000000000', ledger: 110 },
+  rows: [row(1, 105, moves(ADDR, '100000000000000001', '100000000000000000'))] });
+check('and a one-drop shortfall at that magnitude is still caught',
+  hugeOff.status === B.STATUS.CONTRADICTION && hugeOff.unexplained_drops === '-1', hugeOff);
+
+const feeOnly = B.reconcile({ address: ADDR, edge: { from_ledger: 101, through_ledger: 110 },
+  previous: { drops: '20000000000000', ledger: 100 }, current: { drops: '19999999999988', ledger: 110 },
+  rows: [row(1, 103, moves(ADDR, '20000000000000', '19999999999988'))] });
+check('a fee-only movement reconciles — fees are AccountRoot debits like any other',
+  feeOnly.status === B.STATUS.RECONCILED, feeOnly);
+
+const signerOnly = B.reconcile({ address: ADDR, edge: { from_ledger: 101, through_ledger: 110 },
+  previous: { drops: '20000000000000', ledger: 100 }, current: { drops: '20000000000000', ledger: 110 },
+  rows: [row(1, 104, moves('rSomebodyElse', '5', '4'))] });
+check('a transaction this wallet only signed moves none of its XRP and is not "missing"',
+  signerOnly.status === B.STATUS.RECONCILED && signerOnly.transactions_considered === 1 &&
+  signerOnly.transactions_moving_balance === 0, signerOnly);
+
+const outside = B.reconcile({ ...base,
+  rows: [row(1, 105, moves(ADDR, '20000000000000', '18000000000000')),
+         row(2, 99, moves(ADDR, '1', '999999'))] });
+check('a row older than the previous balance observation is not counted twice',
+  outside.status === B.STATUS.RECONCILED && outside.transactions_considered === 1, outside);
+
+const dupe = B.reconcile({ ...base,
+  rows: [row(1, 105, moves(ADDR, '20000000000000', '18000000000000')),
+         row(1, 105, moves(ADDR, '20000000000000', '18000000000000'))] });
+check('the same hash sighted twice contributes once',
+  dupe.status === B.STATUS.RECONCILED && dupe.transactions_considered === 1, dupe);
+
+console.log('\n2. an inability to check is never a finding');
+// This report is read aloud live. A cross-check that cried wolf on its first
+// cold wallet would be switched off inside a week and then catch nothing.
+const noPrev = B.reconcile({ ...base, previous: {}, rows: [] });
+check('a wallet with no previous observation stands down (the cold bootstrap)',
+  noPrev.status === B.STATUS.NOT_APPLICABLE && noPrev.reason === 'NO_PREVIOUS_BALANCE', noPrev);
+const noCurrent = B.reconcile({ ...base, current: {}, rows: [] });
+check('a balance read that failed stands down rather than accusing',
+  noCurrent.status === B.STATUS.NOT_APPLICABLE && noCurrent.reason === 'NO_CURRENT_BALANCE', noCurrent);
+const noWalk = B.reconcile({ ...base, rows: null });
+check('an edge that was not walked stands down — and is never read as a pass',
+  noWalk.status === B.STATUS.NOT_APPLICABLE && noWalk.reason === 'EDGE_NOT_WALKED', noWalk);
+const gap = B.reconcile({ ...base, edge: { from_ledger: 106, through_ledger: 110 }, rows: [] });
+check('a walk that began after the previous observation leaves a gap, not a contradiction',
+  gap.status === B.STATUS.NOT_APPLICABLE && gap.reason === 'EDGE_LEAVES_GAP' &&
+  gap.gap_from === 101 && gap.gap_through === 105, gap);
+const shortEdge = B.reconcile({ ...base, edge: { from_ledger: 101, through_ledger: 108 }, rows: [] });
+check('a partial prefix is not reconciled against a balance read at the anchor',
+  shortEdge.status === B.STATUS.NOT_APPLICABLE && shortEdge.reason === 'EDGE_DOES_NOT_REACH_BALANCE', shortEdge);
+const noDeltas = B.reconcile({ ...base, rows: [{ hash: hash(9), ledger_index: 105, evidence: {} }] });
+check('a row with no AccountRoot projection stands the check down instead of counting it as zero',
+  noDeltas.status === B.STATUS.NOT_APPLICABLE && noDeltas.reason === 'BALANCE_DELTAS_UNAVAILABLE', noDeltas);
+check('B.contradicted() is true for exactly one of these',
+  B.contradicted(unexplained) && B.contradicted(partial) &&
+  !B.contradicted(noDeltas) && !B.contradicted(noPrev) && !B.contradicted(passthrough) && !B.contradicted(null));
+
+console.log('\n3. an unexplained balance may not be rendered as "nothing happened"');
+// Zero rows plus a moved balance is the exact shape a pass-through wallet
+// takes when its transactions were MISSED, so it is the most dangerous
+// possible reading of an empty result.
+const servable = { served_from_index: true, edge_fetch_complete: true };
+check('a proven, retained, genuinely empty window is still quiet',
+  C.mayReportQuiet(servable, 0).quiet === true && C.mayReportQuiet(servable, 0).reason === 'PROVEN_QUIET');
+const refused = C.mayReportQuiet(servable, 0, unexplained);
+check('the same window with an unexplained balance change is NOT quiet',
+  refused.quiet === false && refused.reason === 'BALANCE_MOVED_WITH_NO_EVIDENCE', refused);
+check('and the refusal carries the amount nobody can account for',
+  refused.unexplained_drops === '-2000000000000', refused);
+check('a reconciled cross-check does not disturb an honest quiet claim',
+  C.mayReportQuiet(servable, 0, passthrough).quiet === true);
+check('nor does one that stood down',
+  C.mayReportQuiet(servable, 0, noPrev).quiet === true);
+
+console.log('\n4. the walk is unconditional — balance may not gate acquisition');
+// The structural version of the rule. windowServability is THE decision about
+// whether and how far to fetch, and it is a pure function of proof, retention
+// and the anchor. If a balance ever reached it, a net-zero day would become a
+// reason not to look.
+const COVERAGE_SRC = fs.readFileSync(path.join(ROOT, 'src/db/coverage.js'), 'utf8');
+const servability = COVERAGE_SRC.split('function windowServability')[1].split('\nfunction ')[0];
+check('the fetch decision never mentions a balance',
+  !/balance/i.test(servability.replace(/^\s*\/\/.*$/gm, '')));
+check('and it never mentions wallet_state', !/wallet_state/i.test(servability));
+// In evidence.js the balance is read AFTER the walk, from the same anchor the
+// walk was bounded by. Reading it first would be the first step toward
+// branching on it.
+const readsBalance = EVIDENCE_SRC.indexOf('reader.balance(');
+const walks = EVIDENCE_SRC.indexOf("command:'account_tx'");
+check('the balance is read after the walk, not before it', readsBalance > walks && walks > 0,
+  { readsBalance, walks });
+check('the balance is pinned to the run anchor, never to "latest"',
+  /reader\.balance\(address,\s*anchor\)/.test(EVIDENCE_SRC));
+check('a balance read that fails returns null instead of failing the wallet',
+  /catch \(e\) \{[\s\S]{0,200}?return null;/.test(READER_SRC.split('async balance(')[1] || ''));
+check('account_info is on the read-only method allowlist, and nothing else was added',
+  /\['ledger', 'server_info', 'account_tx', 'account_info'\]/.test(READER_SRC) &&
+  !/'(submit|sign|sign_for|submit_multisigned)'/.test(READER_SRC));
+
+console.log('\n5. the payload is separate, and the slim event does not carry it');
+check('the transactions insert column list has no raw_tx or raw_meta',
+  !/const columns = \[[^\]]*raw_tx/.test(EVIDENCE_SRC) && !/const columns = \[[^\]]*raw_meta/.test(EVIDENCE_SRC));
+check('the payload is written to transaction_raw with an expiry',
+  /INSERT INTO transaction_raw\(hash,raw_tx,raw_meta,expires_at\)/.test(EVIDENCE_SRC) &&
+  /now\(\)\+\(\$2\|\|' hours'\)::interval/.test(EVIDENCE_SRC));
+check('the payload retention default is 48 hours',
+  /SHADOWWATCH_RAW_RETENTION_HOURS\) \|\| 48/.test(EVIDENCE_SRC));
+// Once the payload expires, the conflict guard would have had nothing left to
+// compare. The normalized facts are compared instead, for as long as the event
+// is stored, and the payload comparison stays for as long as the payload is.
+check('a conflicting response is refused on normalized facts, not only on the payload',
+  /factColumns = \[/.test(EVIDENCE_SRC) &&
+  /t\.\$\{c\} IS NOT NULL AND r\.\$\{c\} IS NOT NULL AND t\.\$\{c\}<>r\.\$\{c\}/.test(EVIDENCE_SRC) &&
+  /FROM transaction_raw x/.test(EVIDENCE_SRC));
+// An absent field is not a disagreement. One sighting of a hash can carry a
+// value another could not read, and treating that as a conflict would fail
+// every honest resume rather than catching a dishonest server.
+check('but a NULL on either side is an absent fact, not a conflicting one',
+  !/IS DISTINCT FROM/.test(EVIDENCE_SRC.split('const conflict =')[1].split('LIMIT 1')[0]));
+check('the report window is served from normalized facts, so payload expiry cannot silence it',
+  !/raw_tx/.test(EVIDENCE_SRC.split('async function readRunWindow')[1].split('\nasync function ')[0]));
+check('the legacy payload read refuses rather than inventing a tx_json it no longer has',
+  /RAW_EVIDENCE_EXPIRED_INSIDE_WINDOW/.test(EVIDENCE_SRC));
+check('a contradiction blocks a run from being archived as complete',
+  /coverage_complete:[^;]*contradictions===0/.test(EVIDENCE_SRC));
+
+async function main() {
+console.log('\n6. one wallet through persist(), statement by statement');
+// The write path with an injected executor: no database, every statement
+// recorded. This is where the ordering guarantees live — the payload cannot be
+// written before the event it references, and the route rollup may only count
+// hashes the insert actually accepted.
+const T0 = Date.parse('2026-09-10T12:00:00.000Z');
+const RUN = { scan_id: 'idx-test', anchor_ledger: 1000, anchor_close_time: new Date(T0).toISOString(),
+  window_start: new Date(T0 - 86400000).toISOString(), window_end: new Date(T0).toISOString(),
+  roster_hash: 'roster-hash', roster_accounts: [ADDR], target_wallets: 1 };
+const COVERAGE_AFTER = { address: ADDR, scan_coverage_from: 1, scan_coverage_through: 1000,
+  scan_coverage_from_close: new Date(T0 - 172800000).toISOString(),
+  scan_coverage_through_close: new Date(T0).toISOString(),
+  evidence_retained_from: 1, evidence_retained_through: 1000,
+  evidence_retained_from_close: new Date(T0 - 172800000).toISOString() };
+const PROOF = { status: 'COMPLETE', range_bound_proven: true, from_ledger: 1, through_ledger: 1000,
+  from_close_ms: T0 - 172800000, through_close_ms: T0, rows_stored: 2 };
+
+async function persistOnce(rows, opts = {}) {
+  const calls = [];
+  const realTransaction = db.transaction;
+  try {
+    db.transaction = async work => work(async (text, params) => {
+      const t = text.replace(/\s+/g, ' ').trim();
+      calls.push({ text: t, params });
+      if (/pg_advisory_xact_lock/.test(t)) return { rows: [] };
+      if (/SELECT \* FROM wallet_coverage WHERE address=\$1 FOR UPDATE/.test(t)) return { rows: [] };
+      if (/SELECT \* FROM wallet_coverage WHERE address=\$1$/.test(t)) return { rows: [COVERAGE_AFTER] };
+      if (/INSERT INTO transactions\(/.test(t)) {
+        // Only the FIRST hash is accepted; the second was already stored by an
+        // earlier run, exactly as a resume would find it.
+        return { rows: (opts.accepted || [rows[0] && rows[0].hash]).filter(Boolean).map(h => ({ hash: h })) };
+      }
+      if (/SELECT metrics FROM scan_wallets/.test(t)) return { rows: [] };
+      return { rows: [], rowCount: 0 };
+    });
+    await E.persist(RUN, ADDR, rows, PROOF, { requests: 3, rows_fetched: rows.length, mode: 'EDGE_ONLY' },
+      opts.state === undefined ? { balance: { drops: '18000000000000', ledger: 1000 },
+        reconciliation: explained } : opts.state);
+    return { calls, error: null };
+  } catch (e) {
+    return { calls, error: e.message };
+  } finally { db.transaction = realTransaction; }
+}
+
+const ROWS = [
+  { ...row(1, 900, moves(ADDR, '20000000000000', '19000000000000')), raw_tx: { TransactionType: 'Payment' }, raw_meta: { TransactionResult: 'tesSUCCESS' }, observed_via: [ADDR] },
+  { ...row(2, 950, moves(ADDR, '19000000000000', '18000000000000')), raw_tx: { TransactionType: 'Payment' }, raw_meta: { TransactionResult: 'tesSUCCESS' }, observed_via: [ADDR] }
+];
+
+const written = await persistOnce(ROWS);
+check('persist completes with no error', written.error === null, written.error);
+const at = re => written.calls.findIndex(c => re.test(c.text));
+const iEvent = at(/INSERT INTO transactions\(/);
+const iRaw = at(/INSERT INTO transaction_raw/);
+const iAccounts = at(/INSERT INTO transaction_accounts/);
+const iRoutes = at(/INSERT INTO wallet_routes/);
+const iState = at(/INSERT INTO wallet_state/);
+check('the slim event is inserted', iEvent >= 0);
+check('the payload is inserted AFTER it — the foreign key forbids an orphan', iRaw > iEvent, { iEvent, iRaw });
+check('participants are recorded', iAccounts > iEvent);
+check('the route rollup is written', iRoutes > iEvent);
+const eventStatement = written.calls[iEvent].text;
+check('the slim insert names no payload column',
+  !/raw_tx|raw_meta/.test(eventStatement), eventStatement.slice(0, 160));
+check('and it asks the database which hashes it actually accepted',
+  /ON CONFLICT\(hash\) DO NOTHING RETURNING hash/.test(eventStatement));
+const eventPayload = JSON.parse(written.calls[iEvent].params[0]);
+check('no payload is shipped in the slim statement either',
+  eventPayload.every(r => r.raw_tx === undefined && r.raw_meta === undefined));
+const rawPayload = JSON.parse(written.calls[iRaw].params[0]);
+check('the payload statement carries both halves for every row',
+  rawPayload.length === 2 && rawPayload.every(r => r.raw_tx && r.raw_meta && r.hash));
+check('the payload expiry is a parameter, not a hard-coded literal in the SQL',
+  written.calls[iRaw].params[1] === '48');
+// THE IDEMPOTENCE PROPERTY. Resume re-persists rows routinely; a rollup built
+// from the input rather than from RETURNING would double-count every one.
+const routes = JSON.parse(written.calls[iRoutes].params[0]);
+check('the route rollup counts only the hash the insert accepted, not the one it skipped',
+  routes.length === 1 && routes[0].observed_via === ADDR && routes[0].to_account === 'rDest', routes);
+check('a route carries its day, so it stays meaningful after both prunes',
+  routes[0].day === '2026-09-10' && routes[0].ledger === 900, routes[0]);
+check('wallet_state is written with the pinned balance', iState > 0 &&
+  written.calls[iState].params[1] === '18000000000000' && written.calls[iState].params[2] === 1000);
+check('and with the reconciliation verdict',
+  JSON.parse(written.calls[iState].params[5]).status === 'RECONCILED');
+const stateStatement = written.calls[iState].text;
+check('previous_balance is shifted by the database, not by the caller',
+  /previous_balance_drops=CASE WHEN excluded.balance_ledger>wallet_state.balance_ledger/.test(stateStatement));
+check('a run that could not read a balance leaves the stored one alone',
+  /balance_drops=COALESCE\(excluded.balance_drops,wallet_state.balance_drops\)/.test(stateStatement));
+check('the delta checkpoint only ever moves forward',
+  /last_proven_ledger=GREATEST\(/.test(stateStatement));
+const iScan = at(/UPDATE scan_wallets SET status=/);
+check('the per-run verdict is stored beside the per-run proof',
+  iScan > 0 && JSON.parse(written.calls[iScan].params[5]).status === 'RECONCILED');
+
+const partialWrite = await persistOnce(ROWS, { state: null });
+check('a partial prefix persists with no wallet_state write at all',
+  partialWrite.error === null && partialWrite.calls.findIndex(c => /INSERT INTO wallet_state/.test(c.text)) < 0,
+  partialWrite.error);
+
+const none = await persistOnce([], { accepted: [] });
+check('a wallet with nothing new still records its state and writes no route',
+  none.error === null && none.calls.findIndex(c => /INSERT INTO wallet_state/.test(c.text)) > 0 &&
+  none.calls.findIndex(c => /INSERT INTO wallet_routes/.test(c.text)) < 0, none.error);
+
+console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA EVIDENCE CHECKS PASS'));
+process.exit(fail ? 1 : 0);
+}
+main().then(undefined, e => { console.error(e); process.exit(1); });

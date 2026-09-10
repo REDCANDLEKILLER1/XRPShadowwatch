@@ -34,7 +34,14 @@
       if(result.scan_id!==run.scan_id||result.roster_hash!==run.roster_hash||result.anchor_ledger!==run.anchor_ledger)
         throw new Error('EVIDENCE_SUMMARY_IDENTITY_MISMATCH');
       metrics.server_summary={status:result.status,complete_wallets:result.complete_wallets,target_wallets:result.target_wallets,
-        requests:result.requests,rows_fetched:result.rows_fetched};
+        requests:result.requests,rows_fetched:result.rows_fetched,
+        // The balance cross-check. A non-zero count means a wallet's balance
+        // moved by more than its acquired evidence explains, which is missing
+        // evidence, not a rounding difference — and the server already refuses
+        // to seal such a run as complete. Carried here so it is visible in the
+        // debug export rather than only in Neon.
+        balance_contradictions:result.balance_contradictions||0,
+        balance_contradiction_addresses:result.balance_contradiction_addresses||[]};
       return metrics.server_summary;
     },
     proveWallet:async function(run,address){

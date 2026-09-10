@@ -105,7 +105,12 @@ class Reader {
     });
   }
   async request(command, expectedEpoch) {
-    if (!['ledger', 'server_info', 'account_tx'].includes(command.command)) throw new Error('XRPL_METHOD_NOT_ALLOWED');
+    // Read-only methods, and only these four. account_info joined the list for
+    // the balance cross-check (src/db/balance.js): it reads an AccountRoot at a
+    // pinned ledger and cannot sign, submit or mutate anything. The allowlist
+    // is what keeps that true — an XRPL client library will happily accept
+    // `submit` from a caller that never meant to send one.
+    if (!['ledger', 'server_info', 'account_tx', 'account_info'].includes(command.command)) throw new Error('XRPL_METHOD_NOT_ALLOWED');
     for (let attempt = 0; attempt <= 12; attempt++) {
       await this.admission(); const sock = await this.connect();
       if (expectedEpoch !== undefined && this.epoch !== expectedEpoch) throw new Error('XRPL_TRANSPORT_CHANGED');
@@ -144,6 +149,32 @@ class Reader {
     validatedHeaders.set(seq,header);
     if(validatedHeaders.size>2000)validatedHeaders.delete(validatedHeaders.keys().next().value);
     return header;
+  }
+  // The balance of one account AT one ledger. Pinned, never "latest": an
+  // unpinned balance cannot be reconciled against a proven ledger range, and
+  // comparing two unpinned reads would silently attribute movement to the
+  // wrong window.
+  //
+  // Returns null rather than throwing when the account cannot be read. A
+  // balance is a CROSS-CHECK on evidence, not evidence; failing a whole
+  // wallet's run because a supplementary read was refused would trade the
+  // thing that matters for the thing that confirms it.
+  async balance(address, ledgerIndex) {
+    const index = Number(ledgerIndex);
+    if (!Number.isInteger(index) || index <= 0) throw new Error('BALANCE_LEDGER_UNPINNED');
+    let r;
+    try {
+      r = await this.request({ command: 'account_info', account: address, ledger_index: index, strict: true });
+    } catch (e) {
+      this.event({ event: 'balance_unavailable', account: address, ledger: index, reason: e.message, code: e.code });
+      return null;
+    }
+    // A response that does not name the ledger it answered from proves nothing
+    // about which window the balance belongs to.
+    if (r.validated !== true || Number(r.ledger_index) !== index) return null;
+    const drops = r.account_data && r.account_data.Balance;
+    if (typeof drops !== 'string' || !/^[0-9]+$/.test(drops)) return null;
+    return { drops, ledger: index };
   }
   async retainedRange(anchor = 0) {
     for(let attempt=0;attempt<4;attempt++){
