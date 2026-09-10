@@ -415,6 +415,113 @@ check('provenance is excluded, and it is exactly these three',
 check('the excluded set is justified in the source, not silently listed',
   /PROVENANCE is the exception/.test(EVIDENCE_SRC));
 
+console.log('\n10. one contradiction fails the canonical gate EVERYWHERE');
+// Every wallet answered; one of them cannot account for its own balance.
+// "COMPLETE" describes whether each walk RETURNED. The cross-check describes
+// whether what it returned is all of what happened. Those are different
+// questions, and a run that passes the first and fails the second must not be
+// readable, archivable or stored as COMPLETE — the report is built from
+// readRunWindow(), so a gate that stops at archiveFacts() stops too late.
+const CONTRADICTED = { status: 'CONTRADICTION', reason: 'BALANCE_MOVED_WITH_NO_EVIDENCE',
+  unexplained_drops: '-5000000000000' };
+const RECONCILED_OK = { status: 'RECONCILED', reason: 'BALANCE_EXPLAINED' };
+
+// scan_wallets for a run where every wallet is COMPLETE and exactly one is
+// contradicted — the fixture the gate exists for.
+function walletRows(contradictedCount) {
+  return Array.from({ length: 3 }, (_, i) => ({
+    address: 'rWallet' + i, status: 'COMPLETE', error: null,
+    proof: { status: 'COMPLETE' }, metrics: { requests: 1, rows_fetched: 1 },
+    reconciliation: i < contradictedCount ? CONTRADICTED : RECONCILED_OK
+  }));
+}
+async function runReads(contradictedCount) {
+  const wallets = walletRows(contradictedCount);
+  const real = db.getExecutor;
+  try {
+    db.setExecutor(async (text, params) => {
+      const t = text.replace(/\s+/g, ' ').trim();
+      if (/FROM scan_runs WHERE scan_id/.test(t)) return { rows: [{ ...RUN, roster_accounts: [ADDR],
+        // getRun() re-derives this and refuses a mismatch, so the fixture has
+        // to carry a real roster identity rather than a placeholder.
+        roster_hash: require(path.join(ROOT, 'src/db/roster.js')).identity([ADDR]),
+        created_at: RUN.anchor_close_time }] };
+      if (/FROM scan_wallets WHERE scan_id=\$1 ORDER BY address/.test(t)) return { rows: wallets };
+      if (/count\(\*\)::integer AS total/.test(t)) {
+        const bad = wallets.filter(w => w.reconciliation.status === params[1]);
+        return { rows: [{ total: wallets.length, complete: wallets.length, failed: 0,
+          contradictions: bad.length, contradiction_addresses: bad.map(w => w.address) }] };
+      }
+      if (/SELECT address,status,proof,metrics,error,reconciliation/.test(t)) return { rows: wallets };
+      if (/SELECT status,proof,metrics,reconciliation/.test(t) || /SELECT address,status,proof,metrics,reconciliation/.test(t)) return { rows: wallets };
+      if (/UPDATE scan_runs SET complete_wallets/.test(t)) { runReads.storedStatus = params[3]; return { rows: [] }; }
+      if (/count\(DISTINCT t.hash\)/.test(t)) return { rows: [{ count: 12 }] };
+      return { rows: [] };
+    });
+    // target_wallets equals the number of COMPLETE wallets in every case here,
+    // so nothing below can pass merely because a wallet went missing.
+    RUN.target_wallets = wallets.length;
+    const summary = await E.summary('idx-test');
+    const window = await E.readRunWindow('idx-test');
+    const facts = await E.archiveFacts('idx-test');
+    return { summary, window, facts, stored: runReads.storedStatus };
+  } finally { db.setExecutor(real === db.getExecutor ? null : null); db.getExecutor = real; }
+}
+
+const clean = await runReads(0);
+check('with zero contradictions the run is COMPLETE, readable and archivable',
+  clean.summary.status === 'COMPLETE' && clean.window.available === true &&
+  clean.facts.coverage_complete === true,
+  { status: clean.summary.status, available: clean.window.available, complete: clean.facts.coverage_complete });
+
+const dirty = await runReads(1);
+check('complete_wallets == target_wallets and ONE contradiction is not status COMPLETE',
+  dirty.summary.status === 'PARTIAL', dirty.summary.status);
+check('and that non-COMPLETE status is what gets written to scan_runs',
+  dirty.stored === 'PARTIAL', dirty.stored);
+check('and the canonical window refuses rather than serving it',
+  dirty.window.available === false && dirty.window.error === 'RUN_WINDOW_BALANCE_CONTRADICTION',
+  { available: dirty.window.available, error: dirty.window.error });
+check('and the refusal names how many and which wallets',
+  dirty.window.balance_contradictions === 1 &&
+  Array.isArray(dirty.window.balance_contradiction_addresses) &&
+  dirty.window.balance_contradiction_addresses.length === 1, dirty.window.balance_contradiction_addresses);
+check('and it is not archivable as complete either',
+  dirty.facts.coverage_complete === false && dirty.facts.balance_contradictions === 1, dirty.facts);
+check('the run still reports every wallet as complete — the gate is the cross-check, not a lost wallet',
+  dirty.summary.complete_wallets === 3 && dirty.summary.target_wallets === 3, dirty.summary);
+// The browser's readRun() throws on result.error, so a refusal here stops the
+// report from loading the window at all rather than being advisory.
+const BROWSER = fs.readFileSync(path.join(ROOT, 'src/brief/42-evidence-index.js'), 'utf8');
+check('the browser turns that refusal into a thrown error, not a warning',
+  /throw new Error\(result\.error\|\|'INDEX_RUN_WINDOW_UNPROVEN'\)/.test(BROWSER.replace(/\s+/g, '')) ||
+  /throw new Error\(result\.error/.test(BROWSER));
+
+console.log('\n11. the migration refuses at the quota instead of half-applying');
+const MIGRATION = fs.readFileSync(path.join(ROOT, 'db/migrations/005_delta_evidence.sql'), 'utf8');
+// Every statement after the preflight writes: three CREATE TABLEs, their
+// indexes, two ALTER TABLEs and the schema_migrations insert. Neon blocks
+// writes above the quota precisely so data can be deleted, so a migration that
+// writes cannot be the thing that unblocks a blocked project.
+check('the preflight is the first statement in the migration',
+  MIGRATION.indexOf('SIZE_QUOTA_BLOCKS_MIGRATION') < MIGRATION.indexOf('CREATE TABLE'),
+  { preflight: MIGRATION.indexOf('SIZE_QUOTA_BLOCKS_MIGRATION'), firstWrite: MIGRATION.indexOf('CREATE TABLE') });
+check('it refuses rather than warns',
+  /RAISE EXCEPTION[\s\S]{0,120}?SIZE_QUOTA_BLOCKS_MIGRATION/.test(MIGRATION));
+check('it compares live usage against the ceiling with a margin for its own writes',
+  /pg_database_size\(current_database\(\)\)/.test(MIGRATION) &&
+  /used_mb > limit_mb - margin_mb/.test(MIGRATION));
+check('it is skipped once the migration is applied, so a re-run is not a refusal',
+  /IF EXISTS \(SELECT 1 FROM schema_migrations WHERE version = '005_delta_evidence'\) THEN/.test(MIGRATION));
+// The claim that had to be retracted: dropping the columns frees nothing, and
+// afterwards nothing can free it.
+check('the migration says free-space-first rather than claiming to free space',
+  /FREE SPACE FIRST/.test(MIGRATION) &&
+  /does not reclaim quota/.test(MIGRATION) &&
+  /no longer addressable by any DELETE|can no longer be deleted by any prune/.test(MIGRATION));
+check('and the prune script points recovery at the pre-005 path, not at itself',
+  /pre-005/i.test(fs.readFileSync(path.join(ROOT, 'scripts/db-prune.js'), 'utf8')));
+
 console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA EVIDENCE CHECKS PASS'));
 process.exit(fail ? 1 : 0);
 }

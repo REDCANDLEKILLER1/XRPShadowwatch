@@ -502,11 +502,53 @@ BEGIN;
 -- (7 days) still fires it and still needs the in-transaction repair in
 -- scripts/db-prune.js.
 --
--- OPERATOR NOTE. This migration needs no headroom: by default it copies
--- nothing and the column drop is metadata-only, so it applies on a project
--- that is already at its ceiling. See the block below for what that costs and
--- for SHADOWWATCH_RAW_BACKFILL_HOURS, which carries the payloads across when
--- there IS room.
+-- OPERATOR NOTE — FREE SPACE FIRST. This migration does NOT restore a project
+-- that is already over its storage quota, and must not be run as if it did.
+--
+-- Neon blocks WRITES once logical size exceeds the quota, specifically so that
+-- data can be deleted to get back under it. This migration writes: it creates
+-- three tables and their indexes, alters two more, and inserts its own row in
+-- schema_migrations. On a blocked project those writes fail.
+--
+-- And running it there would make recovery HARDER, not easier. Dropping
+-- raw_tx/raw_meta is metadata-only: it frees no quota, and afterwards those
+-- bytes are no longer addressable by any DELETE, so no prune can reclaim them.
+-- The 7-day slim prune has nothing eligible on a two-day-old store either.
+--
+-- The order is therefore:
+--   1. FREE SPACE. The pre-005 single-phase prune (agent/evidence-retention-
+--      prune): `node scripts/db-prune.js --days 2 --apply`. It deletes whole
+--      rows, payload bytes included, while those bytes are still addressable.
+--      Or raise the plan.
+--   2. CONFIRM usage is back under the ceiling.
+--   3. Migrate. The preflight below refuses, before any write, if it is not.
+--
+-- What this migration fixes is future GROWTH: payloads land in a table with an
+-- expiry instead of accumulating in `transactions` forever.
+
+-- ── PREFLIGHT: refuse before writing anything ──────────────────────────────
+-- First statement in the file on purpose. Everything after it writes, and on a
+-- quota-blocked project those writes fail with an error about the storage
+-- layer rather than about what the operator should do. This says what to do.
+--
+-- The whole migration is one transaction, so a raise here leaves nothing
+-- partial behind.
+DO $$
+DECLARE
+  limit_mb  numeric := COALESCE(NULLIF(current_setting('shadowwatch.size_limit_mb', true), '')::numeric, 512);
+  margin_mb numeric := COALESCE(NULLIF(current_setting('shadowwatch.required_free_mb', true), '')::numeric, 32);
+  used_mb   numeric;
+BEGIN
+  IF EXISTS (SELECT 1 FROM schema_migrations WHERE version = '005_delta_evidence') THEN
+    RETURN;
+  END IF;
+  used_mb := pg_database_size(current_database()) / 1024.0 / 1024.0;
+  IF used_mb > limit_mb - margin_mb THEN
+    RAISE EXCEPTION
+      'SIZE_QUOTA_BLOCKS_MIGRATION: % MB used against a % MB ceiling, and this migration needs about % MB of writable headroom for its new tables and indexes. Nothing has been changed. FREE SPACE FIRST: run the pre-005 prune (node scripts/db-prune.js --days 2 --apply) or raise the plan, confirm usage is back under the ceiling, then migrate. This migration does not reclaim quota — and once raw_tx/raw_meta are dropped, those bytes can no longer be deleted by any prune.',
+      round(used_mb), limit_mb, margin_mb;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS transaction_raw (
   -- The FK is what makes the two tables one fact. Deleting a slim event takes

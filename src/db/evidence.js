@@ -454,11 +454,25 @@ async function readRunWindow(id,after) {
   const run=await getRun(id);
   const status=(await query(`SELECT count(*)::integer AS total,
     count(*) FILTER (WHERE status='COMPLETE')::integer AS complete,
-    count(*) FILTER (WHERE status='FAILED')::integer AS failed
-    FROM scan_wallets WHERE scan_id=$1`,[id])).rows[0];
+    count(*) FILTER (WHERE status='FAILED')::integer AS failed,
+    count(*) FILTER (WHERE reconciliation->>'status'=$2)::integer AS contradictions,
+    COALESCE(ARRAY_AGG(address ORDER BY address) FILTER (WHERE reconciliation->>'status'=$2),'{}') AS contradiction_addresses
+    FROM scan_wallets WHERE scan_id=$1`,[id,B.STATUS.CONTRADICTION])).rows[0];
   if(Number(status.total)!==Number(run.target_wallets)||Number(status.complete)!==Number(run.target_wallets)||Number(status.failed)!==0)
     return {available:false,scan_id:id,roster_hash:run.roster_hash,target_wallets:Number(run.target_wallets),
       complete_wallets:Number(status.complete),error:'RUN_WINDOW_NOT_FULLY_PROVEN',transactions:[]};
+  // Every wallet answered, and one of them cannot account for its own balance.
+  // "COMPLETE" describes whether each walk RETURNED; the cross-check describes
+  // whether what it returned is all of what happened. A window whose evidence
+  // contradicts an observed balance may not be served as the canonical record
+  // just because every wallet reported in — that is the precise shape of a
+  // pass-through wallet whose transactions were missed, and this is the read
+  // the morning report is built from.
+  if(Number(status.contradictions)>0)
+    return {available:false,scan_id:id,roster_hash:run.roster_hash,target_wallets:Number(run.target_wallets),
+      complete_wallets:Number(status.complete),balance_contradictions:Number(status.contradictions),
+      balance_contradiction_addresses:status.contradiction_addresses||[],
+      error:'RUN_WINDOW_BALANCE_CONTRADICTION',transactions:[]};
   const rows=(await query(`SELECT t.*,
     ARRAY(SELECT DISTINCT a.address FROM transaction_accounts a
       WHERE a.tx_hash=t.hash AND a.role='observed_via'
@@ -480,7 +494,11 @@ async function summary(id) {
   const wallets=(await query('SELECT address,status,proof,metrics,error,reconciliation FROM scan_wallets WHERE scan_id=$1 ORDER BY address',[id])).rows;
   const complete=wallets.filter(w=>w.status==='COMPLETE').length;
   const contradictions=wallets.filter(w=>B.contradicted(w.reconciliation));
-  const status=complete===run.target_wallets?'COMPLETE':'PARTIAL';
+  // One gate, everywhere. archiveFacts() already refused to call such a run
+  // complete; the run's own stored status has to agree, or `scan_runs` carries
+  // COMPLETE for a run whose evidence is contradicted and every later reader
+  // of that column inherits the claim.
+  const status=(complete===Number(run.target_wallets)&&contradictions.length===0)?'COMPLETE':'PARTIAL';
   await query(`UPDATE scan_runs SET complete_wallets=$2,failed_wallets=$3,status=$4,finished_at=now() WHERE scan_id=$1`,[id,complete,wallets.filter(w=>w.status==='FAILED').length,status]);
   return {scan_id:id,anchor_ledger:Number(run.anchor_ledger),anchor_close_time:run.anchor_close_time,roster_hash:run.roster_hash,
     target_wallets:run.target_wallets,complete_wallets:complete,status,

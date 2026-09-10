@@ -12,6 +12,12 @@
 // normalized event is a couple hundred bytes. So migration 005 split them, and
 // this script prunes each on its own schedule.
 //
+// NOTE ON RECOVERY: this two-phase script requires migration 005, and 005
+// requires headroom to apply. A project already over its quota is recovered by
+// the PRE-005 single-phase prune (agent/evidence-retention-prune), which
+// deletes whole `transactions` rows while the payload bytes are still part of
+// them. After 005 those bytes are unaddressable and no prune can reclaim them.
+//
 // ── PHASE 1: PAYLOADS, 48 HOURS ────────────────────────────────────────────
 //
 // Deletes rows from `transaction_raw`. It touches NOTHING else, and that is
@@ -108,8 +114,10 @@ async function assertMigrated(q) {
   const present = (await q(`SELECT to_regclass('public.transaction_raw') IS NOT NULL AS ok`)).rows[0].ok;
   if (!present) {
     throw new Error('MIGRATION_005_NOT_APPLIED: transaction_raw does not exist. Run ' +
-      '`node scripts/db-migrate.js` first — it needs no headroom, because 005 copies no ' +
-      'payloads unless SHADOWWATCH_RAW_BACKFILL_HOURS asks it to.');
+      '`node scripts/db-migrate.js` first. If the project is at its storage quota, free ' +
+      'space BEFORE migrating — the single-phase prune on agent/evidence-retention-prune ' +
+      'deletes whole rows while the payload bytes are still addressable, which they are ' +
+      'not once 005 drops the columns.');
   }
 }
 
