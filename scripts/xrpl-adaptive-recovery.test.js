@@ -68,7 +68,26 @@ async function main() {
   });
   await page.goto('http://127.0.0.1:' + port + '/brief-console.html');
   await page.waitForFunction(() => window.SW_RUN_ANCHOR && window.SW_REPORT_SCAN_TUNING_20260816 && window.SW_XRPL_RESILIENCE_20260817);
+  // SW-20260910: scanWallets now REFUSES to fall back to the direct account_tx
+  // walk when the evidence index cannot start, because that silent fallback let
+  // a 503 masquerade as a slow scan for 25 minutes. This fixture has no
+  // /api/evidence to reach, and its whole subject IS the direct walk — so it
+  // takes the documented override explicitly. Prove the refusal first: without
+  // the override the run must stop and name the reason.
+  const refusal = await page.evaluate(async () => {
+    const socket = await connectXRPL(); state._sock = socket; state._transportEpoch = 1;
+    WATCHLIST.splice(255);
+    try { await scanWallets(socket); return { threw: false, message: null, evidenceUnavailable: false }; }
+    catch (e) { return { threw: true, message: e.message, evidenceUnavailable: e.evidenceUnavailable === true }; }
+  });
+  assert.equal(refusal.threw, true, 'an unreachable evidence index must stop the run, not start a direct history walk');
+  assert.equal(refusal.evidenceUnavailable, true);
+  assert.match(refusal.message, /EVIDENCE_SERVICE_UNAVAILABLE/);
+  assert.match(refusal.message, /SW_ALLOW_DIRECT_XRPL/, 'the refusal names its own override');
+  console.log('PASS an unreachable evidence index stops the run instead of silently grinding account_tx');
+
   const roster = await page.evaluate(async () => {
+    window.SW_ALLOW_DIRECT_XRPL = true;   // deliberate: this suite tests the direct path
     const socket = await connectXRPL(); state._sock = socket; state._transportEpoch = 1;
     WATCHLIST.splice(255);
     await scanWallets(socket);
