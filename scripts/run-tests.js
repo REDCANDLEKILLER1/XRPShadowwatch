@@ -65,6 +65,8 @@ const SUITES = [
   // Pacing is a rate limiter, not evidence. It must never be able to take the
   // read path down with it.
   ['xrpl-admission',         'xrpl-admission.test.js',             null],
+  // A seal covers a rendering, so the rendering has to survive the import.
+  ['report-archive-import',  'report-archive-import.test.js',      null],
   // Pure decision logic, no browser and no network.
   ['dex-volume-truth',       'dex-volume-truth.test.js',         null],
   ['xrpl-quota',             'xrpl-quota-backpressure.test.js',  8221],
