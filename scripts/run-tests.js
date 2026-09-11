@@ -62,6 +62,9 @@ const SUITES = [
   // The checkpoint was in the repository all along: a sealed 255/255 report
   // names the ledger every wallet was proven through.
   ['seed-from-receipt',      'seed-from-receipt.test.js',          null],
+  // Pacing is a rate limiter, not evidence. It must never be able to take the
+  // read path down with it.
+  ['xrpl-admission',         'xrpl-admission.test.js',             null],
   // Pure decision logic, no browser and no network.
   ['dex-volume-truth',       'dex-volume-truth.test.js',         null],
   ['xrpl-quota',             'xrpl-quota-backpressure.test.js',  8221],

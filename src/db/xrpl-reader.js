@@ -1,8 +1,8 @@
 'use strict';
 const WebSocket = require('ws');
 const { randomUUID } = require('crypto');
-const db = require('./connection');
 const coverage = require('./coverage');
+const admission = require('./xrpl-admission');
 const ENDPOINTS = ['wss://xrplcluster.com', 'wss://xrpl.ws', 'wss://s1.ripple.com', 'wss://s2.ripple.com'];
 const validatedHeaders = new Map();
 const idleReaders = [];
@@ -34,6 +34,9 @@ function retryMs(error) {
 class Reader {
   constructor(options = {}) {
     this.sock = null; this.epoch = 0; this.endpointIndex = 0;
+    // Shared across Readers in this process so two wallet walks pace against
+    // each other, injectable so the suite can drive it without real time.
+    this.clock = options.clock || admission.shared;
     this.deadline = Date.now() + (options.budgetMs || 240000);
     this.stats = { requests: 0, retries: 0, reconnects: 0, waits_ms: 0, events: [], preferred_endpoint: ENDPOINTS[0] };
   }
@@ -64,19 +67,13 @@ class Reader {
     }
     throw new Error('XRPL_CONNECTION_UNAVAILABLE');
   }
+  // Pacing, from the in-process clock. This used to be three database writes
+  // per request, which meant a database that could not accept writes blocked
+  // every read-only XRPL call before it was sent — and cost about two seconds
+  // of round-trips per request on the way. A rate limiter is not evidence: it
+  // needs no durability and must never be able to take the read path down.
   async admission() {
-    const q = db.getExecutor();
-    while (true) {
-      const reserved = (await q(`UPDATE xrpl_admission SET
-        next_at = GREATEST(next_at, cooldown_until, clock_timestamp()) + gap_ms * interval '1 millisecond',
-        updated_at = clock_timestamp() WHERE id=1
-        RETURNING extract(epoch FROM next_at - gap_ms * interval '1 millisecond') * 1000 AS admit_ms`)).rows[0];
-      const ms = Math.max(0, Number(reserved.admit_ms) - Date.now());
-      if (ms) await this.wait(ms);
-      const row = (await q('SELECT extract(epoch FROM cooldown_until)*1000 AS until_ms FROM xrpl_admission WHERE id=1')).rows[0];
-      if (Number(row.until_ms) <= Date.now()) return;
-      await this.wait(Number(row.until_ms) - Date.now());
-    }
+    await this.clock.admit(this.deadline);
   }
   raw(sock, command) {
     return new Promise((resolve, reject) => {
@@ -115,18 +112,14 @@ class Reader {
       try {
         this.stats.requests++;
         const result=await this.raw(sock, command);
-        await db.getExecutor()(`UPDATE xrpl_admission SET
-          gap_ms=CASE WHEN success_streak>=31 THEN GREATEST(250,(gap_ms*0.8)::integer) ELSE gap_ms END,
-          success_streak=CASE WHEN success_streak>=31 THEN 0 ELSE success_streak+1 END WHERE id=1`);
+        this.clock.succeeded();
         return result;
       } catch (e) {
         if (!this.stats.first_failure) this.stats.first_failure = { at: new Date().toISOString(), reason: e.message, endpoint: sock.url };
         this.event({ event: 'retry', reason: e.message, code: e.code, command: command.command, account: command.account, epoch: this.epoch });
         if (refusal(e)) {
-          const ms = retryMs(e);
-          this.event({ event: 'cooldown', retry_after_ms: ms, endpoint: sock.url });
-          await db.getExecutor()(`UPDATE xrpl_admission SET cooldown_until=GREATEST(cooldown_until, clock_timestamp()+$1*interval '1 millisecond'),
-            gap_ms=LEAST(5000,GREATEST(1000,gap_ms*2)), success_streak=0,last_reason=$2 WHERE id=1`, [ms, e.message]);
+          const ms = this.clock.refused(retryMs(e), e.message);
+          this.event({ event: 'cooldown', retry_after_ms: ms, endpoint: sock.url, gap_ms: this.clock.gap() });
           await this.wait(ms);
         } else if (e.closed || (e.silent && sock.silentReads >= 3)) {
           this.close(); this.stats.reconnects++;
