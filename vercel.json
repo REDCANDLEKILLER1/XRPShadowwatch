@@ -1,6 +1,7 @@
 {
   "functions": {
     "api/evidence.js": { "maxDuration": 300, "includeFiles": "src/{brief,shared}/**" },
+    "api/delta.js": { "maxDuration": 300, "includeFiles": "src/{brief,shared}/**" },
     "api/report-archive.js": { "maxDuration": 60 }
   },
   "redirects": [
