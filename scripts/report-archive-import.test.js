@@ -172,6 +172,12 @@ check('and says plainly that quoted hashes are not proven by it',
   /quotes addresses and transaction hashes; it does not prove them/.test(SRC));
 check('the index repeats it, so a reader of the index alone cannot miss it',
   /not_raw_ledger_evidence/.test(SRC) && /Raw XRPL evidence lives under evidence\//.test(SRC));
+// The more dangerous direction. A report renders what the run chose to say,
+// never everything the ledger did — so reading absence as evidence of absence
+// would turn a narrative omission into "nothing happened".
+check('and both say that absence from a report proves nothing',
+  (SRC.match(/absence_proves_nothing/g) || []).length === 2 &&
+  /do not enumerate/i.test(SRC) && /Do not infer an unrendered transaction did not occur/.test(SRC));
 check('history is filed separately from evidence',
   /const ROOT_PREFIX = 'history'/.test(SRC));
 check('and the import never writes under evidence/',

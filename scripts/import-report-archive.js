@@ -149,7 +149,13 @@ function build(planned) {
           .map(o => o.original_filename),
         artifact_kind: 'SEALED_REPORT_RENDERING',
         not_a_claim: 'A rendered report quotes addresses and transaction hashes; it does not prove them. ' +
-          'This file is the published conclusion, not raw XRPL evidence.'
+          'This file is the published conclusion, not raw XRPL evidence.',
+        // The other direction, and the more dangerous one. A report renders
+        // what the run chose to say, which is never everything the ledger did.
+        // Reading absence as evidence of absence would turn a narrative
+        // omission into a claim that nothing happened.
+        absence_proves_nothing: 'A transaction not appearing in this report was not necessarily absent from ' +
+          'the ledger. Reports render selected findings; they do not enumerate the window.'
       }, null, 2) + '\n';
     }
     for (const r of seen.values()) {
@@ -166,6 +172,9 @@ function build(planned) {
     not_raw_ledger_evidence: 'These are sealed report artifacts — rendered conclusions with their capsule ' +
       'hashes. Addresses and transaction hashes appearing inside them are quoted by the report, not proven ' +
       'by this archive. Raw XRPL evidence lives under evidence/.',
+    absence_proves_nothing: 'Nor is this archive a complete ledger history. A transaction absent from every ' +
+      'report here was not necessarily absent from the ledger: reports render selected findings, they do not ' +
+      'enumerate a window. Do not infer an unrendered transaction did not occur.',
     reports: index.length, distinct_report_ids: byId.size,
     first_date: dates[0] || null, last_date: dates[dates.length - 1] || null,
     ids_with_variants: variants,
