@@ -59,6 +59,9 @@ const SUITES = [
   ['github-evidence-store',  'github-evidence-store.test.js',      null],
   // A morning run with no database: GitHub in, XRPL delta, GitHub out.
   ['delta-acquisition',      'delta-acquisition.test.js',          null],
+  // The checkpoint was in the repository all along: a sealed 255/255 report
+  // names the ledger every wallet was proven through.
+  ['seed-from-receipt',      'seed-from-receipt.test.js',          null],
   // Pure decision logic, no browser and no network.
   ['dex-volume-truth',       'dex-volume-truth.test.js',         null],
   ['xrpl-quota',             'xrpl-quota-backpressure.test.js',  8221],
