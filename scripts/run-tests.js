@@ -57,6 +57,8 @@ const SUITES = [
   // lives in these two now.
   ['evidence-state',         'evidence-state.test.js',             null],
   ['github-evidence-store',  'github-evidence-store.test.js',      null],
+  // A morning run with no database: GitHub in, XRPL delta, GitHub out.
+  ['delta-acquisition',      'delta-acquisition.test.js',          null],
   // Pure decision logic, no browser and no network.
   ['dex-volume-truth',       'dex-volume-truth.test.js',         null],
   ['xrpl-quota',             'xrpl-quota-backpressure.test.js',  8221],
