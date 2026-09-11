@@ -17,13 +17,14 @@
 //   state/runs.ndjson.gz                       the run audit
 //   evidence/YYYY/MM/DD/events.ndjson.gz       slim events, by the day the LEDGER closed
 //   evidence/YYYY/MM/DD/participants.ndjson.gz provenance, including observed_via
+//   evidence/YYYY/MM/DD/payloads.ndjson.gz     complete raw_tx/raw_meta, where still present
 //
-// WHAT IT DOES NOT WRITE
-//
-//   raw_tx / raw_meta. The payload is a 48-hour cache and a git repository is
-//   permanent: ~300 MB of ledger payload would sit in every clone forever and
-//   could not be removed without rewriting history for everyone. The manifest
-//   records the omission explicitly so it reads as a decision.
+// The payload rides in its own shards. It is the largest part of the store by
+// a wide margin — 186 MB against ~105 MB for everything else — and keeping it
+// separate means daily acquisition never reads those files while they remain
+// in the repository for a classifier that does not exist yet. The manifest
+// records their real COMPRESSED size, so the cost is a measurement rather than
+// an estimate.
 //
 // Memory: rows are streamed by keyset pagination and flushed one day at a
 // time, so peak memory is one day of evidence rather than the whole store.
@@ -68,14 +69,16 @@ function writeFile(root, relative, buffer) {
 // Keyset pagination, ordered by the same total order the archive uses. OFFSET
 // would re-scan the whole table for every page and, worse, can skip or repeat
 // rows if anything writes concurrently.
-async function* streamEvents(q, batch) {
+const EVENT_COLUMNS = `hash,ledger_index,close_time,tx_type,tx_result,validated,from_account,to_account,
+              amount_drops,amount_value,currency,issuer,destination_tag,source_tag,sig_mode,signer_count,
+              escrow_owner,escrow_destination,escrow_amount_drops,fee_drops,sequence,tx_flags,
+              transaction_index,roster_version,first_seen_scan_id,ingested_at,evidence`;
+
+async function* streamEvents(q, batch, hasRaw) {
   let afterTime = null, afterHash = null;
   for (;;) {
     const rows = (await q(
-      `SELECT hash,ledger_index,close_time,tx_type,tx_result,validated,from_account,to_account,
-              amount_drops,amount_value,currency,issuer,destination_tag,source_tag,sig_mode,signer_count,
-              escrow_owner,escrow_destination,escrow_amount_drops,fee_drops,sequence,tx_flags,
-              transaction_index,roster_version,first_seen_scan_id,ingested_at,evidence
+      `SELECT ${EVENT_COLUMNS}${hasRaw ? ',raw_tx,raw_meta' : ''}
          FROM transactions
         WHERE ($1::timestamptz IS NULL OR (close_time,hash) > ($1::timestamptz,$2::text))
         ORDER BY close_time,hash LIMIT $3`, [afterTime, afterHash, batch])).rows;
@@ -84,6 +87,17 @@ async function* streamEvents(q, batch) {
     afterTime = rows[rows.length - 1].close_time;
     afterHash = rows[rows.length - 1].hash;
   }
+}
+
+// After migration 005 the payload lives in its own table with its own expiry,
+// so it is joined rather than selected. A payload that has already expired is
+// simply absent — that is the retention policy working, not a gap.
+async function payloadsForDay(q, day) {
+  return (await q(
+    `SELECT x.hash,x.raw_tx,x.raw_meta
+       FROM transaction_raw x JOIN transactions t ON t.hash=x.hash
+      WHERE t.close_time >= $1::timestamptz AND t.close_time < ($1::timestamptz + interval '1 day')
+      ORDER BY x.hash`, [day])).rows;
 }
 
 // Participants for one day's hashes. Joined through `transactions` so the day
@@ -126,12 +140,17 @@ async function main() {
   console.log('  mode              ' + (opts.out ? 'WRITE -> ' + opts.out : 'DRY RUN (pass --out <dir> to write)'));
 
   const migrations = (await q('SELECT version FROM schema_migrations ORDER BY version')).rows.map(r => r.version);
+  // Before 005 the payload is two columns on `transactions`; after it, a table
+  // with an expiry. Both are exported the same way, and neither is required:
+  // an expired payload is the policy working.
+  const hasRaw = shape.has_raw === true;
+  const hasRawTable = (await q(`SELECT to_regclass('public.transaction_raw') IS NOT NULL AS ok`)).rows[0].ok === true;
   const files = [];
-  let events = 0, participants = 0;
+  let events = 0, participants = 0, payloads = 0, payloadBytes = 0;
 
   // One day at a time. A day's events are ordered by the stream itself, so the
   // buffer only ever holds the day being flushed.
-  let day = null, buffer = [];
+  let day = null, buffer = [], dayPayloads = [];
   const flushDay = async () => {
     if (!day) return;
     const base = 'evidence/' + X.dayPath(day);
@@ -148,17 +167,32 @@ async function main() {
       if (opts.out) writeFile(opts.out, entry.path, packed);
       files.push(entry); participants += entry.rows;
     }
+    // Payloads, in their own shards. Pre-005 they arrive on the event rows
+    // themselves; post-005 they come from transaction_raw. Either way they are
+    // written separately so acquisition never loads them.
+    const rawRows = (hasRawTable ? (await payloadsForDay(q, day)) : dayPayloads)
+      .map(X.payloadOf).filter(X.hasPayload).sort(X.orderPayloads);
+    for (const piece of X.shard(rawRows, base + '/payloads.ndjson', X.MAX_SHARD_BYTES)) {
+      const packed = gz(piece.text);
+      const entry = X.fileEntry(piece.path + '.gz', piece.text, packed.length, X.sha256(packed));
+      if (opts.out) writeFile(opts.out, entry.path, packed);
+      files.push(entry); payloads += entry.rows; payloadBytes += packed.length;
+    }
     process.stdout.write('  ' + day + '  ' + buffer.length.toLocaleString() + ' events, ' +
-      rows.length.toLocaleString() + ' participants\n');
-    buffer = [];
+      rows.length.toLocaleString() + ' participants, ' + rawRows.length.toLocaleString() + ' payloads' +
+      (rawRows.length ? ' (' + mb(payloadBytes) + ' cumulative)' : '') + '\n');
+    buffer = []; dayPayloads = [];
   };
 
   console.log('');
-  for await (const row of streamEvents(q, opts.batch)) {
+  for await (const row of streamEvents(q, opts.batch, hasRaw)) {
     const event = X.eventOf(row);
     const rowDay = X.dayOf(event.close_time);
     if (rowDay !== day) { await flushDay(); day = rowDay; }
     buffer.push(event);
+    // Pre-005 the payload rides on the same row. Collected here so the stream
+    // is walked once rather than twice.
+    if (hasRaw && !hasRawTable) dayPayloads.push(row);
   }
   await flushDay();
 
@@ -187,13 +221,13 @@ async function main() {
     generated_at: new Date().toISOString(),
     source: {
       schema_migrations: migrations,
-      payloads_exported: false,
-      payloads_omitted_because: 'raw_tx/raw_meta are a 48-hour cache governed by a retention policy; ' +
-        'a git repository cannot delete, so the payload is deliberately not committed',
+      payloads_exported: true,
+      payloads_available: hasRaw || hasRawTable,
+      payloads_source: hasRawTable ? 'transaction_raw' : (hasRaw ? 'transactions.raw_tx/raw_meta' : 'none'),
       database_bytes: Number(shape.db_bytes)
     },
     totals: {
-      events, participants,
+      events, participants, payloads,
       wallets: coverage.length,
       runs: runs.length,
       source_transactions: Number(shape.transactions),
@@ -211,6 +245,7 @@ async function main() {
   console.log('  files             ' + files.length);
   console.log('  events            ' + events.toLocaleString() + ' of ' + Number(shape.transactions).toLocaleString() + ' rows');
   console.log('  participants      ' + participants.toLocaleString() + ' of ' + Number(shape.participants).toLocaleString() + ' rows');
+  console.log('  payloads          ' + payloads.toLocaleString() + ' rows · ' + mb(payloadBytes) + ' compressed');
   console.log('  wallets proven    ' + coverage.length.toLocaleString());
   console.log('  uncompressed      ' + mb(manifest.totals.bytes));
   console.log('  on disk           ' + mb(manifest.totals.gz_bytes));

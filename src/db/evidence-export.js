@@ -13,19 +13,25 @@
 // forensic record leaves the database in a form that can be verified byte for
 // byte and read without a database at all.
 //
-// ── WHAT IS EXPORTED, AND WHAT IS DELIBERATELY NOT ─────────────────────────
+// ── WHAT IS EXPORTED ───────────────────────────────────────────────────────
 //
-// Exported: the slim event, its participants (provenance included), the
-// coverage proof, and the run audit. That is the forensic record — what
-// happened, who touched it, what was proven, and by which run.
+// Everything: the slim event, its participants (provenance included), the
+// complete ledger payload where it is still present, the coverage proof, and
+// the run audit. What happened, who touched it, what the ledger actually said,
+// what was proven, and by which run.
 //
-// NOT exported: raw_tx / raw_meta. The payload is a 48-hour cache, and a git
-// repository is permanent in a way this data must not be. Committing ~300 MB
-// of ledger payload would put it in every clone forever, unremovable without
-// rewriting history for everyone. Storage that cannot delete is the wrong
-// home for data governed by a retention policy. If the payload is ever wanted
-// long-term it belongs in object storage, and this manifest records that the
-// omission was a decision rather than an oversight.
+// The payload rides in its OWN shards rather than inside the event. It is by
+// far the largest part — 186 MB of the measured store against ~105 MB for
+// everything else — and separating it means the daily runtime path never
+// touches those files, while they are still in the repository if a classifier
+// that does not exist yet ever needs them.
+//
+// An earlier revision of this file excluded the payload on the grounds that a
+// git repository cannot delete and ~300 MB would sit in every clone forever.
+// That figure was the uncompressed total, and it was the wrong number to
+// reason from: gzipped ledger JSON is highly repetitive, so the payload shards
+// are a fraction of it. The manifest records the real compressed size, so the
+// decision is made against a measurement rather than an estimate.
 //
 // ── DETERMINISM, AND WHY IT IS THE POINT ───────────────────────────────────
 //
@@ -108,6 +114,23 @@ function eventOf(row) {
   };
 }
 
+// The complete ledger payload, verbatim, keyed by hash. Separate from the
+// event so that acquisition never loads it and an archive consumer can choose
+// whether to fetch it at all.
+function payloadOf(row) {
+  const r = row || {};
+  return {
+    hash: _s(r.hash),
+    raw_tx: (r.raw_tx && typeof r.raw_tx === 'object') ? r.raw_tx : null,
+    raw_meta: (r.raw_meta && typeof r.raw_meta === 'object') ? r.raw_meta : null
+  };
+}
+// A payload row with neither half is not evidence of anything and would only
+// pad the archive with nulls.
+function hasPayload(payload) {
+  return !!(payload && payload.hash && (payload.raw_tx || payload.raw_meta));
+}
+
 function participantOf(row) {
   const r = row || {};
   return { tx_hash: _s(r.tx_hash), address: _s(r.address), role: _s(r.role) };
@@ -146,6 +169,9 @@ function ndjson(records) {
 function orderEvents(a, b) {
   const at = String(a.close_time || ''), bt = String(b.close_time || '');
   if (at !== bt) return at < bt ? -1 : 1;
+  return String(a.hash) < String(b.hash) ? -1 : (String(a.hash) > String(b.hash) ? 1 : 0);
+}
+function orderPayloads(a, b) {
   return String(a.hash) < String(b.hash) ? -1 : (String(a.hash) > String(b.hash) ? 1 : 0);
 }
 function orderParticipants(a, b) {
@@ -229,7 +255,7 @@ function sealManifest(manifest) {
 
 module.exports = {
   SCHEMA, MAX_SHARD_BYTES, EVENT_KEYS,
-  sha256, eventOf, participantOf, coverageOf,
-  ndjson, orderEvents, orderParticipants, dayOf, dayPath, shard,
+  sha256, eventOf, participantOf, payloadOf, hasPayload, coverageOf,
+  ndjson, orderEvents, orderParticipants, orderPayloads, dayOf, dayPath, shard,
   fileEntry, manifestDigest, sealManifest
 };

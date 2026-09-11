@@ -10,7 +10,7 @@
      a tampered MANIFEST is detectable, so it cannot vouch for tampered files
      nothing is silently dropped, misfiled, or counted twice
      the export never writes to the database it is reading
-     the ledger payload is left behind ON PURPOSE, and says so
+     the ledger payload is exported in its own shards, never inside an event
 
    No database, no network, no filesystem beyond a scratch directory.
 ──────────────────────────────────────────────────────────────────────────── */
@@ -50,7 +50,10 @@ console.log('\n1. the exported event keeps what evidence needs and nothing it mu
 const event = X.eventOf(dbRow(1, '2026-09-10T04:00:00.000Z'));
 check('every declared key is present, in order',
   JSON.stringify(Object.keys(event)) === JSON.stringify(X.EVENT_KEYS), Object.keys(event));
-check('the payload is absent — it is a 48h cache and git cannot delete',
+// The payload is exported, but in its own shards — never folded into the
+// event. That separation is what lets daily acquisition read events without
+// dragging the largest part of the archive along with them.
+check('an event carries no payload, however large the archive gets',
   event.raw_tx === undefined && event.raw_meta === undefined && !/raw_tx|raw_meta/.test(JSON.stringify(event)));
 // Without the AccountRoot deltas the balance cross-check stops working against
 // exported history the moment the payload expires, which is most of the point.
@@ -163,21 +166,46 @@ check('the exporter streams by keyset, so a 300 MB store never lands in memory',
   /ORDER BY close_time,hash LIMIT/.test(EXPORTER_CODE) && !/\bOFFSET\b/i.test(EXPORTER_CODE));
 check('and it flushes one day at a time rather than buffering the whole store',
   /flushDay/.test(EXPORTER) && /buffer = \[\]/.test(EXPORTER));
-
-console.log('\n7. the payload is left behind on purpose, and the archive says so');
-const EVENTS_QUERY = (EXPORTER_CODE.match(/SELECT hash,ledger_index[\s\S]*?FROM transactions/) || [''])[0];
-check('the events query names every exported column and no payload column',
-  /\bevidence\b/.test(EVENTS_QUERY) && !/raw_tx|raw_meta/.test(EVENTS_QUERY), EVENTS_QUERY.slice(0, 80));
-// The column is named exactly twice: once to detect whether it still exists,
-// and once to write down why it was left behind. Neither reads a payload.
-check('the payload columns are named only to detect them and to explain the omission',
-  (EXPORTER_CODE.match(/raw_tx/g) || []).length === 2 &&
-  /information_schema\.columns[\s\S]{0,120}?raw_tx/.test(EXPORTER_CODE) &&
-  /payloads_omitted_because: 'raw_tx/.test(EXPORTER_CODE));
-check('the manifest records the omission as a decision',
-  /payloads_exported: false/.test(EXPORTER) && /payloads_omitted_because/.test(EXPORTER));
-check('and the verifier refuses an archive that does not declare it',
-  /payloads_exported === false/.test(VERIFIER));
+console.log('\n7. the payload is exported, in its own shards');
+// It is the largest part of the store by a wide margin — 186 MB against ~105 MB
+// for everything else. Keeping it in separate files is what lets daily
+// acquisition never read it, while it stays in the repository for a classifier
+// that does not exist yet.
+const EVENT_COLUMN_LIST = (EXPORTER_CODE.match(/const EVENT_COLUMNS = `([\s\S]*?)`/) || ['', ''])[1];
+check('the event column list names every exported field and no payload column',
+  /\bevidence\b/.test(EVENT_COLUMN_LIST) && !/raw_tx|raw_meta/.test(EVENT_COLUMN_LIST),
+  EVENT_COLUMN_LIST.slice(0, 80));
+const payload = X.payloadOf({ hash: hash(1), raw_tx: { TransactionType: 'Payment', Amount: '1' },
+  raw_meta: { TransactionResult: 'tesSUCCESS' } });
+check('a payload record carries both halves and its hash',
+  payload.hash === hash(1) && payload.raw_tx.Amount === '1' &&
+  payload.raw_meta.TransactionResult === 'tesSUCCESS');
+check('the payload is NOT folded into the event record',
+  X.EVENT_KEYS.indexOf('raw_tx') < 0 && X.EVENT_KEYS.indexOf('raw_meta') < 0);
+check('the exporter writes payloads to their own path', /'\/payloads\.ndjson'/.test(EXPORTER));
+// A row whose payload has already expired under the 48h policy is absent, not
+// a line of nulls: that is the policy working, and padding the archive with
+// empty records would make expiry indistinguishable from a gap.
+check('a row with no payload is left out rather than written as nulls',
+  X.hasPayload(X.payloadOf({ hash: hash(2) })) === false && X.hasPayload(payload) === true &&
+  /\.filter\(X\.hasPayload\)/.test(EXPORTER));
+check('payloads are ordered by hash, so the shard is deterministic',
+  [{ hash: 'B' }, { hash: 'A' }].sort(X.orderPayloads)[0].hash === 'A');
+// Both schemas: before 005 the payload is two columns on `transactions`, after
+// it a table with an expiry. Neither is required to be present.
+check('the exporter reads the payload from whichever schema is in place',
+  /transaction_raw x JOIN transactions t/.test(EXPORTER) &&
+  /hasRaw \? ',raw_tx,raw_meta' : ''/.test(EXPORTER));
+check('the manifest records that payloads are included, and from where',
+  /payloads_exported: true/.test(EXPORTER) && /payloads_source:/.test(EXPORTER));
+check('and the verifier requires the archive to declare it either way',
+  /typeof manifest\.source\.payloads_exported === 'boolean'/.test(VERIFIER));
+// A payload belongs to an event. More payloads than events in a day would mean
+// the archive holds a payload for something it does not record happening.
+check('the verifier refuses a day holding more payloads than events',
+  /no day holds more payloads than events/.test(VERIFIER));
+check('and it counts payload shards separately from the other two',
+  /isPayloads/.test(VERIFIER) && /payloads === \(manifest\.totals\.payloads \|\| 0\)/.test(VERIFIER));
 
 console.log('\n8. publishing refuses what it cannot verify, and is resumable');
 const UPLOAD_AT = PUBLISHER.indexOf('A.commitFiles(');

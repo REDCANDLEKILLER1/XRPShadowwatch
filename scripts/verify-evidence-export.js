@@ -70,11 +70,11 @@ async function main() {
   check('the manifest has not been edited since it was written',
     manifest.manifest_sha256 === X.manifestDigest(manifest), manifest.manifest_sha256);
   check('the export declares whether payloads are included',
-    manifest.source && manifest.source.payloads_exported === false);
+    manifest.source && typeof manifest.source.payloads_exported === 'boolean');
 
   // ── files ────────────────────────────────────────────────────────────────
   const byDay = new Map();
-  let events = 0, participants = 0, missing = 0, corrupt = 0, malformed = 0, misfiled = 0;
+  let events = 0, participants = 0, payloads = 0, missing = 0, corrupt = 0, malformed = 0, misfiled = 0;
   const hashes = new Set();
   let duplicated = 0;
 
@@ -91,6 +91,7 @@ async function main() {
     if (lines.length !== entry.rows) { malformed++; console.log('  FAIL  row count differs  ' + entry.path); fail++; continue; }
     const day = /^evidence\/(\d{4})\/(\d{2})\/(\d{2})\//.exec(entry.path);
     const isEvents = /\/events(\.\d{3})?\.ndjson\.gz$/.test(entry.path);
+    const isPayloads = /\/payloads(\.\d{3})?\.ndjson\.gz$/.test(entry.path);
     for (const line of lines) {
       let record; try { record = JSON.parse(line); } catch (_) { malformed++; continue; }
       if (!isEvents) continue;
@@ -101,11 +102,15 @@ async function main() {
     }
     if (day) {
       const key = day[1] + '-' + day[2] + '-' + day[3];
-      const tally = byDay.get(key) || { events: 0, participants: 0 };
-      if (isEvents) tally.events += entry.rows; else tally.participants += entry.rows;
+      const tally = byDay.get(key) || { events: 0, participants: 0, payloads: 0 };
+      if (isEvents) tally.events += entry.rows;
+      else if (isPayloads) tally.payloads += entry.rows;
+      else tally.participants += entry.rows;
       byDay.set(key, tally);
     }
-    if (isEvents) events += entry.rows; else participants += entry.rows;
+    if (isEvents) events += entry.rows;
+    else if (isPayloads) payloads += entry.rows;
+    else participants += entry.rows;
   }
 
   check('every file the manifest lists is present', missing === 0, missing);
@@ -114,8 +119,15 @@ async function main() {
   check('no event is filed under a day its close time does not belong to', misfiled === 0, misfiled);
   check('no transaction hash appears in two shards', duplicated === 0, duplicated);
   check('the per-file row counts add up to the manifest totals',
-    events === manifest.totals.events && participants === manifest.totals.participants,
-    { events, participants, claimed: manifest.totals });
+    events === manifest.totals.events && participants === manifest.totals.participants &&
+    payloads === (manifest.totals.payloads || 0),
+    { events, participants, payloads, claimed: manifest.totals });
+
+  // A payload belongs to an event. More payloads than events would mean the
+  // archive holds a payload for something it does not record happening.
+  check('no day holds more payloads than events',
+    [...byDay.entries()].every(([, t]) => t.payloads <= t.events),
+    [...byDay.entries()].filter(([, t]) => t.payloads > t.events));
 
   const coverage = JSON.parse(readText(path.join(root, 'state/coverage.json')));
   check('the coverage proof is present and is a list', Array.isArray(coverage) && coverage.length === manifest.totals.wallets,
