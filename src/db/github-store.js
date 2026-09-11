@@ -35,7 +35,10 @@ const STATE_PATH = 'evidence/state/latest.json';
 const historyPath = version => 'evidence/state/history/' + String(version).padStart(8, '0') + '.json';
 const runPath = reportId => 'evidence/runs/' + String(reportId) + '.json';
 
-function target(env) { return A.archiveTarget(env || process.env); }
+// The EVIDENCE repository, not the application repo. Daily shards and the
+// checkpoint live in their own private store so the code repo's history stays
+// small and the two can carry different access.
+function target(env) { return A.evidenceTarget(env || process.env); }
 
 // Read one file from the branch at a given ref. Returns null for 404 — an
 // absent state is a real answer (nothing has been committed yet), not an error.
@@ -158,4 +161,40 @@ async function seedGenesis(input, deps) {
     state_version: state.state_version, state_sha256: state.state_sha256, wallets: state.wallet_count };
 }
 
-module.exports = { STATE_PATH, historyPath, runPath, readState, commitRun, seedGenesis };
+// ── Reading back the evidence we already own ───────────────────────────────
+//
+// ACQUISITION never calls this: the walk needs the checkpoint and nothing else.
+// REPORT ASSEMBLY does, and only for the days the window actually touches —
+// one or two files, not the archive. A second run on the same day needs the
+// morning's transactions, and they are already committed; re-fetching them from
+// XRPL would be paying twice for evidence we own.
+//
+// A day with no shard is not an error. It means nothing was committed for that
+// day, which for a day inside a proven window means nothing happened.
+async function readDays(days, deps) {
+  const d = deps || {};
+  const { token, repo, branch } = target(d.env);
+  const gh = d.gh || A.client(token, repo, d.fetch || fetch);
+  const zlib = require('zlib');
+  const out = { events: [], files: [], missing: [] };
+  for (const day of (days || [])) {
+    const base = 'evidence/' + String(day).replace(/-/g, '/');
+    // Shards are numbered only when a day had to be split, so try the plain
+    // name first and then the numbered series until one is absent.
+    const candidates = ['/events.ndjson.gz'];
+    for (let i = 1; i <= 999; i++) candidates.push('/events.' + String(i).padStart(3, '0') + '.ndjson.gz');
+    let found = 0;
+    for (const suffix of candidates) {
+      const path = base + suffix;
+      const file = await gh('GET', '/contents/' + path + '?ref=' + encodeURIComponent(branch), undefined, true);
+      if (!file) { if (suffix === '/events.ndjson.gz') continue; break; }
+      const text = zlib.gunzipSync(Buffer.from(file.content || '', 'base64')).toString('utf8');
+      for (const line of text.split('\n')) { if (line) out.events.push(JSON.parse(line)); }
+      out.files.push(path); found++;
+    }
+    if (!found) out.missing.push(day);
+  }
+  return out;
+}
+
+module.exports = { STATE_PATH, historyPath, runPath, readState, commitRun, seedGenesis, readDays };

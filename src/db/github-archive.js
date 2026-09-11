@@ -4,6 +4,13 @@ const E=require('./evidence');
 
 const BRANCH='shadowwatch-report-archive';
 const REPO='REDCANDLEKILLER1/XRPShadowwatch';
+// The evidence store is a SEPARATE private repository. Keeping daily delta
+// shards out of the application repo means the code repo's history is not
+// dragged along by every clone and every CI run, and it lets the two carry
+// different access. Pinned exactly like the report archive, and refused the
+// same way if an environment tries to redirect it.
+const EVIDENCE_REPO='REDCANDLEKILLER1/SHADOWWATCH_EVIDENCE_REPO-REDCANDLEKILLER1-XRPShadowwatch-evidence';
+const EVIDENCE_BRANCH='main';
 const MAX_REPORT_BYTES=512*1024;
 const ALLOWED=new Set(['report_id','scan_id','evidence_scan_id','generated_at','morning_report','morning_hash','public_hash','full_hash']);
 const sha=text=>crypto.createHash('sha256').update(String(text),'utf8').digest('hex');
@@ -72,6 +79,21 @@ async function archiveRef(gh,branch){
   catch(e){if(e.status!==422)throw e;return await gh('GET','/git/ref/heads/'+branch);}
 }
 
+// The evidence store's pinned target. Its own token when one is configured,
+// because a fine-grained token for the evidence repo need not — and probably
+// should not — also carry write access to the application repo. Falls back to
+// the archive token, since one fine-grained token CAN legitimately be scoped to
+// both; a missing token is refused rather than guessed at.
+function evidenceTarget(env){
+  const e=env||process.env;
+  const token=e.SHADOWWATCH_EVIDENCE_TOKEN||e.SHADOWWATCH_GITHUB_ARCHIVE_TOKEN;
+  if(!token)throw new Error('EVIDENCE_STORE_NOT_CONFIGURED: set SHADOWWATCH_EVIDENCE_TOKEN');
+  const repo=e.SHADOWWATCH_EVIDENCE_REPOSITORY||EVIDENCE_REPO;
+  const branch=e.SHADOWWATCH_EVIDENCE_BRANCH||EVIDENCE_BRANCH;
+  if(repo!==EVIDENCE_REPO||branch!==EVIDENCE_BRANCH)throw new Error('EVIDENCE_TARGET_REFUSED');
+  return {token,repo,branch};
+}
+
 // The pinned target, refused if an environment tries to redirect it. Shared so
 // the export cannot be pointed somewhere the report archive would not go.
 function archiveTarget(env){
@@ -135,4 +157,5 @@ async function archiveReport(raw,deps={}){
   throw new Error('GITHUB_ARCHIVE_RETRY_EXHAUSTED');
 }
 
-module.exports={archiveReport,validate,sha,client,commitFiles,archiveRef,archiveTarget,BRANCH,REPO,MAX_REPORT_BYTES};
+module.exports={archiveReport,validate,sha,client,commitFiles,archiveRef,archiveTarget,evidenceTarget,
+  BRANCH,REPO,EVIDENCE_BRANCH,EVIDENCE_REPO,MAX_REPORT_BYTES};

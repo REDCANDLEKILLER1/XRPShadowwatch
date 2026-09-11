@@ -102,7 +102,38 @@ check('and ends at today\'s anchor, whatever the gap', edge.through_ledger === 1
 check('no wallet is cold — all 255 carry a real checkpoint',
   seeded.wallets.every(w => State.edgeFor(w, 106901000).cold === false));
 
-console.log('\n6. no database, and one write at most');
+console.log('\n6. two repositories, and the right one for each job');
+// The sealed receipts live in the application repo, where the runs that earned
+// them wrote them. The checkpoint they establish belongs in the evidence repo,
+// which is where every later run looks for it. Reading one and writing the
+// other is the whole point of the split.
+const A = require(path.join(ROOT, 'src/db/github-archive.js'));
+check('receipts are read from the application repo\'s archive branch',
+  /A\.archiveTarget\(process\.env\)/.test(SRC) && A.REPO === 'REDCANDLEKILLER1/XRPShadowwatch');
+check('the checkpoint is written to the separate evidence repo',
+  /A\.evidenceTarget\(process\.env\)/.test(SRC) &&
+  A.EVIDENCE_REPO === 'REDCANDLEKILLER1/SHADOWWATCH_EVIDENCE_REPO-REDCANDLEKILLER1-XRPShadowwatch-evidence' &&
+  A.EVIDENCE_BRANCH === 'main');
+check('both targets are printed, so an operator can see where each half went',
+  /receipts from/.test(SRC) && /checkpoint to/.test(SRC));
+// Pinned exactly like the report archive. An environment variable must not be
+// able to redirect evidence to a repository nobody chose.
+check('the evidence target is pinned and a redirect is refused',
+  (() => { try { A.evidenceTarget({ SHADOWWATCH_EVIDENCE_TOKEN: 't',
+    SHADOWWATCH_EVIDENCE_REPOSITORY: 'attacker/elsewhere' }); return false; }
+    catch (e) { return /EVIDENCE_TARGET_REFUSED/.test(e.message); } })());
+check('and a missing token is refused rather than guessed at',
+  (() => { try { A.evidenceTarget({}); return false; }
+    catch (e) { return /EVIDENCE_STORE_NOT_CONFIGURED/.test(e.message); } })());
+// One fine-grained token can legitimately cover both repositories, so the
+// archive token is an accepted fallback — but only as a fallback.
+check('the evidence token is preferred when both are present',
+  A.evidenceTarget({ SHADOWWATCH_EVIDENCE_TOKEN: 'evidence',
+    SHADOWWATCH_GITHUB_ARCHIVE_TOKEN: 'archive' }).token === 'evidence');
+check('and the archive token is accepted when only it is set',
+  A.evidenceTarget({ SHADOWWATCH_GITHUB_ARCHIVE_TOKEN: 'archive' }).token === 'archive');
+
+console.log('\n7. no database, and one write at most');
 check('the seeder never requires the Neon connection',
   !/require\('\.\.\/src\/db\/connection'\)/.test(SRC) && !/getExecutor/.test(SRC));
 check('and issues no SQL', !/\b(SELECT|INSERT|UPDATE|DELETE)\s/i.test(SRC.replace(/^\s*\/\/.*$/gm, '')));

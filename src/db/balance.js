@@ -158,12 +158,20 @@ function reconcile(input) {
     transactions_moving_balance: naming
   };
   if (unexplained === 0n) return Object.assign({ status: STATUS.RECONCILED, reason: 'BALANCE_EXPLAINED' }, facts);
+  // An INTEGRITY CONTRADICTION, and deliberately not a diagnosis. The identity
+  // did not hold; that is a fact. WHY it did not hold is a separate question
+  // with more than one answer — a transaction missing from the walk, a node
+  // that answered a partial range, a defect in the AccountRoot projection, or
+  // an account that was deleted and recreated. Naming it
+  // "missing XRPL transaction" would pick one of those before anyone looked.
+  //
+  // What the verdict licenses is narrow and firm: this wallet may not be
+  // rendered as quiet, and this run may not seal. What caused it is for the
+  // operator and the debug export to establish.
   return Object.assign({
     status: STATUS.CONTRADICTION,
-    // Named for what it means rather than for what failed: the balance moved
-    // by an amount the acquired evidence cannot account for, so evidence is
-    // missing from a range this run claims to have proven.
-    reason: considered.length ? 'BALANCE_PARTIALLY_UNEXPLAINED' : 'BALANCE_MOVED_WITH_NO_EVIDENCE',
+    reason: considered.length ? 'BALANCE_UNEXPLAINED_PARTIAL' : 'BALANCE_UNEXPLAINED_NO_ROWS',
+    contradiction: 'ANCHORED_BALANCE_DOES_NOT_MATCH_OBSERVED_DELTAS',
     unexplained_drops: unexplained.toString()
   }, facts);
 }

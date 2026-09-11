@@ -188,14 +188,17 @@ async function acquire(input, deps) {
   const run = input || {};
   if (!run.report_id) throw new Error('RUN_REPORT_ID_REQUIRED');
 
-  // 1. ONE file. The archive is never loaded to acquire.
-  const loaded = await Store.readState({ env: d.env, gh: d.gh, fetch: d.fetch });
-  if (loaded.missing) throw new Error('EVIDENCE_STATE_MISSING: seed genesis from the export before the first run');
+  // 1+2. Two independent lanes, run concurrently: the checkpoint comes from
+  // GitHub and the anchor from XRPL, and neither needs the other. Serialising
+  // them bought nothing but latency.
+  const [loaded, header] = await Promise.all([
+    Store.readState({ env: d.env, gh: d.gh, fetch: d.fetch }),
+    reader.ledger('validated')
+  ]);
+  if (loaded.missing) throw new Error('EVIDENCE_STATE_MISSING: seed the checkpoint from a sealed report before the first run');
   const state = loaded.state;
-
-  // 2. One anchor, shared by every wallet, so wallet 3 and wallet 200 describe
-  //    the same ledger state.
-  const header = await reader.ledger('validated');
+  // One anchor, shared by every wallet, so wallet 3 and wallet 200 describe the
+  // same ledger state.
   const anchor = { ledger: header.ledger, close_ms: header.close_ms, close_iso: new Date(header.close_ms).toISOString() };
 
   // The validated ledger has not moved since the last sealed run, so there is
@@ -220,16 +223,34 @@ async function acquire(input, deps) {
   const results = new Array(entries.length);
   const concurrency = Math.max(1, Math.min(Number(d.concurrency) || DEFAULT_CONCURRENCY, 8));
   let cursor = 0;
+  // Per-wallet recovery. One sick endpoint must not turn the run into 0/255, so
+  // a wallet that fails is retried — and because the Reader rotates endpoints
+  // on a transport failure, a retry is usually a different server. Attempts are
+  // bounded and every one is recorded: a wallet that took three tries is not
+  // the same fact as one that answered first time.
+  const attemptsPerWallet = Math.max(1, Math.min(Number(d.attempts) || 3, 5));
   const worker = async () => {
     for (;;) {
       const index = cursor++;
       if (index >= entries.length) return;
       const entry = entries[index];
-      try {
-        results[index] = await walkWallet(reader, entry, anchor,
-          { scanId: run.scan_id, rosterHash: state.state_sha256, coldFrom: run.cold_from_ledger });
-      } catch (e) {
-        results[index] = { address: entry.address, status: 'FAILED', error: e.message, rows: [] };
+      const tried = [];
+      for (let attempt = 1; attempt <= attemptsPerWallet; attempt++) {
+        try {
+          const walked = await walkWallet(reader, entry, anchor,
+            { scanId: run.scan_id, rosterHash: state.state_sha256, coldFrom: run.cold_from_ledger });
+          results[index] = { ...walked, attempts: attempt, earlier_failures: tried };
+          break;
+        } catch (e) {
+          tried.push({ attempt, error: e.message, endpoint: reader.stats.actual_endpoint || null });
+          // A permanent refusal will not become a success by being asked again.
+          const permanent = /INVALID|MALFORMED|OUTSIDE_PROVEN_RANGE|CONFLICTING/.test(e.message);
+          if (permanent || attempt === attemptsPerWallet) {
+            results[index] = { address: entry.address, status: 'FAILED', error: e.message,
+              attempts: attempt, earlier_failures: tried, rows: [] };
+            break;
+          }
+        }
       }
       if (typeof d.onWallet === 'function') d.onWallet(results[index], index + 1, entries.length);
     }
@@ -240,6 +261,40 @@ async function acquire(input, deps) {
   const failed = results.filter(r => !r || r.status !== 'COMPLETE');
   const contradicted = complete.filter(r => B.contradicted(r.reconciliation));
   const rows = T.mergeSightings(complete.flatMap(r => r.rows));
+
+  // ── WHAT MAY BE RENDERED, SEPARATELY FROM WHAT MAY BE CLAIMED ───────────
+  // Evidence from a wallet that completed is real whether or not the run as a
+  // whole earned its checkpoint. Returning nothing because six wallets of 255
+  // failed would throw away 249 wallets of true observations and leave the
+  // operator with 0/255 — which reads as "nothing happened" rather than "we
+  // could not finish". So the rows always come back, and the freshness block
+  // says exactly what they cover and what they do not.
+  //
+  // The COMMIT stays all-or-nothing. Renderable and provable are different
+  // questions and this is where they separate.
+  const freshness = {
+    anchor_ledger: anchor.ledger,
+    anchor_close: anchor.close_iso,
+    proven_from_ledger: Number(state.anchor_ledger) || null,
+    wallets_proven: complete.length,
+    wallets_unavailable: failed.length,
+    wallets_contradicted: contradicted.length,
+    checkpoint_advances: failed.length === 0 && contradicted.length === 0,
+    unavailable: failed.map(r => ({ address: r && r.address,
+      error: (r && r.error) || 'UNKNOWN', attempts: (r && r.attempts) || 0 })),
+    contradicted: contradicted.map(r => ({ address: r.address,
+      reason: r.reconciliation.reason,
+      unexplained_drops: r.reconciliation.unexplained_drops || null }))
+  };
+  const wallets = results.map(r => ({
+    address: r && r.address, status: (r && r.status) || 'FAILED',
+    proven_through: r && r.proof ? r.proof.through_ledger : null,
+    rows: r && r.rows ? r.rows.length : 0,
+    reconciliation: (r && r.reconciliation && r.reconciliation.status) || null,
+    attempts: (r && r.attempts) || 0,
+    error: (r && r.error) || null
+  }));
+
   const summary = {
     report_id: run.report_id, scan_id: run.scan_id || null,
     anchor_ledger: anchor.ledger, anchor_close: anchor.close_iso,
@@ -257,10 +312,10 @@ async function acquire(input, deps) {
   // 4. The gate. Anything short of a whole, uncontradicted run commits nothing,
   //    and the checkpoint stays exactly where it was.
   if (failed.length) {
-    return { ...summary, committed: false, reason: 'RUN_INCOMPLETE' };
+    return { ...summary, committed: false, reason: 'RUN_INCOMPLETE', rows, wallets, freshness };
   }
   if (contradicted.length) {
-    return { ...summary, committed: false, reason: 'RUN_CONTRADICTED' };
+    return { ...summary, committed: false, reason: 'RUN_CONTRADICTED', rows, wallets, freshness };
   }
 
   const built = buildShards(rows);
@@ -273,7 +328,44 @@ async function acquire(input, deps) {
     files: built.files
   }, { env: d.env, gh: d.gh, fetch: d.fetch });
 
-  return { ...summary, committed: true, ...committed };
+  return { ...summary, committed: true, rows, wallets, freshness, ...committed };
 }
 
-module.exports = { acquire, walkWallet, buildShards, PAGE_LIMIT };
+// ── The report window: what we already own, plus the edge just walked ──────
+//
+// The delta a daily run fetches IS the window when the run is daily. It stops
+// being so on a second run the same day — the morning's transactions are then
+// already committed, and re-fetching them from XRPL would be paying twice for
+// evidence we own. So the window is assembled from the committed shards for the
+// days it touches (one or two files, never the archive) unioned with the rows
+// this run just walked.
+//
+// Deduped by hash, because a transaction inside the overlap appears in both.
+async function readReportWindow(input, deps) {
+  const d = deps || {};
+  const from = new Date(input.window_start_ms), to = new Date(input.window_end_ms);
+  if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || to < from) {
+    throw new Error('INVALID_REPORT_WINDOW');
+  }
+  const days = [];
+  for (let t = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate());
+       t <= to.getTime(); t += 86400000) {
+    days.push(new Date(t).toISOString().slice(0, 10));
+  }
+  const stored = await Store.readDays(days, d);
+  const fresh = (input.rows || []).map(r => X.eventOf({ ...r, close_time: r.close_time_iso || r.close_time }));
+  const byHash = new Map();
+  // Freshly walked rows win on a tie: they came from this run's proven range.
+  for (const event of stored.events) byHash.set(event.hash, event);
+  for (const event of fresh) byHash.set(event.hash, event);
+  const events = [...byHash.values()]
+    .filter(e => {
+      const t = Date.parse(e.close_time);
+      return Number.isFinite(t) && t >= from.getTime() && t <= to.getTime();
+    })
+    .sort(X.orderEvents);
+  return { events, days, shards_read: stored.files, days_without_shards: stored.missing,
+    from_stored: stored.events.length, from_this_run: fresh.length, in_window: events.length };
+}
+
+module.exports = { acquire, walkWallet, buildShards, readReportWindow, PAGE_LIMIT };

@@ -29,7 +29,7 @@ const check = (name, ok, detail) => {
   if (ok) { pass++; console.log('  PASS  ' + name); }
   else { fail++; console.log('  FAIL  ' + name + (detail !== undefined ? '  -> ' + JSON.stringify(detail) : '')); }
 };
-const ENV = { SHADOWWATCH_GITHUB_ARCHIVE_TOKEN: 'test-token' };
+const ENV = { SHADOWWATCH_EVIDENCE_TOKEN: 'test-token' };
 const WALLETS = ['rAlice', 'rBob', 'rCarol'];
 const ANCHOR = 110000000;
 const RIPPLE_EPOCH = 946684800;
@@ -273,6 +273,133 @@ async function main() {
   check('and issues no SQL', !/\b(SELECT|INSERT|UPDATE|DELETE)\s/i.test(SOURCE.replace(/^\s*\/\/.*$/gm, '')));
   check('XRPL is asked only for reads the allowlist permits',
     /command: 'account_tx'/.test(SOURCE) && !/submit|sign/i.test(SOURCE.replace(/^\s*\/\/.*$/gm, '')));
+
+  console.log('\n8. one sick endpoint does not collapse the run into 0/255');
+  // A wallet that fails is retried, and because the Reader rotates endpoints on
+  // a transport failure a retry is usually a different server.
+  let flaky = 2;
+  const peer8 = fakePeer({ transactions: quiet(), balances: BAL });
+  const innerRequest = peer8.reader.request.bind(peer8.reader);
+  peer8.reader.request = async function (command) {
+    if (command.account === 'rBob' && flaky-- > 0) throw new Error('XRPL_CONNECTION_CLOSED');
+    return innerRequest(command);
+  };
+  const gh8 = fakeGithub(seeded(ANCHOR - 1000));
+  const out8 = await D.acquire({ report_id: 'SW-20260911-HHHHH' },
+    { env: ENV, gh: gh8.gh, reader: peer8.reader, attempts: 3 });
+  check('a wallet that failed twice is retried and still proves',
+    out8.complete_wallets === 3 && out8.committed === true, out8.reason);
+  const retried = out8.wallets.find(w => w.address === 'rBob');
+  check('and the attempts it took are recorded, not hidden', retried.attempts === 3, retried);
+  // A malformed response will not become valid by being asked again.
+  const peer9 = fakePeer({ transactions: quiet(), balances: BAL });
+  const inner9 = peer9.reader.request.bind(peer9.reader);
+  let asked9 = 0;
+  peer9.reader.request = async function (command) {
+    if (command.account === 'rBob') { asked9++; throw new Error('ACCOUNT_TX_RESPONSE_MALFORMED'); }
+    return inner9(command);
+  };
+  const gh9 = fakeGithub(seeded(ANCHOR - 1000));
+  const out9 = await D.acquire({ report_id: 'SW-20260911-IIIII' },
+    { env: ENV, gh: gh9.gh, reader: peer9.reader, attempts: 3 });
+  check('a permanent refusal is not retried three times', asked9 === 1, asked9);
+  check('and the run does not commit', out9.committed === false && out9.reason === 'RUN_INCOMPLETE');
+
+  console.log('\n9. what may be rendered, separately from what may be claimed');
+  // 249 of 255 proving is not "nothing happened". Returning no rows would hand
+  // the operator 0/255, which reads as silence rather than as an unfinished run.
+  const f9 = out9.freshness || {};
+  check('the rows from the wallets that DID prove come back anyway',
+    Array.isArray(out9.rows) && Array.isArray(out9.wallets) && out9.wallets.length === 3,
+    { rows: Array.isArray(out9.rows), wallets: out9.wallets && out9.wallets.length });
+  check('the freshness block says how many proved and how many did not',
+    f9.wallets_proven === 2 && f9.wallets_unavailable === 1,
+    { proven: f9.wallets_proven, unavailable: f9.wallets_unavailable });
+  check('it names the wallet that could not be reached, and why',
+    Array.isArray(f9.unavailable) && f9.unavailable.length === 1 &&
+    f9.unavailable[0].address === 'rBob' && /MALFORMED/.test(f9.unavailable[0].error), f9.unavailable);
+  check('and states plainly that the checkpoint does not advance',
+    f9.checkpoint_advances === false, f9.checkpoint_advances);
+  check('per-wallet proof is reported so the report can label each one',
+    Array.isArray(out9.wallets) &&
+    out9.wallets.filter(w => w.status === 'COMPLETE').every(w => w.proven_through === ANCHOR));
+  const contradictedRun = await D.acquire({ report_id: 'SW-20260911-JJJJJ' },
+    { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh,
+      reader: fakePeer({ transactions: quiet(), balances: { ...BAL, rCarol: '18000000000000' } }).reader });
+  check('a contradicted run also returns its rows and names the contradiction',
+    Array.isArray(contradictedRun.rows) &&
+    contradictedRun.freshness.contradicted.length === 1 &&
+    contradictedRun.freshness.contradicted[0].address === 'rCarol', contradictedRun.freshness.contradicted);
+  check('and the contradiction is framed as an integrity mismatch, not a diagnosis',
+    /UNEXPLAINED/.test(contradictedRun.freshness.contradicted[0].reason) &&
+    !/MISSING/.test(contradictedRun.freshness.contradicted[0].reason),
+    contradictedRun.freshness.contradicted[0].reason);
+  check('a committed run reports its rows too, so one path renders both',
+    Array.isArray(out8.rows) && out8.freshness.checkpoint_advances === true);
+
+  console.log('\n10. the window uses evidence we already own');
+  // A second run the same day must not re-fetch the morning from XRPL: those
+  // transactions are already committed.
+  const DAY = '2026-09-11';
+  const storedEvent = { hash: 'S'.repeat(64), ledger_index: ANCHOR - 900,
+    close_time: DAY + 'T02:00:00.000Z', tx_type: 'Payment', validated: true, evidence: {} };
+  const shard = zlib.gzipSync(Buffer.from(JSON.stringify(storedEvent) + '\n', 'utf8'), { level: 9 });
+  const ghWindow = fakeGithub(seeded(ANCHOR - 1000));
+  ghWindow.files().set('evidence/2026/09/11/events.ndjson.gz', shard);
+  const freshRow = { hash: 'F'.repeat(64), ledger_index: ANCHOR - 100,
+    close_time_iso: DAY + 'T05:00:00.000Z', tx_type: 'Payment', validated: true, evidence: {} };
+
+  const win = await D.readReportWindow({
+    window_start_ms: Date.parse(DAY + 'T00:00:00.000Z'),
+    window_end_ms: Date.parse(DAY + 'T06:00:00.000Z'),
+    rows: [freshRow]
+  }, { env: ENV, gh: ghWindow.gh });
+  check('the committed shard for the day is read back',
+    win.from_stored === 1 && win.shards_read.includes('evidence/2026/09/11/events.ndjson.gz'),
+    { from_stored: win.from_stored, shards: win.shards_read });
+  check('and combined with the rows this run walked',
+    win.from_this_run === 1 && win.in_window === 2, { run: win.from_this_run, total: win.in_window });
+  check('the window is ordered, so the report reads it in ledger-time order',
+    win.events[0].close_time < win.events[1].close_time);
+  check('only the days the window touches are fetched, not the archive',
+    win.days.length === 1 && win.days[0] === DAY, win.days);
+
+  // The same transaction in both places must be counted once.
+  const dupWin = await D.readReportWindow({
+    window_start_ms: Date.parse(DAY + 'T00:00:00.000Z'),
+    window_end_ms: Date.parse(DAY + 'T06:00:00.000Z'),
+    rows: [{ ...storedEvent, close_time_iso: storedEvent.close_time }]
+  }, { env: ENV, gh: ghWindow.gh });
+  check('a transaction present in both storage and this run is counted once',
+    dupWin.in_window === 1, dupWin.in_window);
+
+  // Anything outside the window is not the window.
+  const narrow = await D.readReportWindow({
+    window_start_ms: Date.parse(DAY + 'T03:00:00.000Z'),
+    window_end_ms: Date.parse(DAY + 'T06:00:00.000Z'),
+    rows: [freshRow]
+  }, { env: ENV, gh: ghWindow.gh });
+  check('a stored row outside the window is excluded from it',
+    narrow.in_window === 1 && narrow.events[0].hash === freshRow.hash, narrow.in_window);
+
+  const empty = await D.readReportWindow({
+    window_start_ms: Date.parse('2026-09-07T00:00:00.000Z'),
+    window_end_ms: Date.parse('2026-09-07T06:00:00.000Z'), rows: []
+  }, { env: ENV, gh: ghWindow.gh });
+  check('a day with no shard is reported, not thrown',
+    empty.in_window === 0 && empty.days_without_shards.includes('2026-09-07'), empty.days_without_shards);
+
+  const SRC2 = fs.readFileSync(path.join(ROOT, 'src/db/delta-acquisition.js'), 'utf8');
+  check('acquisition itself never loads a stored shard',
+    !/Store\.readDays/.test(SRC2.split('async function acquire')[1].split('// ── The report window')[0]));
+  check('freshly walked rows win a tie against a stored copy',
+    /for \(const event of stored\.events\) byHash\.set[\s\S]{0,140}?for \(const event of fresh\) byHash\.set/.test(SRC2));
+
+  console.log('\n11. the two lanes run concurrently');
+  check('the checkpoint read and the anchor pin do not wait on each other',
+    /Promise\.all\(\[\s*Store\.readState/.test(SRC2));
+  check('and wallet walks run with bounded concurrency',
+    /Array\.from\(\{ length: concurrency \}, worker\)/.test(SRC2));
 
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA ACQUISITION CHECKS PASS'));
   process.exit(fail ? 1 : 0);

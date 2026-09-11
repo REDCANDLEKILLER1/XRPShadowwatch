@@ -23,7 +23,7 @@ const check = (name, ok, detail) => {
   if (ok) { pass++; console.log('  PASS  ' + name); }
   else { fail++; console.log('  FAIL  ' + name + (detail !== undefined ? '  -> ' + JSON.stringify(detail) : '')); }
 };
-const ENV = { SHADOWWATCH_GITHUB_ARCHIVE_TOKEN: 'test-token' };
+const ENV = { SHADOWWATCH_EVIDENCE_TOKEN: 'test-token' };
 
 // A GitHub that behaves like the real one where it matters: contents reads,
 // blob/tree/commit creation, and a ref PATCH that refuses a non-fast-forward.
@@ -160,8 +160,15 @@ async function main() {
   const SOURCE = fs.readFileSync(path.join(ROOT, 'src/db/github-store.js'), 'utf8');
   check('the store writes no path of its own outside evidence/',
     (SOURCE.match(/'(evidence|reports)\/[^']*'/g) || []).every(p => p.startsWith("'evidence/")));
-  check('the target is the pinned one, not an environment-chosen repo',
-    /A\.archiveTarget\(/.test(SOURCE) && !/SHADOWWATCH_GITHUB_ARCHIVE_REPOSITORY/.test(SOURCE));
+  // The EVIDENCE repository, not the application repo: daily shards belong in
+  // their own private store so the code repo's history is not dragged along by
+  // every clone, and the two can carry different access.
+  check('the store writes to the evidence repo, pinned, not an environment-chosen one',
+    /A\.evidenceTarget\(/.test(SOURCE) && !/SHADOWWATCH_EVIDENCE_REPOSITORY/.test(SOURCE));
+  const A2 = require(path.join(ROOT, 'src/db/github-archive.js'));
+  check('and that target is a different repository from the report archive',
+    A2.EVIDENCE_REPO !== A2.REPO &&
+    A2.EVIDENCE_REPO === 'REDCANDLEKILLER1/SHADOWWATCH_EVIDENCE_REPO-REDCANDLEKILLER1-XRPShadowwatch-evidence');
 
   console.log('\n5. a concurrent run cannot be overwritten');
   // Someone else moved the branch while this run was walking. Retrying is

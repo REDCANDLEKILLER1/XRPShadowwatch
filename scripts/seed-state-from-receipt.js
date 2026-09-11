@@ -64,12 +64,20 @@ function complete(receipt) {
 
 async function main() {
   const opts = args(process.argv.slice(2));
+  // TWO repositories, deliberately. The sealed receipts live in the
+  // application repo's archive branch, where the runs that earned them wrote
+  // them. The checkpoint they establish belongs in the evidence repo, which is
+  // where every later run will look for it.
   const { token, repo, branch } = A.archiveTarget(process.env);
   const gh = A.client(token, repo, fetch);
   const ref = await A.archiveRef(gh, branch);
+  const evidence = A.evidenceTarget(process.env);
 
   console.log('SEED CHECKPOINT FROM SEALED REPORT');
-  console.log('  branch            ' + branch + ' @ ' + ref.object.sha.slice(0, 7));
+  console.log('  receipts from     ' + repo);
+  console.log('                    ' + branch + ' @ ' + ref.object.sha.slice(0, 7));
+  console.log('  checkpoint to     ' + evidence.repo);
+  console.log('                    ' + evidence.branch);
 
   // One tree read finds every receipt without walking the directory structure.
   const commit = await gh('GET', '/git/commits/' + ref.object.sha);
