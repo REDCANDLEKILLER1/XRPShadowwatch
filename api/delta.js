@@ -67,7 +67,12 @@ module.exports = async function handler(req, res) {
     // Idempotent and self-refusing: genesis happens once, a roster that no
     // longer matches the sealed one is refused, and nothing is overwritten.
     if (input.action === 'seed') {
-      const archive = A.archiveTarget(process.env);
+      // Reading receipts accepts either token: one fine-grained token scoped
+      // to both repositories is the normal setup, and demanding two separate
+      // secrets to perform one read is a configuration trap rather than a
+      // security boundary. Writing the checkpoint still goes through the
+      // evidence target below.
+      const archive = A.archiveReadTarget(process.env);
       const gh = A.client(archive.token, archive.repo, fetch);
       const ref = await A.archiveRef(gh, archive.branch);
       const commit = await gh('GET', '/git/commits/' + ref.object.sha);

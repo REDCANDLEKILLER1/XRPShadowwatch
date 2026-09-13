@@ -94,6 +94,21 @@ function evidenceTarget(env){
   return {token,repo,branch};
 }
 
+// READING the sealed receipts. Same pinned repository and branch as
+// archiveTarget, but either token is accepted: a fine-grained token that can
+// see both repositories is the normal setup, and requiring the archive
+// variable specifically meant an operator had to configure two secrets to do
+// one read. Writing still goes through archiveTarget, which is unchanged.
+function archiveReadTarget(env){
+  const e=env||process.env;
+  const token=e.SHADOWWATCH_GITHUB_ARCHIVE_TOKEN||e.SHADOWWATCH_EVIDENCE_TOKEN;
+  if(!token)throw new Error('GITHUB_ARCHIVE_NOT_CONFIGURED');
+  const repo=e.SHADOWWATCH_GITHUB_ARCHIVE_REPOSITORY||REPO;
+  const branch=e.SHADOWWATCH_GITHUB_ARCHIVE_BRANCH||BRANCH;
+  if(repo!==REPO||branch!==BRANCH)throw new Error('GITHUB_ARCHIVE_TARGET_REFUSED');
+  return {token,repo,branch};
+}
+
 // The pinned target, refused if an environment tries to redirect it. Shared so
 // the export cannot be pointed somewhere the report archive would not go.
 function archiveTarget(env){
@@ -157,5 +172,5 @@ async function archiveReport(raw,deps={}){
   throw new Error('GITHUB_ARCHIVE_RETRY_EXHAUSTED');
 }
 
-module.exports={archiveReport,validate,sha,client,commitFiles,archiveRef,archiveTarget,evidenceTarget,
+module.exports={archiveReport,validate,sha,client,commitFiles,archiveRef,archiveTarget,archiveReadTarget,evidenceTarget,
   BRANCH,REPO,EVIDENCE_BRANCH,EVIDENCE_REPO,MAX_REPORT_BYTES};
