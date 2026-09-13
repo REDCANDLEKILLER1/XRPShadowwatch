@@ -73,17 +73,31 @@ const COLD_WINDOW_LEDGERS = 30000;
 // 204 seconds of pacing alone against a 240-second budget. A cold wallet costs
 // more than that: 33 hours of history can be several pages.
 //
-// So admitting 153 wallets in one run does not produce a slow run, it produces
-// a run that dies, commits nothing, and leaves the roster exactly where it was
-// — then does it again tomorrow. Admissions are therefore BATCHED: each run
-// takes the next few in address order, the rest stay pending and are named in
-// the result, and the roster fills in over several mornings while every run
-// stays whole and atomic. The 255 already proven walk their delta throughout
-// and are never affected.
+// Admissions are therefore BATCHED: each run takes the next few in address
+// order, the rest stay pending and are named in the result. The 255 already
+// proven walk their delta throughout and are never affected.
 //
-// This is a budget decision, not a forensic one. Nothing is skipped and no
-// window is narrowed; a wallet simply joins on Tuesday instead of Monday.
-const DEFAULT_MAX_ADMISSIONS = 12;
+// ── HOW BIG THE BATCH SHOULD BE, MEASURED RATHER THAN GUESSED ──────────────
+//
+// The first value here was twelve, chosen before any of these wallets had been
+// looked at and while a failed run still lost all of its work. Both of those
+// have changed. The journal now keeps what a run walked, so a batch that does
+// not finish costs a wait rather than a loss — and the wallets themselves have
+// been measured. Thirty of the 153, over a full 30,000-ledger cold window:
+//
+//   18 of 30 silent — no transactions at all in 33 hours
+//    9 of 30 answered in one page
+//    3 of 30 needed more than one
+//   1.07 requests and 0.39 seconds per wallet
+//
+// At that cost the entire remaining roster is about a minute of walking, not
+// twelve mornings of it. Twelve was not caution, it was an untested number
+// standing in for a measurement.
+//
+// This is still a budget decision and not a forensic one: nothing is skipped
+// and no window is narrowed. A wallet joins when a run commits, and a run that
+// runs out of road leaves it named as awaiting rather than half-admitted.
+const DEFAULT_MAX_ADMISSIONS = 150;
 
 // How many finished wallets accumulate before the run writes them down. Every
 // flush is one commit, so flushing per wallet would be 255 ref updates — the

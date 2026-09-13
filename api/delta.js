@@ -165,7 +165,10 @@ module.exports = async function handler(req, res) {
       // How many new wallets may join THIS run. A budget dial, not a forensic
       // one: it changes when a wallet joins, never what is proven about it.
       // Bounded so a caller cannot ask for a run that cannot finish.
-      max_admissions: Math.max(0, Math.min(Number(input.max_admissions) || 12, 60))
+      // Measured: a cold admission costs about one request and 0.4 seconds, so
+      // the whole remaining roster is a minute of walking. The ceiling is a
+      // guard against a caller asking for something absurd, not a throttle.
+      max_admissions: Math.max(0, Math.min(Number(input.max_admissions) || 150, 200))
     };
     // Measured, not guessed. A deep account_tx page costs roughly seven
     // seconds on a public node — the cost is the server's, not the 250 ms
