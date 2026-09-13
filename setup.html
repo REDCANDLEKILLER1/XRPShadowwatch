@@ -265,7 +265,7 @@ wire('b3', 'o3', async slot => {
             ' · ' + m.xrpl_requests + ' XRPL reads' +
             (m.xrpl_retries ? ' · ' + m.xrpl_retries + ' retries' : '') +
             (m.xrpl_reconnects ? ' · ' + m.xrpl_reconnects + ' reconnects' : '') +
-            (m.endpoint ? ' · ' + m.endpoint : ' · no endpoint yet') +
+            (m.lanes ? ' · ' + m.lanes : (m.endpoint ? ' · ' + m.endpoint : ' · no endpoint yet')) +
             (m.first_failure ? ' · first failure: ' + m.first_failure.reason : ''),
             m.xrpl_requests === 0 && m.ms > 15000 ? 'f' : 'g');
         }

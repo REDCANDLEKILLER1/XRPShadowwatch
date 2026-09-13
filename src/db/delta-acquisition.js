@@ -116,6 +116,14 @@ const gz = text => zlib.gzipSync(Buffer.from(text, 'utf8'), { level: 9 });
 // not because anything counted the days.
 async function walkWallet(reader, entry, anchor, options) {
   const opts = options || {};
+  // One lane for this whole wallet. account_tx markers are the server's own
+  // bookmark into its own data, so a paged walk has to finish where it began —
+  // but DIFFERENT wallets go to different servers, which is how the roster's
+  // load gets spread instead of piling onto one endpoint.
+  const lane = typeof reader.lane === 'function' ? await reader.lane() : null;
+  const ask = (command) => lane
+    ? reader.request(command, lane.epoch, lane)
+    : reader.request(command, reader.epoch);
   const edge = State.edgeFor(entry, anchor.ledger);
   const address = edge.address;
   const from = edge.cold ? (opts.coldFrom || null) : edge.from_ledger;
@@ -141,7 +149,7 @@ async function walkWallet(reader, entry, anchor, options) {
     const command = { command: 'account_tx', account: address, ledger_index_min: from,
       ledger_index_max: anchor.ledger, limit: PAGE_LIMIT, forward: true };
     if (marker) command.marker = marker;
-    const result = await reader.request(command, reader.epoch);
+    const result = await ask(command);
     // The response has to name the range it answered for. Without that, a
     // server could quietly answer a narrower window and the walk would call it
     // exhausted.
@@ -169,7 +177,7 @@ async function walkWallet(reader, entry, anchor, options) {
 
   // The cross-check, read AFTER the walk and pinned to the same anchor, so both
   // describe one instant.
-  const observed = await reader.balance(address, anchor.ledger);
+  const observed = await reader.balance(address, anchor.ledger, lane);
   const reconciliation = B.reconcile({
     address, rows: merged,
     edge: { from_ledger: from, through_ledger: anchor.ledger },
@@ -180,7 +188,8 @@ async function walkWallet(reader, entry, anchor, options) {
   const last = merged.length ? merged.reduce((a, b) => b.ledger_index > a.ledger_index ? b : a) : null;
   return {
     address, status: 'COMPLETE', rows: merged, edge,
-    proof: { from_ledger: from, through_ledger: anchor.ledger, pages, requests: reader.stats.requests - before },
+    proof: { from_ledger: from, through_ledger: anchor.ledger, pages,
+      requests: reader.stats.requests - before, endpoint: lane ? lane.endpoint : null },
     balance: observed,
     reconciliation,
     next_entry: State.walletEntry({
@@ -486,6 +495,17 @@ async function acquire(input, deps) {
           break;
         } catch (e) {
           tried.push({ attempt, error: e.message, endpoint: reader.stats.actual_endpoint || null });
+          // OUT OF BUDGET IS NOT A BROKEN WALLET. The admission clock throws
+          // this when the wait it would have to impose runs past the run's
+          // deadline — it means "there is no time left", not "this wallet
+          // would not answer". Retrying it three times burns through the rest
+          // of the roster in seconds and reports two hundred healthy wallets
+          // as failures, which is what a live run actually did.
+          if (e.pending) {
+            results[index] = { address: entry.address, status: 'NOT_ATTEMPTED',
+              error: 'RUN_BUDGET_EXHAUSTED', attempts: 0, earlier_failures: [], rows: [] };
+            break;
+          }
           // A permanent refusal will not become a success by being asked again.
           const permanent = /INVALID|MALFORMED|OUTSIDE_PROVEN_RANGE|CONFLICTING/.test(e.message);
           if (permanent || attempt === attemptsPerWallet) {

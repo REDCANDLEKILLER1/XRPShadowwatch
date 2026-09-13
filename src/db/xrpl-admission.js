@@ -36,9 +36,24 @@
 
 // The same numbers the database clock used, so pacing behaviour is unchanged.
 const MIN_GAP_MS = 250;
-const MAX_GAP_MS = 5000;
+// ── WHY THESE MOVED ────────────────────────────────────────────────────────
+//
+// Measured on a live run against xrplcluster.com, which refused with
+// "units quota (2000 per 10s) exhausted, retry in ~9891ms". One refusal
+// doubled the gap, and with the ceiling at five seconds and easing needing
+// thirty-one consecutive successes for a 20% cut, the run never recovered: it
+// managed 75 requests in 238 seconds — one every three seconds — and then
+// failed 240 wallets for want of budget.
+//
+// The endpoint's own retry-after is the backpressure signal, and it is honoured
+// as a cooldown. Widening the steady-state gap on top of that is a second,
+// slower brake, and it has to release on the timescale of a RUN — a few
+// hundred requests — not a few thousand. So the ceiling is lower and the
+// easing is faster. Neither change touches what the server asked for.
+const MAX_GAP_MS = 2000;
 const REFUSAL_FLOOR_MS = 1000;
-const STREAK_BEFORE_EASING = 31;
+const STREAK_BEFORE_EASING = 5;
+const EASE_FACTOR = 0.7;
 
 function createClock(options) {
   const opts = options || {};
@@ -93,7 +108,7 @@ function createClock(options) {
     succeeded() {
       state.successStreak++;
       if (state.successStreak >= STREAK_BEFORE_EASING) {
-        state.gapMs = Math.max(MIN_GAP_MS, Math.floor(state.gapMs * 0.8));
+        state.gapMs = Math.max(MIN_GAP_MS, Math.floor(state.gapMs * EASE_FACTOR));
         state.successStreak = 0;
       }
     },
@@ -120,4 +135,23 @@ function createClock(options) {
 // same instance pace against each other rather than independently.
 const shared = createClock();
 
-module.exports = { createClock, shared, MIN_GAP_MS, MAX_GAP_MS, REFUSAL_FLOOR_MS, STREAK_BEFORE_EASING };
+// ── ONE CLOCK PER ENDPOINT, NOT ONE PER PROCESS ────────────────────────────
+//
+// A rate limit belongs to a SERVER. One global clock meant that when
+// xrplcluster.com said "slow down", every request in the run slowed down —
+// including the ones bound for three other servers that had said nothing. The
+// cooldown from one endpoint became a cooldown on all of them, and a run that
+// should have shifted its load sideways sat still instead.
+//
+// Keyed per process so two Readers in the same instance still pace against
+// each other on the endpoint they share, which is the part the single clock
+// got right.
+const byEndpoint = new Map();
+function sharedFor(endpoint) {
+  const key = String(endpoint);
+  if (!byEndpoint.has(key)) byEndpoint.set(key, createClock());
+  return byEndpoint.get(key);
+}
+
+module.exports = { createClock, shared, sharedFor,
+  MIN_GAP_MS, MAX_GAP_MS, REFUSAL_FLOOR_MS, STREAK_BEFORE_EASING, EASE_FACTOR };

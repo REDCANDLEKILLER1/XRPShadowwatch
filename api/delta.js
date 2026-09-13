@@ -210,7 +210,15 @@ module.exports = async function handler(req, res) {
         waiting_on: lastPhase, wallets_done: walletsDone,
         xrpl_requests: reader.stats.requests,
         xrpl_retries: reader.stats.retries, xrpl_reconnects: reader.stats.reconnects,
-        endpoint: reader.stats.actual_endpoint || null,
+        // Per endpoint, because the whole point is that they are no longer one
+        // number. A run that felt slow should be showable as slow on ONE
+        // server rather than everywhere.
+        lanes: typeof reader.laneStats === 'function'
+          ? reader.laneStats().map(l => l.endpoint.replace('wss://', '') +
+              ' ' + l.requests + (l.refusals ? '/' + l.refusals + 'ref' : '') +
+              (l.cooldown_ms ? ' cool' + Math.round(l.cooldown_ms / 1000) + 's' : '') +
+              (l.retired ? ' RETIRED' : '')).join(' · ')
+          : null,
         first_failure: reader.stats.first_failure || null,
         ms: Date.now() - startedAt }), 5000);
       if (typeof beat.unref === 'function') beat.unref();
@@ -238,7 +246,7 @@ module.exports = async function handler(req, res) {
         line({ t: 'done', ...summary, wallets_detail: wallets,
           xrpl: { requests: reader.stats.requests, retries: reader.stats.retries,
             reconnects: reader.stats.reconnects, waits_ms: reader.stats.waits_ms,
-            endpoint: reader.stats.actual_endpoint || null,
+            lanes: typeof reader.laneStats === 'function' ? reader.laneStats() : null,
             events: (reader.stats.events || []).slice(0, 40) },
           elapsed_ms: Date.now() - startedAt });
       } catch (e) {

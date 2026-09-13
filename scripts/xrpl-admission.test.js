@@ -121,11 +121,19 @@ console.log('\n4. a caller that cannot afford the wait is told');
     !/require\('\.\/connection'\)/.test(READER));
   check('and makes no executor call anywhere', !/getExecutor|db\.transaction/.test(READER));
   check('and issues no SQL', !/\b(UPDATE|INSERT|SELECT|DELETE)\s+\w/i.test(READER.replace(/^\s*\/\/.*$/gm, '')));
-  check('admission comes from the in-process clock', /this\.clock\.admit\(this\.deadline\)/.test(READER));
+  check('admission comes from an in-process clock', /clock\.admit\(this\.deadline\)/.test(READER));
   check('success and refusal feed that clock, not a table',
-    /this\.clock\.succeeded\(\)/.test(READER) && /this\.clock\.refused\(retryMs\(e\), e\.message\)/.test(READER));
+    /lane\.clock\.succeeded\(\)/.test(READER) && /lane\.clock\.refused\(retryMs\(e\), e\.message\)/.test(READER));
   check('the clock is injectable, so pacing is testable without real time',
-    /options\.clock \|\| admission\.shared/.test(READER));
+    /options\.clockFor/.test(READER) && /admission\.sharedFor\(e\)/.test(READER));
+  // The property the live run proved was missing: a rate limit belongs to a
+  // SERVER. One clock for the whole process meant one endpoint's cooldown
+  // stalled every request in the run, including those bound for three servers
+  // that had said nothing.
+  check('the clock is per ENDPOINT, so one server\'s refusal does not stall the rest',
+    /sharedFor\(endpoint\)/.test(fs.readFileSync(path.join(ROOT, 'src/db/xrpl-admission.js'), 'utf8')));
+  check('and every endpoint carries traffic rather than sitting as failover',
+    /ENDPOINTS\.map\(e => new Lane\(/.test(READER));
   // The property that made this necessary: a read-only call must not need a
   // write to happen first.
   check('nothing in the request path requires a write to succeed first',
@@ -135,12 +143,106 @@ console.log('\n4. a caller that cannot afford the wait is told');
   const SRC = fs.readFileSync(path.join(ROOT, 'src/db/xrpl-admission.js'), 'utf8');
   check('the loss of the shared clock is stated, not glossed',
     /shared clock/i.test(SRC) && /traded|trade/i.test(SRC));
-  check('the numbers match the ones the database clock used',
-    A.MIN_GAP_MS === 250 && A.MAX_GAP_MS === 5000 &&
-    A.REFUSAL_FLOOR_MS === 1000 && A.STREAK_BEFORE_EASING === 31);
+  // The floor and the refusal floor are still the database clock's, because
+  // those were right. The CEILING and the EASING are not, and a live run
+  // proved it: xrplcluster refused once with "units quota (2000 per 10s)
+  // exhausted", the gap doubled to the old five-second ceiling, and easing
+  // needed thirty-one consecutive successes for a 20% cut. The run made 75
+  // requests in 238 seconds and never got back down.
+  check('the pacing floor is unchanged from the database clock',
+    A.MIN_GAP_MS === 250 && A.REFUSAL_FLOOR_MS === 1000);
+  // The property, not the numbers: a clock pushed to its ceiling must return
+  // to the floor within a RUN's worth of successes — a few hundred — rather
+  // than a few thousand. Whatever the constants are, this has to hold.
+  const easeSteps = (max, floor, factor, streak) => {
+    let gap = max, successes = 0;
+    while (gap > floor && successes < 100000) {
+      gap = Math.max(floor, Math.floor(gap * factor)); successes += streak;
+    }
+    return successes;
+  };
+  const toFloor = easeSteps(A.MAX_GAP_MS, A.MIN_GAP_MS, A.EASE_FACTOR, A.STREAK_BEFORE_EASING);
+  check('a clock at its ceiling recovers to the floor inside one run',
+    toFloor <= 300, { successes_needed: toFloor });
+  check('and the old settings would NOT have — which is why they changed',
+    easeSteps(5000, 250, 0.8, 31) > 300, { old: easeSteps(5000, 250, 0.8, 31) });
+  check('the ceiling is still a real brake, several times the floor',
+    A.MAX_GAP_MS >= A.MIN_GAP_MS * 4);
+  // What the server itself asked for is never softened: the cooldown is the
+  // retry-after, verbatim. Only our own secondary brake was retuned.
+  check('a refusal still honours the endpoint\'s own retry-after exactly',
+    (() => { let t = 1000; const c = A.createClock({ now: () => t, sleep: async () => {} });
+      return c.refused(9891, 'units quota') === 9891 && c.cooldownRemaining() === 9891; })());
   check('one clock is shared across Readers in a process, so walks pace together',
     A.shared && typeof A.shared.reserve === 'function');
 
-  console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' XRPL ADMISSION CHECKS PASS'));
-  process.exit(fail ? 1 : 0);
 })();
+
+console.log('\n7. four endpoints, four lanes — the thing that was configured but never used');
+/* ── WHAT THE LIVE RUN SHOWED ───────────────────────────────────────────────
+   The endpoint list has been four servers long from the start, but connect()
+   returned the socket it already had, so every request went down ONE
+   WebSocket. A real run's log said `wss://xrplcluster.com` on every single
+   line, hit "units quota (2000 per 10s) exhausted", and — because the clock
+   was global — served 75 requests in 238 seconds while three idle servers sat
+   there willing to answer. These checks are what makes that impossible to
+   reintroduce quietly. */
+{
+  const R = require(path.join(ROOT, 'src/db/xrpl-reader.js'));
+  const ENDPOINTS = ['wss://a', 'wss://b', 'wss://c', 'wss://d'];
+  const clocks = new Map();
+  const clockFor = e => {
+    if (!clocks.has(e)) clocks.set(e, A.createClock({ now: () => 0, sleep: async () => {} }));
+    return clocks.get(e);
+  };
+  const reader = new R.Reader({ clockFor });
+  check('a reader holds one lane per configured endpoint',
+    reader.lanes.length === 4 && new Set(reader.lanes.map(l => l.endpoint)).size === 4,
+    reader.lanes.map(l => l.endpoint));
+  check('each lane has its OWN clock, not one shared across all of them',
+    new Set(reader.lanes.map(l => l.clock)).size === 4);
+  // And the real default, not just the injected one: without clockFor, the
+  // lanes must still get per-endpoint clocks rather than the process-wide one.
+  check('the DEFAULT clock is per endpoint, not the process-wide singleton',
+    A.sharedFor('wss://one') !== A.sharedFor('wss://two') &&
+    A.sharedFor('wss://one') !== A.shared);
+  check('and the same endpoint always gets the same clock, so walks still pace',
+    A.sharedFor('wss://one') === A.sharedFor('wss://one'));
+  check('a real reader built without injection has four distinct clocks',
+    new Set(new R.Reader().lanes.map(l => l.clock)).size === 4);
+
+  // Four wallets asking for a lane must not all be handed the same one.
+  reader.openLane = async lane => { lane.sock = { readyState: 1, url: lane.endpoint }; return lane.sock; };
+  (async () => {
+    const held = [];
+    for (let i = 0; i < 4; i++) { const l = await reader.lane(); l.inFlight++; held.push(l.endpoint); }
+    check('four concurrent walks land on four different servers',
+      new Set(held).size === 4, held);
+    for (const l of reader.lanes) l.inFlight = 0;
+
+    // A refusal on one lane must not touch the others.
+    const lane = reader.lanes[0];
+    lane.clock.refused(9891, 'units quota (2000 per 10s) exhausted');
+    check('a refusal cools the lane that refused',
+      lane.clock.cooldownRemaining() === 9891);
+    check('and leaves every other lane ready immediately',
+      reader.lanes.slice(1).every(l => l.clock.cooldownRemaining() === 0));
+    const next = reader.pickLane();
+    check('so the next request goes to a server that did not refuse',
+      next.endpoint !== lane.endpoint, next.endpoint);
+
+    // Retiring lanes one at a time must not take the pool down with them.
+    reader.lanes[1].retired = true; reader.lanes[2].retired = true;
+    check('a pool with one lane left still answers',
+      reader.pickLane().endpoint === reader.lanes[3].endpoint);
+    reader.lanes[3].retired = true; reader.lanes[0].retired = true;
+    let threw = null;
+    try { reader.pickLane(); } catch (e) { threw = e.message; }
+    check('and a pool with none left says so rather than returning nothing',
+      threw === 'XRPL_ALL_ENDPOINTS_RETIRED', threw);
+  })().then(() => {
+    console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' XRPL ADMISSION CHECKS PASS'));
+    process.exit(fail ? 1 : 0);
+  });
+}
+

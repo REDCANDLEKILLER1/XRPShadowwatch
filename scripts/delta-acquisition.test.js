@@ -41,14 +41,25 @@ function fakePeer(options) {
   const asked = [];
   const balances = opts.balances || {};
   const txs = opts.transactions || {};
+  const LANES = opts.endpoints || ['wss://a', 'wss://b', 'wss://c', 'wss://d'];
+  const lanes = LANES.map(endpoint => ({ endpoint, epoch: 1, inFlight: 0 }));
+  let laneCursor = 0;
   const reader = {
     epoch: 1,
     stats: { requests: 0, events: [] },
+    lanes,
+    // The real Reader hands out the lane that can answer soonest; the fake
+    // hands them out in turn, which is enough to prove a run SPREADS rather
+    // than piling every wallet onto one server.
+    async lane() { return lanes[laneCursor++ % lanes.length]; },
     event() {},
     async ledger() { return { ledger: ANCHOR, close_ms: Date.UTC(2026, 8, 11, 6, 0, 0) }; },
-    async request(command) {
+    async request(command, expectedEpoch, pin) {
       this.stats.requests++;
-      asked.push(command);
+      asked.push({ ...command, _endpoint: pin ? pin.endpoint : null });
+      if (opts.pendingFrom && this.stats.requests > opts.pendingFrom) {
+        const e = new Error('XRPL_ADMISSION_BUDGET_EXCEEDED'); e.pending = true; throw e;
+      }
       if (command.command !== 'account_tx') throw new Error('UNEXPECTED_COMMAND_' + command.command);
       if (opts.failOn && opts.failOn === command.account) throw new Error('INJECTED_WALK_FAILURE');
       const list = (txs[command.account] || []).filter(t =>
@@ -68,9 +79,9 @@ function fakePeer(options) {
         }))
       };
     },
-    async balance(address) {
+    async balance(address, ledgerIndex, pin) {
       this.stats.requests++;
-      asked.push({ command: 'account_info', account: address });
+      asked.push({ command: 'account_info', account: address, _endpoint: pin ? pin.endpoint : null });
       const drops = balances[address];
       return drops === undefined ? null : { drops, ledger: ANCHOR };
     }
@@ -790,6 +801,42 @@ async function main() {
     (await D.acquire({ report_id: 'SW-20260911-AE124' },
       { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh,
         reader: fakePeer({ transactions: many, balances: BAL }).reader })).committed === true);
+
+  console.log('\n24. the roster is spread across servers, not piled onto one');
+  /* A live run's log named wss://xrplcluster.com on every line, hit "units
+     quota (2000 per 10s) exhausted", and served 75 requests in 238 seconds
+     while three configured endpoints sat idle. The endpoints were never the
+     problem; using them was. */
+  const peerSp = fakePeer({ transactions: quiet(), balances: BAL });
+  await D.acquire({ report_id: 'SW-20260911-AF123' },
+    { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh, reader: peerSp.reader, concurrency: 3 });
+  const byEndpoint = {};
+  for (const c of peerSp.asked) byEndpoint[c._endpoint] = (byEndpoint[c._endpoint] || 0) + 1;
+  check('three wallets used three different servers',
+    Object.keys(byEndpoint).filter(k => k !== 'null').length === 3, byEndpoint);
+  check('and every request a wallet made went to that wallet\'s own server',
+    ['rAlice', 'rBob', 'rCarol'].every(a => {
+      const mine = peerSp.asked.filter(c => c.account === a);
+      return new Set(mine.map(c => c._endpoint)).size === 1;
+    }), peerSp.asked.map(c => c.account + '@' + c._endpoint));
+  check('including its balance read, so a wallet is answered by one server throughout',
+    peerSp.asked.filter(c => c.command === 'account_info').every(c => c._endpoint !== null));
+
+  console.log('\n25. running out of budget is not a wallet failing');
+  /* The live run reported 240 healthy wallets as FAILED in a few seconds,
+     each after three attempts, because the admission clock threw once there
+     was no time left and the retry loop treated that as the wallet's fault. */
+  const peerPend = fakePeer({ transactions: quiet(), balances: BAL, pendingFrom: 2 });
+  const outPend = await D.acquire({ report_id: 'SW-20260911-AG123' },
+    { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh, reader: peerPend.reader, concurrency: 1 });
+  check('a wallet cut off by the budget is NOT_ATTEMPTED, not FAILED',
+    outPend.not_attempted_wallets >= 1 &&
+    outPend.wallets.filter(w => w.status === 'FAILED').length === 0,
+    outPend.wallets.map(w => w.status));
+  check('and it is not retried three times on the way to that conclusion',
+    outPend.wallets.filter(w => w.status === 'NOT_ATTEMPTED').every(w => w.attempts === 0));
+  check('the run still reports what it did prove',
+    outPend.committed === false && outPend.complete_wallets >= 1, outPend.reason);
 
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA ACQUISITION CHECKS PASS'));
   process.exit(fail ? 1 : 0);
