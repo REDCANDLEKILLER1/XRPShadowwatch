@@ -55,7 +55,9 @@ function fakeGithub(options) {
     if (method === 'POST' && pathArg === '/git/commits') {
       const sha = 'c' + (++state.n);
       const files = new Map(state.headFiles);
-      for (const entry of state.pendingTree) files.set(entry.path, blobs.get(entry.sha));
+      // sha:null is git's deletion; honouring it here is what makes a test
+      // that asserts a file was removed mean anything.
+      for (const entry of state.pendingTree) { if (entry.sha === null) files.delete(entry.path); else files.set(entry.path, blobs.get(entry.sha)); }
       commits.set(sha, { tree: body.tree, files });
       state.proposed = sha;
       return { sha };

@@ -102,7 +102,9 @@ function fakeGithub(files) {
     if (method === 'POST' && p === '/git/commits') {
       const sha = 'c' + (++state.n);
       const f = new Map(state.headFiles);
-      for (const e of state.pending) f.set(e.path, blobs.get(e.sha));
+      // sha:null is git's deletion. The fake honours it, or a test would
+      // pass on a store that silently kept files it was told to remove.
+      for (const e of state.pending) { if (e.sha === null) f.delete(e.path); else f.set(e.path, blobs.get(e.sha)); }
       commits.set(sha, { files: f });
       state.proposed = sha;
       return { sha };
@@ -212,7 +214,18 @@ async function main() {
   check('the run refuses to commit', out5.committed === false && out5.reason === 'RUN_CONTRADICTED', out5.reason);
   check('it names the wallet that cannot account for itself',
     out5.balance_contradiction_addresses.join(',') === 'rCarol', out5.balance_contradiction_addresses);
-  check('the branch did not move', gh5.calls.filter(c => c.method === 'PATCH').length === 0);
+  // The CHECKPOINT did not move. The branch does move — the run writes down
+  // the walking it finished so the next attempt does not pay XRPL for it twice
+  // — and those are different claims. Asserting "no commit" would have been
+  // asserting that the work was thrown away.
+  check('the checkpoint did not move',
+    JSON.parse(gh5.files().get(Store.STATE_PATH).toString('utf8')).state_version === 1 &&
+    JSON.parse(gh5.files().get(Store.STATE_PATH).toString('utf8')).anchor_ledger === ANCHOR - 1000);
+  check('but the finished work was written down rather than discarded',
+    out5.journal_wallets === 3 && !!gh5.files().get(Store.JOURNAL_PATH), out5.journal_wallets);
+  check('and the journal is quarantined — it names no path under the evidence days',
+    JSON.parse(gh5.files().get(Store.JOURNAL_PATH).toString('utf8'))
+      .row_shards.every(x => x.path.startsWith('evidence/runs/resume/')));
   check('and the checkpoint is exactly where it was',
     JSON.parse(gh5.files().get(Store.STATE_PATH)).wallets[0].last_proven_ledger === ANCHOR - 1000);
   check('the other two wallets still walked — the gate is the commit, not the walk',
@@ -234,7 +247,12 @@ async function main() {
     { complete: out6.complete_wallets, target: out6.target_wallets });
   check('the failure is reported with its cause',
     out6.failures.length === 1 && /INJECTED_WALK_FAILURE/.test(out6.failures[0].error), out6.failures);
-  check('nothing was written', gh6.calls.filter(c => c.method === 'PATCH').length === 0);
+  check('the checkpoint did not move',
+    JSON.parse(gh6.files().get(Store.STATE_PATH).toString('utf8')).state_version === 1);
+  check('the two wallets that did prove were written down, and the failed one was not',
+    out6.journal_wallets === 2 &&
+    JSON.parse(gh6.files().get(Store.JOURNAL_PATH).toString('utf8'))
+      .wallets.every(w => w.address !== 'rBob'), out6.journal_wallets);
   check('and the next run will repeat the same bounded edge',
     JSON.parse(gh6.files().get(Store.STATE_PATH)).state_version === 1);
 
@@ -552,6 +570,174 @@ async function main() {
     outR12.wallets_pending_admission === 1, outR12);
   check('and not one XRPL walk was spent discovering that',
     peerR12.asked.filter(c => c.command === 'account_tx').length === 0);
+
+  console.log('\n18. a run that dies is not a run that starts over');
+  /* The checkpoint stays all-or-nothing. The WORK does not have to. A run that
+     dies at wallet 240 used to discard 240 wallets of finished walking and pay
+     XRPL a second time for evidence it already had and had already validated.
+     That was not a safety property; it was waste wearing one's clothes. */
+  const crashTx = { rAlice: [], rCarol: [],
+    rBob: [{ ledger: ANCHOR - 500, amount: '5000000000000', before: '20000000000000', after: '25000000000000' },
+           { ledger: ANCHOR - 400, amount: '5000000000000', before: '25000000000000', after: '20000000000000' }] };
+  const peerX1 = fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' });
+  const ghX = fakeGithub(seeded(ANCHOR - 1000));
+  const outX1 = await D.acquire({ report_id: 'SW-20260911-RRRRR', scan_id: 'idx-r' },
+    { env: ENV, gh: ghX.gh, reader: peerX1.reader, concurrency: 1 });
+  check('the first attempt does not commit — one wallet never answered',
+    outX1.committed === false && outX1.reason === 'RUN_INCOMPLETE', outX1.reason);
+  check('and it wrote down the two wallets that did finish',
+    outX1.journal_wallets === 2, outX1.journal_wallets);
+  const journalled = JSON.parse(ghX.files().get(Store.JOURNAL_PATH).toString('utf8'));
+  check('the journal pins the anchor the attempt used',
+    journalled.anchor_ledger === ANCHOR);
+  check('and the checkpoint it began from, so a moved checkpoint can be detected later',
+    journalled.from_state_sha256 ===
+      JSON.parse(ghX.files().get(Store.STATE_PATH).toString('utf8')).state_sha256);
+  check('every journalled wallet carries the range it proved, not a bare done flag',
+    journalled.wallets.every(w => w.proven_through === ANCHOR && w.proven_from === ANCHOR - 999));
+  check('and the state entry it earned, so a resume commits what this run would have',
+    journalled.wallets.every(w => w.entry && w.entry.address === w.address &&
+      w.entry.last_proven_ledger === ANCHOR));
+
+  // The second attempt: same store, a peer that now answers, and a fresh
+  // report_id — the operator pressed Run again, they did not replay anything.
+  const peerX2 = fakePeer({ transactions: crashTx, balances: BAL });
+  const outX2 = await D.acquire({ report_id: 'SW-20260911-SSSSS', scan_id: 'idx-s' },
+    { env: ENV, gh: ghX.gh, reader: peerX2.reader, concurrency: 1 });
+  check('the second attempt commits', outX2.committed === true, outX2.reason);
+  check('it adopted the journal rather than starting over',
+    outX2.resumed && outX2.resumed.adopted === true &&
+    outX2.wallets_recovered_from_journal === 2, outX2.resumed);
+  check('and walked ONLY the wallet that was missing',
+    peerX2.asked.filter(c => c.command === 'account_tx').length === 1 &&
+    peerX2.asked.filter(c => c.command === 'account_tx')[0].account === 'rCarol',
+    peerX2.asked.filter(c => c.command === 'account_tx').map(c => c.account));
+  check('it finished against the SAME anchor, not a fresher one',
+    outX2.anchor_ledger === ANCHOR);
+  check('the recovered rows are in the commit — rBob\'s two transactions survived the crash',
+    outX2.transactions === 2, outX2.transactions);
+  check('all three wallets are proved, recovered ones included',
+    outX2.complete_wallets === 3 && outX2.target_wallets === 3);
+  const stateX = JSON.parse(ghX.files().get(Store.STATE_PATH).toString('utf8'));
+  check('and the checkpoint advanced for every one of them',
+    stateX.state_version === 2 && stateX.wallets.every(w => w.last_proven_ledger === ANCHOR));
+  check('the journal is gone, removed by the commit that made it redundant',
+    !ghX.files().get(Store.JOURNAL_PATH) &&
+    journalled.row_shards.every(x => !ghX.files().get(x.path)));
+  // Awaited, not handed to check() as a promise — a promise is truthy and the
+  // assertion would have passed whatever it resolved to.
+  const cleanGh = fakeGithub(seeded(ANCHOR - 1000));
+  const cleanRun = await D.acquire({ report_id: 'SW-20260911-TTTTT', scan_id: 'idx-t' },
+    { env: ENV, gh: cleanGh.gh, reader: fakePeer({ transactions: crashTx, balances: BAL }).reader });
+  const cleanState = JSON.parse(cleanGh.files().get(Store.STATE_PATH).toString('utf8'));
+  check('an uninterrupted run of the same morning commits',
+    cleanRun.committed === true, cleanRun.reason);
+  check('and the resumed run committed byte-identical evidence — same shards, same hashes',
+    JSON.stringify(cleanState.evidence_shards) === JSON.stringify(stateX.evidence_shards),
+    { resumed: stateX.evidence_shards, clean: cleanState.evidence_shards });
+
+  console.log('\n19. a resume finishes the interrupted instant, not a fresh one');
+  /* The whole reason the journal pins an anchor. If a resumed run pinned its
+     own, the wallets walked before the disconnect would be proven to a
+     different ledger than the ones walked after it, and the committed state
+     would describe an instant that never existed. */
+  const ghY = fakeGithub(seeded(ANCHOR - 1000));
+  await D.acquire({ report_id: 'SW-20260911-AB123' },
+    { env: ENV, gh: ghY.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+  const peerY = fakePeer({ transactions: crashTx, balances: BAL });
+  // The ledger has moved on since the crash, as it always will have.
+  peerY.reader.ledger = async () => ({ ledger: ANCHOR + 7000, close_ms: Date.UTC(2026, 8, 11, 12, 0, 0) });
+  const outY = await D.acquire({ report_id: 'SW-20260911-AB124' },
+    { env: ENV, gh: ghY.gh, reader: peerY.reader });
+  check('it resumed', outY.committed === true && outY.resumed.adopted === true, outY.reason);
+  check('and finished against the journal\'s anchor, not the fresher validated ledger',
+    outY.anchor_ledger === ANCHOR, { used: outY.anchor_ledger, available: ANCHOR + 7000 });
+  check('the wallet it still had to walk was bounded by that same older anchor',
+    peerY.asked.filter(c => c.command === 'account_tx')
+      .every(c => c.ledger_index_max === ANCHOR));
+  check('so every wallet in the committed state names ONE instant',
+    (() => { const st = JSON.parse(ghY.files().get(Store.STATE_PATH).toString('utf8'));
+      return st.anchor_ledger === ANCHOR &&
+        st.wallets.every(w => w.last_proven_ledger === ANCHOR); })());
+
+  console.log('\n20. journalled rows are checked against the hash the journal recorded');
+  const ghZ = fakeGithub(seeded(ANCHOR - 1000));
+  await D.acquire({ report_id: 'SW-20260911-AC123' },
+    { env: ENV, gh: ghZ.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+  const rowPath = JSON.parse(ghZ.files().get(Store.JOURNAL_PATH).toString('utf8')).row_shards[0].path;
+  // Swap the rows for different ones. The journal still says they hash to what
+  // was written, and that disagreement is the whole point of recording it.
+  ghZ.files().set(rowPath, zlib.gzipSync(Buffer.from('{"hash":"FORGED"}\n', 'utf8')));
+  let threwZ = null;
+  await D.acquire({ report_id: 'SW-20260911-AC124' },
+    { env: ENV, gh: ghZ.gh, reader: fakePeer({ transactions: crashTx, balances: BAL }).reader })
+    .catch(e => { threwZ = e.message; });
+  check('rows that are not the bytes the journal recorded are refused, not used',
+    /JOURNAL_SHARD_HASH_MISMATCH/.test(String(threwZ)), threwZ);
+  check('and the forged rows never reached the checkpoint',
+    JSON.parse(ghZ.files().get(Store.STATE_PATH).toString('utf8')).state_version === 1);
+
+  console.log('\n21. a journal is refused rather than trusted');
+  /* Every refusal here costs one morning of re-walking. Every refusal NOT here
+     costs correctness, which is not a trade this project makes. */
+  const staleFor = async (mutate) => {
+    const gh = fakeGithub(seeded(ANCHOR - 1000));
+    await D.acquire({ report_id: 'SW-20260911-UUUUU' },
+      { env: ENV, gh: gh.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+    const files = gh.files();
+    const j = JSON.parse(files.get(Store.JOURNAL_PATH).toString('utf8'));
+    files.set(Store.JOURNAL_PATH, Buffer.from(JSON.stringify(mutate(j), null, 2), 'utf8'));
+    const out = await D.acquire({ report_id: 'SW-20260911-VVVVV' },
+      { env: ENV, gh: gh.gh, reader: fakePeer({ transactions: crashTx, balances: BAL }).reader });
+    return { out, gh };
+  };
+  const edited = await staleFor(j => ({ ...j, wallets: j.wallets.map(w =>
+    ({ ...w, proven_through: ANCHOR + 5000 })) }));
+  check('a journal edited by hand fails its own digest and is refused',
+    edited.out.resumed && edited.out.resumed.adopted === false &&
+    /DIGEST_MISMATCH/.test(edited.out.resumed.reason), edited.out.resumed);
+  check('and the refused journal is discarded, not left to be refused every morning',
+    !edited.gh.files().get(Store.JOURNAL_PATH));
+  check('the run still completes — a bad journal costs a re-walk, never the run',
+    edited.out.committed === true && edited.out.complete_wallets === 3, edited.out.reason);
+
+  const unreadable = await (async () => {
+    const gh = fakeGithub(seeded(ANCHOR - 1000));
+    await D.acquire({ report_id: 'SW-20260911-WWWWW' },
+      { env: ENV, gh: gh.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+    gh.files().set(Store.JOURNAL_PATH, Buffer.from('{ not json', 'utf8'));
+    return D.acquire({ report_id: 'SW-20260911-XXXXX' },
+      { env: ENV, gh: gh.gh, reader: fakePeer({ transactions: crashTx, balances: BAL }).reader });
+  })();
+  check('an unreadable journal is discarded rather than crashing the run',
+    unreadable.committed === true && unreadable.resumed.reason === 'JOURNAL_UNREADABLE',
+    unreadable.resumed);
+
+  // The dangerous one: a journal that outlived a commit. Its wallets were
+  // walked from checkpoints that have since moved, so adopting it would
+  // re-claim a window already claimed.
+  const moved = await (async () => {
+    const gh = fakeGithub(seeded(ANCHOR - 1000));
+    await D.acquire({ report_id: 'SW-20260911-YYYYY' },
+      { env: ENV, gh: gh.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+    const j = gh.files().get(Store.JOURNAL_PATH);
+    const peer = fakePeer({ transactions: crashTx, balances: BAL });
+    await D.acquire({ report_id: 'SW-20260911-ZZZZZ' }, { env: ENV, gh: gh.gh, reader: peer.reader });
+    // The commit removed it; put it back, exactly as a failed cleanup would.
+    gh.files().set(Store.JOURNAL_PATH, j);
+    const later = fakePeer({ transactions: crashTx, balances: BAL });
+    later.reader.ledger = async () => ({ ledger: ANCHOR + 1000, close_ms: Date.UTC(2026, 8, 12, 6, 0, 0) });
+    const out = await D.acquire({ report_id: 'SW-20260912-AAAAA' },
+      { env: ENV, gh: gh.gh, reader: later.reader });
+    return { out, peer: later };
+  })();
+  check('a journal that outlived its commit is refused: the checkpoint moved under it',
+    moved.out.resumed && moved.out.resumed.adopted === false &&
+    /CHECKPOINT_MOVED_SINCE/.test(moved.out.resumed.reason), moved.out.resumed);
+  check('so the next run walks every wallet itself rather than inheriting stale proof',
+    moved.peer.asked.filter(c => c.command === 'account_tx').length === 3);
+  check('and it pinned its OWN anchor, not the dead journal\'s',
+    moved.out.anchor_ledger === ANCHOR + 1000);
 
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA ACQUISITION CHECKS PASS'));
   process.exit(fail ? 1 : 0);

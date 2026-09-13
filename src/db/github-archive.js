@@ -56,6 +56,11 @@ async function commitFiles(gh,branch,parentSha,files,message){
   const commit=await gh('GET','/git/commits/'+parentSha);
   const entries=[];
   for(const [filePath,content] of Object.entries(files)){
+    // A null value REMOVES the path. Git's tree API reads sha:null as a
+    // deletion, which is how a run clears its resume journal in the very same
+    // commit that lands the evidence rather than in a second one that might
+    // never happen.
+    if(content===null){entries.push({path:filePath,mode:'100644',type:'blob',sha:null});continue;}
     const buffer=Buffer.isBuffer(content)?content:Buffer.from(content,'utf8');
     const blob=await gh('POST','/git/blobs',{content:buffer.toString('base64'),encoding:'base64'});
     entries.push({path:filePath,mode:'100644',type:'blob',sha:blob.sha});
@@ -65,7 +70,8 @@ async function commitFiles(gh,branch,parentSha,files,message){
   try{await gh('PATCH','/git/refs/heads/'+branch,{sha:made.sha,force:false});}
   catch(e){if(e.status===422)e.refConflict=true;throw e;}
   return {commit_sha:made.sha,files_written:entries.length,
-    bytes_written:Object.values(files).reduce((n,c)=>n+(Buffer.isBuffer(c)?c.length:Buffer.byteLength(c,'utf8')),0)};
+    files_removed:entries.filter(e=>e.sha===null).length,
+    bytes_written:Object.values(files).reduce((n,c)=>n+(c===null?0:(Buffer.isBuffer(c)?c.length:Buffer.byteLength(c,'utf8'))),0)};
 }
 
 // Resolve the archive branch, creating it from the default branch the first

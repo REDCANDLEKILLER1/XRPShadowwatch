@@ -30,8 +30,16 @@
 
 const A = require('./github-archive');
 const State = require('./evidence-state');
+const Journal = require('./run-journal');
 
 const STATE_PATH = 'evidence/state/latest.json';
+// The resume journal's own subtree. Quarantined on purpose: readDays() reads
+// evidence/YYYY/MM/DD and never looks here, so journalled rows can never reach
+// report assembly without first passing the whole-run gate and being written
+// into the evidence days properly.
+const JOURNAL_PATH = 'evidence/runs/resume/latest.json';
+const journalRowPath = (reportId, segment) =>
+  'evidence/runs/resume/' + String(reportId) + '-' + String(segment).padStart(4, '0') + '.ndjson.gz';
 const historyPath = version => 'evidence/state/history/' + String(version).padStart(8, '0') + '.json';
 const runPath = reportId => 'evidence/runs/' + String(reportId) + '.json';
 
@@ -66,6 +74,85 @@ async function readState(deps) {
   const verdict = State.verify(state);
   if (!verdict.ok) throw new Error('EVIDENCE_STATE_UNVERIFIED: ' + verdict.problems.join(','));
   return { state, missing: false, branch };
+}
+
+// ── THE RESUME JOURNAL ─────────────────────────────────────────────────────
+//
+// Read at the start of a run, appended as the run goes, and deleted by the
+// commit that lands the evidence. It proves nothing; it only stops the next
+// attempt paying XRPL a second time for rows it already has.
+async function readJournal(deps) {
+  const d = deps || {};
+  const { token, repo, branch } = target(d.env);
+  const gh = d.gh || A.client(token, repo, d.fetch || fetch);
+  const text = await readFile(gh, branch, JOURNAL_PATH);
+  if (text === null) return { journal: null, missing: true, branch };
+  let journal;
+  // A journal that is not readable is not a crisis — it is work we will redo.
+  // Failing the run over it would turn a lost optimisation into a lost morning.
+  try { journal = JSON.parse(text); }
+  catch (_) { return { journal: null, missing: false, unreadable: true, branch }; }
+  return { journal, missing: false, branch };
+}
+
+// Read back the rows a journal owns. Every file is checked against the hash the
+// journal recorded, so a resumed run works from the bytes it wrote and not from
+// whatever happens to be at that path now.
+async function readJournalRows(journal, deps) {
+  const d = deps || {};
+  const { token, repo, branch } = target(d.env);
+  const gh = d.gh || A.client(token, repo, d.fetch || fetch);
+  const zlib = require('zlib');
+  const rows = [];
+  for (const shard of ((journal && journal.row_shards) || [])) {
+    const file = await gh('GET', '/contents/' + shard.path + '?ref=' + encodeURIComponent(branch), undefined, true);
+    if (!file) throw new Error('JOURNAL_SHARD_MISSING: ' + shard.path);
+    const packed = Buffer.from(file.content || '', 'base64');
+    if (Journal.sha256(packed) !== shard.sha256) throw new Error('JOURNAL_SHARD_HASH_MISMATCH: ' + shard.path);
+    const text = zlib.gunzipSync(packed).toString('utf8');
+    for (const line of text.split('\n')) { if (line) rows.push(JSON.parse(line)); }
+  }
+  return rows;
+}
+
+// Append one segment: the finished wallets and the gzipped rows behind them,
+// in ONE commit. This is the only place the store writes without the whole-run
+// gate, and it is allowed to because nothing it writes is a claim.
+async function appendJournal(journal, segment, deps) {
+  const d = deps || {};
+  const { token, repo, branch } = target(d.env);
+  const gh = d.gh || A.client(token, repo, d.fetch || fetch);
+  const zlib = require('zlib');
+  const path = journalRowPath(journal.report_id, Number(journal.segments || 0) + 1);
+  const packed = zlib.gzipSync(Buffer.from(
+    (segment.rows || []).map(r => JSON.stringify(r)).join('\n') + ((segment.rows || []).length ? '\n' : ''),
+    'utf8'), { level: 9 });
+  const shards = (segment.rows || []).length
+    ? [{ path, sha256: Journal.sha256(packed), rows: segment.rows.length }] : [];
+  const next = Journal.record(journal, { wallets: segment.wallets, row_shards: shards });
+
+  const files = { [JOURNAL_PATH]: Journal.serialize(next) };
+  if (shards.length) files[path] = packed;
+  const ref = await A.archiveRef(gh, branch);
+  const written = await A.commitFiles(gh, branch, ref.object.sha, files,
+    'journal: ' + next.report_id + ' segment ' + next.segments + ' — ' +
+    next.wallet_count + ' wallets walked — anchor ' + next.anchor_ledger);
+  return { journal: next, commit_sha: written.commit_sha };
+}
+
+// Remove a journal and everything it owns, without touching anything else.
+// Used when a journal is refused: leaving it would offer the same refusal to
+// every run after this one.
+async function clearJournal(journal, deps) {
+  const d = deps || {};
+  const { token, repo, branch } = target(d.env);
+  const gh = d.gh || A.client(token, repo, d.fetch || fetch);
+  const files = {};
+  for (const p of Journal.ownedPaths(journal, JOURNAL_PATH)) files[p] = null;
+  const ref = await A.archiveRef(gh, branch);
+  const written = await A.commitFiles(gh, branch, ref.object.sha, files,
+    'journal: discard ' + ((journal && journal.report_id) || 'unreadable') + ' — not resumable');
+  return { commit_sha: written.commit_sha, files_removed: written.files_removed };
 }
 
 // THE RUN COMMIT. `run` is the completed acquisition; `files` are the delta
@@ -119,6 +206,14 @@ async function commitRun(input, deps) {
       state_version: state.state_version, state_sha256: state.state_sha256,
       evidence_shards: state.evidence_shards, sealed_at: state.sealed_run.sealed_at
     }, null, 2) + '\n';
+
+    // The journal dies with the commit that makes it redundant — same tree,
+    // same ref update. A second call to clean it up is a call that can fail
+    // after the evidence has landed, leaving a stale journal for the next run
+    // to refuse.
+    for (const p of Journal.ownedPaths(run.journal || null, JOURNAL_PATH)) {
+      if (run.journal) files[p] = null;
+    }
 
     try {
       const written = await A.commitFiles(gh, branch, ref.object.sha, files,
@@ -200,4 +295,6 @@ async function readDays(days, deps) {
   return out;
 }
 
-module.exports = { STATE_PATH, historyPath, runPath, readState, commitRun, seedGenesis, readDays };
+module.exports = { STATE_PATH, JOURNAL_PATH, historyPath, runPath, journalRowPath,
+  readState, commitRun, seedGenesis, readDays,
+  readJournal, readJournalRows, appendJournal, clearJournal };

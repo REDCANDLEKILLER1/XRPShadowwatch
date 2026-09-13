@@ -235,9 +235,11 @@ module.exports = async function handler(req, res) {
           elapsed_ms: Date.now() - startedAt });
       } catch (e) {
         const safe = String(e.message || 'DELTA_RUN_FAILED').replace(/postgres(?:ql)?:\/\/\S+/gi, '[redacted]');
-        // The transport's own account of itself, which is the whole diagnosis
-        // when the failure is "it never connected".
+        // A commit refusal still walked real wallets and still wrote them down.
+        // Reporting only the error would hide what the attempt achieved and
+        // make the next run look like it started from nothing.
         line({ t: 'error', error: safe, committed: false, waiting_on: lastPhase,
+          ...(e.runSummary || {}),
           xrpl: { requests: reader.stats.requests, retries: reader.stats.retries,
             reconnects: reader.stats.reconnects, endpoint: reader.stats.actual_endpoint || null,
             first_failure: reader.stats.first_failure || null,

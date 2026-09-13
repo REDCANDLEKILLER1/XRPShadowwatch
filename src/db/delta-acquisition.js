@@ -43,6 +43,7 @@ const T = require('./transactions');
 const B = require('./balance');
 const State = require('./evidence-state');
 const Store = require('./github-store');
+const Journal = require('./run-journal');
 const X = require('./evidence-export');
 
 const PAGE_LIMIT = 200;
@@ -83,6 +84,13 @@ const COLD_WINDOW_LEDGERS = 30000;
 // This is a budget decision, not a forensic one. Nothing is skipped and no
 // window is narrowed; a wallet simply joins on Tuesday instead of Monday.
 const DEFAULT_MAX_ADMISSIONS = 12;
+
+// How many finished wallets accumulate before the run writes them down. Every
+// flush is one commit, so flushing per wallet would be 255 ref updates — the
+// exact cost the single-commit rule exists to avoid. Flushing never is what we
+// had. Twenty-five is roughly ten commits a run, and it bounds what a
+// disconnect can cost to the wallets walked since the last flush.
+const DEFAULT_JOURNAL_EVERY = 25;
 
 const gz = text => zlib.gzipSync(Buffer.from(text, 'utf8'), { level: 9 });
 
@@ -241,20 +249,54 @@ async function acquire(input, deps) {
   // a slow first wallet. That ambiguity is the same one the per-wallet stream
   // was built to remove; it just moved one level up.
   const phase = (name, detail) => { if (typeof d.onPhase === 'function') d.onPhase(name, detail || {}); };
-  const [loaded, header] = await Promise.all([
+  const [loaded, header, journalRead] = await Promise.all([
     Store.readState({ env: d.env, gh: d.gh, fetch: d.fetch })
       .then(r => { phase('state', { seeded: !r.missing,
         state_version: r.state ? r.state.state_version : null,
         wallets: r.state ? r.state.wallet_count : 0 }); return r; }),
     reader.ledger('validated')
       .then(h => { phase('anchor', { ledger: h.ledger,
-        endpoint: reader.stats.actual_endpoint || null }); return h; })
+        endpoint: reader.stats.actual_endpoint || null }); return h; }),
+    // A third independent lane. An absent journal is the normal case and costs
+    // one 404; a present one is a previous run that did not finish.
+    Store.readJournal({ env: d.env, gh: d.gh, fetch: d.fetch })
+      .then(r => r, e => ({ journal: null, missing: true, error: e.message }))
   ]);
   if (loaded.missing) throw new Error('EVIDENCE_STATE_MISSING: seed the checkpoint from a sealed report before the first run');
   const state = loaded.state;
   // One anchor, shared by every wallet, so wallet 3 and wallet 200 describe the
   // same ledger state.
-  const anchor = { ledger: header.ledger, close_ms: header.close_ms, close_iso: new Date(header.close_ms).toISOString() };
+  let anchor = { ledger: header.ledger, close_ms: header.close_ms, close_iso: new Date(header.close_ms).toISOString() };
+
+  // ── RESUMING ────────────────────────────────────────────────────────────
+  //
+  // A resumed run must finish against the anchor the interrupted one pinned.
+  // Picking a fresh one would leave the wallets walked before the disconnect
+  // proven to a different ledger than the ones walked after it, and the state
+  // would describe an instant that never existed. So the journal's anchor wins,
+  // the window ends slightly earlier than "now", and the result says so.
+  let journal = null, resumed = null, resumedRows = [];
+  const stale = journalRead && !journalRead.missing && journalRead.journal
+    ? Journal.usable(journalRead.journal, state) : null;
+  if (journalRead && !journalRead.missing && (journalRead.unreadable || (stale && !stale.ok))) {
+    // Refused. Discard it rather than leave it to be refused again every
+    // morning from here on, and say why.
+    resumed = { adopted: false,
+      reason: journalRead.unreadable ? 'JOURNAL_UNREADABLE' : stale.problems.join(','),
+      report_id: journalRead.journal ? journalRead.journal.report_id : null };
+    phase('journal', resumed);
+    try { await Store.clearJournal(journalRead.journal, { env: d.env, gh: d.gh, fetch: d.fetch }); }
+    catch (e) { resumed.discard_error = e.message; }
+  } else if (journalRead && journalRead.journal && stale && stale.ok) {
+    journal = journalRead.journal;
+    anchor = { ledger: Number(journal.anchor_ledger), close_ms: null,
+      close_iso: journal.anchor_close || null };
+    resumedRows = await Store.readJournalRows(journal, { env: d.env, gh: d.gh, fetch: d.fetch });
+    resumed = { adopted: true, report_id: journal.report_id, segments: journal.segments,
+      wallets_already_walked: journal.wallets.length, rows_recovered: resumedRows.length,
+      anchor_ledger: anchor.ledger, started_at: journal.started_at };
+    phase('journal', resumed);
+  }
 
   // ── THE ROSTER AND THE STATE ARE DIFFERENT THINGS ───────────────────────
   //
@@ -275,8 +317,11 @@ async function acquire(input, deps) {
   // whichever ones a Set happened to yield first.
   const maxAdmissions = Math.max(0, Number.isFinite(Number(run.max_admissions))
     ? Number(run.max_admissions) : DEFAULT_MAX_ADMISSIONS);
-  const admitted = waiting.slice(0, maxAdmissions);
-  const deferred = waiting.slice(admitted.length);
+  // A resumed run admits exactly who the interrupted one admitted. Re-deciding
+  // it against a roster that may have changed since would leave the journal's
+  // wallets and this run's wallets describing two different rosters.
+  const admitted = journal ? (journal.admitted_wallets || []).slice() : waiting.slice(0, maxAdmissions);
+  const deferred = journal ? waiting.filter(a => admitted.indexOf(a) < 0) : waiting.slice(admitted.length);
   // And the other direction. A wallet the state knows but the roster no longer
   // lists is NOT dropped: retiring a watched wallet is a decision, and a run
   // does not infer a decision from a list it was handed. It keeps being walked
@@ -285,7 +330,10 @@ async function acquire(input, deps) {
   const rosterAbsent = rosterList
     ? state.wallets.map(w => w.address).filter(a => !rosterList.includes(a)) : [];
   const coldWindow = Math.max(1, Number(run.cold_window_ledgers) || COLD_WINDOW_LEDGERS);
-  const coldFrom = Math.max(1, anchor.ledger - coldWindow + 1);
+  // Same reasoning: the horizon a resumed run buys is the one already bought,
+  // so the wallets admitted before the disconnect and after it share it.
+  const coldFrom = journal && Number(journal.cold_from_ledger)
+    ? Number(journal.cold_from_ledger) : Math.max(1, anchor.ledger - coldWindow + 1);
 
   // The validated ledger has not moved since the last sealed run, so there is
   // by definition nothing new to prove: every checkpoint already reaches it.
@@ -311,14 +359,80 @@ async function acquire(input, deps) {
 
   // 3. Every wallet, unconditionally — the proven ones on their own delta, the
   //    admitted ones on one bounded cold window each.
-  const entries = state.wallets.concat(
+  const roster = state.wallets.concat(
     admitted.map(address => State.walletEntry({ address })));
-  phase('plan', { wallets: entries.length, proven: state.wallets.length,
+  // Wallets a previous attempt already finished. Their evidence is recovered
+  // from the journal rather than re-fetched: the rows were validated when they
+  // were walked and the file they came from was hash-checked on the way in.
+  const alreadyWalked = journal ? journal.wallets.slice() : [];
+  const walkedSet = new Set(alreadyWalked.map(w => w.address));
+  const entries = roster.filter(e => !walkedSet.has(e.address));
+  phase('plan', { wallets: roster.length, to_walk: entries.length,
+    recovered: alreadyWalked.length, proven: state.wallets.length,
     admitting: admitted.length, awaiting: deferred.length,
     cold_from_ledger: admitted.length ? coldFrom : null });
+
+  // The journal is created in memory and written on the first flush. Creating
+  // it up front would cost a commit before a single wallet had been walked,
+  // for a run that may well finish without ever needing it.
+  if (!journal) {
+    journal = Journal.begin({ report_id: run.report_id, scan_id: run.scan_id || null,
+      started_at: run.sealed_at || new Date(Date.now()).toISOString(),
+      from_state_version: state.state_version, from_state_sha256: state.state_sha256,
+      anchor_ledger: anchor.ledger, anchor_close: anchor.close_iso,
+      cold_from_ledger: admitted.length ? coldFrom : null,
+      admitted_wallets: admitted });
+  }
+  let journalWritten = journal.segments > 0;
   const results = new Array(entries.length);
   const concurrency = Math.max(1, Math.min(Number(d.concurrency) || DEFAULT_CONCURRENCY, 8));
   let cursor = 0;
+
+  // ── WRITING THE WORK DOWN AS IT GOES ────────────────────────────────────
+  //
+  // Not the checkpoint — the WORK. Each flush records which wallets finished
+  // and the rows behind them, so a run that dies at wallet 240 resumes at 241
+  // instead of paying XRPL a second time for 240 wallets it already walked.
+  //
+  // Appends are serialised through one promise chain. The workers run
+  // concurrently, but two concurrent appends would each build on the same
+  // parent commit and one of them would be lost.
+  const flushEvery = Math.max(1, Math.min(Number(d.journalEvery) || DEFAULT_JOURNAL_EVERY, 200));
+  const flushed = new Set();
+  let flushing = Promise.resolve(), journalError = null, reported = 0;
+
+  const writeSegment = async batch => {
+    const wallets = batch.map(r => Journal.walletRecord({
+      address: r.address, proven_from: r.proof.from_ledger, proven_through: r.proof.through_ledger,
+      rows: r.rows.length, reconciliation: r.reconciliation && r.reconciliation.status,
+      entry: r.next_entry }));
+    const written = await Store.appendJournal(journal,
+      { wallets, rows: batch.flatMap(r => r.rows) }, { env: d.env, gh: d.gh, fetch: d.fetch });
+    journal = written.journal; journalWritten = true;
+    phase('journal-flush', { segment: journal.segments, wallets_recorded: journal.wallet_count,
+      commit_sha: written.commit_sha });
+  };
+
+  const maybeFlush = async force => {
+    const batch = [];
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      if (r && r.status === 'COMPLETE' && !flushed.has(i)) batch.push({ i, r });
+    }
+    if (!batch.length || (!force && batch.length < flushEvery)) return;
+    for (const b of batch) flushed.add(b.i);
+    flushing = flushing.then(() => writeSegment(batch.map(b => b.r))).catch(e => {
+      // A journal that cannot be written is a lost optimisation, never a lost
+      // run: the walk continues and the whole-run gate is untouched. The
+      // wallets are unmarked so a later flush can try again — record() refuses
+      // duplicates, and a failed append left the journal unadvanced, so
+      // retrying cannot double-count them.
+      for (const b of batch) flushed.delete(b.i);
+      journalError = journalError || e.message;
+    });
+    await flushing;
+  };
+
   // Per-wallet recovery. One sick endpoint must not turn the run into 0/255, so
   // a wallet that fails is retried — and because the Reader rotates endpoints
   // on a transport failure, a retry is usually a different server. Attempts are
@@ -348,15 +462,33 @@ async function acquire(input, deps) {
           }
         }
       }
-      if (typeof d.onWallet === 'function') d.onWallet(results[index], index + 1, entries.length);
+      // Counted against the WHOLE roster, recovered wallets included, so the
+      // progress bar does not restart at zero on a resumed run.
+      if (typeof d.onWallet === 'function') {
+        d.onWallet(results[index], alreadyWalked.length + (++reported), roster.length);
+      }
+      await maybeFlush(false);
     }
   };
+
   await Promise.all(Array.from({ length: concurrency }, worker));
+  await flushing;
 
   const complete = results.filter(r => r && r.status === 'COMPLETE');
   const failed = results.filter(r => !r || r.status !== 'COMPLETE');
-  const contradicted = complete.filter(r => B.contradicted(r.reconciliation));
-  const rows = T.mergeSightings(complete.flatMap(r => r.rows));
+  // Wallets recovered from the journal count as proved because they WERE
+  // proved — walked against this same anchor, their rows hash-checked on the
+  // way back in. They simply were not walked by this invocation.
+  const provedTotal = complete.length + alreadyWalked.length;
+  const contradicted = complete.filter(r => B.contradicted(r.reconciliation))
+    .map(r => ({ address: r.address, reason: r.reconciliation.reason,
+      unexplained_drops: r.reconciliation.unexplained_drops || null }))
+    .concat(alreadyWalked.filter(w => w.reconciliation === B.STATUS.CONTRADICTION)
+      .map(w => ({ address: w.address, reason: 'RECOVERED_FROM_JOURNAL',
+        unexplained_drops: null })));
+  const rows = T.mergeSightings(resumedRows.concat(complete.flatMap(r => r.rows)));
+  // Every entry the state will carry: the ones recovered and the ones walked.
+  const nextEntries = alreadyWalked.map(w => w.entry).concat(complete.map(r => r.next_entry));
 
   // ── WHAT MAY BE RENDERED, SEPARATELY FROM WHAT MAY BE CLAIMED ───────────
   // Evidence from a wallet that completed is real whether or not the run as a
@@ -372,7 +504,9 @@ async function acquire(input, deps) {
     anchor_ledger: anchor.ledger,
     anchor_close: anchor.close_iso,
     proven_from_ledger: Number(state.anchor_ledger) || null,
-    wallets_proven: complete.length,
+    wallets_proven: provedTotal,
+    wallets_walked_this_attempt: complete.length,
+    wallets_recovered_from_journal: alreadyWalked.length,
     wallets_unavailable: failed.length,
     wallets_contradicted: contradicted.length,
     // Said plainly, because it is the one thing a reader of this morning's
@@ -389,24 +523,30 @@ async function acquire(input, deps) {
     checkpoint_advances: failed.length === 0 && contradicted.length === 0,
     unavailable: failed.map(r => ({ address: r && r.address,
       error: (r && r.error) || 'UNKNOWN', attempts: (r && r.attempts) || 0 })),
-    contradicted: contradicted.map(r => ({ address: r.address,
-      reason: r.reconciliation.reason,
-      unexplained_drops: r.reconciliation.unexplained_drops || null }))
+    contradicted: contradicted.slice()
   };
-  const wallets = results.map(r => ({
+  const wallets = alreadyWalked.map(w => ({
+    address: w.address, status: 'RECOVERED',
+    proven_through: w.proven_through, rows: w.rows,
+    reconciliation: w.reconciliation, attempts: 0, error: null
+  })).concat(results.map(r => ({
     address: r && r.address, status: (r && r.status) || 'FAILED',
     proven_through: r && r.proof ? r.proof.through_ledger : null,
     rows: r && r.rows ? r.rows.length : 0,
     reconciliation: (r && r.reconciliation && r.reconciliation.status) || null,
     attempts: (r && r.attempts) || 0,
     error: (r && r.error) || null
-  }));
+  })));
 
   const summary = {
     report_id: run.report_id, scan_id: run.scan_id || null,
     anchor_ledger: anchor.ledger, anchor_close: anchor.close_iso,
     state_version_read: state.state_version,
-    target_wallets: entries.length, complete_wallets: complete.length,
+    target_wallets: roster.length, complete_wallets: provedTotal,
+    wallets_walked_this_attempt: complete.length,
+    wallets_recovered_from_journal: alreadyWalked.length,
+    resumed: resumed || null,
+    journal_error: journalError,
     failed_wallets: failed.length,
     balance_contradictions: contradicted.length,
     balance_contradiction_addresses: contradicted.map(r => r.address).sort(),
@@ -424,23 +564,51 @@ async function acquire(input, deps) {
 
   // 4. The gate. Anything short of a whole, uncontradicted run commits nothing,
   //    and the checkpoint stays exactly where it was.
+  // A run that will not commit flushes whatever it finished. That is the whole
+  // point of the journal: the checkpoint does not move, and the WORK is not
+  // thrown away either. A run that IS about to commit skips this — the commit
+  // deletes the journal in the same breath, so writing it first would be a
+  // round trip to GitHub for a file that dies moments later.
+  const saveWork = async () => {
+    await maybeFlush(true); await flushing;
+    return { journal_segments: journal.segments, journal_wallets: journal.wallet_count,
+      journal_error: journalError };
+  };
   if (failed.length) {
-    return { ...summary, committed: false, reason: 'RUN_INCOMPLETE', rows, wallets, freshness };
+    return { ...summary, committed: false, reason: 'RUN_INCOMPLETE',
+      rows, wallets, freshness, ...(await saveWork()) };
   }
   if (contradicted.length) {
-    return { ...summary, committed: false, reason: 'RUN_CONTRADICTED', rows, wallets, freshness };
+    return { ...summary, committed: false, reason: 'RUN_CONTRADICTED',
+      rows, wallets, freshness, ...(await saveWork()) };
   }
 
   const built = buildShards(rows);
-  const committed = await Store.commitRun({
+  let committed;
+  try {
+    committed = await Store.commitRun({
     report_id: run.report_id, scan_id: run.scan_id || null, sealed_at: run.sealed_at || null,
     anchor_ledger: anchor.ledger, anchor_close: anchor.close_iso,
-    target_wallets: entries.length, complete_wallets: complete.length, balance_contradictions: 0,
+    target_wallets: roster.length, complete_wallets: provedTotal, balance_contradictions: 0,
     evidence_shards: built.shards,
-    wallets: complete.map(r => r.next_entry),
+    wallets: nextEntries,
     admitted_wallets: admitted,
+    // Named so the commit that lands the evidence also removes the journal,
+    // in the same tree and the same ref update. A separate cleanup call is a
+    // call that can fail after the evidence is already in.
+    journal: journalWritten ? journal : null,
     files: built.files
-  }, { env: d.env, gh: d.gh, fetch: d.fetch });
+    }, { env: d.env, gh: d.gh, fetch: d.fetch });
+  } catch (e) {
+    // The gate refused, or GitHub did. Either way the walking was real and
+    // must not be paid for twice, so it is written down before the failure is
+    // reported. The checkpoint is exactly where it was.
+    const saved = await saveWork();
+    const err = new Error(e.message);
+    err.runSummary = { ...summary, committed: false, reason: 'COMMIT_REFUSED',
+      commit_error: e.message, rows, wallets, freshness, ...saved };
+    throw err;
+  }
 
   return { ...summary, committed: true, rows, wallets, freshness, ...committed };
 }

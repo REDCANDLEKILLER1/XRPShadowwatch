@@ -215,10 +215,21 @@ wire('b3', 'o3', async slot => {
           } else if (m.phase === 'anchor') {
             v.textContent = 'Anchor pinned…';
             append('anchor · ledger ' + m.ledger + (m.endpoint ? ' · ' + m.endpoint : '') + ' · ' + secs, 'g');
+          } else if (m.phase === 'journal') {
+            append(m.adopted
+              ? 'resuming ' + m.report_id + ' · ' + m.wallets_already_walked +
+                ' wallets already walked · ' + m.rows_recovered + ' rows recovered · anchor ' +
+                m.anchor_ledger + ' · ' + secs
+              : 'previous run discarded (' + m.reason + ') — walking everything · ' + secs,
+              m.adopted ? '' : 'c');
+          } else if (m.phase === 'journal-flush') {
+            append('saved · segment ' + m.segment + ' · ' + m.wallets_recorded +
+              ' wallets written down · ' + secs, 'g');
           } else if (m.phase === 'plan') {
             v.textContent = 'Walking wallets…';
-            append('plan · ' + m.wallets + ' to walk (' + m.proven + ' proven' +
-              (m.admitting ? ' + ' + m.admitting + ' joining' : '') + ')' +
+            append('plan · ' + m.to_walk + ' to walk of ' + m.wallets +
+              (m.recovered ? ' (' + m.recovered + ' recovered)' : '') +
+              (m.admitting ? ' · ' + m.admitting + ' joining' : '') +
               (m.awaiting ? ' · ' + m.awaiting + ' still waiting' : '') + ' · ' + secs, 'g');
           }
         }
@@ -267,12 +278,21 @@ wire('b3', 'o3', async slot => {
     return;
   }
   const line = done.complete_wallets + '/' + done.target_wallets + ' proved · ' +
+    (done.wallets_recovered_from_journal
+      ? done.wallets_recovered_from_journal + ' recovered · ' : '') +
     (done.wallets_admitted ? done.wallets_admitted + ' admitted · ' : '') +
     (done.wallets_awaiting_admission ? done.wallets_awaiting_admission + ' still waiting · ' : '') +
     (done.transactions || 0) + ' tx · ' + (done.xrpl_requests || 0) + ' XRPL reads · ' + seconds + 's';
   if (done.t === 'error') { v.className = 'verdict bad'; v.textContent = 'Failed after ' + seconds + 's — ' + done.error; }
   else if (done.committed) { v.className = 'verdict ok'; v.textContent = 'COMMITTED · ' + line; }
-  else { v.className = 'verdict warn'; v.textContent = 'NOT committed (' + done.reason + ') · ' + line; }
+  else {
+    v.className = 'verdict warn';
+    // What was walked is saved. Saying so is the difference between "we got
+    // nowhere" and "press Run again and it picks up here".
+    v.textContent = 'NOT committed (' + done.reason + ') · ' + line +
+      (done.journal_wallets ? ' · ' + done.journal_wallets +
+        ' wallets saved — press Run again to continue from here' : '');
+  }
 
   const pre = document.createElement('pre');
   pre.textContent = JSON.stringify(done, null, 2);
