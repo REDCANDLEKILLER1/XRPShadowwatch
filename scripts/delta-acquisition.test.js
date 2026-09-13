@@ -51,7 +51,8 @@ function fakePeer(options) {
     // The real Reader hands out the lane that can answer soonest; the fake
     // hands them out in turn, which is enough to prove a run SPREADS rather
     // than piling every wallet onto one server.
-    async lane() { return lanes[laneCursor++ % lanes.length]; },
+    async lane() { const l = lanes[laneCursor++ % lanes.length]; l.assigned = (l.assigned || 0) + 1; return l; },
+    releaseLane(l) { if (l && l.assigned > 0) l.assigned--; },
     event() {},
     async ledger() { return { ledger: ANCHOR, close_ms: Date.UTC(2026, 8, 11, 6, 0, 0) }; },
     async request(command, expectedEpoch, pin) {
@@ -821,6 +822,15 @@ async function main() {
     }), peerSp.asked.map(c => c.account + '@' + c._endpoint));
   check('including its balance read, so a wallet is answered by one server throughout',
     peerSp.asked.filter(c => c.command === 'account_info').every(c => c._endpoint !== null));
+  // A lane held forever makes its server look permanently busy and quietly
+  // undoes the spreading. Every walk must hand its lane back, however it ended.
+  check('every lane is handed back when its walk ends',
+    peerSp.reader.lanes.every(l => !l.assigned), peerSp.reader.lanes.map(l => l.assigned));
+  const peerRel = fakePeer({ transactions: quiet(), balances: BAL, failOn: 'rBob' });
+  await D.acquire({ report_id: 'SW-20260911-AH123' },
+    { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh, reader: peerRel.reader, concurrency: 2 });
+  check('including the walk of a wallet that failed',
+    peerRel.reader.lanes.every(l => !l.assigned), peerRel.reader.lanes.map(l => l.assigned));
 
   console.log('\n25. running out of budget is not a wallet failing');
   /* The live run reported 240 healthy wallets as FAILED in a few seconds,

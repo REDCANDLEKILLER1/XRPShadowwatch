@@ -4,6 +4,11 @@ const { randomUUID } = require('crypto');
 const coverage = require('./coverage');
 const admission = require('./xrpl-admission');
 const ENDPOINTS = ['wss://xrplcluster.com', 'wss://xrpl.ws', 'wss://s1.ripple.com', 'wss://s2.ripple.com'];
+// How much one refusal counts against a lane when choosing where the next
+// wallet goes. Two seconds' worth per refusal: enough that a server refusing
+// repeatedly is steered away from, small enough that one bad moment does not
+// exile an otherwise healthy endpoint for the rest of the run.
+const REFUSAL_PENALTY_MS = 2000;
 const validatedHeaders = new Map();
 const idleReaders = [];
 function acquireReader() {
@@ -64,11 +69,36 @@ class Lane {
   constructor(endpoint, clock) {
     this.endpoint = endpoint; this.sock = null; this.epoch = 0;
     this.clock = clock; this.inFlight = 0; this.requests = 0;
+    // Wallets currently HOLDING this lane, as opposed to requests currently in
+    // it. A wallet holds its lane across the gaps between its pages, and those
+    // gaps are most of a slow walk — so counting only in-flight requests makes
+    // a busy lane look idle and every wallet piles onto the same one.
+    this.assigned = 0;
     this.retries = 0; this.reconnects = 0; this.refusals = 0; this.retired = false;
   }
   // How long before this lane could carry a request, and how loaded it is.
   // Used to choose between lanes: the one that can answer soonest wins.
   readyIn() { return this.retired ? Infinity : this.clock.cooldownRemaining(); }
+  load() { return this.assigned * 1000 + this.inFlight; }
+
+  // ── WHY REFUSALS ARE PART OF THE COST, NOT JUST THE COOLDOWN ─────────────
+  //
+  // A cooldown expires. The server that imposed it has not changed its mind.
+  // Ordering lanes by cooldownRemaining alone meant the busiest, strictest
+  // endpoint became eligible again the instant its cooldown lapsed and
+  // promptly collected the next wallet — measured live as 63 requests and 18
+  // refusals on xrplcluster while s1 and s2 took 36 and 32 with ZERO refusals
+  // between them.
+  //
+  // A refusal is evidence about a server that outlives the wait it asked for,
+  // so it carries a lasting penalty here. This is a scheduling heuristic and
+  // mixes milliseconds with counts deliberately: the units do not need to
+  // mean anything, only the ordering does. Nothing here overrides what an
+  // endpoint asked for — a cooling lane is still skipped for its full wait.
+  cost() {
+    if (this.retired) return Infinity;
+    return this.clock.cooldownRemaining() + this.refusals * REFUSAL_PENALTY_MS + this.load();
+  }
 }
 
 class Reader {
@@ -92,8 +122,7 @@ class Reader {
     for (const lane of this.lanes) {
       if (lane.retired) continue;
       if (!best) { best = lane; continue; }
-      const a = lane.readyIn(), b = best.readyIn();
-      if (a < b || (a === b && lane.inFlight < best.inFlight)) best = lane;
+      if (lane.cost() < best.cost()) best = lane;
     }
     if (!best) throw new Error('XRPL_ALL_ENDPOINTS_RETIRED');
     return best;
@@ -144,14 +173,23 @@ class Reader {
     throw new Error('XRPL_CONNECTION_UNAVAILABLE');
   }
 
-  // A lane reserved for one wallet's paged walk. Held for the whole walk so
-  // its markers stay on the server that issued them.
+  // A lane RESERVED for one wallet's paged walk. Held for the whole walk so its
+  // markers stay on the server that issued them — and marked as held the
+  // moment it is handed out, not when its first request goes in flight.
+  //
+  // Without that reservation every concurrent walk sees four idle lanes and
+  // takes the same one. A live measurement caught exactly that: 100 requests
+  // on xrplcluster, 6 on s1, 0 on s2. The lanes existed; nothing was using
+  // them.
   async lane() {
     for (let attempt = 0; attempt < this.lanes.length; attempt++) {
       let chosen;
       try { chosen = this.pickLane(); } catch (_) { break; }
-      try { await this.openLane(chosen); return chosen; }
-      catch (e) {
+      try {
+        await this.openLane(chosen);
+        chosen.assigned++;
+        return chosen;
+      } catch (e) {
         chosen.retired = true;
         this.event({ event: 'connect_failed', endpoint: chosen.endpoint, reason: e.message });
       }
@@ -159,6 +197,10 @@ class Reader {
     for (const l of this.lanes) l.retired = false;
     throw new Error('XRPL_CONNECTION_UNAVAILABLE');
   }
+
+  // Hand the lane back. A wallet that never releases its lane makes that
+  // server look permanently busy and pushes every later wallet elsewhere.
+  releaseLane(lane) { if (lane && lane.assigned > 0) lane.assigned--; }
   // Pacing, from the in-process clock. This used to be three database writes
   // per request, which meant a database that could not accept writes blocked
   // every read-only XRPL call before it was sent — and cost about two seconds
@@ -246,7 +288,7 @@ class Reader {
   // What each server actually carried. Reported so a run that felt slow can be
   // shown to have been slow on ONE endpoint rather than everywhere.
   laneStats() {
-    return this.lanes.map(l => ({ endpoint: l.endpoint, requests: l.requests,
+    return this.lanes.map(l => ({ endpoint: l.endpoint, requests: l.requests, assigned: l.assigned,
       retries: l.retries, refusals: l.refusals, reconnects: l.reconnects,
       retired: l.retired, cooldown_ms: Math.round(l.readyIn()) || 0 }));
   }

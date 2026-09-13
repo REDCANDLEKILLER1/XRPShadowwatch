@@ -214,11 +214,29 @@ console.log('\n7. four endpoints, four lanes — the thing that was configured b
   // Four wallets asking for a lane must not all be handed the same one.
   reader.openLane = async lane => { lane.sock = { readyState: 1, url: lane.endpoint }; return lane.sock; };
   (async () => {
+    // NOTHING is incremented by hand here. An earlier version of this check
+    // did `l.inFlight++` after each lane() call and passed against a Reader
+    // that handed the SAME lane to every caller — a live measurement showed
+    // 100 requests on xrplcluster, 6 on s1 and 0 on s2. The reservation has to
+    // be the Reader's job, so the test must not do it.
     const held = [];
-    for (let i = 0; i < 4; i++) { const l = await reader.lane(); l.inFlight++; held.push(l.endpoint); }
+    for (let i = 0; i < 4; i++) held.push((await reader.lane()).endpoint);
     check('four concurrent walks land on four different servers',
       new Set(held).size === 4, held);
-    for (const l of reader.lanes) l.inFlight = 0;
+    check('a lane is marked held the moment it is handed out, not on first request',
+      reader.lanes.every(l => l.assigned === 1), reader.lanes.map(l => l.assigned));
+    // Eight walks over four lanes should be two apiece, not eight on one.
+    const more = [];
+    for (let i = 0; i < 4; i++) more.push((await reader.lane()).endpoint);
+    check('and a fifth through eighth walk double up evenly rather than piling on',
+      reader.lanes.every(l => l.assigned === 2), reader.lanes.map(l => l.assigned));
+    check('a released lane becomes available again',
+      (() => { const l = reader.lanes[0]; reader.releaseLane(l); reader.releaseLane(l);
+        return l.assigned === 0 && reader.pickLane().endpoint === l.endpoint; })());
+    check('releasing a lane that is not held cannot drive the count negative',
+      (() => { const l = reader.lanes[0]; reader.releaseLane(l); reader.releaseLane(l);
+        return l.assigned === 0; })());
+    for (const l of reader.lanes) { l.inFlight = 0; l.assigned = 0; }
 
     // A refusal on one lane must not touch the others.
     const lane = reader.lanes[0];
@@ -230,6 +248,22 @@ console.log('\n7. four endpoints, four lanes — the thing that was configured b
     const next = reader.pickLane();
     check('so the next request goes to a server that did not refuse',
       next.endpoint !== lane.endpoint, next.endpoint);
+    // A cooldown expires; the server that imposed it has not changed its mind.
+    // Ordering by cooldown alone made the strictest endpoint eligible again the
+    // instant its wait lapsed and it promptly took the next wallet — measured
+    // live as 18 refusals on one server while two others took none at all.
+    // A fresh reader, so no clock has a cooldown outstanding and the only
+    // thing separating the lanes is their refusal history.
+    const cooled = new R.Reader({ clockFor: () => A.createClock({ now: () => 0, sleep: async () => {} }) });
+    cooled.lanes[0].refusals = 5;
+    check('a lane whose cooldown has EXPIRED is still avoided if it keeps refusing',
+      cooled.lanes[0].clock.cooldownRemaining() === 0 &&
+      cooled.pickLane().endpoint !== cooled.lanes[0].endpoint,
+      { chosen: cooled.pickLane().endpoint });
+    check('but one bad moment does not exile an otherwise healthy lane',
+      (() => { cooled.lanes[1].refusals = 1; cooled.lanes[2].assigned = 3;
+        return cooled.lanes[1].cost() < cooled.lanes[0].cost() &&
+               cooled.lanes[1].cost() < cooled.lanes[2].cost(); })());
 
     // Retiring lanes one at a time must not take the pool down with them.
     reader.lanes[1].retired = true; reader.lanes[2].retired = true;

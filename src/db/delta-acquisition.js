@@ -124,6 +124,16 @@ async function walkWallet(reader, entry, anchor, options) {
   const ask = (command) => lane
     ? reader.request(command, lane.epoch, lane)
     : reader.request(command, reader.epoch);
+  // Held for the whole walk and handed back however the walk ends. A lane that
+  // is never released makes its server look permanently busy and quietly
+  // undoes the spreading it exists to provide.
+  const release = () => { if (lane && typeof reader.releaseLane === 'function') reader.releaseLane(lane); };
+  try {
+    return await walkOn(reader, entry, anchor, opts, lane, ask);
+  } finally { release(); }
+}
+
+async function walkOn(reader, entry, anchor, opts, lane, ask) {
   const edge = State.edgeFor(entry, anchor.ledger);
   const address = edge.address;
   const from = edge.cold ? (opts.coldFrom || null) : edge.from_ledger;
