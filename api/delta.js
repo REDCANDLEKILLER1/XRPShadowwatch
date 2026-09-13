@@ -167,7 +167,12 @@ module.exports = async function handler(req, res) {
       // Bounded so a caller cannot ask for a run that cannot finish.
       max_admissions: Math.max(0, Math.min(Number(input.max_admissions) || 12, 60))
     };
-    const concurrency = Number(input.concurrency) || 4;
+    // Measured, not guessed. A deep account_tx page costs roughly seven
+    // seconds on a public node — the cost is the server's, not the 250 ms
+    // admission clock's — so pages overlap profitably and the run is latency
+    // bound rather than pacing bound. Four workers left the link mostly idle
+    // while one exchange wallet ground through thirty-one pages.
+    const concurrency = Math.max(1, Math.min(Number(input.concurrency) || 8, 8));
 
     // ── Streaming progress ────────────────────────────────────────────────
     //
@@ -215,6 +220,9 @@ module.exports = async function handler(req, res) {
           // as a missing anchor rather than as a run that is simply quiet.
           onPhase: (name, detail) => { lastPhase = name === 'plan' ? 'wallets' : name;
             line({ t: 'phase', phase: name, ...detail, ms: Date.now() - startedAt }); },
+          // One line per PAGE of a long wallet. Thirty-one pages is four
+          // minutes; without this it is four minutes of nothing.
+          onPage: p => line({ t: 'page', ...p, ms: Date.now() - startedAt }),
           onWallet: (w, done, total) => { walletsDone = done;
             return line({ t: 'wallet', n: done, total,
             address: w && w.address, status: (w && w.status) || 'FAILED',

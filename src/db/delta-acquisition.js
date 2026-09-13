@@ -91,6 +91,19 @@ const DEFAULT_MAX_ADMISSIONS = 12;
 // had. Twenty-five is roughly ten commits a run, and it bounds what a
 // disconnect can cost to the wallets walked since the last flush.
 const DEFAULT_JOURNAL_EVERY = 25;
+// …or every half minute, whichever comes first. Measured on the live ledger:
+// most watched wallets move nothing in four days and answer in one page, but a
+// busy exchange hot wallet can need thirty-one pages at roughly seven seconds
+// each — public nodes slow down sharply as a marker walks deep. A run can
+// therefore finish three wallets in four minutes, which a count-based flush
+// would never write down at all.
+const JOURNAL_INTERVAL_MS = 30000;
+
+// Budget left below which the run stops STARTING wallets. A wallet begun with
+// twenty seconds remaining is a wallet that will be cut off mid-walk, and a
+// partial walk proves nothing and cannot be journalled — the work is simply
+// lost. Stopping cleanly converts that into a flush and a resume.
+const START_RESERVE_MS = 25000;
 
 const gz = text => zlib.gzipSync(Buffer.from(text, 'utf8'), { level: 9 });
 
@@ -145,6 +158,10 @@ async function walkWallet(reader, entry, anchor, options) {
     const next = result.marker;
     if (next && marker && JSON.stringify(next) === JSON.stringify(marker)) throw new Error('ACCOUNT_TX_MARKER_NOT_ADVANCING');
     marker = next; pages++;
+    // A wallet with thirty pages is four minutes of silence otherwise, which is
+    // indistinguishable from a hang. Reported per page so a slow wallet reads
+    // as slow rather than as stuck.
+    if (typeof opts.onPage === 'function') opts.onPage({ address, pages, rows: rows.length, more: !!marker });
   } while (marker);
 
   const merged = T.mergeSightings(rows);
@@ -413,13 +430,16 @@ async function acquire(input, deps) {
       commit_sha: written.commit_sha });
   };
 
+  let lastFlushAt = Date.now();
   const maybeFlush = async force => {
     const batch = [];
     for (let i = 0; i < results.length; i++) {
       const r = results[i];
       if (r && r.status === 'COMPLETE' && !flushed.has(i)) batch.push({ i, r });
     }
-    if (!batch.length || (!force && batch.length < flushEvery)) return;
+    const overdue = Date.now() - lastFlushAt >= JOURNAL_INTERVAL_MS;
+    if (!batch.length || (!force && !overdue && batch.length < flushEvery)) return;
+    lastFlushAt = Date.now();
     for (const b of batch) flushed.add(b.i);
     flushing = flushing.then(() => writeSegment(batch.map(b => b.r))).catch(e => {
       // A journal that cannot be written is a lost optimisation, never a lost
@@ -444,11 +464,24 @@ async function acquire(input, deps) {
       const index = cursor++;
       if (index >= entries.length) return;
       const entry = entries[index];
+      // Do not start what cannot finish. A wallet begun with seconds left is
+      // cut off mid-walk, and a partial walk proves nothing and cannot be
+      // written down — it is simply thrown away. Stopping here turns that into
+      // a flush and a resume that starts on this wallet next time.
+      if (reader.deadline && reader.deadline - Date.now() < START_RESERVE_MS) {
+        results[index] = { address: entry.address, status: 'NOT_ATTEMPTED',
+          error: 'RUN_BUDGET_EXHAUSTED', attempts: 0, earlier_failures: [], rows: [] };
+        if (typeof d.onWallet === 'function') {
+          d.onWallet(results[index], alreadyWalked.length + (++reported), roster.length);
+        }
+        continue;
+      }
       const tried = [];
       for (let attempt = 1; attempt <= attemptsPerWallet; attempt++) {
         try {
           const walked = await walkWallet(reader, entry, anchor,
-            { scanId: run.scan_id, rosterHash: state.state_sha256, coldFrom });
+            { scanId: run.scan_id, rosterHash: state.state_sha256, coldFrom,
+              onPage: d.onPage });
           results[index] = { ...walked, attempts: attempt, earlier_failures: tried };
           break;
         } catch (e) {
@@ -521,6 +554,10 @@ async function acquire(input, deps) {
     wallets_awaiting_admission: deferred.length,
     watched_not_in_roster: rosterAbsent.slice().sort(),
     checkpoint_advances: failed.length === 0 && contradicted.length === 0,
+    // Separated, because "we ran out of time before reaching it" and "it was
+    // asked and would not answer" are different facts about a wallet and the
+    // report must not merge them into one shrug.
+    wallets_not_attempted: results.filter(r => r && r.status === 'NOT_ATTEMPTED').length,
     unavailable: failed.map(r => ({ address: r && r.address,
       error: (r && r.error) || 'UNKNOWN', attempts: (r && r.attempts) || 0 })),
     contradicted: contradicted.slice()
@@ -548,6 +585,7 @@ async function acquire(input, deps) {
     resumed: resumed || null,
     journal_error: journalError,
     failed_wallets: failed.length,
+    not_attempted_wallets: results.filter(r => r && r.status === 'NOT_ATTEMPTED').length,
     balance_contradictions: contradicted.length,
     balance_contradiction_addresses: contradicted.map(r => r.address).sort(),
     balance_reconciled: complete.filter(r => r.reconciliation && r.reconciliation.status === B.STATUS.RECONCILED).length,

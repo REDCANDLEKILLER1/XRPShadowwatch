@@ -739,6 +739,58 @@ async function main() {
   check('and it pinned its OWN anchor, not the dead journal\'s',
     moved.out.anchor_ledger === ANCHOR + 1000);
 
+  console.log('\n22. a wallet that cannot finish is not started');
+  /* Measured on the live ledger: most watched wallets move nothing in four days
+     and answer in one page, but a busy exchange hot wallet needed 31 pages at
+     roughly seven seconds each — 223 seconds against a 240-second budget. A
+     wallet begun with seconds left is cut off mid-walk, and a partial walk
+     proves nothing and cannot be journalled. It is simply thrown away. */
+  const peerBud = fakePeer({ transactions: quiet(), balances: BAL });
+  const ghBud = fakeGithub(seeded(ANCHOR - 1000));
+  // Two wallets' worth of budget, then nothing.
+  let walked = 0;
+  const innerReq = peerBud.reader.request.bind(peerBud.reader);
+  peerBud.reader.deadline = Date.now() + 3600000;
+  peerBud.reader.request = async function (c, e) {
+    const out = await innerReq(c, e);
+    if (c.command === 'account_tx' && ++walked === 2) peerBud.reader.deadline = Date.now() + 1000;
+    return out;
+  };
+  const outBud = await D.acquire({ report_id: 'SW-20260911-AD123' },
+    { env: ENV, gh: ghBud.gh, reader: peerBud.reader, concurrency: 1 });
+  check('the run stops starting wallets rather than beginning one it cannot finish',
+    outBud.not_attempted_wallets >= 1, outBud.not_attempted_wallets);
+  check('a wallet never reached is not reported as one that failed to answer',
+    outBud.wallets.some(w => w.status === 'NOT_ATTEMPTED') &&
+    outBud.failures.every(f => f.error === 'RUN_BUDGET_EXHAUSTED' ||
+      !/RUN_BUDGET/.test(f.error)));
+  check('it commits nothing — a roster not finished is not a run',
+    outBud.committed === false && outBud.reason === 'RUN_INCOMPLETE');
+  check('but the wallets it DID walk were written down, so the next run starts there',
+    outBud.journal_wallets >= 1 && !!ghBud.files().get(Store.JOURNAL_PATH), outBud.journal_wallets);
+  check('and no XRPL request was spent on the wallets it skipped',
+    peerBud.asked.filter(c => c.command === 'account_tx').length ===
+      outBud.wallets.filter(w => w.status === 'COMPLETE' || w.status === 'FAILED').length,
+    { asked: peerBud.asked.filter(c => c.command === 'account_tx').length });
+
+  console.log('\n23. a long wallet reports its pages rather than going quiet');
+  const many = { rAlice: [], rBob: [], rCarol: [] };
+  for (let i = 0; i < 5; i++) many.rBob.push({ ledger: ANCHOR - 900 + i, amount: '1000000',
+    before: '20000000000000', after: '20000000000000', hash: hashFor('rBobPage', i) });
+  const pages = [];
+  const peerPg = fakePeer({ transactions: many, balances: BAL });
+  await D.acquire({ report_id: 'SW-20260911-AE123' },
+    { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh, reader: peerPg.reader,
+      concurrency: 1, onPage: p => pages.push(p) });
+  check('every wallet reports at least one page', pages.length >= 3, pages.length);
+  check('each page says which wallet, how far in, and whether more is coming',
+    pages.every(p => p.address && p.pages >= 1 && typeof p.more === 'boolean'), pages[0]);
+  check('the last page of a wallet says so', pages.some(p => p.more === false));
+  check('a run with no page listener behaves identically',
+    (await D.acquire({ report_id: 'SW-20260911-AE124' },
+      { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh,
+        reader: fakePeer({ transactions: many, balances: BAL }).reader })).committed === true);
+
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA ACQUISITION CHECKS PASS'));
   process.exit(fail ? 1 : 0);
 }

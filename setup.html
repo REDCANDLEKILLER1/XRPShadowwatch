@@ -149,7 +149,7 @@ wire('b3', 'o3', async slot => {
     '<div class="log" id="l3"><div class="g">report_id ' + id + '</div></div>';
   const v = document.getElementById('v3'), bar = document.getElementById('p3'), log = document.getElementById('l3');
   const set = (id2, n) => { document.getElementById(id2).textContent = n; };
-  let ok = 0, bad = 0, con = 0, tx = 0, done = null;
+  let ok = 0, bad = 0, con = 0, tx = 0, skipped = 0, done = null;
   const tick = setInterval(() => set('c-t', ((Date.now() - started) / 1000).toFixed(0)), 1000);
   // Every raw line, kept verbatim and unsummarised. The rendered log is for
   // reading; this is for sending to whoever has to diagnose it.
@@ -233,8 +233,16 @@ wire('b3', 'o3', async slot => {
               (m.awaiting ? ' · ' + m.awaiting + ' still waiting' : '') + ' · ' + secs, 'g');
           }
         }
+        else if (m.t === 'page') {
+          v.textContent = 'Walking ' + String(m.address).slice(0, 10) + '… page ' + m.pages;
+          if (m.pages % 5 === 0 || !m.more) {
+            append('    ' + String(m.address).slice(0, 12) + '…  page ' + m.pages +
+              ' · ' + m.rows + ' tx so far' + (m.more ? ' · more' : ' · last'), 'g');
+          }
+        }
         else if (m.t === 'wallet') {
           if (m.status === 'COMPLETE') ok++; else bad++;
+          if (m.status === 'NOT_ATTEMPTED') skipped++;
           if (m.reconciliation === 'CONTRADICTION') con++;
           tx += m.rows || 0;
           set('c-ok', ok); set('c-bad', bad); set('c-con', con); set('c-tx', tx);
@@ -242,7 +250,9 @@ wire('b3', 'o3', async slot => {
           v.textContent = 'Walking · ' + m.n + ' of ' + m.total;
           const tag = m.status === 'COMPLETE'
             ? (m.reconciliation === 'CONTRADICTION' ? 'CONTRADICTION' : m.rows + ' tx')
-            : 'FAILED ' + (m.error || '');
+            : (m.status === 'NOT_ATTEMPTED'
+              ? 'not reached — out of time this run'
+              : 'FAILED ' + (m.error || ''));
           append(String(m.n).padStart(3) + '  ' + String(m.address).slice(0, 12) + '…  ' + tag +
             (m.attempts > 1 ? '  (try ' + m.attempts + ')' : ''),
             m.status !== 'COMPLETE' ? 'f' : (m.reconciliation === 'CONTRADICTION' ? 'c' : ''));
