@@ -248,6 +248,7 @@ module.exports = async function handler(req, res) {
             reconnects: reader.stats.reconnects, waits_ms: reader.stats.waits_ms,
             lanes: typeof reader.laneStats === 'function' ? reader.laneStats() : null,
             events: (reader.stats.events || []).slice(0, 40) },
+          heap_mb: Math.round(process.memoryUsage().heapUsed / 1048576),
           elapsed_ms: Date.now() - startedAt });
       } catch (e) {
         const safe = String(e.message || 'DELTA_RUN_FAILED').replace(/postgres(?:ql)?:\/\/\S+/gi, '[redacted]');
