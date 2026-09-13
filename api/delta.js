@@ -130,11 +130,52 @@ module.exports = async function handler(req, res) {
     }
     reader = acquireReader();
     reader.deadline = Date.now() + READ_BUDGET_MS;
-    const result = await D.acquire({
+    const job = {
       report_id: input.report_id,
       scan_id: typeof input.scan_id === 'string' ? input.scan_id : null,
       sealed_at: typeof input.sealed_at === 'string' ? input.sealed_at : null
-    }, { reader, concurrency: Number(input.concurrency) || 4 });
+    };
+    const concurrency = Number(input.concurrency) || 4;
+
+    // ── Streaming progress ────────────────────────────────────────────────
+    //
+    // A run takes minutes and the caller otherwise sees a spinner and then, at
+    // the very end, either a result or a timeout with nothing to say about it.
+    // A wallet that hung is indistinguishable from a network stall, which makes
+    // a failed run undiagnosable from the outside.
+    //
+    // So progress is written as it happens: one NDJSON line per wallet, then a
+    // final line carrying the same object the non-streaming path returns.
+    // Nothing about the run changes — the gate, the commit and the refusals are
+    // identical. Only the caller's view of it does.
+    if (input.stream) {
+      res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+      res.setHeader('X-Accel-Buffering', 'no');
+      const line = value => { try { res.write(JSON.stringify(value) + '\n'); } catch (_) {} };
+      const startedAt = Date.now();
+      line({ t: 'start', report_id: job.report_id, budget_ms: READ_BUDGET_MS, at: new Date().toISOString() });
+      try {
+        const result = await D.acquire(job, { reader, concurrency,
+          onWallet: (w, done, total) => line({ t: 'wallet', n: done, total,
+            address: w && w.address, status: (w && w.status) || 'FAILED',
+            rows: (w && w.rows) ? w.rows.length : 0,
+            attempts: (w && w.attempts) || 1,
+            reconciliation: (w && w.reconciliation && w.reconciliation.status) || null,
+            error: (w && w.error) || null,
+            ms: Date.now() - startedAt })
+        });
+        // The rows themselves are large and the page does not render them;
+        // the counts and the freshness block are what a reader needs.
+        const { rows, wallets, ...summary } = result;
+        line({ t: 'done', ...summary, wallets_detail: wallets, elapsed_ms: Date.now() - startedAt });
+      } catch (e) {
+        const safe = String(e.message || 'DELTA_RUN_FAILED').replace(/postgres(?:ql)?:\/\/\S+/gi, '[redacted]');
+        line({ t: 'error', error: safe, committed: false, elapsed_ms: Date.now() - startedAt });
+      }
+      return res.end();
+    }
+
+    const result = await D.acquire(job, { reader, concurrency });
     return res.json(result);
   } catch (e) {
     // A connection string can appear in a driver error; it must never leave

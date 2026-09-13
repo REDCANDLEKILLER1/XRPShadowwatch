@@ -22,6 +22,17 @@
   .verdict { font-weight:600; margin:12px 0 0; }
   .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); }
   code { background:#161b22; padding:1px 5px; border-radius:4px; font-size:12px; }
+  .bar { height:6px; background:#161b22; border-radius:3px; overflow:hidden; margin:10px 0 6px; }
+  .bar i { display:block; height:100%; background:var(--accent); width:0; transition:width .2s; }
+  .counts { display:flex; gap:14px; font-size:13px; color:var(--dim); flex-wrap:wrap; margin-bottom:4px; }
+  .counts b { color:var(--fg); font-weight:600; }
+  .log { background:#0d1117; border:1px solid var(--line); border-radius:8px; padding:9px;
+         font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; max-height:230px; overflow:auto;
+         margin-top:8px; }
+  .log div { white-space:pre; }
+  .log .f { color:var(--bad); } .log .c { color:var(--warn); } .log .g { color:var(--dim); }
+  .copy { margin-top:8px; background:#21262d; border:1px solid var(--line); color:var(--fg);
+          font-size:13px; padding:10px; }
 </style>
 
 <h1>ShadowWatch — evidence setup</h1>
@@ -109,19 +120,99 @@ wire('b2', 'o2', async slot => {
     ' wallets at ledger ' + r.data.anchor_ledger, 'ok', JSON.stringify(r.data, null, 2));
 });
 
+// The run streams one line per wallet. Without it the caller sees a spinner and
+// then, minutes later, a result or a timeout with nothing to say about itself —
+// a wallet that hung looks exactly like a network stall.
 wire('b3', 'o3', async slot => {
-  const stamp = new Date();
-  const id = 'SW-' + stamp.toISOString().slice(0, 10).replace(/-/g, '') + '-' +
+  const id = 'SW-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-' +
     Math.random().toString(36).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
-  show(slot, 'Running — this walks every wallet and can take a couple of minutes.', 'warn', 'report_id ' + id);
   const started = Date.now();
-  const r = await call('run', 'POST', { report_id: id });
+  const el = document.getElementById(slot);
+  el.innerHTML =
+    '<p class="verdict warn" id="v3">Starting…</p>' +
+    '<div class="bar"><i id="p3"></i></div>' +
+    '<div class="counts"><span>proved <b id="c-ok">0</b></span>' +
+    '<span>failed <b id="c-bad">0</b></span>' +
+    '<span>contradicted <b id="c-con">0</b></span>' +
+    '<span>tx <b id="c-tx">0</b></span>' +
+    '<span><b id="c-t">0</b>s</span></div>' +
+    '<div class="log" id="l3"><div class="g">report_id ' + id + '</div></div>';
+  const v = document.getElementById('v3'), bar = document.getElementById('p3'), log = document.getElementById('l3');
+  const set = (id2, n) => { document.getElementById(id2).textContent = n; };
+  let ok = 0, bad = 0, con = 0, tx = 0, done = null;
+  const tick = setInterval(() => set('c-t', ((Date.now() - started) / 1000).toFixed(0)), 1000);
+  const append = (text, cls) => {
+    const d = document.createElement('div');
+    if (cls) d.className = cls;
+    d.textContent = text;
+    log.appendChild(d); log.scrollTop = log.scrollHeight;
+    // The phone has to hold this; older lines are not worth the memory.
+    while (log.childNodes.length > 400) log.removeChild(log.firstChild);
+  };
+
+  try {
+    const response = await fetch('/api/delta', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+      body: JSON.stringify({ action: 'run', report_id: id, stream: true })
+    });
+    if (!response.body) throw new Error('NO_STREAM_SUPPORT');
+    const reader = response.body.getReader(), decoder = new TextDecoder();
+    let buffer = '';
+    for (;;) {
+      const { value, done: finished } = await reader.read();
+      if (finished) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n');
+      buffer = parts.pop();
+      for (const part of parts) {
+        if (!part.trim()) continue;
+        let m; try { m = JSON.parse(part); } catch (_) { append(part, 'g'); continue; }
+        if (m.t === 'start') { v.textContent = 'Walking wallets…'; append('start · budget ' + Math.round(m.budget_ms / 1000) + 's', 'g'); }
+        else if (m.t === 'wallet') {
+          if (m.status === 'COMPLETE') ok++; else bad++;
+          if (m.reconciliation === 'CONTRADICTION') con++;
+          tx += m.rows || 0;
+          set('c-ok', ok); set('c-bad', bad); set('c-con', con); set('c-tx', tx);
+          bar.style.width = ((m.n / m.total) * 100).toFixed(1) + '%';
+          v.textContent = 'Walking · ' + m.n + ' of ' + m.total;
+          const tag = m.status === 'COMPLETE'
+            ? (m.reconciliation === 'CONTRADICTION' ? 'CONTRADICTION' : m.rows + ' tx')
+            : 'FAILED ' + (m.error || '');
+          append(String(m.n).padStart(3) + '  ' + String(m.address).slice(0, 12) + '…  ' + tag +
+            (m.attempts > 1 ? '  (try ' + m.attempts + ')' : ''),
+            m.status !== 'COMPLETE' ? 'f' : (m.reconciliation === 'CONTRADICTION' ? 'c' : ''));
+        }
+        else if (m.t === 'done') { done = m; }
+        else if (m.t === 'error') { done = m; }
+      }
+    }
+  } catch (e) {
+    clearInterval(tick);
+    v.className = 'verdict bad'; v.textContent = 'Stream failed';
+    return append(e.message, 'f');
+  }
+  clearInterval(tick);
   const seconds = ((Date.now() - started) / 1000).toFixed(0);
-  const d = r.data || {};
-  if (!r.ok) return show(slot, 'Failed after ' + seconds + 's', 'bad', JSON.stringify(d, null, 2));
-  const line = d.complete_wallets + '/' + d.target_wallets + ' proved · ' +
-    (d.transactions || 0) + ' transactions · ' + (d.xrpl_requests || 0) + ' XRPL reads · ' + seconds + 's';
-  if (d.committed) return show(slot, 'COMMITTED · ' + line, 'ok', JSON.stringify(d, null, 2));
-  show(slot, 'NOT committed (' + d.reason + ') · ' + line, 'warn', JSON.stringify(d, null, 2));
+  set('c-t', seconds);
+
+  if (!done) { v.className = 'verdict bad'; v.textContent = 'Ended with no result after ' + seconds + 's'; return; }
+  const line = done.complete_wallets + '/' + done.target_wallets + ' proved · ' +
+    (done.transactions || 0) + ' tx · ' + (done.xrpl_requests || 0) + ' XRPL reads · ' + seconds + 's';
+  if (done.t === 'error') { v.className = 'verdict bad'; v.textContent = 'Failed after ' + seconds + 's — ' + done.error; }
+  else if (done.committed) { v.className = 'verdict ok'; v.textContent = 'COMMITTED · ' + line; }
+  else { v.className = 'verdict warn'; v.textContent = 'NOT committed (' + done.reason + ') · ' + line; }
+
+  const pre = document.createElement('pre');
+  pre.textContent = JSON.stringify(done, null, 2);
+  el.appendChild(pre);
+  // Selecting JSON by hand on a phone is miserable, and this is the thing that
+  // has to reach whoever is diagnosing the run.
+  const copy = document.createElement('button');
+  copy.className = 'copy'; copy.textContent = 'Copy result';
+  copy.onclick = async () => {
+    try { await navigator.clipboard.writeText(JSON.stringify(done, null, 2)); copy.textContent = 'Copied'; }
+    catch (_) { copy.textContent = 'Select the text above to copy'; }
+  };
+  el.appendChild(copy);
 });
 </script>
