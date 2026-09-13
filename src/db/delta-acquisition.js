@@ -64,6 +64,26 @@ const DEFAULT_CONCURRENCY = 4;
 // ledger" — not "we have its history".
 const COLD_WINDOW_LEDGERS = 30000;
 
+// ── HOW MANY MAY JOIN AT ONCE ──────────────────────────────────────────────
+//
+// One run is one serverless invocation with a hard ceiling, and the admission
+// clock paces every XRPL request 250 ms apart. 408 wallets already cost at
+// least 816 requests — one account_tx plus one account_info each — which is
+// 204 seconds of pacing alone against a 240-second budget. A cold wallet costs
+// more than that: 33 hours of history can be several pages.
+//
+// So admitting 153 wallets in one run does not produce a slow run, it produces
+// a run that dies, commits nothing, and leaves the roster exactly where it was
+// — then does it again tomorrow. Admissions are therefore BATCHED: each run
+// takes the next few in address order, the rest stay pending and are named in
+// the result, and the roster fills in over several mornings while every run
+// stays whole and atomic. The 255 already proven walk their delta throughout
+// and are never affected.
+//
+// This is a budget decision, not a forensic one. Nothing is skipped and no
+// window is narrowed; a wallet simply joins on Tuesday instead of Monday.
+const DEFAULT_MAX_ADMISSIONS = 12;
+
 const gz = text => zlib.gzipSync(Buffer.from(text, 'utf8'), { level: 9 });
 
 // ── One wallet's bounded edge ──────────────────────────────────────────────
@@ -239,7 +259,13 @@ async function acquire(input, deps) {
   const known = new Set(state.wallets.map(w => w.address));
   const rosterList = Array.isArray(run.roster)
     ? [...new Set(run.roster.map(a => String(a)))] : null;
-  const admitted = rosterList ? rosterList.filter(a => !known.has(a)) : [];
+  const waiting = rosterList ? rosterList.filter(a => !known.has(a)).sort() : [];
+  // Sorted, so "the next few" is the same few on every attempt rather than
+  // whichever ones a Set happened to yield first.
+  const maxAdmissions = Math.max(0, Number.isFinite(Number(run.max_admissions))
+    ? Number(run.max_admissions) : DEFAULT_MAX_ADMISSIONS);
+  const admitted = waiting.slice(0, maxAdmissions);
+  const deferred = waiting.slice(admitted.length);
   // And the other direction. A wallet the state knows but the roster no longer
   // lists is NOT dropped: retiring a watched wallet is a decision, and a run
   // does not infer a decision from a list it was handed. It keeps being walked
@@ -265,7 +291,7 @@ async function acquire(input, deps) {
       // state advance requires an anchor ahead of the last one, so admitting
       // them against this ledger would be re-claiming a window already claimed.
       // They are admitted on the next ledger, one wait, no work wasted.
-      wallets_pending_admission: admitted.length,
+      wallets_pending_admission: waiting.length,
       balance_contradictions: 0, balance_contradiction_addresses: [], balance_reconciled: 0,
       transactions: 0, xrpl_requests: reader.stats.requests, failures: [],
       committed: false, reason: 'ANCHOR_NOT_ADVANCED',
@@ -339,8 +365,12 @@ async function acquire(input, deps) {
     // report could otherwise get wrong: these wallets are watched from here,
     // and nothing is known about them before this ledger.
     wallets_admitted: admitted.length,
-    admitted: admitted.slice().sort(),
+    admitted: admitted.slice(),
     admitted_history_from_ledger: admitted.length ? coldFrom : null,
+    // Named, not merely counted. A roster of 408 with 141 still waiting is a
+    // different fact from a roster of 267, and the report must not round one
+    // into the other.
+    wallets_awaiting_admission: deferred.length,
     watched_not_in_roster: rosterAbsent.slice().sort(),
     checkpoint_advances: failed.length === 0 && contradicted.length === 0,
     unavailable: failed.map(r => ({ address: r && r.address,
@@ -369,8 +399,10 @@ async function acquire(input, deps) {
     balance_reconciled: complete.filter(r => r.reconciliation && r.reconciliation.status === B.STATUS.RECONCILED).length,
     transactions: rows.length,
     wallets_admitted: admitted.length,
-    admitted_wallets: admitted.slice().sort(),
+    admitted_wallets: admitted.slice(),
     admitted_history_from_ledger: admitted.length ? coldFrom : null,
+    wallets_awaiting_admission: deferred.length,
+    roster_wallets: rosterList ? rosterList.length : null,
     watched_not_in_roster: rosterAbsent.slice().sort(),
     xrpl_requests: reader.stats.requests,
     failures: failed.map(r => ({ address: r && r.address, error: (r && r.error) || 'UNKNOWN' }))

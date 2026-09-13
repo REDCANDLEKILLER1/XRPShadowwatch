@@ -100,8 +100,14 @@ wire('b1', 'o1', async slot => {
   if (!r.data.seeded) {
     return show(slot, 'Token OK · checkpoint NOT seeded — do step 2', 'warn', JSON.stringify(r.data, null, 2));
   }
+  // The roster and the checkpoint are different numbers, and the difference is
+  // the wallets still waiting to join. Saying "255 wallets" while the roster
+  // holds 408 would read as complete when it is not.
+  const waiting = Number(r.data.wallets_awaiting_admission || 0);
   show(slot, 'Ready · state v' + r.data.state_version + ' · anchor ' + r.data.anchor_ledger +
-    ' · ' + r.data.wallets + ' wallets', 'ok', JSON.stringify(r.data, null, 2));
+    ' · ' + r.data.wallets + ' of ' + (r.data.roster_wallets || r.data.wallets) + ' wallets proven' +
+    (waiting ? ' · ' + waiting + ' waiting to join' : ''),
+    waiting ? 'warn' : 'ok', JSON.stringify(r.data, null, 2));
 });
 
 wire('b2', 'o2', async slot => {
@@ -197,6 +203,8 @@ wire('b3', 'o3', async slot => {
 
   if (!done) { v.className = 'verdict bad'; v.textContent = 'Ended with no result after ' + seconds + 's'; return; }
   const line = done.complete_wallets + '/' + done.target_wallets + ' proved · ' +
+    (done.wallets_admitted ? done.wallets_admitted + ' admitted · ' : '') +
+    (done.wallets_awaiting_admission ? done.wallets_awaiting_admission + ' still waiting · ' : '') +
     (done.transactions || 0) + ' tx · ' + (done.xrpl_requests || 0) + ' XRPL reads · ' + seconds + 's';
   if (done.t === 'error') { v.className = 'verdict bad'; v.textContent = 'Failed after ' + seconds + 's — ' + done.error; }
   else if (done.committed) { v.className = 'verdict ok'; v.textContent = 'COMMITTED · ' + line; }

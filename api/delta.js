@@ -22,6 +22,11 @@ const { acquireReader, releaseReader } = require('../src/db/xrpl-reader');
 // mid-sentence.
 const READ_BUDGET_MS = 240000;
 
+// The roster is parsed out of committed source. A parse failure must not turn
+// a status check into a 500 — the checkpoint is still readable and still worth
+// reporting — so it degrades to null rather than throwing.
+const rosterCount = () => { try { return roster.select().accounts.length; } catch (_) { return null; } };
+
 module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
   res.setHeader('CDN-Cache-Control', 'no-store');
@@ -52,6 +57,12 @@ module.exports = async function handler(req, res) {
         state_sha256: loaded.state ? loaded.state.state_sha256 : null,
         anchor_ledger: loaded.state ? loaded.state.anchor_ledger : null,
         wallets: loaded.state ? loaded.state.wallet_count : 0,
+        // What the roster says versus what the checkpoint has proven. The gap
+        // is the wallets still waiting to join, and it is worth seeing BEFORE
+        // a run rather than inferring it from a count that looks short.
+        roster_wallets: rosterCount(),
+        wallets_awaiting_admission: loaded.state
+          ? Math.max(0, rosterCount() - Number(loaded.state.wallet_count || 0)) : rosterCount(),
         // The per-wallet checkpoints, so the UI can show what is proven before
         // a run starts rather than only after it finishes.
         wallets_detail: input.action === 'state' && loaded.state ? loaded.state.wallets : undefined
@@ -150,7 +161,11 @@ module.exports = async function handler(req, res) {
       // request. A caller who could name the roster could name any address and
       // have the run admit it to the watchlist — so the client does not get to
       // say who is watched, the repository does.
-      roster: roster.select().accounts
+      roster: roster.select().accounts,
+      // How many new wallets may join THIS run. A budget dial, not a forensic
+      // one: it changes when a wallet joins, never what is proven about it.
+      // Bounded so a caller cannot ask for a run that cannot finish.
+      max_admissions: Math.max(0, Math.min(Number(input.max_admissions) || 12, 60))
     };
     const concurrency = Number(input.concurrency) || 4;
 
@@ -170,7 +185,9 @@ module.exports = async function handler(req, res) {
       res.setHeader('X-Accel-Buffering', 'no');
       const line = value => { try { res.write(JSON.stringify(value) + '\n'); } catch (_) {} };
       const startedAt = Date.now();
-      line({ t: 'start', report_id: job.report_id, budget_ms: READ_BUDGET_MS, at: new Date().toISOString() });
+      line({ t: 'start', report_id: job.report_id, budget_ms: READ_BUDGET_MS,
+        roster_wallets: job.roster.length, max_admissions: job.max_admissions,
+        at: new Date().toISOString() });
       try {
         const result = await D.acquire(job, { reader, concurrency,
           onWallet: (w, done, total) => line({ t: 'wallet', n: done, total,

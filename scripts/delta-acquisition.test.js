@@ -475,7 +475,51 @@ async function main() {
     /roster: roster\.select\(\)\.accounts/.test(fs.readFileSync(path.join(ROOT, 'api/delta.js'), 'utf8')) &&
     !/input\.roster/.test(fs.readFileSync(path.join(ROOT, 'api/delta.js'), 'utf8')));
 
-  console.log('\n15. an addition on a ledger that has not moved waits rather than half-lands');
+  console.log('\n15. a roster that grew by more than one run can carry');
+  /* 153 wallets joined at once. One run cannot walk 153 cold windows inside a
+     serverless ceiling — and a run that tries does not come back slow, it comes
+     back dead, commits nothing, and leaves the roster where it was. So the
+     admissions queue and a few join each morning, while every run stays whole.
+     Nothing is skipped and no window narrows: a wallet joins on Tuesday. */
+  const MANY = WALLETS.concat(['rDave', 'rErin', 'rFrank', 'rGrace']);
+  const txsMany = { ...quiet(), rDave: [], rErin: [], rFrank: [], rGrace: [] };
+  const balMany = { ...BAL, rDave: '1000', rErin: '2000', rFrank: '3000', rGrace: '4000' };
+  const peerB = fakePeer({ transactions: txsMany, balances: balMany });
+  const ghB = fakeGithub(seeded(ANCHOR - 1000));
+  const outB = await D.acquire({ report_id: 'SW-20260911-MMMMM', scan_id: 'idx-b',
+    roster: MANY, max_admissions: 2 },
+    { env: ENV, gh: ghB.gh, reader: peerB.reader, concurrency: 2 });
+  check('the run commits with only as many admissions as it can afford',
+    outB.committed === true && outB.wallets_admitted === 2 && outB.target_wallets === 5, outB.reason);
+  check('and names the ones still waiting rather than rounding them away',
+    outB.wallets_awaiting_admission === 2 && outB.roster_wallets === 7);
+  check('the batch is taken in address order, so the same run twice picks the same two',
+    JSON.stringify(outB.admitted_wallets) === JSON.stringify(['rDave', 'rErin']));
+  check('the deferred wallets were not walked — a deferral costs no XRPL request',
+    !peerB.asked.some(c => c.account === 'rFrank' || c.account === 'rGrace'));
+  check('and they are not in the committed state either',
+    (() => { const st = JSON.parse(ghB.files().get(Store.STATE_PATH).toString('utf8'));
+      return st.wallet_count === 5 && !st.wallets.some(w => w.address === 'rGrace'); })());
+
+  const peerC = fakePeer({ transactions: txsMany, balances: balMany });
+  peerC.reader.ledger = async () => ({ ledger: ANCHOR + 500, close_ms: Date.UTC(2026, 8, 12, 6, 0, 0) });
+  const ghC = fakeGithub(Object.fromEntries([...ghB.files()].map(([k, v]) => [k, v.toString('utf8')])));
+  const outC = await D.acquire({ report_id: 'SW-20260912-MMMMM', scan_id: 'idx-c',
+    roster: MANY, max_admissions: 2 },
+    { env: ENV, gh: ghC.gh, reader: peerC.reader, concurrency: 2 });
+  check('the next morning takes the next two, and the queue empties',
+    outC.committed === true && outC.wallets_admitted === 2 &&
+    JSON.stringify(outC.admitted_wallets) === JSON.stringify(['rFrank', 'rGrace']) &&
+    outC.wallets_awaiting_admission === 0, outC.reason);
+  check('the wallets admitted yesterday walk their own delta today, not another cold window',
+    peerC.asked.filter(c => c.command === 'account_tx' && c.account === 'rDave')[0]
+      .ledger_index_min === ANCHOR + 1);
+  check('and the roster is whole: 7 wallets, all proven to the same anchor',
+    (() => { const st = JSON.parse(ghC.files().get(Store.STATE_PATH).toString('utf8'));
+      return st.wallet_count === 7 &&
+        st.wallets.every(w => w.last_proven_ledger === ANCHOR + 500); })());
+
+  console.log('\n16. an addition on a ledger that has not moved waits rather than half-lands');
   const peerR12 = fakePeer({ transactions: quiet(), balances: BAL });
   const ghR12 = fakeGithub(seeded(ANCHOR));
   const outR12 = await D.acquire({ report_id: 'SW-20260911-LLLLL', scan_id: 'idx-12', roster: ROSTER },
