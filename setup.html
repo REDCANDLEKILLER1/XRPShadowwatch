@@ -142,11 +142,18 @@ wire('b3', 'o3', async slot => {
     '<span>contradicted <b id="c-con">0</b></span>' +
     '<span>tx <b id="c-tx">0</b></span>' +
     '<span><b id="c-t">0</b>s</span></div>' +
+    // The copy button exists from the FIRST second, not after the run ends. A
+    // run that is stuck is exactly the run whose log has to travel, and waiting
+    // for a result that never comes is not a way to get it off a phone.
+    '<button class="copy" id="cp3">Copy debug log</button>' +
     '<div class="log" id="l3"><div class="g">report_id ' + id + '</div></div>';
   const v = document.getElementById('v3'), bar = document.getElementById('p3'), log = document.getElementById('l3');
   const set = (id2, n) => { document.getElementById(id2).textContent = n; };
   let ok = 0, bad = 0, con = 0, tx = 0, done = null;
   const tick = setInterval(() => set('c-t', ((Date.now() - started) / 1000).toFixed(0)), 1000);
+  // Every raw line, kept verbatim and unsummarised. The rendered log is for
+  // reading; this is for sending to whoever has to diagnose it.
+  const raw = ['report_id ' + id, 'page ' + location.pathname + ' · ' + new Date().toISOString()];
   const append = (text, cls) => {
     const d = document.createElement('div');
     if (cls) d.className = cls;
@@ -154,6 +161,23 @@ wire('b3', 'o3', async slot => {
     log.appendChild(d); log.scrollTop = log.scrollHeight;
     // The phone has to hold this; older lines are not worth the memory.
     while (log.childNodes.length > 400) log.removeChild(log.firstChild);
+  };
+  const copyBtn = document.getElementById('cp3');
+  copyBtn.onclick = async () => {
+    const text = raw.join('\n') + '\n--- ' + ((Date.now() - started) / 1000).toFixed(0) +
+      's elapsed · proved ' + ok + ' failed ' + bad + ' contradicted ' + con + ' tx ' + tx +
+      (done ? '\n--- result\n' + JSON.stringify(done, null, 2) : '\n--- still running, no result yet');
+    try { await navigator.clipboard.writeText(text); copyBtn.textContent = 'Copied ' + raw.length + ' lines'; }
+    catch (_) {
+      // Clipboard access is refused in some mobile contexts. A textarea the
+      // operator can select by hand is worse than a button and better than
+      // nothing, which is what they had.
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.rows = 12; ta.style.width = '100%';
+      copyBtn.parentNode.insertBefore(ta, copyBtn.nextSibling);
+      ta.select(); copyBtn.textContent = 'Select the box below and copy';
+    }
+    setTimeout(() => { copyBtn.textContent = 'Copy debug log'; }, 4000);
   };
 
   try {
@@ -172,8 +196,32 @@ wire('b3', 'o3', async slot => {
       buffer = parts.pop();
       for (const part of parts) {
         if (!part.trim()) continue;
+        raw.push(part);
         let m; try { m = JSON.parse(part); } catch (_) { append(part, 'g'); continue; }
-        if (m.t === 'start') { v.textContent = 'Walking wallets…'; append('start · budget ' + Math.round(m.budget_ms / 1000) + 's', 'g'); }
+        if (m.t === 'start') {
+          v.textContent = 'Starting…';
+          append('start · budget ' + Math.round(m.budget_ms / 1000) + 's' +
+            (m.roster_wallets ? ' · roster ' + m.roster_wallets : '') +
+            (m.max_admissions !== undefined ? ' · admit up to ' + m.max_admissions : ''), 'g');
+        }
+        // Between "start" and the first wallet there is a GitHub read, an XRPL
+        // connect and an anchor pin. Naming each as it lands is the difference
+        // between "it is taking a while" and "it never connected".
+        else if (m.t === 'phase') {
+          const secs = (m.ms / 1000).toFixed(1) + 's';
+          if (m.phase === 'state') {
+            v.textContent = 'Checkpoint read…';
+            append('checkpoint · v' + m.state_version + ' · ' + m.wallets + ' wallets · ' + secs, 'g');
+          } else if (m.phase === 'anchor') {
+            v.textContent = 'Anchor pinned…';
+            append('anchor · ledger ' + m.ledger + (m.endpoint ? ' · ' + m.endpoint : '') + ' · ' + secs, 'g');
+          } else if (m.phase === 'plan') {
+            v.textContent = 'Walking wallets…';
+            append('plan · ' + m.wallets + ' to walk (' + m.proven + ' proven' +
+              (m.admitting ? ' + ' + m.admitting + ' joining' : '') + ')' +
+              (m.awaiting ? ' · ' + m.awaiting + ' still waiting' : '') + ' · ' + secs, 'g');
+          }
+        }
         else if (m.t === 'wallet') {
           if (m.status === 'COMPLETE') ok++; else bad++;
           if (m.reconciliation === 'CONTRADICTION') con++;
@@ -188,6 +236,18 @@ wire('b3', 'o3', async slot => {
             (m.attempts > 1 ? '  (try ' + m.attempts + ')' : ''),
             m.status !== 'COMPLETE' ? 'f' : (m.reconciliation === 'CONTRADICTION' ? 'c' : ''));
         }
+        // The heartbeat. xrpl_requests is the line that matters: stuck at 0
+        // means nothing ever went out over the socket, climbing means the walk
+        // is merely slow, and those are different problems.
+        else if (m.t === 'tick') {
+          append('· ' + (m.ms / 1000).toFixed(0) + 's waiting on ' + m.waiting_on +
+            ' · ' + m.xrpl_requests + ' XRPL reads' +
+            (m.xrpl_retries ? ' · ' + m.xrpl_retries + ' retries' : '') +
+            (m.xrpl_reconnects ? ' · ' + m.xrpl_reconnects + ' reconnects' : '') +
+            (m.endpoint ? ' · ' + m.endpoint : ' · no endpoint yet') +
+            (m.first_failure ? ' · first failure: ' + m.first_failure.reason : ''),
+            m.xrpl_requests === 0 && m.ms > 15000 ? 'f' : 'g');
+        }
         else if (m.t === 'done') { done = m; }
         else if (m.t === 'error') { done = m; }
       }
@@ -201,7 +261,11 @@ wire('b3', 'o3', async slot => {
   const seconds = ((Date.now() - started) / 1000).toFixed(0);
   set('c-t', seconds);
 
-  if (!done) { v.className = 'verdict bad'; v.textContent = 'Ended with no result after ' + seconds + 's'; return; }
+  if (!done) {
+    v.className = 'verdict bad';
+    v.textContent = 'Ended with no result after ' + seconds + 's — copy the log above';
+    return;
+  }
   const line = done.complete_wallets + '/' + done.target_wallets + ' proved · ' +
     (done.wallets_admitted ? done.wallets_admitted + ' admitted · ' : '') +
     (done.wallets_awaiting_admission ? done.wallets_awaiting_admission + ' still waiting · ' : '') +

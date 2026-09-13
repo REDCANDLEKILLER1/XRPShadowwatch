@@ -519,7 +519,30 @@ async function main() {
       return st.wallet_count === 7 &&
         st.wallets.every(w => w.last_proven_ledger === ANCHOR + 500); })());
 
-  console.log('\n16. an addition on a ledger that has not moved waits rather than half-lands');
+  console.log('\n16. the silent gap before the first wallet is named');
+  /* 85 seconds into a run with no wallet line, the operator cannot tell a slow
+     first wallet from an XRPL connect that never happened. Each lane therefore
+     reports the moment it lands. */
+  const seen = [];
+  const peerP = fakePeer({ transactions: quiet(), balances: BAL });
+  const ghP = fakeGithub(seeded(ANCHOR - 1000));
+  await D.acquire({ report_id: 'SW-20260911-PPPPP', scan_id: 'idx-p', roster: WALLETS.concat(['rDave']) },
+    { env: ENV, gh: ghP.gh, reader: peerP.reader, concurrency: 2,
+      onPhase: (name, detail) => seen.push({ name, ...detail }) });
+  check('the checkpoint read reports itself', seen.some(p => p.name === 'state' && p.wallets === 3));
+  check('the anchor pin reports itself, with the ledger it pinned',
+    seen.some(p => p.name === 'anchor' && p.ledger === ANCHOR));
+  check('and the plan says what is about to be walked before any of it is',
+    seen.some(p => p.name === 'plan' && p.wallets === 4 && p.proven === 3 && p.admitting === 1));
+  check('every phase lands before the first wallet line',
+    (() => { const idx = seen.findIndex(p => p.name === 'plan');
+      return idx === seen.length - 1; })(), seen.map(p => p.name));
+  check('a run with no phase listener behaves identically',
+    (await D.acquire({ report_id: 'SW-20260911-QQQQQ', scan_id: 'idx-q' },
+      { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh,
+        reader: fakePeer({ transactions: quiet(), balances: BAL }).reader })).committed === true);
+
+  console.log('\n17. an addition on a ledger that has not moved waits rather than half-lands');
   const peerR12 = fakePeer({ transactions: quiet(), balances: BAL });
   const ghR12 = fakeGithub(seeded(ANCHOR));
   const outR12 = await D.acquire({ report_id: 'SW-20260911-LLLLL', scan_id: 'idx-12', roster: ROSTER },

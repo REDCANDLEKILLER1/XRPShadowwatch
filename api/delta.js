@@ -188,24 +188,62 @@ module.exports = async function handler(req, res) {
       line({ t: 'start', report_id: job.report_id, budget_ms: READ_BUDGET_MS,
         roster_wallets: job.roster.length, max_admissions: job.max_admissions,
         at: new Date().toISOString() });
+
+      // ── A HEARTBEAT, BECAUSE SILENCE IS NOT A DIAGNOSIS ──────────────────
+      //
+      // A run that emits "start" and then nothing for ninety seconds tells the
+      // operator only that it is slow, which is the one thing they can already
+      // see. It cannot distinguish a GitHub read that is taking its time from
+      // an XRPL socket that never opened — and those need opposite responses.
+      //
+      // So every few seconds the run says what it is waiting on and, crucially,
+      // how many XRPL requests it has actually issued. A request count stuck at
+      // zero means the transport never carried anything; a climbing one means
+      // the walk is simply slow. That single number separates the two.
+      let lastPhase = 'connecting', walletsDone = 0;
+      const beat = setInterval(() => line({ t: 'tick',
+        waiting_on: lastPhase, wallets_done: walletsDone,
+        xrpl_requests: reader.stats.requests,
+        xrpl_retries: reader.stats.retries, xrpl_reconnects: reader.stats.reconnects,
+        endpoint: reader.stats.actual_endpoint || null,
+        first_failure: reader.stats.first_failure || null,
+        ms: Date.now() - startedAt }), 5000);
+      if (typeof beat.unref === 'function') beat.unref();
       try {
         const result = await D.acquire(job, { reader, concurrency,
-          onWallet: (w, done, total) => line({ t: 'wallet', n: done, total,
+          // The lanes report as they land, so a stalled XRPL connect is visible
+          // as a missing anchor rather than as a run that is simply quiet.
+          onPhase: (name, detail) => { lastPhase = name === 'plan' ? 'wallets' : name;
+            line({ t: 'phase', phase: name, ...detail, ms: Date.now() - startedAt }); },
+          onWallet: (w, done, total) => { walletsDone = done;
+            return line({ t: 'wallet', n: done, total,
             address: w && w.address, status: (w && w.status) || 'FAILED',
             rows: (w && w.rows) ? w.rows.length : 0,
             attempts: (w && w.attempts) || 1,
             reconciliation: (w && w.reconciliation && w.reconciliation.status) || null,
             error: (w && w.error) || null,
-            ms: Date.now() - startedAt })
+            ms: Date.now() - startedAt }); }
         });
         // The rows themselves are large and the page does not render them;
         // the counts and the freshness block are what a reader needs.
         const { rows, wallets, ...summary } = result;
-        line({ t: 'done', ...summary, wallets_detail: wallets, elapsed_ms: Date.now() - startedAt });
+        line({ t: 'done', ...summary, wallets_detail: wallets,
+          xrpl: { requests: reader.stats.requests, retries: reader.stats.retries,
+            reconnects: reader.stats.reconnects, waits_ms: reader.stats.waits_ms,
+            endpoint: reader.stats.actual_endpoint || null,
+            events: (reader.stats.events || []).slice(0, 40) },
+          elapsed_ms: Date.now() - startedAt });
       } catch (e) {
         const safe = String(e.message || 'DELTA_RUN_FAILED').replace(/postgres(?:ql)?:\/\/\S+/gi, '[redacted]');
-        line({ t: 'error', error: safe, committed: false, elapsed_ms: Date.now() - startedAt });
-      }
+        // The transport's own account of itself, which is the whole diagnosis
+        // when the failure is "it never connected".
+        line({ t: 'error', error: safe, committed: false, waiting_on: lastPhase,
+          xrpl: { requests: reader.stats.requests, retries: reader.stats.retries,
+            reconnects: reader.stats.reconnects, endpoint: reader.stats.actual_endpoint || null,
+            first_failure: reader.stats.first_failure || null,
+            events: (reader.stats.events || []).slice(0, 40) },
+          elapsed_ms: Date.now() - startedAt });
+      } finally { clearInterval(beat); }
       return res.end();
     }
 

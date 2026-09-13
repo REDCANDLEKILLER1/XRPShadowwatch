@@ -235,9 +235,20 @@ async function acquire(input, deps) {
   // 1+2. Two independent lanes, run concurrently: the checkpoint comes from
   // GitHub and the anchor from XRPL, and neither needs the other. Serialising
   // them bought nothing but latency.
+  // Each lane reports the moment it lands. Between "start" and the first wallet
+  // line there is otherwise a silent gap covering the GitHub read, the XRPL
+  // connect and the anchor pin — and a stall in any of them looks identical to
+  // a slow first wallet. That ambiguity is the same one the per-wallet stream
+  // was built to remove; it just moved one level up.
+  const phase = (name, detail) => { if (typeof d.onPhase === 'function') d.onPhase(name, detail || {}); };
   const [loaded, header] = await Promise.all([
-    Store.readState({ env: d.env, gh: d.gh, fetch: d.fetch }),
+    Store.readState({ env: d.env, gh: d.gh, fetch: d.fetch })
+      .then(r => { phase('state', { seeded: !r.missing,
+        state_version: r.state ? r.state.state_version : null,
+        wallets: r.state ? r.state.wallet_count : 0 }); return r; }),
     reader.ledger('validated')
+      .then(h => { phase('anchor', { ledger: h.ledger,
+        endpoint: reader.stats.actual_endpoint || null }); return h; })
   ]);
   if (loaded.missing) throw new Error('EVIDENCE_STATE_MISSING: seed the checkpoint from a sealed report before the first run');
   const state = loaded.state;
@@ -302,6 +313,9 @@ async function acquire(input, deps) {
   //    admitted ones on one bounded cold window each.
   const entries = state.wallets.concat(
     admitted.map(address => State.walletEntry({ address })));
+  phase('plan', { wallets: entries.length, proven: state.wallets.length,
+    admitting: admitted.length, awaiting: deferred.length,
+    cold_from_ledger: admitted.length ? coldFrom : null });
   const results = new Array(entries.length);
   const concurrency = Math.max(1, Math.min(Number(d.concurrency) || DEFAULT_CONCURRENCY, 8));
   let cursor = 0;
