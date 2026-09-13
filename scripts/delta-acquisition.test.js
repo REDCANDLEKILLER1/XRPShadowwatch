@@ -1049,6 +1049,40 @@ async function main() {
   check('and a part-walked wallet is journalled as nothing — it proved nothing',
     outHang.journal_wallets === 2, outHang.journal_wallets);
 
+  console.log('\n30. the reserve pays for the ending, not just for stopping');
+  /* A run reached 266 of 267 wallets and still committed nothing. It was not
+     short of wallets — it was short of ENDING. A flat 25-second reserve was
+     enough when the ending was one small commit; a run holding 165,000 banked
+     rows has to read them back and write them, and if it spends its last
+     second starting another wallet it has nothing left to finish with. */
+  const ghR = fakeGithub(seeded(ANCHOR - 1000));
+  await D.acquire({ report_id: 'SW-20260911-AN123' },
+    { env: ENV, gh: ghR.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader,
+      concurrency: 1 });
+  const banked = JSON.parse(ghR.files().get(Store.JOURNAL_PATH).toString('utf8'))
+    .row_shards.reduce((n, sh) => n + sh.rows, 0);
+  check('the first attempt banked some rows', banked > 0, banked);
+  const seenPhases = [];
+  const ghR2 = fakeGithub(Object.fromEntries([...ghR.files()].map(([k, v]) => [k, v])));
+  await D.acquire({ report_id: 'SW-20260911-AN124' },
+    { env: ENV, gh: ghR2.gh, reader: fakePeer({ transactions: crashTx, balances: BAL }).reader,
+      concurrency: 1, onPhase: (n, det) => seenPhases.push({ n, ...det }) });
+  const res = seenPhases.find(p => p.n === 'reserve');
+  check('a resumed run says how much is banked, so the reserve is explicable',
+    !!res && res.banked_rows === banked, res);
+  // The rule itself, checked directly: more banked work means a longer reserve.
+  const reserveFor = rows => 25000 + Math.ceil(rows / 5000) * 1000;
+  check('the reserve grows with what has to be written at the end',
+    reserveFor(165000) > reserveFor(0) && reserveFor(165000) >= 50000,
+    { none: reserveFor(0), banked_165k: reserveFor(165000) });
+  check('and a run with nothing banked keeps the plain floor',
+    reserveFor(0) === 25000);
+  check('an explicit override still wins, so the suite can drive it',
+    (await D.acquire({ report_id: 'SW-20260911-AN125' },
+      { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh,
+        reader: fakePeer({ transactions: quiet(), balances: BAL }).reader,
+        startReserveMs: 0 })).committed === true);
+
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA ACQUISITION CHECKS PASS'));
   process.exit(fail ? 1 : 0);
 }

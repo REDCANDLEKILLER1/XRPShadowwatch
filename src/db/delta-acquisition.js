@@ -448,6 +448,12 @@ async function acquire(input, deps) {
     recovered: alreadyWalked.length, proven: state.wallets.length,
     admitting: admitted.length, awaiting: deferred.length,
     cold_from_ledger: admitted.length ? coldFrom : null });
+  // Said out loud, because "it stopped starting wallets with a minute left"
+  // looks like a bug until you know the minute was spoken for.
+  if (journal && journal.row_shards && journal.row_shards.length) {
+    phase('reserve', { banked_rows: (journal.row_shards || [])
+      .reduce((n, sh) => n + (Number(sh.rows) || 0), 0) });
+  }
 
   // The journal is created in memory and written on the first flush. Creating
   // it up front would cost a commit before a single wallet had been walked,
@@ -521,8 +527,23 @@ async function acquire(input, deps) {
   const attemptsPerWallet = Math.max(1, Math.min(Number(d.attempts) || 3, 5));
   // Injectable so the suite can exercise the budget paths without spending a
   // real twenty-five seconds to reach them.
+  // ── THE RESERVE HAS TO PAY FOR THE ENDING, NOT JUST STOP STARTING ───────
+  //
+  // A flat 25 seconds was enough when the ending was one small commit. It is
+  // not enough now: a run holding 165,000 banked rows has to READ them back
+  // (25 seconds, measured) and then gzip, blob and commit them, and if it
+  // spends its last second starting another wallet it has nothing left to
+  // finish with. That is why a run reached 266 of 267 and still committed
+  // nothing — it was not short of wallets, it was short of ending.
+  //
+  // So the reserve grows with what is banked. Roughly a second per five
+  // thousand journalled rows on top of the floor, which covers the measured
+  // read and leaves room for the write.
+  const bankedRows = journal
+    ? (journal.row_shards || []).reduce((n, sh) => n + (Number(sh.rows) || 0), 0) : 0;
   const startReserveMs = Number.isFinite(Number(d.startReserveMs))
-    ? Math.max(0, Number(d.startReserveMs)) : START_RESERVE_MS;
+    ? Math.max(0, Number(d.startReserveMs))
+    : START_RESERVE_MS + Math.ceil(bankedRows / 5000) * 1000;
   const worker = async () => {
     for (;;) {
       const index = cursor++;
