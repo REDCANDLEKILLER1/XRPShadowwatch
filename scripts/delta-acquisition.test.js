@@ -711,22 +711,27 @@ async function main() {
   const peerZ = fakePeer({ transactions: crashTx, balances: BAL });
   const outZ = await D.acquire({ report_id: 'SW-20260911-AC124' },
     { env: ENV, gh: ghZ.gh, reader: peerZ.reader });
+  // The wallets ARE proven — the manifest says so and this run walked the rest
+  // — but their transactions cannot be produced. Committing the checkpoint
+  // anyway would advance a coverage floor past evidence that is not in the
+  // repository, which is the one thing that must never happen. So the run
+  // refuses, even though refusing costs another morning.
   check('rows that are not the bytes the journal recorded are refused, not used',
-    outZ.resumed && outZ.resumed.adopted === false &&
-    /JOURNAL_SHARD_HASH_MISMATCH/.test(outZ.resumed.reason), outZ.resumed);
-  // And the run SURVIVES it. An unreadable segment used to throw out of
-  // acquire() and kill every attempt from that point on — which is the exact
-  // opposite of what a resume journal is for. It is a lost optimisation, so
-  // the wallets are simply walked again.
-  check('the run completes anyway, walking those wallets itself',
-    outZ.committed === true && outZ.complete_wallets === 3, outZ.reason);
-  check('and it walked every wallet rather than trusting any recovered row',
-    outZ.wallets_recovered_from_journal === 0 &&
-    peerZ.asked.filter(c => c.command === 'account_tx').length === 3);
+    outZ.committed === false && outZ.reason === 'JOURNAL_ROWS_UNREADABLE' &&
+    /JOURNAL_SHARD_HASH_MISMATCH/.test(outZ.journal_rows_unreadable), outZ.reason);
   check('the forged rows never reached the checkpoint',
+    JSON.parse(ghZ.files().get(Store.STATE_PATH).toString('utf8')).state_version === 1 &&
     !JSON.stringify(JSON.parse(ghZ.files().get(Store.STATE_PATH).toString('utf8'))).includes('FORGED'));
   check('and the bad journal is discarded rather than refused again every run',
     !ghZ.files().get(Store.JOURNAL_PATH));
+  // Which means the NEXT run simply does the work itself.
+  const peerZ2 = fakePeer({ transactions: crashTx, balances: BAL });
+  const outZ2 = await D.acquire({ report_id: 'SW-20260911-AC125' },
+    { env: ENV, gh: ghZ.gh, reader: peerZ2.reader });
+  check('the run after it walks every wallet and commits',
+    outZ2.committed === true && outZ2.complete_wallets === 3 &&
+    outZ2.wallets_recovered_from_journal === 0 &&
+    peerZ2.asked.filter(c => c.command === 'account_tx').length === 3, outZ2.reason);
 
   console.log('\n21. a journal is refused rather than trusted');
   /* Every refusal here costs one morning of re-walking. Every refusal NOT here
@@ -939,8 +944,8 @@ async function main() {
     { env: ENV, gh: ghBig.gh, reader: peerBig.reader, concurrency: 1 });
   check('the resume reads it through the blobs API and adopts it',
     outBig2.resumed && outBig2.resumed.adopted === true, outBig2.resumed);
-  check('every journalled row came back — none lost to the truncated read',
-    outBig2.resumed.rows_recovered === 120, outBig2.resumed.rows_recovered);
+  check('the manifest names how many rows are banked, without reading them yet',
+    outBig2.resumed.rows_awaiting_load === 120, outBig2.resumed.rows_awaiting_load);
   check('and it commits, with the recovered transactions in the evidence',
     outBig2.committed === true && outBig2.transactions === 120,
     { committed: outBig2.committed, tx: outBig2.transactions, reason: outBig2.reason });
@@ -960,6 +965,89 @@ async function main() {
   check('and report assembly reads it back whole rather than empty',
     readBack.events.length === 120 && readBack.missing.length === 0,
     { events: readBack.events.length, missing: readBack.missing });
+
+  console.log('\n28. journalled rows are read at the commit, not at the start');
+  /* Measured live: a resume spent NINETY SECONDS of a 240-second budget reading
+     121,409 journalled rows back, before walking a single wallet — and it gets
+     worse every run, because each run journals more. Those rows are needed for
+     exactly one thing, the commit, which a run that does not finish its roster
+     never reaches. */
+  const ghL = fakeGithub(seeded(ANCHOR - 1000));
+  await D.acquire({ report_id: 'SW-20260911-AL123' },
+    { env: ENV, gh: ghL.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader,
+      concurrency: 1 });
+  const bankedPaths = JSON.parse(ghL.files().get(Store.JOURNAL_PATH).toString('utf8'))
+    .row_shards.map(sh => sh.path);
+  check('the first attempt banked rows in the journal', bankedPaths.length >= 1);
+
+  // Attempt two: still cannot finish (rCarol fails again), so it must never
+  // touch the banked rows.
+  const ghL2 = fakeGithub(Object.fromEntries([...ghL.files()].map(([k, v]) => [k, v])));
+  const outL2 = await D.acquire({ report_id: 'SW-20260911-AL124' },
+    { env: ENV, gh: ghL2.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader,
+      concurrency: 1 });
+  check('an attempt that cannot commit never reads them',
+    outL2.committed === false &&
+    !ghL2.calls.some(c => bankedPaths.some(p2 => c.path.indexOf(p2) > -1)),
+    ghL2.calls.filter(c => /resume/.test(c.path)).map(c => c.path));
+  check('but it still knows how many are banked, from the manifest alone',
+    outL2.resumed.adopted === true && outL2.resumed.rows_awaiting_load > 0,
+    outL2.resumed);
+  check('and it reports its OWN transactions separately from the banked ones',
+    outL2.transactions_journalled === outL2.resumed.rows_awaiting_load,
+    { own: outL2.transactions, banked: outL2.transactions_journalled });
+
+  // Attempt three finishes, so now — and only now — the rows are fetched.
+  const ghL3 = fakeGithub(Object.fromEntries([...ghL2.files()].map(([k, v]) => [k, v])));
+  const outL3 = await D.acquire({ report_id: 'SW-20260911-AL125' },
+    { env: ENV, gh: ghL3.gh, reader: fakePeer({ transactions: crashTx, balances: BAL }).reader,
+      concurrency: 1 });
+  check('the attempt that COMMITS reads them',
+    outL3.committed === true &&
+    ghL3.calls.some(c => bankedPaths.some(p2 => c.path.indexOf(p2) > -1)), outL3.reason);
+  check('and the committed evidence holds the banked rows plus this run\'s',
+    outL3.transactions === 2, outL3.transactions);
+  check('every wallet is proven, recovered ones included',
+    outL3.complete_wallets === 3 && outL3.wallets_recovered_from_journal === 2);
+  const stateL = JSON.parse(ghL3.files().get(Store.STATE_PATH).toString('utf8'));
+  check('the checkpoint advanced for all of them',
+    stateL.state_version === 2 && stateL.wallets.every(w => w.last_proven_ledger === ANCHOR));
+  check('and the journal is gone',
+    !ghL3.files().get(Store.JOURNAL_PATH) && bankedPaths.every(p2 => !ghL3.files().get(p2)));
+
+  console.log('\n29. a run always comes back, even from a wallet that never does');
+  /* Measured live: 266 of 267 wallets finished, the last one hung, and the run
+     produced NO result at all — not a failure, not a partial, nothing. Every
+     wallet already walked was journalled and safe, and the operator still saw
+     "ended with no result", which is the least useful thing a run can say. */
+  const peerHang = fakePeer({ transactions: quiet(), balances: BAL });
+  const innerHang = peerHang.reader.request.bind(peerHang.reader);
+  peerHang.reader.deadline = Date.now() + 4000;
+  peerHang.reader.request = async function (c, e, pin) {
+    // rCarol's walk never returns. Nothing cancels it; the run must stop
+    // waiting for it of its own accord.
+    if (c.command === 'account_tx' && c.account === 'rCarol') return new Promise(() => {});
+    return innerHang(c, e, pin);
+  };
+  const started = Date.now();
+  const outHang = await D.acquire({ report_id: 'SW-20260911-AM123' },
+    { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh, reader: peerHang.reader,
+      concurrency: 3, startReserveMs: 100 });
+  const tookMs = Date.now() - started;
+  check('the run returns instead of waiting forever',
+    !!outHang && outHang.committed === false, outHang && outHang.reason);
+  check('and it returns near the budget, not long after it',
+    tookMs < 30000, tookMs + 'ms');
+  check('the hung wallet is named as abandoned, not silently dropped',
+    outHang.abandoned_wallets === 1 &&
+    outHang.freshness.abandoned.join(',') === 'rCarol', outHang.freshness.abandoned);
+  check('abandoned is its own fact — not merged with never-attempted',
+    outHang.wallets.find(w => w.address === 'rCarol').status === 'ABANDONED',
+    outHang.wallets.map(w => w.address + ':' + w.status));
+  check('the wallets that DID finish are still reported',
+    outHang.complete_wallets === 2, outHang.complete_wallets);
+  check('and a part-walked wallet is journalled as nothing — it proved nothing',
+    outHang.journal_wallets === 2, outHang.journal_wallets);
 
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA ACQUISITION CHECKS PASS'));
   process.exit(fail ? 1 : 0);

@@ -326,7 +326,19 @@ async function acquire(input, deps) {
   // proven to a different ledger than the ones walked after it, and the state
   // would describe an instant that never existed. So the journal's anchor wins,
   // the window ends slightly earlier than "now", and the result says so.
-  let journal = null, resumed = null, resumedRows = [];
+  // ── THE ROWS ARE NOT READ UNTIL THEY ARE NEEDED ─────────────────────────
+  //
+  // Measured on a live resume: reading 121,409 journalled rows back took NINETY
+  // SECONDS of a 240-second budget, before a single wallet was walked. The
+  // journal exists to save work and at that size it was spending more than it
+  // saved — and getting worse every run, because each run journals more.
+  //
+  // But those rows are needed for exactly one thing: the commit. A run that
+  // does not finish its roster never reaches it. So the manifest is read at the
+  // start (it is small, and it says which wallets to skip) and the rows are
+  // fetched only once the whole-run gate has actually passed. The cost lands on
+  // the run that finishes, not on every run that does not.
+  let journal = null, resumed = null, resumedRows = null;
   const stale = journalRead && !journalRead.missing && journalRead.journal
     ? Journal.usable(journalRead.journal, state) : null;
   if (journalRead && !journalRead.missing && (journalRead.unreadable || (stale && !stale.ok))) {
@@ -339,29 +351,14 @@ async function acquire(input, deps) {
     try { await Store.clearJournal(journalRead.journal, { env: d.env, gh: d.gh, fetch: d.fetch }); }
     catch (e) { resumed.discard_error = e.message; }
   } else if (journalRead && journalRead.journal && stale && stale.ok) {
-    const candidate = journalRead.journal;
-    try {
-      resumedRows = await Store.readJournalRows(candidate, { env: d.env, gh: d.gh, fetch: d.fetch });
-      journal = candidate;
-      anchor = { ledger: Number(journal.anchor_ledger), close_ms: null,
-        close_iso: journal.anchor_close || null };
-      resumed = { adopted: true, report_id: journal.report_id, segments: journal.segments,
-        wallets_already_walked: journal.wallets.length, rows_recovered: resumedRows.length,
-        anchor_ledger: anchor.ledger, started_at: journal.started_at };
-      phase('journal', resumed);
-    } catch (e) {
-      // The manifest verified but its rows would not come back. That is a lost
-      // optimisation, exactly like a manifest that failed to verify — and the
-      // run must survive it. Killing the run here meant an unreadable segment
-      // stopped every attempt from that point on, which is the opposite of
-      // what a resume journal is for.
-      resumedRows = [];
-      resumed = { adopted: false, reason: 'JOURNAL_ROWS_UNREADABLE: ' + e.message,
-        report_id: candidate.report_id };
-      phase('journal', resumed);
-      try { await Store.clearJournal(candidate, { env: d.env, gh: d.gh, fetch: d.fetch }); }
-      catch (e2) { resumed.discard_error = e2.message; }
-    }
+    journal = journalRead.journal;
+    anchor = { ledger: Number(journal.anchor_ledger), close_ms: null,
+      close_iso: journal.anchor_close || null };
+    resumed = { adopted: true, report_id: journal.report_id, segments: journal.segments,
+      wallets_already_walked: journal.wallets.length,
+      rows_awaiting_load: (journal.row_shards || []).reduce((n, sh) => n + (Number(sh.rows) || 0), 0),
+      anchor_ledger: anchor.ledger, started_at: journal.started_at };
+    phase('journal', resumed);
   }
 
   // ── THE ROSTER AND THE STATE ARE DIFFERENT THINGS ───────────────────────
@@ -508,6 +505,10 @@ async function acquire(input, deps) {
   // bounded and every one is recorded: a wallet that took three tries is not
   // the same fact as one that answered first time.
   const attemptsPerWallet = Math.max(1, Math.min(Number(d.attempts) || 3, 5));
+  // Injectable so the suite can exercise the budget paths without spending a
+  // real twenty-five seconds to reach them.
+  const startReserveMs = Number.isFinite(Number(d.startReserveMs))
+    ? Math.max(0, Number(d.startReserveMs)) : START_RESERVE_MS;
   const worker = async () => {
     for (;;) {
       const index = cursor++;
@@ -517,7 +518,7 @@ async function acquire(input, deps) {
       // cut off mid-walk, and a partial walk proves nothing and cannot be
       // written down — it is simply thrown away. Stopping here turns that into
       // a flush and a resume that starts on this wallet next time.
-      if (reader.deadline && reader.deadline - Date.now() < START_RESERVE_MS) {
+      if (reader.deadline && reader.deadline - Date.now() < startReserveMs) {
         results[index] = { address: entry.address, status: 'NOT_ATTEMPTED',
           error: 'RUN_BUDGET_EXHAUSTED', attempts: 0, earlier_failures: [], rows: [] };
         if (typeof d.onWallet === 'function') {
@@ -564,8 +565,49 @@ async function acquire(input, deps) {
     }
   };
 
-  await Promise.all(Array.from({ length: concurrency }, worker));
-  await flushing;
+  // ── A RUN ALWAYS COMES BACK ─────────────────────────────────────────────
+  //
+  // Promise.all waits for every worker, and a worker waits for its wallet. One
+  // wallet that never returns therefore holds the entire run — measured live:
+  // 266 of 267 wallets finished, the last one hung, and the run produced NO
+  // result at all. Not a failure, not a partial: nothing. Every wallet that had
+  // been walked was already journalled and safe, and the operator still saw
+  // "ended with no result", which is the least useful thing a run can say.
+  //
+  // So the workers are RACED against the budget. When it expires we stop
+  // waiting; the stragglers are named as abandoned, nothing they were part-way
+  // through is journalled — a partial walk proves nothing — and the run returns
+  // and says what it did.
+  const workers = Promise.all(Array.from({ length: concurrency }, worker));
+  const budgetLeft = () => Math.max(0, (reader.deadline || 0) - Date.now());
+  // NOT unref'd. This timer is the only thing keeping the process alive while a
+  // hung wallet holds a promise that will never settle — an unref'd one lets
+  // Node decide the loop is empty and exit silently, which produces exactly the
+  // "no result at all" this whole mechanism exists to prevent. It is cleared
+  // the moment the workers win, so it never delays a healthy run.
+  let abandonTimer = null;
+  await Promise.race([
+    workers.then(() => { if (abandonTimer) clearTimeout(abandonTimer); }),
+    new Promise(resolve => { abandonTimer = setTimeout(resolve, budgetLeft() || 1); })
+  ]);
+  // Whatever is still unfinished is unfinished. Its worker may keep running in
+  // the background until the process ends; its result is not read either way.
+  const abandoned = [];
+  for (let i = 0; i < entries.length; i++) {
+    if (results[i]) continue;
+    results[i] = { address: entries[i].address, status: 'ABANDONED',
+      error: 'RUN_BUDGET_EXPIRED_MID_WALK', attempts: 1, earlier_failures: [], rows: [] };
+    abandoned.push(entries[i].address);
+  }
+  if (abandoned.length) phase('abandoned', { wallets: abandoned.length, addresses: abandoned });
+  // The flush still has to land, but it must not be able to hang the run
+  // either — the same lesson, one level down.
+  let flushTimer = null;
+  await Promise.race([
+    flushing.then(() => { if (flushTimer) clearTimeout(flushTimer); },
+                  () => { if (flushTimer) clearTimeout(flushTimer); }),
+    new Promise(resolve => { flushTimer = setTimeout(resolve, 20000); })
+  ]);
 
   const complete = results.filter(r => r && r.status === 'COMPLETE');
   const failed = results.filter(r => !r || r.status !== 'COMPLETE');
@@ -579,7 +621,8 @@ async function acquire(input, deps) {
     .concat(alreadyWalked.filter(w => w.reconciliation === B.STATUS.CONTRADICTION)
       .map(w => ({ address: w.address, reason: 'RECOVERED_FROM_JOURNAL',
         unexplained_drops: null })));
-  const rows = T.mergeSightings(resumedRows.concat(complete.flatMap(r => r.rows)));
+  // Only what THIS attempt walked. The journalled rows join at commit time.
+  const rows = T.mergeSightings(complete.flatMap(r => r.rows));
   // Every entry the state will carry: the ones recovered and the ones walked.
   const nextEntries = alreadyWalked.map(w => w.entry).concat(complete.map(r => r.next_entry));
 
@@ -618,6 +661,11 @@ async function acquire(input, deps) {
     // asked and would not answer" are different facts about a wallet and the
     // report must not merge them into one shrug.
     wallets_not_attempted: results.filter(r => r && r.status === 'NOT_ATTEMPTED').length,
+    // Different from "not attempted": this one was STARTED and did not come
+    // back before the budget expired. A part-walked wallet proves nothing and
+    // is journalled as nothing, but it is not the same fact as one never begun.
+    wallets_abandoned: abandoned.length,
+    abandoned: abandoned.slice(),
     // Grouped by CAUSE, not one entry per wallet. A hundred wallets sharing
     // one reason is one fact about the run, and listing it a hundred times
     // made the result three times its useful size — the same addresses already
@@ -649,10 +697,16 @@ async function acquire(input, deps) {
     journal_error: journalError,
     failed_wallets: failed.length,
     not_attempted_wallets: results.filter(r => r && r.status === 'NOT_ATTEMPTED').length,
+    abandoned_wallets: abandoned.length,
     balance_contradictions: contradicted.length,
     balance_contradiction_addresses: contradicted.map(r => r.address).sort(),
     balance_reconciled: complete.filter(r => r.reconciliation && r.reconciliation.status === B.STATUS.RECONCILED).length,
     transactions: rows.length,
+    // What this attempt walked, separate from what is banked. A resumed run
+    // that reports only its own rows is not reporting less evidence — the rest
+    // is journalled and joins at the commit — but the two must not be added up
+    // into one number that means neither.
+    transactions_journalled: resumed && resumed.adopted ? (resumed.rows_awaiting_load || 0) : 0,
     wallets_admitted: admitted.length,
     admitted_wallets: admitted.slice(),
     admitted_history_from_ledger: admitted.length ? coldFrom : null,
@@ -684,7 +738,31 @@ async function acquire(input, deps) {
       rows, wallets, freshness, ...(await saveWork()) };
   }
 
-  const built = buildShards(rows);
+  // The gate has passed, so this run WILL commit — which is the only moment
+  // the journalled rows are needed. Ninety seconds of reading them belongs
+  // here, once, and not at the start of every attempt that never gets this far.
+  let committedRows = rows;
+  if (journal && (journal.row_shards || []).length) {
+    phase('journal-load', { shards: journal.row_shards.length,
+      rows: resumed && resumed.rows_awaiting_load });
+    try {
+      resumedRows = await Store.readJournalRows(journal, { env: d.env, gh: d.gh, fetch: d.fetch });
+      committedRows = T.mergeSightings(resumedRows.concat(rows));
+    } catch (e) {
+      // The wallets are proven — their manifest entries say so and this run
+      // walked the rest — but their transactions cannot be produced. Committing
+      // the checkpoint without them would advance a coverage floor past
+      // evidence that is not in the repository, which is the one thing that
+      // must never happen. So the run refuses, discards the journal, and the
+      // next attempt walks those wallets again.
+      const saved = { journal_rows_unreadable: e.message };
+      try { await Store.clearJournal(journal, { env: d.env, gh: d.gh, fetch: d.fetch }); }
+      catch (e2) { saved.discard_error = e2.message; }
+      return { ...summary, committed: false, reason: 'JOURNAL_ROWS_UNREADABLE',
+        rows, wallets, freshness, ...saved };
+    }
+  }
+  const built = buildShards(committedRows);
   let committed;
   try {
     committed = await Store.commitRun({
@@ -711,7 +789,8 @@ async function acquire(input, deps) {
     throw err;
   }
 
-  return { ...summary, committed: true, rows, wallets, freshness, ...committed };
+  return { ...summary, committed: true, transactions: committedRows.length,
+    rows: committedRows, wallets, freshness, ...committed };
 }
 
 // ── The report window: what we already own, plus the edge just walked ──────
