@@ -268,6 +268,21 @@ function buildShards(rows) {
   return { files, shards };
 }
 
+// Wallets that did not complete, grouped by the reason they did not. Keeps
+// every address — nothing is summarised away — but says each reason once.
+function groupByCause(results) {
+  const byCause = new Map();
+  for (const r of results) {
+    const cause = (r && r.error) || 'UNKNOWN';
+    if (!byCause.has(cause)) byCause.set(cause, { error: cause, wallets: 0, addresses: [], max_attempts: 0 });
+    const bucket = byCause.get(cause);
+    bucket.wallets++;
+    bucket.addresses.push(r && r.address);
+    bucket.max_attempts = Math.max(bucket.max_attempts, (r && r.attempts) || 0);
+  }
+  return [...byCause.values()].sort((a, b) => b.wallets - a.wallets);
+}
+
 // ── The run ────────────────────────────────────────────────────────────────
 async function acquire(input, deps) {
   const d = deps || {};
@@ -324,14 +339,29 @@ async function acquire(input, deps) {
     try { await Store.clearJournal(journalRead.journal, { env: d.env, gh: d.gh, fetch: d.fetch }); }
     catch (e) { resumed.discard_error = e.message; }
   } else if (journalRead && journalRead.journal && stale && stale.ok) {
-    journal = journalRead.journal;
-    anchor = { ledger: Number(journal.anchor_ledger), close_ms: null,
-      close_iso: journal.anchor_close || null };
-    resumedRows = await Store.readJournalRows(journal, { env: d.env, gh: d.gh, fetch: d.fetch });
-    resumed = { adopted: true, report_id: journal.report_id, segments: journal.segments,
-      wallets_already_walked: journal.wallets.length, rows_recovered: resumedRows.length,
-      anchor_ledger: anchor.ledger, started_at: journal.started_at };
-    phase('journal', resumed);
+    const candidate = journalRead.journal;
+    try {
+      resumedRows = await Store.readJournalRows(candidate, { env: d.env, gh: d.gh, fetch: d.fetch });
+      journal = candidate;
+      anchor = { ledger: Number(journal.anchor_ledger), close_ms: null,
+        close_iso: journal.anchor_close || null };
+      resumed = { adopted: true, report_id: journal.report_id, segments: journal.segments,
+        wallets_already_walked: journal.wallets.length, rows_recovered: resumedRows.length,
+        anchor_ledger: anchor.ledger, started_at: journal.started_at };
+      phase('journal', resumed);
+    } catch (e) {
+      // The manifest verified but its rows would not come back. That is a lost
+      // optimisation, exactly like a manifest that failed to verify — and the
+      // run must survive it. Killing the run here meant an unreadable segment
+      // stopped every attempt from that point on, which is the opposite of
+      // what a resume journal is for.
+      resumedRows = [];
+      resumed = { adopted: false, reason: 'JOURNAL_ROWS_UNREADABLE: ' + e.message,
+        report_id: candidate.report_id };
+      phase('journal', resumed);
+      try { await Store.clearJournal(candidate, { env: d.env, gh: d.gh, fetch: d.fetch }); }
+      catch (e2) { resumed.discard_error = e2.message; }
+    }
   }
 
   // ── THE ROSTER AND THE STATE ARE DIFFERENT THINGS ───────────────────────
@@ -588,8 +618,11 @@ async function acquire(input, deps) {
     // asked and would not answer" are different facts about a wallet and the
     // report must not merge them into one shrug.
     wallets_not_attempted: results.filter(r => r && r.status === 'NOT_ATTEMPTED').length,
-    unavailable: failed.map(r => ({ address: r && r.address,
-      error: (r && r.error) || 'UNKNOWN', attempts: (r && r.attempts) || 0 })),
+    // Grouped by CAUSE, not one entry per wallet. A hundred wallets sharing
+    // one reason is one fact about the run, and listing it a hundred times
+    // made the result three times its useful size — the same addresses already
+    // appear, once, in the per-wallet detail.
+    unavailable: groupByCause(failed),
     contradicted: contradicted.slice()
   };
   const wallets = alreadyWalked.map(w => ({
@@ -627,7 +660,7 @@ async function acquire(input, deps) {
     roster_wallets: rosterList ? rosterList.length : null,
     watched_not_in_roster: rosterAbsent.slice().sort(),
     xrpl_requests: reader.stats.requests,
-    failures: failed.map(r => ({ address: r && r.address, error: (r && r.error) || 'UNKNOWN' }))
+    failures: groupByCause(failed)
   };
 
   // 4. The gate. Anything short of a whole, uncontradicted run commits nothing,
@@ -718,4 +751,4 @@ async function readReportWindow(input, deps) {
     from_stored: stored.events.length, from_this_run: fresh.length, in_window: events.length };
 }
 
-module.exports = { acquire, walkWallet, buildShards, readReportWindow, PAGE_LIMIT };
+module.exports = { acquire, walkWallet, buildShards, readReportWindow, groupByCause, PAGE_LIMIT };

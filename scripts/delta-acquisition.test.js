@@ -21,6 +21,9 @@ const fs = require('fs');
 const zlib = require('zlib');
 const ROOT = path.join(__dirname, '..');
 const D = require(path.join(ROOT, 'src/db/delta-acquisition.js'));
+// The grouper, reached through the module so the ordering rule is tested
+// directly rather than only through a run that happens to have one cause.
+const groupOf = rows => D.groupByCause(rows);
 const State = require(path.join(ROOT, 'src/db/evidence-state.js'));
 const Store = require(path.join(ROOT, 'src/db/github-store.js'));
 
@@ -91,10 +94,15 @@ function fakePeer(options) {
 }
 
 // The same fake GitHub the store suite uses, trimmed to what a run needs.
+// GitHub's documented ceiling for the contents API. Small here so a test can
+// cross it without building a megabyte.
+const CONTENTS_API_LIMIT = 1024;
+
 function fakeGithub(files) {
   const calls = [];
   const blobs = new Map();
-  const state = { headFiles: new Map(Object.entries(files || {})), head: 'c0', n: 0 };
+  const state = { headFiles: new Map(Object.entries(files || {})), head: 'c0', n: 0,
+    blobBytes: new Map() };
   const commits = new Map([['c0', { files: new Map(state.headFiles) }]]);
   const gh = async (method, p, body, allow404) => {
     calls.push({ method, path: p });
@@ -102,7 +110,23 @@ function fakeGithub(files) {
     if (method === 'GET' && /^\/contents\//.test(p)) {
       const file = decodeURIComponent(p.slice('/contents/'.length).split('?')[0]);
       if (!state.headFiles.has(file)) { if (allow404) return null; throw Object.assign(new Error('404'), { status: 404 }); }
-      return { content: Buffer.from(state.headFiles.get(file), 'utf8').toString('base64') };
+      // GitHub's contents API carries bytes only to 1 MB. Past that it
+      // answers with the metadata and an EMPTY body — no error. The fake does
+      // the same, because a fake that always returns the bytes cannot catch
+      // the bug where the real one does not.
+      const buf = Buffer.isBuffer(state.headFiles.get(file))
+        ? state.headFiles.get(file) : Buffer.from(state.headFiles.get(file), 'utf8');
+      const sha = 'blob-' + file;
+      state.blobBytes.set(sha, buf);
+      if (buf.length > CONTENTS_API_LIMIT) return { sha, size: buf.length, encoding: 'none', content: '' };
+      return { sha, size: buf.length, encoding: 'base64', content: buf.toString('base64') };
+    }
+    // The blobs API, which carries what the contents API would not.
+    if (method === 'GET' && /^\/git\/blobs\//.test(p)) {
+      const sha = decodeURIComponent(p.slice('/git/blobs/'.length));
+      const buf = state.blobBytes.get(sha);
+      if (!buf) throw Object.assign(new Error('404'), { status: 404 });
+      return { sha, size: buf.length, encoding: 'base64', content: buf.toString('base64') };
     }
     if (method === 'GET' && /^\/git\/commits\//.test(p)) return { tree: { sha: 't0' } };
     if (method === 'POST' && p === '/git/blobs') {
@@ -258,7 +282,8 @@ async function main() {
     out6.complete_wallets === 2 && out6.target_wallets === 3,
     { complete: out6.complete_wallets, target: out6.target_wallets });
   check('the failure is reported with its cause',
-    out6.failures.length === 1 && /INJECTED_WALK_FAILURE/.test(out6.failures[0].error), out6.failures);
+    out6.failures.length === 1 && /INJECTED_WALK_FAILURE/.test(out6.failures[0].error) &&
+    out6.failures[0].wallets === 1 && out6.failures[0].addresses.join(',') === 'rBob', out6.failures);
   check('the checkpoint did not move',
     JSON.parse(gh6.files().get(Store.STATE_PATH).toString('utf8')).state_version === 1);
   check('the two wallets that did prove were written down, and the failed one was not',
@@ -345,9 +370,12 @@ async function main() {
   check('the freshness block says how many proved and how many did not',
     f9.wallets_proven === 2 && f9.wallets_unavailable === 1,
     { proven: f9.wallets_proven, unavailable: f9.wallets_unavailable });
+  // Grouped by cause, but nothing is summarised away: every address is still
+  // named. A hundred wallets sharing one reason is one fact, not a hundred.
   check('it names the wallet that could not be reached, and why',
     Array.isArray(f9.unavailable) && f9.unavailable.length === 1 &&
-    f9.unavailable[0].address === 'rBob' && /MALFORMED/.test(f9.unavailable[0].error), f9.unavailable);
+    f9.unavailable[0].addresses.join(',') === 'rBob' &&
+    /MALFORMED/.test(f9.unavailable[0].error), f9.unavailable);
   check('and states plainly that the checkpoint does not advance',
     f9.checkpoint_advances === false, f9.checkpoint_advances);
   check('per-wallet proof is reported so the report can label each one',
@@ -680,14 +708,25 @@ async function main() {
   // Swap the rows for different ones. The journal still says they hash to what
   // was written, and that disagreement is the whole point of recording it.
   ghZ.files().set(rowPath, zlib.gzipSync(Buffer.from('{"hash":"FORGED"}\n', 'utf8')));
-  let threwZ = null;
-  await D.acquire({ report_id: 'SW-20260911-AC124' },
-    { env: ENV, gh: ghZ.gh, reader: fakePeer({ transactions: crashTx, balances: BAL }).reader })
-    .catch(e => { threwZ = e.message; });
+  const peerZ = fakePeer({ transactions: crashTx, balances: BAL });
+  const outZ = await D.acquire({ report_id: 'SW-20260911-AC124' },
+    { env: ENV, gh: ghZ.gh, reader: peerZ.reader });
   check('rows that are not the bytes the journal recorded are refused, not used',
-    /JOURNAL_SHARD_HASH_MISMATCH/.test(String(threwZ)), threwZ);
-  check('and the forged rows never reached the checkpoint',
-    JSON.parse(ghZ.files().get(Store.STATE_PATH).toString('utf8')).state_version === 1);
+    outZ.resumed && outZ.resumed.adopted === false &&
+    /JOURNAL_SHARD_HASH_MISMATCH/.test(outZ.resumed.reason), outZ.resumed);
+  // And the run SURVIVES it. An unreadable segment used to throw out of
+  // acquire() and kill every attempt from that point on — which is the exact
+  // opposite of what a resume journal is for. It is a lost optimisation, so
+  // the wallets are simply walked again.
+  check('the run completes anyway, walking those wallets itself',
+    outZ.committed === true && outZ.complete_wallets === 3, outZ.reason);
+  check('and it walked every wallet rather than trusting any recovered row',
+    outZ.wallets_recovered_from_journal === 0 &&
+    peerZ.asked.filter(c => c.command === 'account_tx').length === 3);
+  check('the forged rows never reached the checkpoint',
+    !JSON.stringify(JSON.parse(ghZ.files().get(Store.STATE_PATH).toString('utf8'))).includes('FORGED'));
+  check('and the bad journal is discarded rather than refused again every run',
+    !ghZ.files().get(Store.JOURNAL_PATH));
 
   console.log('\n21. a journal is refused rather than trusted');
   /* Every refusal here costs one morning of re-walking. Every refusal NOT here
@@ -847,6 +886,80 @@ async function main() {
     outPend.wallets.filter(w => w.status === 'NOT_ATTEMPTED').every(w => w.attempts === 0));
   check('the run still reports what it did prove',
     outPend.committed === false && outPend.complete_wallets >= 1, outPend.reason);
+
+  console.log('\n26. a hundred wallets with one cause is one fact, not a hundred');
+  /* A real result listed the same 105 addresses three times — once in
+     failures, once in freshness.unavailable, once in wallets_detail — and was
+     three times the size it needed to be to say the same thing. */
+  const peerG = fakePeer({ transactions: quiet(), balances: BAL, pendingFrom: 1 });
+  const outG = await D.acquire({ report_id: 'SW-20260911-AJ123' },
+    { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh, reader: peerG.reader, concurrency: 1 });
+  check('wallets sharing a cause are reported under it once',
+    outG.failures.length === 1 && outG.failures[0].error === 'RUN_BUDGET_EXHAUSTED',
+    outG.failures.map(f => f.error));
+  check('with the count, so nobody has to measure an array to learn it',
+    outG.failures[0].wallets === outG.not_attempted_wallets, outG.failures[0].wallets);
+  check('and EVERY address still named — grouping is not summarising away',
+    outG.failures[0].addresses.length === outG.not_attempted_wallets &&
+    outG.failures[0].addresses.every(a => typeof a === 'string' && a));
+  check('every wallet still has its own record in the detail',
+    outG.wallets.filter(w => w.status === 'NOT_ATTEMPTED').length === outG.not_attempted_wallets);
+  check('two different causes stay two groups, ordered by how many they hit',
+    (() => {
+      const mixed = groupOf([{ error: 'A' }, { error: 'B' }, { error: 'B' }]);
+      return mixed.length === 2 && mixed[0].error === 'B' && mixed[0].wallets === 2;
+    })());
+
+  console.log('\n27. a journal segment bigger than the contents API can carry');
+  /* THE BUG THIS EXISTS FOR. GitHub's contents API returns file bytes only up
+     to 1 MB; past that it answers with the metadata and an EMPTY body — no
+     error, no 404. Decoding that gives an empty buffer, which then fails the
+     hash check that was applied to it.
+
+     Live: a resume died with JOURNAL_SHARD_HASH_MISMATCH on segment 7, which
+     held several thousand transactions. The hash check was right. The read was
+     wrong. */
+  const bulky = { rAlice: [], rCarol: [], rBob: [] };
+  for (let i = 0; i < 120; i++) {
+    bulky.rBob.push({ ledger: ANCHOR - 900 + i, amount: '1000000',
+      before: '20000000000000', after: '20000000000000', hash: hashFor('rBulk', i) });
+  }
+  const ghBig = fakeGithub(seeded(ANCHOR - 1000));
+  const outBig1 = await D.acquire({ report_id: 'SW-20260911-AK123' },
+    { env: ENV, gh: ghBig.gh, reader: fakePeer({ transactions: bulky, balances: BAL, failOn: 'rCarol' }).reader,
+      concurrency: 1 });
+  check('the first attempt journals a segment past the contents-API limit',
+    outBig1.journal_wallets >= 1 &&
+    JSON.parse(ghBig.files().get(Store.JOURNAL_PATH).toString('utf8'))
+      .row_shards.some(sh => ghBig.files().get(sh.path).length > CONTENTS_API_LIMIT),
+    JSON.parse(ghBig.files().get(Store.JOURNAL_PATH).toString('utf8'))
+      .row_shards.map(sh => ghBig.files().get(sh.path).length));
+  const peerBig = fakePeer({ transactions: bulky, balances: BAL });
+  const outBig2 = await D.acquire({ report_id: 'SW-20260911-AK124' },
+    { env: ENV, gh: ghBig.gh, reader: peerBig.reader, concurrency: 1 });
+  check('the resume reads it through the blobs API and adopts it',
+    outBig2.resumed && outBig2.resumed.adopted === true, outBig2.resumed);
+  check('every journalled row came back — none lost to the truncated read',
+    outBig2.resumed.rows_recovered === 120, outBig2.resumed.rows_recovered);
+  check('and it commits, with the recovered transactions in the evidence',
+    outBig2.committed === true && outBig2.transactions === 120,
+    { committed: outBig2.committed, tx: outBig2.transactions, reason: outBig2.reason });
+  check('the wallet whose rows were recovered was not walked a second time',
+    !peerBig.asked.some(c => c.command === 'account_tx' && c.account === 'rBob'));
+
+  // The same ceiling applies to committed day shards, which report assembly
+  // reads. A busy day is far larger than a journal segment.
+  const dayShard = [...ghBig.files().keys()]
+    .find(k => /^evidence\/20.*events.*\.gz$/.test(k));
+  const dayKey = dayShard && dayShard.split('/').slice(1, 4).join('-');
+  check('the committed day shard is itself past the limit — the check is not vacuous',
+    !!dayShard && ghBig.files().get(dayShard).length > CONTENTS_API_LIMIT,
+    { path: dayShard, bytes: dayShard && ghBig.files().get(dayShard).length,
+      limit: CONTENTS_API_LIMIT });
+  const readBack = await Store.readDays([dayKey], { env: ENV, gh: ghBig.gh });
+  check('and report assembly reads it back whole rather than empty',
+    readBack.events.length === 120 && readBack.missing.length === 0,
+    { events: readBack.events.length, missing: readBack.missing });
 
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA ACQUISITION CHECKS PASS'));
   process.exit(fail ? 1 : 0);

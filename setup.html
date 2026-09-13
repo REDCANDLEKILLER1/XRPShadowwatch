@@ -145,7 +145,12 @@ wire('b3', 'o3', async slot => {
     // The copy button exists from the FIRST second, not after the run ends. A
     // run that is stuck is exactly the run whose log has to travel, and waiting
     // for a result that never comes is not a way to get it off a phone.
-    '<button class="copy" id="cp3">Copy debug log</button>' +
+    // Two buttons, two jobs. The summary is what a person pastes into a
+    // conversation; the file is what they attach when the summary is not
+    // enough. Pasting the whole record was costing more to read than it was
+    // worth — the same 105 addresses appeared in it three times.
+    '<button class="copy" id="cp3">Copy summary</button>' +
+    '<button class="copy" id="dl3" style="margin-left:8px">Download full log (JSON)</button>' +
     '<div class="log" id="l3"><div class="g">report_id ' + id + '</div></div>';
   const v = document.getElementById('v3'), bar = document.getElementById('p3'), log = document.getElementById('l3');
   const set = (id2, n) => { document.getElementById(id2).textContent = n; };
@@ -162,22 +167,100 @@ wire('b3', 'o3', async slot => {
     // The phone has to hold this; older lines are not worth the memory.
     while (log.childNodes.length > 400) log.removeChild(log.firstChild);
   };
+  // ── THE SUMMARY ─────────────────────────────────────────────────────────
+  //
+  // Everything a reader needs to say what the run did, in about ten lines.
+  // Deliberately not a truncation of the full record: it is the questions
+  // someone actually asks — how much proved, how much is left, where the time
+  // went, which server misbehaved — answered once each.
+  const summaryText = () => {
+    const secs = ((Date.now() - started) / 1000).toFixed(0);
+    const n = x => (x === null || x === undefined) ? '—' : Number(x).toLocaleString();
+    const out = [];
+    out.push(id + ' · ' + secs + 's · ' + (done
+      ? (done.t === 'error' ? 'ERROR ' + done.error
+        : (done.committed ? 'COMMITTED' : 'NOT committed (' + done.reason + ')'))
+      : 'still running'));
+    if (done && done.t !== 'error') {
+      out.push('proven ' + n(done.complete_wallets) + '/' + n(done.target_wallets) +
+        '  (walked ' + n(done.wallets_walked_this_attempt) +
+        ', recovered ' + n(done.wallets_recovered_from_journal) + ')' +
+        '  not reached ' + n(done.not_attempted_wallets) +
+        '  failed ' + n(done.failed_wallets));
+      out.push('roster ' + n(done.roster_wallets) + '  admitted ' + n(done.wallets_admitted) +
+        '  awaiting ' + n(done.wallets_awaiting_admission));
+      out.push(n(done.transactions) + ' tx · ' + n(done.xrpl_requests) + ' XRPL reads · anchor ' +
+        n(done.anchor_ledger));
+      out.push('balance: ' + n(done.balance_reconciled) + ' reconciled, ' +
+        n(done.balance_contradictions) + ' contradicted' +
+        (Number(done.balance_reconciled) === 0 && Number(done.complete_wallets) > 0
+          ? '   [NOT ARMED — no prior balances pinned yet]' : ''));
+      if (done.journal_wallets) out.push('saved: ' + n(done.journal_segments) +
+        ' segments, ' + n(done.journal_wallets) + ' wallets' +
+        (done.journal_error ? '  JOURNAL ERROR: ' + done.journal_error : ''));
+      if (done.resumed) out.push('resumed: ' + (done.resumed.adopted
+        ? done.resumed.report_id + ' (' + n(done.resumed.wallets_already_walked) + ' wallets, ' +
+          n(done.resumed.rows_recovered) + ' rows)'
+        : 'DISCARDED — ' + done.resumed.reason));
+      if (done.xrpl && done.xrpl.lanes) {
+        out.push('lanes: ' + done.xrpl.lanes.map(l => l.endpoint.replace('wss://', '') +
+          ' ' + l.requests + (l.refusals ? '/' + l.refusals + 'ref' : '') +
+          (l.retired ? ' RETIRED' : '')).join(' · '));
+      }
+      // Error KINDS with counts, not one line per wallet. A hundred wallets
+      // sharing one cause is one fact, not a hundred.
+      const kinds = {};
+      for (const f of (done.failures || [])) kinds[f.error] = (kinds[f.error] || 0) + 1;
+      const kindList = Object.entries(kinds).sort((a, b) => b[1] - a[1]);
+      out.push('errors: ' + (kindList.length
+        ? kindList.map(([k, v]) => v + '× ' + k).join(' · ') : 'none'));
+    } else if (!done) {
+      out.push('proved ' + ok + ' · failed ' + bad + ' · contradicted ' + con +
+        ' · skipped ' + skipped + ' · ' + tx + ' tx');
+      out.push('last: ' + (raw.length ? raw[raw.length - 1].slice(0, 200) : '—'));
+    }
+    return out.join('\n');
+  };
+
   const copyBtn = document.getElementById('cp3');
   copyBtn.onclick = async () => {
-    const text = raw.join('\n') + '\n--- ' + ((Date.now() - started) / 1000).toFixed(0) +
-      's elapsed · proved ' + ok + ' failed ' + bad + ' contradicted ' + con + ' tx ' + tx +
-      (done ? '\n--- result\n' + JSON.stringify(done, null, 2) : '\n--- still running, no result yet');
-    try { await navigator.clipboard.writeText(text); copyBtn.textContent = 'Copied ' + raw.length + ' lines'; }
+    const text = summaryText();
+    try { await navigator.clipboard.writeText(text); copyBtn.textContent = 'Copied'; }
     catch (_) {
-      // Clipboard access is refused in some mobile contexts. A textarea the
-      // operator can select by hand is worse than a button and better than
-      // nothing, which is what they had.
+      // Clipboard access is refused in some contexts. A textarea to select by
+      // hand is worse than a button and better than nothing.
       const ta = document.createElement('textarea');
       ta.value = text; ta.rows = 12; ta.style.width = '100%';
       copyBtn.parentNode.insertBefore(ta, copyBtn.nextSibling);
       ta.select(); copyBtn.textContent = 'Select the box below and copy';
     }
-    setTimeout(() => { copyBtn.textContent = 'Copy debug log'; }, 4000);
+    setTimeout(() => { copyBtn.textContent = 'Copy summary'; }, 4000);
+  };
+
+  // ── THE FULL RECORD, AS A FILE ──────────────────────────────────────────
+  //
+  // Every streamed line verbatim plus the final result, compact rather than
+  // pretty-printed. A file is attached, not pasted, so nothing is lost to
+  // make it smaller and nothing has to be read that is not needed.
+  const dlBtn = document.getElementById('dl3');
+  dlBtn.onclick = () => {
+    const record = {
+      report_id: id, page: location.pathname,
+      captured_at: new Date().toISOString(),
+      elapsed_s: Number(((Date.now() - started) / 1000).toFixed(1)),
+      finished: !!done,
+      counters: { proved: ok, failed: bad, contradicted: con, not_reached: skipped, transactions: tx },
+      result: done || null,
+      stream: raw.map(line => { try { return JSON.parse(line); } catch (_) { return line; } })
+    };
+    const blob = new Blob([JSON.stringify(record)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'shadowwatch-' + id + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    dlBtn.textContent = 'Downloaded';
+    setTimeout(() => { dlBtn.textContent = 'Download full log (JSON)'; }, 4000);
   };
 
   try {
@@ -304,17 +387,11 @@ wire('b3', 'o3', async slot => {
         ' wallets saved — press Run again to continue from here' : '');
   }
 
+  // The SUMMARY on the page, not the raw record. The full thing is one tap
+  // away as a file; printing three hundred wallet objects here only made the
+  // page unreadable and the useful lines harder to find.
   const pre = document.createElement('pre');
-  pre.textContent = JSON.stringify(done, null, 2);
+  pre.textContent = summaryText();
   el.appendChild(pre);
-  // Selecting JSON by hand on a phone is miserable, and this is the thing that
-  // has to reach whoever is diagnosing the run.
-  const copy = document.createElement('button');
-  copy.className = 'copy'; copy.textContent = 'Copy result';
-  copy.onclick = async () => {
-    try { await navigator.clipboard.writeText(JSON.stringify(done, null, 2)); copy.textContent = 'Copied'; }
-    catch (_) { copy.textContent = 'Select the text above to copy'; }
-  };
-  el.appendChild(copy);
 });
 </script>

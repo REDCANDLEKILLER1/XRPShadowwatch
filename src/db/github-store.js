@@ -50,11 +50,46 @@ function target(env) { return A.evidenceTarget(env || process.env); }
 
 // Read one file from the branch at a given ref. Returns null for 404 — an
 // absent state is a real answer (nothing has been committed yet), not an error.
-async function readFile(gh, branch, path, ref) {
+// ── READING A FILE THAT MIGHT BE BIG ───────────────────────────────────────
+//
+// The contents API returns file bytes only up to 1 MB. Past that it answers
+// with the metadata and an EMPTY body — no error, no 404, just nothing where
+// the content should be. Decoding that gives an empty buffer, which then fails
+// whatever check was applied to it.
+//
+// That is exactly how a resume broke: a journal segment holding several
+// thousand transactions gzipped past a megabyte, came back empty, and failed
+// its own hash. The hash check was right; the read was wrong.
+//
+// So a short read falls through to the git blobs API, which carries the same
+// bytes up to 100 MB. The metadata response already names the blob, so this
+// costs one extra request only on the files that need it.
+async function readBytes(gh, branch, path, ref) {
   const at = ref ? '?ref=' + encodeURIComponent(ref) : '?ref=' + encodeURIComponent(branch);
   const file = await gh('GET', '/contents/' + path + at, undefined, true);
   if (!file) return null;
-  return Buffer.from(file.content || '', 'base64').toString('utf8');
+  // An explicit non-base64 encoding is GitHub saying "the bytes are not here"
+  // (it answers `encoding: "none"` past its size limit). An ABSENT encoding is
+  // not that claim, and treating it as one would have quietly broken every
+  // caller that worked before.
+  let bytes = (file.encoding && file.encoding !== 'base64')
+    ? Buffer.alloc(0) : Buffer.from(file.content || '', 'base64');
+  const expected = Number(file.size);
+  if (Number.isFinite(expected) && bytes.length !== expected) {
+    if (!file.sha) throw new Error('GITHUB_CONTENT_TRUNCATED: ' + path);
+    const blob = await gh('GET', '/git/blobs/' + file.sha);
+    bytes = Buffer.from(blob.content || '', (blob.encoding === 'base64') ? 'base64' : 'utf8');
+    // If it STILL does not match, the file is not what the index says it is,
+    // and guessing which of the two is right is not this function's business.
+    if (bytes.length !== expected) throw new Error('GITHUB_CONTENT_TRUNCATED: ' + path +
+      ' (' + bytes.length + ' of ' + expected + ' bytes)');
+  }
+  return bytes;
+}
+
+async function readFile(gh, branch, path, ref) {
+  const bytes = await readBytes(gh, branch, path, ref);
+  return bytes === null ? null : bytes.toString('utf8');
 }
 
 // THE RUNTIME READ. One request, one file, verified before it is believed.
@@ -105,9 +140,8 @@ async function readJournalRows(journal, deps) {
   const zlib = require('zlib');
   const rows = [];
   for (const shard of ((journal && journal.row_shards) || [])) {
-    const file = await gh('GET', '/contents/' + shard.path + '?ref=' + encodeURIComponent(branch), undefined, true);
-    if (!file) throw new Error('JOURNAL_SHARD_MISSING: ' + shard.path);
-    const packed = Buffer.from(file.content || '', 'base64');
+    const packed = await readBytes(gh, branch, shard.path);
+    if (packed === null) throw new Error('JOURNAL_SHARD_MISSING: ' + shard.path);
     if (Journal.sha256(packed) !== shard.sha256) throw new Error('JOURNAL_SHARD_HASH_MISMATCH: ' + shard.path);
     const text = zlib.gunzipSync(packed).toString('utf8');
     for (const line of text.split('\n')) { if (line) rows.push(JSON.parse(line)); }
@@ -284,9 +318,11 @@ async function readDays(days, deps) {
     let found = 0;
     for (const suffix of candidates) {
       const path = base + suffix;
-      const file = await gh('GET', '/contents/' + path + '?ref=' + encodeURIComponent(branch), undefined, true);
-      if (!file) { if (suffix === '/events.ndjson.gz') continue; break; }
-      const text = zlib.gunzipSync(Buffer.from(file.content || '', 'base64')).toString('utf8');
+      // Day shards are routinely larger than a megabyte — a busy day can hold
+      // tens of thousands of events — so they go through the same path.
+      const packed = await readBytes(gh, branch, path);
+      if (packed === null) { if (suffix === '/events.ndjson.gz') continue; break; }
+      const text = zlib.gunzipSync(packed).toString('utf8');
       for (const line of text.split('\n')) { if (line) out.events.push(JSON.parse(line)); }
       out.files.push(path); found++;
     }
@@ -295,6 +331,6 @@ async function readDays(days, deps) {
   return out;
 }
 
-module.exports = { STATE_PATH, JOURNAL_PATH, historyPath, runPath, journalRowPath,
+module.exports = { STATE_PATH, JOURNAL_PATH, historyPath, runPath, journalRowPath, readBytes,
   readState, commitRun, seedGenesis, readDays,
   readJournal, readJournalRows, appendJournal, clearJournal };
