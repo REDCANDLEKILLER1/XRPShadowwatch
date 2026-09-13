@@ -23,11 +23,20 @@ async function main(){
     console.log('PASS raw transaction and equal-node-count metadata conflicts are refused before writes; key order is harmless');
   }finally{db.transaction=txBoundary;}
   const selected=roster.select();
-  assert.equal(selected.accounts.length,255);
+  // Not a pinned count — the roster grows, and a test that has to be edited
+  // every time it does teaches people to edit it without thinking. What must
+  // never happen is the roster SHRINKING below the wallets already proven, so
+  // that is the floor, and the rest is checked for what it actually has to be:
+  // every entry a well-formed XRPL address, no duplicates, identity covering
+  // the whole list regardless of order.
+  const rosterSize=selected.accounts.length;
+  assert.ok(rosterSize>=255,'roster shrank to '+rosterSize+'; 255 wallets are already proven');
+  assert.equal(new Set(selected.accounts).size,rosterSize,'duplicate address in the roster');
+  assert.ok(selected.accounts.every(a=>/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(a)),'malformed address in the roster');
   assert.equal(selected.hash,roster.identity([...selected.accounts].reverse()));
   assert.throws(()=>roster.select([...selected.accounts,'rUnknown']),/ROSTER_MISMATCH/);
   assert.throws(()=>roster.select([selected.accounts[0],selected.accounts[0]]),/ROSTER_MISMATCH/);
-  console.log('PASS canonical roster identity covers the exact 255 accounts');
+  console.log('PASS canonical roster identity covers all '+rosterSize+' accounts and never drops below 255');
   const close=new Date('2026-09-08T00:00:00Z');
   const row=C.normalizeCoverage({scan_coverage_from_close:close,scan_coverage_through_close:close.toISOString(),evidence_retained_from_close:null});
   assert.equal(row.scan_coverage_from_close_ms,close.getTime());

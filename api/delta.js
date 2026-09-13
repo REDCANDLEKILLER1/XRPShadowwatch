@@ -67,6 +67,18 @@ module.exports = async function handler(req, res) {
     // Idempotent and self-refusing: genesis happens once, a roster that no
     // longer matches the sealed one is refused, and nothing is overwritten.
     if (input.action === 'seed') {
+      // Already seeded? Say so before walking every receipt in the archive.
+      // Genesis happens once, and after the roster grows past the sealed run
+      // that seeded it the receipt comparison below would refuse — which is
+      // correct, but reads as a failure when the answer is simply "done".
+      const already = await Store.readState({});
+      if (!already.missing) {
+        return res.json({ status: 'ALREADY_SEEDED', branch: already.branch,
+          state_version: already.state.state_version,
+          state_sha256: already.state.state_sha256,
+          anchor_ledger: already.state.anchor_ledger,
+          wallets: already.state.wallet_count });
+      }
       // Reading receipts accepts either token: one fine-grained token scoped
       // to both repositories is the normal setup, and demanding two separate
       // secrets to perform one read is a configuration trap rather than a
@@ -133,7 +145,12 @@ module.exports = async function handler(req, res) {
     const job = {
       report_id: input.report_id,
       scan_id: typeof input.scan_id === 'string' ? input.scan_id : null,
-      sealed_at: typeof input.sealed_at === 'string' ? input.sealed_at : null
+      sealed_at: typeof input.sealed_at === 'string' ? input.sealed_at : null,
+      // The roster comes from committed source, read HERE and never from the
+      // request. A caller who could name the roster could name any address and
+      // have the run admit it to the watchlist — so the client does not get to
+      // say who is watched, the repository does.
+      roster: roster.select().accounts
     };
     const concurrency = Number(input.concurrency) || 4;
 

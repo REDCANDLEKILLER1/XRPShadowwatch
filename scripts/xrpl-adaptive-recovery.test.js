@@ -70,20 +70,36 @@ async function main() {
   await page.waitForFunction(() => window.SW_RUN_ANCHOR && window.SW_REPORT_SCAN_TUNING_20260816 && window.SW_XRPL_RESILIENCE_20260817);
   const roster = await page.evaluate(async () => {
     const socket = await connectXRPL(); state._sock = socket; state._transportEpoch = 1;
+    // A CAP, not the roster size. This test drives a real scan through a fake
+    // socket and its runtime is linear in the wallet count, so it caps the list
+    // to keep itself bounded as the production roster grows. Every assertion
+    // below is against the cap that actually held, never against the roster.
+    //
+    // Layer 38 re-asserts its promoted wallet every 200 ms for eight seconds,
+    // so a truncation that removes it is undone — correctly — a moment later.
+    // Settling for one cycle before reading the cap means the scan runs against
+    // a list that is not still changing under it; without the wait the wallet
+    // arrives MID-SCAN and shows up as one NOT_CHECKED wallet, which looks like
+    // a coverage defect and is really a racing fixture.
     WATCHLIST.splice(255);
+    await new Promise(r => setTimeout(r, 600));
+    const capped = WATCHLIST.length;
     await scanWallets(socket);
     const pack = buildPack({}); state.pack = pack;
     const report = buildPublicReport(pack);
     return { coverage: state.txScanCoverage, rows: state.txs.length, unique: new Set(state.txs.map(t => t.account + ':' + t.hash)).size,
-      recovery: state.xrplRecovery, early: testPeer.early, report, checked: state.wallets.filter(w => w.status === 'CHECKED').length,
+      recovery: state.xrplRecovery, early: testPeer.early, report, capped,
+      checked: state.wallets.filter(w => w.status === 'CHECKED').length,
       anchors: [...new Set(testPeer.sent.filter(q => q.command === 'account_tx').map(q => q.ledger_index_max))] };
   });
   console.log('roster result', JSON.stringify({ ...roster, report: undefined, recovery: { ...roster.recovery, events: undefined } }));
-  assert.equal(roster.checked, 255);
-  assert.equal(roster.coverage.complete_wallets, 255);
+  assert.ok(roster.capped >= 255 && roster.capped <= 256,
+    'the cap held: ' + roster.capped + ' wallets scanned');
+  assert.equal(roster.checked, roster.capped);
+  assert.equal(roster.coverage.complete_wallets, roster.capped);
   assert.equal(roster.coverage.failed_wallets, 0);
   assert.equal(roster.coverage.full_window_complete, true);
-  assert.equal(roster.rows, 255 * 133);
+  assert.equal(roster.rows, roster.capped * 133);
   assert.equal(roster.unique, roster.rows);
   assert.equal(roster.early, 0, 'nothing dispatched inside the supplied cooldown');
   assert.deepEqual(roster.anchors, [110000000]);

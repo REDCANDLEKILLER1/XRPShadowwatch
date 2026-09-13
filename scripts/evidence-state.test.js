@@ -166,7 +166,127 @@ const serialized = S.serialize(S.genesis(
   { anchor_ledger: 100000000 }));
 const bytes = Buffer.byteLength(serialized, 'utf8');
 check('255 wallets of state is a few hundred kB at most', bytes < 300 * 1024, bytes);
+check('and 408 wallets still is — the roster grew, the file did not stop being readable',
+  Buffer.byteLength(S.serialize(S.genesis(
+    Array.from({ length: 408 }, (_, i) => ({ address: 'r' + String(i).padStart(33, '0'), scan_coverage_through: 100000000 })),
+    { anchor_ledger: 100000000 })), 'utf8') < 500 * 1024);
 check('it is valid JSON and round-trips', S.digest(JSON.parse(serialized)) === JSON.parse(serialized).state_sha256);
+
+console.log('\n8. a roster that grows — admission, and everything it refuses');
+/* ── WHY THIS SECTION EXISTS ────────────────────────────────────────────────
+   The roster grew from 255 to 408. Before this, advance() rejected any wallet
+   it had not seen before with RUN_WALLET_NOT_IN_STATE — which meant the state
+   could never learn about a new wallet at all, and adding one would have failed
+   every run rather than bootstrapping anything.
+
+   Opening that door is the dangerous part. A wallet entering the state is
+   entering the set of things the report may speak about, so it enters on
+   stricter terms than a wallet already there:
+
+     it must be NAMED by the run as an admission — not merely present
+     it proves only THIS run's anchor, never a checkpoint it did not earn
+     it records the horizon it actually read from, so the file itself says
+       where this wallet's evidence begins
+     and it may not be used to rewrite what is already known about anyone else
+──────────────────────────────────────────────────────────────────────────── */
+const ADMIT = (over) => run(Object.assign({
+  target_wallets: 4, complete_wallets: 4,
+  admitted_wallets: ['rDave'],
+  wallets: run().wallets.concat([{ address: 'rDave', last_proven_ledger: 200,
+    last_observed_tx_ledger: 180, last_observed_tx_hash: 'D'.repeat(64),
+    balance_drops: '5000000000', balance_ledger: 200, reconciliation: 'NOT_APPLICABLE',
+    admitted_at_ledger: 200, history_from_ledger: 170 }])
+}, over || {}));
+
+const admitted = S.advance(GENESIS, ADMIT());
+check('a declared new wallet enters the state',
+  admitted.wallet_count === 4 && admitted.wallets.some(w => w.address === 'rDave'));
+const dave = admitted.wallets.find(w => w.address === 'rDave');
+check('and it records the ledger it was admitted at', dave.admitted_at_ledger === 200);
+check('and the horizon it actually read from, so nothing before it can be claimed',
+  dave.history_from_ledger === 170);
+check('the admission is named in the sealed run, not only visible as a diff',
+  JSON.stringify(admitted.sealed_run.admitted_wallets) === JSON.stringify(['rDave']));
+check('the state still hashes itself after the roster changed',
+  admitted.state_sha256 === S.digest(admitted) && S.verify(admitted, GENESIS).ok);
+
+check('a wallet that was not declared is still refused, exactly as before',
+  /RUN_WALLET_NOT_IN_STATE: rDave/.test(refusal(() => S.advance(GENESIS, ADMIT({ admitted_wallets: [] })))));
+check('an admitted wallet may not claim a checkpoint it did not earn',
+  /ADMISSION_CHECKPOINT_UNEARNED/.test(refusal(() => S.advance(GENESIS, ADMIT({
+    wallets: run().wallets.concat([{ address: 'rDave', last_proven_ledger: 100,
+      balance_drops: '1', balance_ledger: 100,
+      admitted_at_ledger: 200, history_from_ledger: 170 }]) })))));
+check('an admitted wallet that does not say how far back it read is refused',
+  /ADMISSION_HORIZON_UNKNOWN/.test(refusal(() => S.advance(GENESIS, ADMIT({
+    wallets: run().wallets.concat([{ address: 'rDave', last_proven_ledger: 200,
+      balance_drops: '1', balance_ledger: 200, admitted_at_ledger: 200 }]) })))));
+check('a horizon later than the anchor is refused: it would claim unread ledgers',
+  /ADMISSION_HORIZON_PAST_ANCHOR/.test(refusal(() => S.advance(GENESIS, ADMIT({
+    wallets: run().wallets.concat([{ address: 'rDave', last_proven_ledger: 200,
+      balance_drops: '1', balance_ledger: 200,
+      admitted_at_ledger: 200, history_from_ledger: 300 }]) })))));
+check('an admission stamped at some other ledger than this run\'s anchor is refused',
+  /ADMISSION_NOT_AT_ANCHOR/.test(refusal(() => S.advance(GENESIS, ADMIT({
+    wallets: run().wallets.concat([{ address: 'rDave', last_proven_ledger: 200,
+      balance_drops: '1', balance_ledger: 200,
+      admitted_at_ledger: 199, history_from_ledger: 170 }]) })))));
+check('an admitted wallet with an unpinned balance is refused like any other',
+  /BALANCE_NOT_PINNED/.test(refusal(() => S.advance(GENESIS, ADMIT({
+    wallets: run().wallets.concat([{ address: 'rDave', last_proven_ledger: 200,
+      balance_drops: '1', balance_ledger: null,
+      admitted_at_ledger: 200, history_from_ledger: 170 }]) })))));
+check('admitting a wallet the state already has is refused, so admission cannot be replayed',
+  /WALLET_ALREADY_IN_STATE: rAlice/.test(refusal(() => S.advance(GENESIS, ADMIT({
+    admitted_wallets: ['rDave', 'rAlice'] })))));
+
+console.log('\n9. an addition may not disturb the wallets already there');
+check('the existing wallets keep their checkpoints when a new one arrives',
+  ['rAlice', 'rBob', 'rCarol'].every(a =>
+    admitted.wallets.find(w => w.address === a).last_proven_ledger === 200));
+check('and none of them is made cold by the addition',
+  ['rAlice', 'rBob', 'rCarol'].every(a =>
+    S.edgeFor(admitted.wallets.find(w => w.address === a), 300).cold === false));
+check('the new wallet walks only from its own horizon, never from the others\' checkpoint',
+  S.edgeFor(dave, 300).from_ledger === 201 && S.edgeFor(dave, 300).cold === false);
+check('a run may not backdate an existing wallet\'s admission',
+  /ADMISSION_LEDGER_REWRITTEN: rAlice/.test(refusal(() => S.advance(GENESIS, ADMIT({
+    wallets: run().wallets.map(w => w.address === 'rAlice' ? { ...w, admitted_at_ledger: 5 } : w)
+      .concat([{ address: 'rDave', last_proven_ledger: 200, balance_drops: '1', balance_ledger: 200,
+        admitted_at_ledger: 200, history_from_ledger: 170 }]) })))));
+
+// The second run after an admission: rDave is now an ordinary wallet, and its
+// horizon is a fact about the past that no later run may restate.
+const second = (over) => Object.assign({
+  anchor_ledger: 300, anchor_close: '2026-09-12T00:00:00.000Z',
+  scan_id: 'idx-2', report_id: 'SW-20260912-AAAAA', sealed_at: '2026-09-12T00:05:00.000Z',
+  target_wallets: 4, complete_wallets: 4, balance_contradictions: 0,
+  evidence_shards: [SHARD],
+  wallets: admitted.wallets.map(w => ({ ...w, last_proven_ledger: 300, balance_ledger: 300 }))
+}, over || {});
+const after = S.advance(admitted, second());
+check('the admitted wallet is ordinary on its second run — no new admission needed',
+  after.wallets.find(w => w.address === 'rDave').last_proven_ledger === 300 &&
+  JSON.stringify(after.sealed_run.admitted_wallets) === JSON.stringify([]));
+check('and its horizon is carried unchanged',
+  after.wallets.find(w => w.address === 'rDave').history_from_ledger === 170);
+check('a later run may not move that horizon earlier to claim history nobody read',
+  /HISTORY_HORIZON_REWRITTEN: rDave/.test(refusal(() => S.advance(admitted, second({
+    wallets: admitted.wallets.map(w => ({ ...w, last_proven_ledger: 300, balance_ledger: 300,
+      history_from_ledger: w.address === 'rDave' ? 1 : w.history_from_ledger })) })))));
+check('and verify() catches the same edit made to a file by hand',
+  S.verify(S.seal({ ...after, wallets: after.wallets.map(w =>
+    w.address === 'rDave' ? { ...w, history_from_ledger: 1 } : w) }), admitted)
+    .problems.some(p => p === 'HISTORY_HORIZON_CHANGED:rDave'));
+check('dropping a wallet is still refused — a roster that grows cannot also shrink silently',
+  /WALLET_DROPPED_FROM_STATE/.test(refusal(() => S.advance(admitted, second({
+    target_wallets: 3, complete_wallets: 3,
+    wallets: admitted.wallets.filter(w => w.address !== 'rBob')
+      .map(w => ({ ...w, last_proven_ledger: 300, balance_ledger: 300 })) })))));
+check('an incomplete run admits nobody — 407 of 408 leaves the roster where it was',
+  /RUN_INCOMPLETE/.test(refusal(() => S.advance(GENESIS, ADMIT({ complete_wallets: 3 })))));
+check('a contradicted run admits nobody either',
+  /RUN_CONTRADICTED/.test(refusal(() => S.advance(GENESIS, ADMIT({ balance_contradictions: 1 })))));
 
 console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' EVIDENCE STATE CHECKS PASS'));
 process.exit(fail ? 1 : 0);

@@ -401,6 +401,91 @@ async function main() {
   check('and wallet walks run with bounded concurrency',
     /Array\.from\(\{ length: concurrency \}, worker\)/.test(SRC2));
 
+  console.log('\n12. the roster grew — what a new wallet costs, and what it may claim');
+  /* The roster went from 255 to 408. The state knows the wallets it has proven;
+     the roster names the wallets we watch. The gap between them IS the set being
+     admitted — and a wallet entering that set buys one bounded window of history,
+     not the whole ledger, and says in the file where its evidence begins. */
+  const ROSTER = WALLETS.concat(['rDave']);
+  const peerR9 = fakePeer({ transactions: { ...quiet(),
+      rDave: [{ ledger: ANCHOR - 20, amount: '1000000000', before: '9000000000', after: '10000000000' }] },
+    balances: { ...BAL, rDave: '10000000000' } });
+  const ghR9 = fakeGithub(seeded(ANCHOR - 1000));
+  const outR9 = await D.acquire({ report_id: 'SW-20260911-JJJJJ', scan_id: 'idx-9', roster: ROSTER },
+    { env: ENV, gh: ghR9.gh, reader: peerR9.reader, concurrency: 2 });
+  check('the run completes with the new wallet included',
+    outR9.committed === true && outR9.target_wallets === 4 && outR9.complete_wallets === 4, outR9.reason);
+  check('and says plainly which wallets it admitted',
+    outR9.wallets_admitted === 1 && JSON.stringify(outR9.admitted_wallets) === JSON.stringify(['rDave']));
+  const walkR9 = peerR9.asked.filter(c => c.command === 'account_tx');
+  const daveWalk = walkR9.filter(c => c.account === 'rDave');
+  check('the new wallet was actually walked', daveWalk.length === 1);
+  check('over a BOUNDED window, not to genesis',
+    daveWalk[0].ledger_index_min === ANCHOR - 30000 + 1 && daveWalk[0].ledger_index_max === ANCHOR,
+    daveWalk[0] && daveWalk[0].ledger_index_min);
+  check('and the run reports the horizon it bought, so the report cannot claim past it',
+    outR9.admitted_history_from_ledger === ANCHOR - 30000 + 1);
+  check('the wallets already proven still walk only their own delta — an addition costs them nothing',
+    walkR9.filter(c => c.account !== 'rDave').every(c => c.ledger_index_min === ANCHOR - 999));
+  const stateR9 = JSON.parse(ghR9.files().get(Store.STATE_PATH).toString('utf8'));
+  const daveR9 = stateR9.wallets.find(w => w.address === 'rDave');
+  check('the committed state carries the new wallet with its horizon recorded',
+    daveR9 && daveR9.admitted_at_ledger === ANCHOR && daveR9.history_from_ledger === ANCHOR - 30000 + 1, daveR9);
+  check('and it is proven only to this anchor — no inherited checkpoint',
+    daveR9.last_proven_ledger === ANCHOR);
+  check('the existing wallets kept their own admission fields untouched (null: seeded before this store)',
+    stateR9.wallets.filter(w => w.address !== 'rDave')
+      .every(w => w.admitted_at_ledger === null && w.history_from_ledger === null));
+  check('the run manifest names the admission too',
+    JSON.parse(ghR9.files().get('evidence/runs/SW-20260911-JJJJJ.json').toString('utf8'))
+      .admitted_wallets.join(',') === 'rDave');
+
+  console.log('\n13. the second morning: an admitted wallet is an ordinary one');
+  const peerR10 = fakePeer({ transactions: { ...quiet(), rDave: [] },
+    balances: { ...BAL, rDave: '10000000000' } });
+  peerR10.reader.ledger = async () => ({ ledger: ANCHOR + 1000, close_ms: Date.UTC(2026, 8, 12, 6, 0, 0) });
+  const ghR10 = fakeGithub(Object.fromEntries(
+    [...ghR9.files()].map(([k, v]) => [k, v.toString('utf8')])));
+  const outR10 = await D.acquire({ report_id: 'SW-20260912-AAAAA', scan_id: 'idx-10', roster: ROSTER },
+    { env: ENV, gh: ghR10.gh, reader: peerR10.reader, concurrency: 2 });
+  check('it commits, and admits nobody — the wallet is already in',
+    outR10.committed === true && outR10.wallets_admitted === 0, outR10.reason);
+  const daveWalkR10 = peerR10.asked.filter(c => c.command === 'account_tx' && c.account === 'rDave');
+  check('the new wallet now walks its own delta, not another cold window',
+    daveWalkR10[0].ledger_index_min === ANCHOR + 1, daveWalkR10[0]);
+  const daveR10 = JSON.parse(ghR10.files().get(Store.STATE_PATH).toString('utf8'))
+    .wallets.find(w => w.address === 'rDave');
+  check('and its horizon is carried unchanged — one cold window, bought once',
+    daveR10.history_from_ledger === ANCHOR - 30000 + 1 && daveR10.admitted_at_ledger === ANCHOR);
+
+  console.log('\n14. the roster is not a lever the caller gets to pull');
+  const peerR11 = fakePeer({ transactions: quiet(), balances: BAL });
+  const ghR11 = fakeGithub(seeded(ANCHOR - 1000));
+  const outR11 = await D.acquire({ report_id: 'SW-20260911-KKKKK', scan_id: 'idx-11',
+    roster: ['rAlice', 'rBob'] }, { env: ENV, gh: ghR11.gh, reader: peerR11.reader, concurrency: 2 });
+  check('a wallet missing from the roster is NOT dropped — retiring one is a decision, not an inference',
+    outR11.committed === true && outR11.target_wallets === 3 &&
+    peerR11.asked.some(c => c.command === 'account_tx' && c.account === 'rCarol'), outR11.reason);
+  check('but the discrepancy is reported rather than swallowed',
+    JSON.stringify(outR11.watched_not_in_roster) === JSON.stringify(['rCarol']));
+  check('a state committed without a roster admits nobody at all',
+    (() => { const s = JSON.parse(ghR11.files().get(Store.STATE_PATH).toString('utf8'));
+      return s.wallet_count === 3 && s.sealed_run.admitted_wallets.length === 0; })());
+  check('and the API takes the roster from committed source, never from the request body',
+    /roster: roster\.select\(\)\.accounts/.test(fs.readFileSync(path.join(ROOT, 'api/delta.js'), 'utf8')) &&
+    !/input\.roster/.test(fs.readFileSync(path.join(ROOT, 'api/delta.js'), 'utf8')));
+
+  console.log('\n15. an addition on a ledger that has not moved waits rather than half-lands');
+  const peerR12 = fakePeer({ transactions: quiet(), balances: BAL });
+  const ghR12 = fakeGithub(seeded(ANCHOR));
+  const outR12 = await D.acquire({ report_id: 'SW-20260911-LLLLL', scan_id: 'idx-12', roster: ROSTER },
+    { env: ENV, gh: ghR12.gh, reader: peerR12.reader, concurrency: 2 });
+  check('nothing is committed and the new wallet is named as pending',
+    outR12.committed === false && outR12.reason === 'ANCHOR_NOT_ADVANCED' &&
+    outR12.wallets_pending_admission === 1, outR12);
+  check('and not one XRPL walk was spent discovering that',
+    peerR12.asked.filter(c => c.command === 'account_tx').length === 0);
+
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA ACQUISITION CHECKS PASS'));
   process.exit(fail ? 1 : 0);
 }

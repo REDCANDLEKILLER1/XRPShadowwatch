@@ -71,7 +71,17 @@ function walletEntry(input) {
     // endpoints of an exact identity rather than two unrelated readings.
     balance_drops: _drops(w.balance_drops),
     balance_ledger: _int(w.balance_ledger),
-    reconciliation: _s(w.reconciliation) || 'NOT_APPLICABLE'
+    reconciliation: _s(w.reconciliation) || 'NOT_APPLICABLE',
+    // The two facts that make a roster addition honest. admitted_at_ledger is
+    // the anchor of the run that let this wallet in; history_from_ledger is the
+    // EARLIEST ledger any run has ever read for it. Everything before that
+    // horizon is unread, and the report may not speak about it.
+    //
+    // Both are null on the 255 wallets seeded from the Neon proof: their
+    // horizon predates this store and is not knowable from here. Null means
+    // UNKNOWN, never "from the beginning".
+    admitted_at_ledger: _int(w.admitted_at_ledger),
+    history_from_ledger: _int(w.history_from_ledger)
   };
 }
 
@@ -164,6 +174,12 @@ function advance(prior, run) {
   }
 
   const priorByAddress = new Map((prior.wallets || []).map(w => [w.address, w]));
+  // Wallets this run declares it is ADMITTING to the roster. Growing the
+  // watchlist is a decision, so it has to be stated: a wallet that merely turns
+  // up among the results without being named here is still refused, exactly as
+  // it was before admission existed. What changed is that there is now a door,
+  // not that the wall came down.
+  const admitting = new Set((r.admitted_wallets || []).map(a => String(a)));
   const incoming = (r.wallets || []).map(walletEntry);
   if (incoming.length !== target) reject('RUN_WALLET_COUNT_MISMATCH: ' + incoming.length + ' entries for ' + target + ' wallets');
 
@@ -171,11 +187,48 @@ function advance(prior, run) {
   for (const next of incoming) {
     if (!next.address) reject('RUN_WALLET_ADDRESS_MISSING');
     const was = priorByAddress.get(next.address);
-    if (!was) reject('RUN_WALLET_NOT_IN_STATE: ' + next.address);
+    if (!was) {
+      if (!admitting.has(next.address)) reject('RUN_WALLET_NOT_IN_STATE: ' + next.address);
+      // An admitted wallet enters on exactly the terms every other wallet is
+      // held to, and on one more besides: it may not inherit a checkpoint it
+      // did not earn. It proved a range in THIS run, bounded by THIS anchor,
+      // and it records how far back it actually read — so the file itself says
+      // where this wallet's evidence begins and a later reader cannot mistake
+      // "watched since Tuesday" for "we have its history".
+      if (next.admitted_at_ledger !== anchor) {
+        reject('ADMISSION_NOT_AT_ANCHOR: ' + next.address + ' claims admission at ' +
+          next.admitted_at_ledger + ' against anchor ' + anchor);
+      }
+      if (next.history_from_ledger === null) {
+        reject('ADMISSION_HORIZON_UNKNOWN: ' + next.address + ' must record how far back it read');
+      }
+      if (next.history_from_ledger > anchor) {
+        reject('ADMISSION_HORIZON_PAST_ANCHOR: ' + next.address + ' claims to have read from ' +
+          next.history_from_ledger + ' against anchor ' + anchor);
+      }
+      if (next.last_proven_ledger !== anchor) {
+        reject('ADMISSION_CHECKPOINT_UNEARNED: ' + next.address + ' may be proven only to this run\'s anchor, not ' +
+          next.last_proven_ledger);
+      }
+    } else {
+      // The other direction: an addition must never rewrite what is already
+      // known. A wallet in the state has an admission and a horizon that are
+      // facts about the past; a run carries them forward and may not restate
+      // them, so "re-admitting" an existing wallet cannot be used to move its
+      // horizon and quietly widen what the report may claim.
+      if (admitting.has(next.address)) reject('WALLET_ALREADY_IN_STATE: ' + next.address);
+      if (next.admitted_at_ledger !== _int(was.admitted_at_ledger)) {
+        reject('ADMISSION_LEDGER_REWRITTEN: ' + next.address);
+      }
+      if (_int(was.history_from_ledger) !== null && next.history_from_ledger !== _int(was.history_from_ledger)) {
+        reject('HISTORY_HORIZON_REWRITTEN: ' + next.address + ' ' +
+          was.history_from_ledger + ' -> ' + next.history_from_ledger);
+      }
+    }
     if (next.last_proven_ledger === null) reject('RUN_WALLET_UNPROVEN: ' + next.address);
     // The monotonic rule the database used to enforce. Equal is allowed — a
     // repeat run against the same anchor proves nothing new — but never less.
-    if (was.last_proven_ledger !== null && next.last_proven_ledger < was.last_proven_ledger) {
+    if (was && was.last_proven_ledger !== null && next.last_proven_ledger < was.last_proven_ledger) {
       reject('CHECKPOINT_WOULD_MOVE_BACKWARDS: ' + next.address + ' ' +
         was.last_proven_ledger + ' -> ' + next.last_proven_ledger);
     }
@@ -209,7 +262,10 @@ function advance(prior, run) {
       target_wallets: target,
       complete_wallets: complete,
       balance_contradictions: 0,
-      sealed_at: _s(r.sealed_at)
+      sealed_at: _s(r.sealed_at),
+      // Named in the sealed run, so a roster change is visible in the state
+      // that carried it rather than only in the diff of the wallet list.
+      admitted_wallets: [...admitting].sort()
     },
     wallets,
     evidence_shards: shards.map(s => ({ path: String(s.path), sha256: String(s.sha256), rows: _int(s.rows) }))
@@ -237,6 +293,16 @@ function verify(state, previous) {
       if (before && before.last_proven_ledger !== null &&
           Number(w.last_proven_ledger) < Number(before.last_proven_ledger)) {
         problems.push('CHECKPOINT_MOVED_BACKWARDS:' + w.address);
+      }
+      // A wallet's evidence horizon is a fact about what was read. Moving it
+      // earlier would claim history nobody fetched; moving it later would
+      // silently disown evidence already committed. Neither is a valid edit.
+      if (before && _int(before.history_from_ledger) !== null &&
+          _int(w.history_from_ledger) !== _int(before.history_from_ledger)) {
+        problems.push('HISTORY_HORIZON_CHANGED:' + w.address);
+      }
+      if (before && _int(before.admitted_at_ledger) !== _int(w.admitted_at_ledger)) {
+        problems.push('ADMISSION_LEDGER_CHANGED:' + w.address);
       }
     }
   }

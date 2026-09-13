@@ -155,14 +155,25 @@ const check = (name, ok, detail) => {
     // Seed the real discovery inbox so AUTO_WALLET_FINDER produces a real list.
     // Without this the wallet section renders empty and every check below would
     // pass on an absent section.
+    //
+    // These addresses must not be ON the watchlist: a watched wallet is not a
+    // candidate, so the finder correctly drops it and the section renders
+    // empty — which used to show up as a mystifying "0 candidates" the first
+    // time the roster grew past one of them. out.seedAlreadyWatched names that
+    // case directly instead.
+    //
+    // The first one must also carry a RICHLIST_EMBEDDED_SEED_V1 reading: the
+    // finder scores an unknown address with no richlist line too low to render,
+    // so without that the section comes out empty for a reason that has nothing
+    // to do with what this suite is testing.
     const stamp = new Date().toISOString();
     try {
       state.discoveryInbox = [
-        { address: 'rND7mGebsCbcwJ5Xz7zwQQu77K4YGNZsJH', classification: 'LARGE_TRANSFER_RECEIVER',
+        { address: 'rw2hzLZgiQ9q62KCuaTWuFHWfiX7JWg3wY', classification: 'LARGE_TRANSFER_RECEIVER',
           score: 175, total_value_xrp: 1059628.695, tx_count: 63, seen_count: 1,
           last_seen: stamp, first_seen: stamp, reasons: ['destination of large transfer'],
           related_watched_wallets: ['Uphold'], sources: ['large_transfer'] },
-        { address: 'rUzWJkXyEtT8ekSSxkBYPqCvHpngcy6Fks', classification: 'LARGE_TRANSFER_RECEIVER',
+        { address: 'rPd8nvJcTmLxRb5wKgQyAe3HsUn6ZfW2qD', classification: 'LARGE_TRANSFER_RECEIVER',
           score: 140, total_value_xrp: 13975984.107, tx_count: 172, seen_count: 1,
           last_seen: stamp, first_seen: stamp, reasons: ['destination of large transfer'],
           related_watched_wallets: ['Bithumb'], sources: ['large_transfer'] },
@@ -171,6 +182,8 @@ const check = (name, ok, detail) => {
           last_seen: stamp, first_seen: stamp, reasons: ['destination of large transfer'],
           related_watched_wallets: [], sources: ['large_transfer'] }
       ];
+      out.seedAlreadyWatched = state.discoveryInbox
+        .map(c => c.address).filter(a => typeof KNOWN === 'object' && KNOWN[a]);
       state.pack = PACK;
     } catch (_) {}
 
@@ -391,6 +404,8 @@ const check = (name, ok, detail) => {
 
   console.log('\n5. suggested watchlist additions');
   console.log(r.sugBlock.split('\n').map(l => '    ' + l).join('\n'));
+  check('no seeded candidate is already on the watchlist (a watched wallet is not a candidate)',
+    Array.isArray(r.seedAlreadyWatched) && r.seedAlreadyWatched.length === 0, r.seedAlreadyWatched);
   check('the wallet list is in the post at all', r.hasSuggested);
   check('it carries the review-only safety language', r.sugHasSafety, r.sugBlock);
   check('it lists candidates', r.sugRows >= 1, r.sugRows);

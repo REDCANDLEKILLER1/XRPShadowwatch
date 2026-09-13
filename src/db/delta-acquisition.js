@@ -48,6 +48,22 @@ const X = require('./evidence-export');
 const PAGE_LIMIT = 200;
 const DEFAULT_CONCURRENCY = 4;
 
+// ── HOW FAR BACK A NEWLY ADMITTED WALLET READS ─────────────────────────────
+//
+// A wallet joining the roster has no checkpoint, so there is no delta to walk —
+// only a decision about how much history to buy on its first morning. Walking
+// it to genesis would be honest and unaffordable: some of these wallets have
+// hundreds of thousands of transactions, and one cold wallet could consume the
+// entire run's budget and strand the other four hundred.
+//
+// So the first walk is BOUNDED and the bound is RECORDED. ~30,000 ledgers is
+// roughly 33 hours at four seconds a ledger, which covers the report's 24-hour
+// window with margin under any plausible close rate. Everything before that is
+// unread, the state says so per wallet in history_from_ledger, and the report
+// may not speak about it. A wallet admitted this morning is "watched since this
+// ledger" — not "we have its history".
+const COLD_WINDOW_LEDGERS = 30000;
+
 const gz = text => zlib.gzipSync(Buffer.from(text, 'utf8'), { level: 9 });
 
 // ── One wallet's bounded edge ──────────────────────────────────────────────
@@ -70,7 +86,11 @@ async function walkWallet(reader, entry, anchor, options) {
   if (from > anchor.ledger) {
     return { address, status: 'COMPLETE', rows: [], edge,
       proof: { from_ledger: anchor.ledger, through_ledger: anchor.ledger, pages: 0, requests: 0 },
-      reconciliation: { status: B.STATUS.NOT_APPLICABLE, reason: 'EDGE_ALREADY_PROVEN_THIS_ANCHOR' } };
+      reconciliation: { status: B.STATUS.NOT_APPLICABLE, reason: 'EDGE_ALREADY_PROVEN_THIS_ANCHOR' },
+      // Carried unchanged. Nothing was read, so nothing about this wallet moves
+      // — but it still has to appear in the state the run writes, or it would
+      // read as dropped.
+      next_entry: State.walletEntry(entry) };
   }
 
   const rows = [];
@@ -126,7 +146,11 @@ async function walkWallet(reader, entry, anchor, options) {
       last_observed_tx_hash: last ? last.hash : (entry && entry.last_observed_tx_hash),
       balance_drops: observed ? observed.drops : (entry && entry.balance_drops),
       balance_ledger: observed ? observed.ledger : (entry && entry.balance_ledger),
-      reconciliation: reconciliation.status
+      reconciliation: reconciliation.status,
+      // An admitted wallet stamps both facts now; every other wallet carries
+      // forward what it already had. A run never restates either.
+      admitted_at_ledger: edge.cold ? anchor.ledger : (entry && entry.admitted_at_ledger),
+      history_from_ledger: edge.cold ? from : (entry && entry.history_from_ledger)
     })
   };
 }
@@ -201,6 +225,31 @@ async function acquire(input, deps) {
   // same ledger state.
   const anchor = { ledger: header.ledger, close_ms: header.close_ms, close_iso: new Date(header.close_ms).toISOString() };
 
+  // ── THE ROSTER AND THE STATE ARE DIFFERENT THINGS ───────────────────────
+  //
+  // The roster is the list of wallets ShadowWatch watches. The state is what it
+  // has PROVEN about them. On a steady morning they name the same set, and the
+  // difference is empty. When the roster grows, the difference is exactly the
+  // wallets being admitted — so admission is not a separate mechanism bolted
+  // on, it is what the gap between those two lists means.
+  //
+  // The roster is supplied by the server from committed source. It is never
+  // taken from a request body: a caller who could name the roster could name a
+  // wallet nobody decided to watch and have the run stamp it as admitted.
+  const known = new Set(state.wallets.map(w => w.address));
+  const rosterList = Array.isArray(run.roster)
+    ? [...new Set(run.roster.map(a => String(a)))] : null;
+  const admitted = rosterList ? rosterList.filter(a => !known.has(a)) : [];
+  // And the other direction. A wallet the state knows but the roster no longer
+  // lists is NOT dropped: retiring a watched wallet is a decision, and a run
+  // does not infer a decision from a list it was handed. It keeps being walked
+  // and the discrepancy is reported, which is the difference between noticing
+  // an edit and obeying one.
+  const rosterAbsent = rosterList
+    ? state.wallets.map(w => w.address).filter(a => !rosterList.includes(a)) : [];
+  const coldWindow = Math.max(1, Number(run.cold_window_ledgers) || COLD_WINDOW_LEDGERS);
+  const coldFrom = Math.max(1, anchor.ledger - coldWindow + 1);
+
   // The validated ledger has not moved since the last sealed run, so there is
   // by definition nothing new to prove: every checkpoint already reaches it.
   // This is a clean no-op, not a failure — walking 255 wallets to discover that
@@ -212,14 +261,21 @@ async function acquire(input, deps) {
       anchor_ledger: anchor.ledger, anchor_close: anchor.close_iso,
       state_version_read: state.state_version,
       target_wallets: state.wallets.length, complete_wallets: 0, failed_wallets: 0,
+      // The new wallets have nothing proven and would gladly be walked — but a
+      // state advance requires an anchor ahead of the last one, so admitting
+      // them against this ledger would be re-claiming a window already claimed.
+      // They are admitted on the next ledger, one wait, no work wasted.
+      wallets_pending_admission: admitted.length,
       balance_contradictions: 0, balance_contradiction_addresses: [], balance_reconciled: 0,
       transactions: 0, xrpl_requests: reader.stats.requests, failures: [],
       committed: false, reason: 'ANCHOR_NOT_ADVANCED',
       stored_anchor_ledger: Number(state.anchor_ledger) };
   }
 
-  // 3. Every wallet, unconditionally.
-  const entries = state.wallets.slice();
+  // 3. Every wallet, unconditionally — the proven ones on their own delta, the
+  //    admitted ones on one bounded cold window each.
+  const entries = state.wallets.concat(
+    admitted.map(address => State.walletEntry({ address })));
   const results = new Array(entries.length);
   const concurrency = Math.max(1, Math.min(Number(d.concurrency) || DEFAULT_CONCURRENCY, 8));
   let cursor = 0;
@@ -238,7 +294,7 @@ async function acquire(input, deps) {
       for (let attempt = 1; attempt <= attemptsPerWallet; attempt++) {
         try {
           const walked = await walkWallet(reader, entry, anchor,
-            { scanId: run.scan_id, rosterHash: state.state_sha256, coldFrom: run.cold_from_ledger });
+            { scanId: run.scan_id, rosterHash: state.state_sha256, coldFrom });
           results[index] = { ...walked, attempts: attempt, earlier_failures: tried };
           break;
         } catch (e) {
@@ -279,6 +335,13 @@ async function acquire(input, deps) {
     wallets_proven: complete.length,
     wallets_unavailable: failed.length,
     wallets_contradicted: contradicted.length,
+    // Said plainly, because it is the one thing a reader of this morning's
+    // report could otherwise get wrong: these wallets are watched from here,
+    // and nothing is known about them before this ledger.
+    wallets_admitted: admitted.length,
+    admitted: admitted.slice().sort(),
+    admitted_history_from_ledger: admitted.length ? coldFrom : null,
+    watched_not_in_roster: rosterAbsent.slice().sort(),
     checkpoint_advances: failed.length === 0 && contradicted.length === 0,
     unavailable: failed.map(r => ({ address: r && r.address,
       error: (r && r.error) || 'UNKNOWN', attempts: (r && r.attempts) || 0 })),
@@ -305,6 +368,10 @@ async function acquire(input, deps) {
     balance_contradiction_addresses: contradicted.map(r => r.address).sort(),
     balance_reconciled: complete.filter(r => r.reconciliation && r.reconciliation.status === B.STATUS.RECONCILED).length,
     transactions: rows.length,
+    wallets_admitted: admitted.length,
+    admitted_wallets: admitted.slice().sort(),
+    admitted_history_from_ledger: admitted.length ? coldFrom : null,
+    watched_not_in_roster: rosterAbsent.slice().sort(),
     xrpl_requests: reader.stats.requests,
     failures: failed.map(r => ({ address: r && r.address, error: (r && r.error) || 'UNKNOWN' }))
   };
@@ -325,6 +392,7 @@ async function acquire(input, deps) {
     target_wallets: entries.length, complete_wallets: complete.length, balance_contradictions: 0,
     evidence_shards: built.shards,
     wallets: complete.map(r => r.next_entry),
+    admitted_wallets: admitted,
     files: built.files
   }, { env: d.env, gh: d.gh, fetch: d.fetch });
 
