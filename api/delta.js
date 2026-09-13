@@ -12,6 +12,9 @@
 // same bounded edge, which costs one account_tx per wallet.
 const D = require('../src/db/delta-acquisition');
 const Store = require('../src/db/github-store');
+const State = require('../src/db/evidence-state');
+const A = require('../src/db/github-archive');
+const roster = require('../src/db/roster');
 const { acquireReader, releaseReader } = require('../src/db/xrpl-reader');
 
 // Leave room inside the function's own ceiling to serialise and return a
@@ -34,7 +37,7 @@ module.exports = async function handler(req, res) {
     if (origin !== req.headers.host) return res.status(403).json({ error: 'CROSS_ORIGIN_WRITE_REFUSED' });
   }
 
-  const allowed = req.method === 'GET' ? ['state', 'health'] : ['run'];
+  const allowed = req.method === 'GET' ? ['state', 'health'] : ['run', 'seed'];
   if (!allowed.includes(input.action)) return res.status(400).json({ error: 'ACTION_NOT_ALLOWED' });
 
   let reader;
@@ -53,6 +56,68 @@ module.exports = async function handler(req, res) {
         // a run starts rather than only after it finishes.
         wallets_detail: input.action === 'state' && loaded.state ? loaded.state.wallets : undefined
       });
+    }
+
+    // ── Seed the checkpoint from a sealed report, over HTTP ────────────────
+    //
+    // The same decision the CLI makes, exposed as an action because the
+    // operator works from a phone and cannot run a script. The credential lives
+    // here either way; moving the trigger does not move the trust.
+    //
+    // Idempotent and self-refusing: genesis happens once, a roster that no
+    // longer matches the sealed one is refused, and nothing is overwritten.
+    if (input.action === 'seed') {
+      const archive = A.archiveTarget(process.env);
+      const gh = A.client(archive.token, archive.repo, fetch);
+      const ref = await A.archiveRef(gh, archive.branch);
+      const commit = await gh('GET', '/git/commits/' + ref.object.sha);
+      const tree = await gh('GET', '/git/trees/' + commit.tree.sha + '?recursive=1');
+      const paths = (tree.tree || []).filter(n => n.type === 'blob' &&
+        /^reports\/.*\/receipt\.json$/.test(n.path)).map(n => n.path);
+      if (!paths.length) return res.status(503).json({ error: 'NO_RECEIPTS' });
+
+      const usable = [];
+      for (const path of paths) {
+        const file = await gh('GET', '/contents/' + path + '?ref=' + encodeURIComponent(archive.branch), undefined, true);
+        if (!file) continue;
+        let r; try { r = JSON.parse(Buffer.from(file.content || '', 'base64').toString('utf8')); } catch (_) { continue; }
+        // Only a run that proved its WHOLE roster establishes a checkpoint.
+        if (r.coverage_complete === true &&
+            Number(r.transaction_windows_proved) === Number(r.target_wallets) &&
+            Number(r.target_wallets) > 0 && Number(r.failed || 0) === 0 &&
+            Number(r.truncated || 0) === 0 && Number(r.unproven || 0) === 0 &&
+            Number.isInteger(Number(r.validated_anchor_ledger)) && Number(r.validated_anchor_ledger) > 0) {
+          usable.push(r);
+        }
+      }
+      if (!usable.length) return res.status(503).json({ error: 'NO_COMPLETE_RECEIPT' });
+      usable.sort((a, b) => Number(a.validated_anchor_ledger) - Number(b.validated_anchor_ledger));
+      const receipt = input.report_id
+        ? usable.find(r => r.report_id === input.report_id) : usable[usable.length - 1];
+      if (!receipt) return res.status(400).json({ error: 'REPORT_NOT_USABLE', usable: usable.map(r => r.report_id) });
+
+      // The receipt names a roster by HASH, not by address. If it differs there
+      // is no way to know which wallets that anchor covered, and seeding them
+      // all would hand a checkpoint to a wallet nobody proved.
+      const selected = roster.select();
+      if (selected.hash !== receipt.roster_hash) {
+        return res.status(409).json({ error: 'ROSTER_CHANGED_SINCE_RECEIPT',
+          roster_now: selected.hash, roster_proved: receipt.roster_hash,
+          wallets_now: selected.accounts.length, wallets_proved: Number(receipt.target_wallets) });
+      }
+      const anchor = Number(receipt.validated_anchor_ledger);
+      const seeded = await Store.seedGenesis({
+        coverage: selected.accounts.map(address => ({
+          address, scan_coverage_through: anchor, scan_coverage_through_close: null })),
+        anchor_ledger: anchor, anchor_close: null,
+        sealed_run: { report_id: receipt.report_id, scan_id: receipt.scan_id || null,
+          target_wallets: Number(receipt.target_wallets),
+          complete_wallets: Number(receipt.transaction_windows_proved),
+          balance_contradictions: 0, sealed_at: receipt.sealed_at || null }
+      }, {});
+      return res.json({ ...seeded, seeded_from: receipt.report_id, anchor_ledger: anchor,
+        wallets: selected.accounts.length,
+        next_walk_from: anchor + 1 });
     }
 
     if (!/^SW-\d{8}-[A-Z0-9]{5}$/.test(String(input.report_id || ''))) {

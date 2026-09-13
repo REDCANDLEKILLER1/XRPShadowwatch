@@ -1,0 +1,127 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ShadowWatch — evidence setup</title>
+<style>
+  :root { color-scheme: dark; --bg:#0b0e13; --fg:#e6edf3; --dim:#8b98a5; --line:#222a35;
+          --ok:#3fb950; --bad:#f85149; --warn:#d29922; --accent:#2f81f7; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg);
+         font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  h1 { font-size:19px; margin:0 0 4px; }
+  p.sub { color:var(--dim); margin:0 0 20px; font-size:13px; }
+  .step { border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:12px; }
+  .step h2 { font-size:14px; margin:0 0 4px; letter-spacing:.02em; }
+  .step .why { color:var(--dim); font-size:13px; margin:0 0 12px; }
+  button { width:100%; padding:13px; font-size:15px; font-weight:600; border:0; border-radius:8px;
+           background:var(--accent); color:#fff; }
+  button:disabled { opacity:.45; }
+  button.secondary { background:#21262d; color:var(--fg); border:1px solid var(--line); }
+  pre { white-space:pre-wrap; word-break:break-word; background:#0d1117; border:1px solid var(--line);
+        border-radius:8px; padding:11px; font-size:12px; margin:12px 0 0; max-height:320px; overflow:auto; }
+  .verdict { font-weight:600; margin:12px 0 0; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); }
+  code { background:#161b22; padding:1px 5px; border-radius:4px; font-size:12px; }
+</style>
+
+<h1>ShadowWatch — evidence setup</h1>
+<p class="sub">Checkpoint lives in GitHub. No database. Each step says exactly what it did.</p>
+
+<div class="step">
+  <h2>1 · Check</h2>
+  <p class="why">Is the token configured, and is the checkpoint seeded? Reads only.</p>
+  <button id="b1">Check status</button>
+  <div id="o1"></div>
+</div>
+
+<div class="step">
+  <h2>2 · Seed the checkpoint</h2>
+  <p class="why">Reads the last sealed 255/255 report and writes its anchor as the starting
+     checkpoint. Happens once — re-running is refused, not repeated.</p>
+  <button id="b2" class="secondary">Seed from sealed report</button>
+  <div id="o2"></div>
+</div>
+
+<div class="step">
+  <h2>3 · Run</h2>
+  <p class="why">Walks each wallet from its checkpoint to one pinned ledger, reads balances,
+     and commits only if every wallet proves with no contradictions.</p>
+  <button id="b3" class="secondary">Run acquisition</button>
+  <div id="o3"></div>
+</div>
+
+<script>
+// Deliberately plain: this page exists so a phone can do what a terminal would,
+// and it shows the raw response rather than a summary of it. If something is
+// wrong, the operator should see what the server actually said.
+function show(slot, verdict, cls, body) {
+  document.getElementById(slot).innerHTML =
+    '<p class="verdict ' + cls + '">' + verdict + '</p><pre>' +
+    String(body).replace(/[<&]/g, c => ({ '<': '&lt;', '&': '&amp;' }[c])) + '</pre>';
+}
+async function call(action, method, body) {
+  const url = '/api/delta' + (method === 'GET' ? '?action=' + action : '');
+  const init = method === 'GET' ? { cache: 'no-store' }
+    : { method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+        body: JSON.stringify(Object.assign({ action }, body || {})) };
+  const response = await fetch(url, init);
+  let data; try { data = await response.json(); } catch (_) { data = { error: 'NON_JSON_RESPONSE' }; }
+  return { ok: response.ok, status: response.status, data };
+}
+function wire(id, slot, fn) {
+  const button = document.getElementById(id);
+  button.onclick = async () => {
+    button.disabled = true; const label = button.textContent; button.textContent = 'Working…';
+    try { await fn(slot); }
+    catch (e) { show(slot, 'Request failed', 'bad', e.message); }
+    finally { button.disabled = false; button.textContent = label; }
+  };
+}
+
+wire('b1', 'o1', async slot => {
+  const r = await call('health', 'GET');
+  if (r.status === 503 || /NOT_CONFIGURED/.test(r.data.error || '')) {
+    return show(slot, 'Token not configured', 'bad',
+      'Set SHADOWWATCH_EVIDENCE_TOKEN in the Vercel environment (fine-grained, Contents: ' +
+      'Read and write, scoped to the evidence repo), then redeploy.\n\n' + JSON.stringify(r.data, null, 2));
+  }
+  if (!r.ok) return show(slot, 'Error', 'bad', JSON.stringify(r.data, null, 2));
+  if (!r.data.seeded) {
+    return show(slot, 'Token OK · checkpoint NOT seeded — do step 2', 'warn', JSON.stringify(r.data, null, 2));
+  }
+  show(slot, 'Ready · state v' + r.data.state_version + ' · anchor ' + r.data.anchor_ledger +
+    ' · ' + r.data.wallets + ' wallets', 'ok', JSON.stringify(r.data, null, 2));
+});
+
+wire('b2', 'o2', async slot => {
+  const r = await call('seed', 'POST');
+  if (!r.ok) {
+    const hint = r.data.error === 'ROSTER_CHANGED_SINCE_RECEIPT'
+      ? 'The roster no longer matches the one that anchor proved, and the receipt records only its ' +
+        'hash — so which wallets it covered cannot be determined. Those wallets need their own walk.\n\n'
+      : '';
+    return show(slot, 'Refused', 'bad', hint + JSON.stringify(r.data, null, 2));
+  }
+  if (r.data.status === 'ALREADY_SEEDED') {
+    return show(slot, 'Already seeded — nothing changed', 'ok', JSON.stringify(r.data, null, 2));
+  }
+  show(slot, 'Seeded from ' + r.data.seeded_from + ' · ' + r.data.wallets +
+    ' wallets at ledger ' + r.data.anchor_ledger, 'ok', JSON.stringify(r.data, null, 2));
+});
+
+wire('b3', 'o3', async slot => {
+  const stamp = new Date();
+  const id = 'SW-' + stamp.toISOString().slice(0, 10).replace(/-/g, '') + '-' +
+    Math.random().toString(36).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
+  show(slot, 'Running — this walks every wallet and can take a couple of minutes.', 'warn', 'report_id ' + id);
+  const started = Date.now();
+  const r = await call('run', 'POST', { report_id: id });
+  const seconds = ((Date.now() - started) / 1000).toFixed(0);
+  const d = r.data || {};
+  if (!r.ok) return show(slot, 'Failed after ' + seconds + 's', 'bad', JSON.stringify(d, null, 2));
+  const line = d.complete_wallets + '/' + d.target_wallets + ' proved · ' +
+    (d.transactions || 0) + ' transactions · ' + (d.xrpl_requests || 0) + ' XRPL reads · ' + seconds + 's';
+  if (d.committed) return show(slot, 'COMMITTED · ' + line, 'ok', JSON.stringify(d, null, 2));
+  show(slot, 'NOT committed (' + d.reason + ') · ' + line, 'warn', JSON.stringify(d, null, 2));
+});
+</script>
