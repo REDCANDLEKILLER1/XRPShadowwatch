@@ -50,6 +50,7 @@ const SUITES = [
   ['desktop-navigation',     'desktop-navigation.test.js',       8230],
   ['daily-archive-proof',    'daily-archive-proof.test.js',        null],
   ['github-report-archive',  'github-report-archive.test.js',      null],
+  ['watchlist-promotion',    'watchlist-promotion.test.js',        null],
   // Pure decision logic, no browser and no network.
   ['dex-volume-truth',       'dex-volume-truth.test.js',         null],
   ['xrpl-quota',             'xrpl-quota-backpressure.test.js',  8221],
