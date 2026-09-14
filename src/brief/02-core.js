@@ -776,6 +776,24 @@ if (typeof window !== 'undefined') {
 
 // ── LOGGING ────────────────────────────────────────────────────
 function log(msg) {
+  // ── THE RUN'S OWN NARRATIVE, KEPT ───────────────────────────────────────
+  //
+  // This used to write to a DOM element and nothing else, so every line the
+  // run said about itself died with the page. The TOTAL DEBUG file — the one
+  // thing an operator actually sends when something is wrong — carried none of
+  // it. A report that failed three times in a row produced three byte-identical
+  // files, none of which contained the sentence that named the cause:
+  // "Evidence index unavailable — direct XRPL acquisition:
+  // DELTA_REPORT_ID_REQUIRED".
+  //
+  // Bounded, because a long run is thousands of lines and the file has to stay
+  // sendable. The most recent lines are the ones that matter when something
+  // stopped.
+  try {
+    if (!Array.isArray(state.runLog)) state.runLog = [];
+    state.runLog.push('[' + new Date().toISOString().slice(11, 19) + '] ' + msg);
+    if (state.runLog.length > 800) state.runLog.splice(0, state.runLog.length - 800);
+  } catch (_) {}
   const el = $('statusFeed'); if (!el) return;
   el.textContent += '\n' + msg;
   el.scrollTop = el.scrollHeight;
@@ -19340,7 +19358,18 @@ function _resolveReportSource(kind) {
     }
     case 'error-log': {
       const t = txt('errorLog');
-      return { text: t, ext: 'txt', ok: !!(t && !/^No errors yet/i.test(t)) };
+      // The errors AND what the run was doing when they happened. Errors alone
+      // were not enough: the failure that stopped three reports never raised
+      // one — it was caught, logged as narrative, and fell back. Section 09 was
+      // empty every time while the answer sat in a DOM element nobody exports.
+      const narrative = Array.isArray(state.runLog) ? state.runLog : [];
+      const parts = [];
+      parts.push(t && !/^No errors yet/i.test(t) ? t.trim() : '[no errors raised this run]');
+      parts.push('');
+      parts.push('=== RUN LOG (' + narrative.length + ' lines' +
+        (narrative.length >= 800 ? ', oldest trimmed' : '') + ') ===');
+      parts.push(narrative.length ? narrative.join('\n') : '[nothing logged this run]');
+      return { text: parts.join('\n'), ext: 'txt', ok: !!(narrative.length || (t && !/^No errors yet/i.test(t))) };
     }
     case 'github-archive': {
       const a=state.githubArchive||{attempted:false,status:'NOT_ATTEMPTED'};

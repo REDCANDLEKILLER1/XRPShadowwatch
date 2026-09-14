@@ -144,7 +144,6 @@ async function main() {
   // to catch it the way layer 17 does, inside a try, rather than off a rejected
   // promise that is never created.
   const unnamed = await page.evaluate(() => {
-    window.state = window.state || {};
     delete state.reportId; delete state.seal;
     try {
       var p = window.SW_EVIDENCE_INDEX.begin({ startMs: 1, endMs: 2 }, []);
@@ -153,11 +152,39 @@ async function main() {
   });
   check('an unnamed run is refused by name, not run anyway',
     unnamed === 'DELTA_REPORT_ID_REQUIRED', unnamed);
+  // ── THE DEFECT THAT SURVIVED THREE RUNS ─────────────────────────────────
+  //
+  // `state` is `let state = {...}` at 02-core.js:587. A top-level `let` in a
+  // classic script lives in the global LEXICAL scope and never becomes a
+  // property of window — so `window.state` is undefined, and every guard
+  // written as `(window.state && state.x)` short-circuits to nothing. This
+  // layer did exactly that, and begin() threw DELTA_REPORT_ID_REQUIRED on
+  // every report with a perfectly good id sitting in state.reportId.
+  check('the page really does NOT expose state on window',
+    await page.evaluate(() => typeof window.state === 'undefined'),
+    await page.evaluate(() => typeof window.state));
+  // Comments stripped first: the file explains this defect in prose, and a
+  // source check that trips on its own explanation tests nothing.
+  const LAYER45 = fs.readFileSync(path.join(ROOT, 'src/brief/45-delta-evidence-index-20260911.js'), 'utf8')
+    .split('\n').map(l => l.replace(/^\s*\/\/.*$/, '')).join('\n');
+  check('so the index must not read it from there',
+    !/\(window\.state &&/.test(LAYER45), (LAYER45.match(/.*window\.state.*/g) || []).slice(0, 3));
+  check('and it reads the lexical binding the page actually has',
+    await page.evaluate(() => {
+      state.reportId = 'SW-20260914-LEXIC';
+      // If the layer read window.state this would still be undefined and the
+      // call would refuse. It resolving proves it read the real one.
+      var p = window.SW_EVIDENCE_INDEX.begin({ startMs: 1, endMs: 2 }, []);
+      return p && typeof p.then === 'function';
+    }));
 
   console.log('\n3. begin() sends the report window');
   const began = await page.evaluate(async () => {
-    window.state = window.state || {};
-    // Exactly what the scan entry now does at 02-core.js:1653.
+    // Exactly what the scan entry does at 02-core.js:1653 — and NOTHING else.
+    // An earlier version of this line also did `window.state = window.state ||
+    // {}`, which CREATED the window property the layer was wrongly reading and
+    // made the defect below disappear. The page does not do that, so neither
+    // does this.
     state.reportId = 'SW-20260914-TEST1';
     // Exactly what layer 17 does at 02-core.js:1670 — including storing the
     // descriptor, which every later call is handed.
@@ -226,7 +253,7 @@ async function main() {
   // response. Rendering a day from a delta that does not cover it is exactly
   // the quiet understatement this project exists to prevent.
   const refusal = await page.evaluate(async () => {
-    window.state.reportId = 'SW-20260914-TEST2';
+    state.reportId = 'SW-20260914-TEST2';
     const run = await window.SW_EVIDENCE_INDEX.begin({}, []);
     try { await window.SW_EVIDENCE_INDEX.readRun(run); return { threw: null }; }
     catch (e) { return { threw: e.message }; }

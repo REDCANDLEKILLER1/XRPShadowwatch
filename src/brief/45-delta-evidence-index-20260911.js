@@ -36,12 +36,29 @@
             function (e) { clearTimeout(timer); throw e; });
   }
 
+  // ── READING THE PAGE'S STATE ────────────────────────────────────────────
+  //
+  // `state` is declared `let state = {...}` at the top level of 02-core.js. A
+  // top-level `let` in a classic script goes into the global LEXICAL scope, not
+  // onto `window` — so `window.state` is undefined, forever, and every guard
+  // written as `(window.state && state.x)` short-circuits to nothing.
+  //
+  // This layer did exactly that, so begin() threw DELTA_REPORT_ID_REQUIRED on
+  // every report ever run through it, with a perfectly good report id sitting
+  // in `state.reportId`. The lexical binding IS visible here — classic scripts
+  // share it — it just has to be read as `state`, not as a property of window.
+  function pageState() {
+    try { return (typeof state !== 'undefined' && state) ? state : (window.state || null); }
+    catch (_) { return window.state || null; }
+  }
+
   var run = null;   // the single acquisition this page performed
 
   window.SW_EVIDENCE_INDEX = {
     // Everything happens here. The name is kept because layer 17 calls it.
     begin: function (windowRange, accounts) {
-      var reportId = (window.state && state.reportId) || (window.state && state.seal && state.seal.report_id) || null;
+      var S = pageState();
+      var reportId = (S && S.reportId) || (S && S.seal && S.seal.report_id) || null;
       if (!reportId) throw new Error('DELTA_REPORT_ID_REQUIRED');
       if (typeof log === 'function') log('Evidence: reading checkpoint and walking the delta (one server call)...');
       // The window travels with the request. Without it the server has no way
@@ -49,7 +66,7 @@
       // delta — which on a second run of the same day is nearly empty while the
       // morning's transactions sit committed in the evidence repository.
       var w = windowRange || {};
-      return post('run', { report_id: reportId, scan_id: (window.state && state.scanId) || null,
+      return post('run', { report_id: reportId, scan_id: (S && S.scanId) || null,
         window_start_ms: w.startMs, window_end_ms: w.endMs })
         .then(function (result) {
           run = result;
