@@ -81,16 +81,37 @@ async function respondWithWindow(res, result, input, reader) {
     body.window = { error: 'REPORT_WINDOW_NOT_REQUESTED' };
   }
 
-  // Gzipped. A day of this roster is tens of thousands of events, which is
-  // megabytes of JSON and more than a function response is willing to carry —
-  // and it compresses by roughly an order of magnitude.
-  const json = Buffer.from(JSON.stringify(body), 'utf8');
+  // ── COMPRESSED INSIDE THE JSON, NOT AROUND IT ──────────────────────────
+  //
+  // A 72-hour window over this roster is ninety thousand events — tens of
+  // megabytes of JSON, past what a function response will carry. It has to be
+  // compressed.
+  //
+  // The obvious way is Content-Encoding: gzip on the response. The problem is
+  // that the platform also negotiates compression from Accept-Encoding, and if
+  // it compresses a body that already says it is gzipped, the browser gunzips
+  // once and finds gzip. That fails as a network error with no useful message,
+  // and it cannot be tested from here — only in production, on a live report.
+  //
+  // So the events travel as a gzipped base64 STRING inside ordinary JSON. No
+  // Content-Encoding, no negotiation, nothing the platform can double. Both
+  // halves are exercised by the suite because both halves are just code.
+  packEvents(body);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  if (json.length > 65536) {
-    res.setHeader('Content-Encoding', 'gzip');
-    return res.end(zlib.gzipSync(json, { level: 6 }));
-  }
-  return res.end(json);
+  return res.end(JSON.stringify(body));
+}
+
+// Pulled out and exported so the DECISION is testable rather than only its
+// spelling. A source check can see the word "gzip" in a file whose compression
+// never runs — one did, and passed while the feature was disabled.
+const GZIP_EVENTS_ABOVE = 200;
+function packEvents(body) {
+  if (!body || !Array.isArray(body.events) || body.events.length <= GZIP_EVENTS_ABOVE) return body;
+  body.events_count = body.events.length;
+  body.events_gz = zlib.gzipSync(Buffer.from(JSON.stringify(body.events), 'utf8'),
+    { level: 6 }).toString('base64');
+  body.events = null;
+  return body;
 }
 
 module.exports = async function handler(req, res) {
@@ -348,3 +369,6 @@ module.exports = async function handler(req, res) {
     return res.status(status).json({ error: safe, committed: false });
   } finally { if (reader) releaseReader(reader); }
 };
+
+module.exports.packEvents = packEvents;
+module.exports.GZIP_EVENTS_ABOVE = GZIP_EVENTS_ABOVE;

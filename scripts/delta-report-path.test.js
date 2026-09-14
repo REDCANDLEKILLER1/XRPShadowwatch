@@ -48,6 +48,8 @@ const event = (i, over) => Object.assign({
 }, over || {});
 
 let lastRequest = null;
+let dropNext = 0;          // simulate a browser killing an in-flight fetch
+let requestCount = 0;
 function stubbed(body) {
   return {
     report_id: body.report_id, scan_id: body.scan_id || null,
@@ -64,7 +66,12 @@ function stubbed(body) {
     // when it could not assemble one. That is the case section 6 drives.
     ...(Number.isFinite(Number(body.window_start_ms)) && Number.isFinite(Number(body.window_end_ms))
       ? { // THE POINT: stored evidence from earlier today, plus this run's delta.
-          events: [event(0), event(1), event(2)],
+          // Keyed off the report id, not the window size: the compressed path
+          // belongs to the checks that ask for it, and nothing else should
+          // silently change shape underneath the other sections.
+          events: /BIGWN|DROPD/.test(String(body.report_id || ''))
+            ? Array.from({ length: 260 }, (_, i) => event(i))
+            : [event(0), event(1), event(2)],
           window: { from: new Date(Number(body.window_start_ms)).toISOString(),
             to: new Date(Number(body.window_end_ms)).toISOString(),
             days: ['2026-09-13', '2026-09-14'], in_window: 3,
@@ -80,9 +87,18 @@ function server() {
       req.on('data', c => { raw += c; });
       req.on('end', () => {
         let body = {}; try { body = JSON.parse(raw || '{}'); } catch (_) {}
-        lastRequest = body;
+        lastRequest = body; requestCount++;
+        // A dropped connection, which is what a backgrounded tab produces: no
+        // status, no body, just a socket that stops.
+        if (dropNext > 0) { dropNext--; req.socket.destroy(); return; }
+        const out = body.action === 'run' ? stubbed(body) : {};
+        // The REAL packer, not a copy of it. A fake that gzips the same way by
+        // hand would let the two drift apart silently, and the browser half of
+        // this exchange would then be testing a compression the server no
+        // longer performs.
+        require(path.join(ROOT, 'api/delta.js')).packEvents(out);
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(body.action === 'run' ? stubbed(body) : {}));
+        res.end(JSON.stringify(out));
       });
       return;
     }
@@ -265,6 +281,118 @@ async function main() {
     /REPORT_WINDOW_UNAVAILABLE/.test(guarded) && /if \(!run\.events\)/.test(guarded));
   check('and it does not fall back to the run\'s rows',
     !/run\.rows/.test(guarded), 'readRun still reads run.rows');
+
+
+  console.log('\n8. a window too big to send plainly, and a request that gets cut');
+  /* Two live failures, one push apart.
+
+     A 72-hour window over this roster is ninety thousand events — tens of
+     megabytes of JSON. Compressing the RESPONSE means setting Content-Encoding,
+     which the platform also negotiates; if it compresses a body that already
+     says it is gzipped, the browser gunzips once and finds gzip, and the whole
+     thing fails as an unexplained network error. So the events travel gzipped
+     INSIDE the JSON, where nothing can double them.
+
+     And the report's one call takes minutes. A phone that backgrounds the tab —
+     to screenshot, to save a file — kills it. Measured: "Failed to fetch" 55
+     seconds in, long before any response was due. The run on the server is not
+     wasted, because what it walked is journalled, so the retry resumes. */
+  const bigEvents = await page.evaluate(async () => {
+    state.reportId = 'SW-20260914-BIGWN';
+    const run = await window.SW_EVIDENCE_INDEX.begin(
+      { startMs: Date.UTC(2026, 8, 13, 0, 0), endMs: Date.UTC(2026, 8, 14, 0, 0) }, []);
+    state.indexRun = run;
+    const facts = await window.SW_EVIDENCE_INDEX.readRun(run);
+    return { count: facts.length, first: facts[0] && facts[0].hash,
+      hasObservers: facts.every(f => Array.isArray(f.observed_via)) };
+  });
+  check('a compressed window is unpacked in the browser',
+    bigEvents.count === 260, bigEvents.count);
+  check('and every event survives the round trip intact',
+    !!bigEvents.first && bigEvents.hasObservers, bigEvents);
+
+  // Driven through window.fetch rather than by killing a socket: a destroyed
+  // socket does not reach the page as a failed fetch through the test proxy, so
+  // an earlier version of this check passed with the retry removed. Rejecting
+  // the fetch is exactly what a backgrounded tab does, and it is unambiguous.
+  const cut = await page.evaluate(async () => {
+    const real = window.fetch;
+    let calls = 0;
+    window.fetch = function () {
+      calls++;
+      if (calls === 1) return Promise.reject(new TypeError('Failed to fetch'));
+      return real.apply(this, arguments);
+    };
+    state.reportId = 'SW-20260914-DROPD';
+    try {
+      const run = await window.SW_EVIDENCE_INDEX.begin(
+        { startMs: Date.UTC(2026, 8, 13, 0, 0), endMs: Date.UTC(2026, 8, 14, 0, 0) }, []);
+      return { ok: true, anchor: run.anchor_ledger, calls };
+    } catch (e) { return { ok: false, error: e.message, calls }; }
+    finally { window.fetch = real; }
+  });
+  check('a request cut mid-flight is retried, not surrendered to the slow path',
+    cut.ok === true && cut.anchor === 106968575, cut);
+  check('and the retry is a real second request',
+    cut.calls === 2, cut.calls);
+
+  // The other half of the rule: an answer from the server is an ANSWER. A
+  // refusal retried three times is three times the work and the same refusal.
+  const serverSaidNo = await page.evaluate(async () => {
+    const real = window.fetch;
+    let calls = 0;
+    window.fetch = function () {
+      calls++;
+      return Promise.resolve(new Response(JSON.stringify({ error: 'EVIDENCE_STATE_MISSING' }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }));
+    };
+    state.reportId = 'SW-20260914-REFUS';
+    try { await window.SW_EVIDENCE_INDEX.begin({ startMs: 1, endMs: 2 }, []); return { calls, threw: null }; }
+    catch (e) { return { calls, threw: e.message }; }
+    finally { window.fetch = real; }
+  });
+  check('a refusal from the server is not retried — it is an answer',
+    serverSaidNo.calls === 1 && /EVIDENCE_STATE_MISSING/.test(serverSaidNo.threw || ''), serverSaidNo);
+
+  // And the compression decision itself, which the fake server cannot test
+  // because the fake does its own. What matters is that the API never sets
+  // Content-Encoding: the platform negotiates that too, and a doubly
+  // compressed body fails as an unexplained network error.
+  const API = fs.readFileSync(path.join(ROOT, 'api/delta.js'), 'utf8')
+    .split('\n').map(l => l.replace(/^\s*\/\/.*$/, '')).join('\n');
+  // The DECISION, run — not its spelling read back. A source check can see the
+  // word "gzip" in a file whose compression never executes; one did, and passed
+  // while the feature was disabled.
+  const api = require(path.join(ROOT, 'api/delta.js'));
+  const zlib = require('zlib');
+  const many = Array.from({ length: api.GZIP_EVENTS_ABOVE + 1 },
+    (_, i) => ({ hash: String(i).padStart(64, 'A'), amount_drops: '1000000' }));
+  const packedBig = api.packEvents({ events: many.slice() });
+  check('a large event set is actually compressed, not merely intended to be',
+    packedBig.events === null && typeof packedBig.events_gz === 'string' &&
+    packedBig.events_count === many.length, {
+      events: packedBig.events, gz: typeof packedBig.events_gz, count: packedBig.events_count });
+  check('and it decompresses back to exactly what went in',
+    JSON.parse(zlib.gunzipSync(Buffer.from(packedBig.events_gz, 'base64')).toString('utf8'))
+      .length === many.length);
+  const packedSmall = api.packEvents({ events: many.slice(0, 3) });
+  check('a small event set is left alone — compression is not free',
+    Array.isArray(packedSmall.events) && packedSmall.events.length === 3 &&
+    packedSmall.events_gz === undefined);
+  check('and an absent event set is not mangled on the way through',
+    api.packEvents({ events: null }).events === null &&
+    api.packEvents({}).events_gz === undefined);
+  // Running the decision proves it works; this proves it is reached. Both are
+  // needed — a perfectly correct function nothing calls is the same defect as
+  // readReportWindow was.
+  // The CALL, not the definition — `function packEvents(body)` matches a naive
+  // search for `packEvents(body)` and made this check pass with the call
+  // deleted.
+  check('and the response path actually calls it',
+    /^\s*packEvents\(body\);/m.test(API), (API.match(/.*packEvents.*/g) || []).slice(0, 4));
+  check('and never sets Content-Encoding itself',
+    !/setHeader\(\s*['"]Content-Encoding/i.test(API),
+    (API.match(/.*Content-Encoding.*/g) || []).slice(0, 2));
 
   await browser.close();
   srv.close();

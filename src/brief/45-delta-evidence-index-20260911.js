@@ -18,6 +18,23 @@
   // render what was actually proven with the rest stated honestly.
   var LEGACY = window.SW_EVIDENCE_INDEX;
 
+  // ── THE EVENTS, UNPACKED ────────────────────────────────────────────────
+  //
+  // Large windows arrive as gzipped base64 inside the JSON rather than as a
+  // gzipped response, so nothing depends on how the platform negotiates
+  // Content-Encoding. See api/delta.js.
+  function inflateEvents(result) {
+    if (!result || !result.events_gz) return result;
+    var raw = atob(result.events_gz);
+    var bytes = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    if (typeof DecompressionStream === 'undefined') {
+      throw new Error('EVENTS_COMPRESSED_BUT_NO_DECOMPRESSOR');
+    }
+    return new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')))
+      .text().then(function (text) { result.events = JSON.parse(text); return result; });
+  }
+
   function post(action, body) {
     var controller = new AbortController();
     var timer = setTimeout(function () { controller.abort(); }, 290000);
@@ -32,8 +49,40 @@
     }).catch(function (e) {
       if (e.name === 'AbortError') throw new Error('DELTA_RUN_TIMEOUT');
       throw e;
-    }).then(function (v) { clearTimeout(timer); return v; },
+    }).then(function (v) { clearTimeout(timer); return inflateEvents(v); },
             function (e) { clearTimeout(timer); throw e; });
+  }
+
+  // ── A DROPPED REQUEST IS NOT A FAILED RUN ───────────────────────────────
+  //
+  // The acquisition takes minutes, and a phone that backgrounds the tab — to
+  // take a screenshot, to save a file, because a notification arrived — kills
+  // the in-flight fetch. Measured live: the request died 55 seconds in, long
+  // before any response was due, with "Failed to fetch".
+  //
+  // The run on the server is not wasted when that happens: whatever it walked
+  // is journalled, so a retry resumes rather than restarting. So a transport
+  // failure is retried instead of collapsing the report into the direct-XRPL
+  // fallback, which is the slow path this whole migration replaced.
+  //
+  // Only TRANSPORT failures. An answer from the server — a refusal, a bad
+  // state, anything with an opinion — is returned as-is.
+  function postWithRetry(action, body, attempts) {
+    var tries = attempts || 3;
+    var attempt = 0;
+    function once() {
+      attempt++;
+      return post(action, body).catch(function (e) {
+        var transport = /Failed to fetch|NetworkError|DELTA_RUN_TIMEOUT|load failed/i.test(e.message || '');
+        if (!transport || attempt >= tries) throw e;
+        if (typeof log === 'function') {
+          log('Evidence: the request was cut (' + e.message + ') — retrying ' +
+            attempt + '/' + (tries - 1) + '. Work already walked is journalled and resumes.');
+        }
+        return new Promise(function (r) { setTimeout(r, 2000); }).then(once);
+      });
+    }
+    return once();
   }
 
   // ── READING THE PAGE'S STATE ────────────────────────────────────────────
@@ -66,7 +115,7 @@
       // delta — which on a second run of the same day is nearly empty while the
       // morning's transactions sit committed in the evidence repository.
       var w = windowRange || {};
-      return post('run', { report_id: reportId, scan_id: (S && S.scanId) || null,
+      return postWithRetry('run', { report_id: reportId, scan_id: (S && S.scanId) || null,
         window_start_ms: w.startMs, window_end_ms: w.endMs })
         .then(function (result) {
           run = result;
