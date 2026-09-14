@@ -52,19 +52,36 @@ function client(token,repo,fetchImpl){
 // A 422 on the ref PATCH means someone else moved the branch first, and it is
 // the ONLY failure the caller may retry — so it is tagged rather than left for
 // the caller to infer from a status code that other calls could also produce.
-async function commitFiles(gh,branch,parentSha,files,message){
+// Blob uploads are INDEPENDENT of each other — each one is a content-addressed
+// write that names nothing else — so they have no reason to queue. Uploading 21
+// shards one at a time turned a commit into a long series of round trips, each
+// one waiting out the last. The tree, the commit and the ref update stay
+// strictly ordered below, because those genuinely depend on what came before.
+const BLOB_CONCURRENCY=6;
+async function commitFiles(gh,branch,parentSha,files,message,onProgress){
   const commit=await gh('GET','/git/commits/'+parentSha);
-  const entries=[];
-  for(const [filePath,content] of Object.entries(files)){
-    // A null value REMOVES the path. Git's tree API reads sha:null as a
-    // deletion, which is how a run clears its resume journal in the very same
-    // commit that lands the evidence rather than in a second one that might
-    // never happen.
-    if(content===null){entries.push({path:filePath,mode:'100644',type:'blob',sha:null});continue;}
-    const buffer=Buffer.isBuffer(content)?content:Buffer.from(content,'utf8');
-    const blob=await gh('POST','/git/blobs',{content:buffer.toString('base64'),encoding:'base64'});
-    entries.push({path:filePath,mode:'100644',type:'blob',sha:blob.sha});
-  }
+  const list=Object.entries(files);
+  const entries=new Array(list.length);
+  let cursor=0,done=0;
+  const worker=async()=>{
+    for(;;){
+      const i=cursor++;
+      if(i>=list.length)return;
+      const [filePath,content]=list[i];
+      // A null value REMOVES the path. Git's tree API reads sha:null as a
+      // deletion, which is how a run clears its resume journal in the very same
+      // commit that lands the evidence rather than in a second one that might
+      // never happen.
+      if(content===null){entries[i]={path:filePath,mode:'100644',type:'blob',sha:null};}
+      else{
+        const buffer=Buffer.isBuffer(content)?content:Buffer.from(content,'utf8');
+        const blob=await gh('POST','/git/blobs',{content:buffer.toString('base64'),encoding:'base64'});
+        entries[i]={path:filePath,mode:'100644',type:'blob',sha:blob.sha};
+      }
+      if(typeof onProgress==='function')onProgress(++done,list.length,filePath);
+    }
+  };
+  await Promise.all(Array.from({length:Math.min(BLOB_CONCURRENCY,list.length||1)},worker));
   const tree=await gh('POST','/git/trees',{base_tree:commit.tree.sha,tree:entries});
   const made=await gh('POST','/git/commits',{message,tree:tree.sha,parents:[parentSha]});
   try{await gh('PATCH','/git/refs/heads/'+branch,{sha:made.sha,force:false});}

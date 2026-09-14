@@ -119,7 +119,11 @@ const JOURNAL_INTERVAL_MS = 30000;
 // lost. Stopping cleanly converts that into a flush and a resume.
 const START_RESERVE_MS = 25000;
 
-const gz = text => zlib.gzipSync(Buffer.from(text, 'utf8'), { level: 9 });
+// Level 6, not 9. Measured on a representative shard: level 9 took 43 ms and
+// level 6 took 19 ms, for output 0.1% larger. Level 9 was buying nothing and
+// charging more than twice the CPU for it, on a path that gzips tens of
+// megabytes at the end of a run.
+const gz = text => zlib.gzipSync(Buffer.from(text, 'utf8'), { level: 6 });
 
 // ── One wallet's bounded edge ──────────────────────────────────────────────
 //
@@ -781,8 +785,14 @@ async function acquire(input, deps) {
     phase('journal-load', { shards: journal.row_shards.length,
       rows: resumed && resumed.rows_awaiting_load });
     try {
-      resumedRows = await Store.readJournalRows(journal, { env: d.env, gh: d.gh, fetch: d.fetch });
+      const t0 = Date.now();
+      resumedRows = await Store.readJournalRows(journal, { env: d.env, gh: d.gh, fetch: d.fetch,
+        onShard: (n, total, rowCount) => phase('journal-shard',
+          { shard: n, of: total, rows: rowCount, ms: Date.now() - t0 }) });
+      phase('journal-loaded', { rows: resumedRows.length, took_ms: Date.now() - t0 });
+      const t1 = Date.now();
       committedRows = T.mergeSightings(resumedRows.concat(rows));
+      phase('merged', { rows: committedRows.length, took_ms: Date.now() - t1 });
     } catch (e) {
       // The wallets are proven — their manifest entries say so and this run
       // walked the rest — but their transactions cannot be produced. Committing
@@ -797,7 +807,19 @@ async function acquire(input, deps) {
         rows, wallets, freshness, ...saved };
     }
   }
+  // ── THE LAST MILE, SAID OUT LOUD ────────────────────────────────────────
+  //
+  // Between "journal-load" and "done" the run used to say nothing, and that gap
+  // turned out to be twenty-eight minutes of a thirty-two minute run. It is the
+  // same silent-gap problem as the one before the first wallet, one level
+  // deeper: without these lines the only way to find where a commit spends its
+  // time is to guess.
+  const tBuild = Date.now();
   const built = buildShards(committedRows);
+  phase('shards-built', { files: Object.keys(built.files).length,
+    bytes: Object.values(built.files).reduce((n, b) => n + b.length, 0),
+    took_ms: Date.now() - tBuild });
+  const tCommit = Date.now();
   let committed;
   try {
     committed = await Store.commitRun({
@@ -812,7 +834,10 @@ async function acquire(input, deps) {
     // call that can fail after the evidence is already in.
     journal: journalWritten ? journal : null,
     files: built.files
-    }, { env: d.env, gh: d.gh, fetch: d.fetch });
+    }, { env: d.env, gh: d.gh, fetch: d.fetch,
+      onBlob: (n, total, path) => { if (n === 1 || n === total || n % 5 === 0) {
+        phase('uploading', { file: n, of: total, path, ms: Date.now() - tCommit }); } } });
+    phase('committed', { took_ms: Date.now() - tCommit });
   } catch (e) {
     // The gate refused, or GitHub did. Either way the walking was real and
     // must not be paid for twice, so it is written down before the failure is

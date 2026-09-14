@@ -202,6 +202,13 @@ wire('b3', 'o3', async slot => {
         ? done.resumed.report_id + ' (' + n(done.resumed.wallets_already_walked) + ' wallets, ' +
           n(done.resumed.rows_recovered) + ' rows)'
         : 'DISCARDED — ' + done.resumed.reason));
+      // Where the last mile went. A run whose walk took four minutes and whose
+      // COMMIT took twenty-eight needs that said, not buried.
+      const timed = raw.map(l => { try { return JSON.parse(l); } catch (_) { return null; } })
+        .filter(x => x && x.t === 'phase' && x.took_ms !== undefined);
+      if (timed.length) {
+        out.push('timing: ' + timed.map(x => x.phase + ' ' + (x.took_ms / 1000).toFixed(1) + 's').join(' · '));
+      }
       if (done.xrpl && done.xrpl.lanes) {
         out.push('lanes: ' + done.xrpl.lanes.map(l => l.endpoint.replace('wss://', '') +
           ' ' + l.requests + (l.refusals ? '/' + l.refusals + 'ref' : '') +
@@ -305,6 +312,24 @@ wire('b3', 'o3', async slot => {
                 m.anchor_ledger + ' · ' + secs
               : 'previous run discarded (' + m.reason + ') — walking everything · ' + secs,
               m.adopted ? '' : 'c');
+          } else if (m.phase === 'journal-shard') {
+            v.textContent = 'Loading banked evidence ' + m.shard + '/' + m.of + '…';
+            if (m.shard === 1 || m.shard === m.of || m.shard % 4 === 0) {
+              append('load · shard ' + m.shard + '/' + m.of + ' · ' + m.rows + ' rows · ' + secs, 'g');
+            }
+          } else if (m.phase === 'journal-loaded') {
+            append('loaded · ' + m.rows + ' banked rows in ' + (m.took_ms / 1000).toFixed(1) + 's', 'g');
+          } else if (m.phase === 'merged') {
+            append('merged · ' + m.rows + ' rows in ' + (m.took_ms / 1000).toFixed(1) + 's', 'g');
+          } else if (m.phase === 'shards-built') {
+            v.textContent = 'Writing evidence…';
+            append('built · ' + m.files + ' files, ' + (m.bytes / 1048576).toFixed(1) +
+              ' MB in ' + (m.took_ms / 1000).toFixed(1) + 's', 'g');
+          } else if (m.phase === 'uploading') {
+            v.textContent = 'Uploading ' + m.file + '/' + m.of + '…';
+            append('upload · ' + m.file + '/' + m.of + ' · ' + secs, 'g');
+          } else if (m.phase === 'committed') {
+            append('committed in ' + (m.took_ms / 1000).toFixed(1) + 's', 'g');
           } else if (m.phase === 'journal-flush') {
             append('saved · segment ' + m.segment + ' · ' + m.wallets_recorded +
               ' wallets written down · ' + secs, 'g');

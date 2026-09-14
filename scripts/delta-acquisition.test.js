@@ -592,9 +592,17 @@ async function main() {
     seen.some(p => p.name === 'anchor' && p.ledger === ANCHOR));
   check('and the plan says what is about to be walked before any of it is',
     seen.some(p => p.name === 'plan' && p.wallets === 4 && p.proven === 3 && p.admitting === 1));
-  check('every phase lands before the first wallet line',
-    (() => { const idx = seen.findIndex(p => p.name === 'plan');
-      return idx === seen.length - 1; })(), seen.map(p => p.name));
+  // The STARTUP phases all land before any wallet is walked. (Commit phases
+  // come after, which is the point of them — they describe the last mile.)
+  check('every startup phase lands before the walking begins',
+    (() => { const names = seen.map(p => p.name);
+      const plan = names.indexOf('plan');
+      return plan > -1 && ['state', 'anchor', 'journal'].every(n =>
+        names.indexOf(n) === -1 || names.indexOf(n) < plan); })(), seen.map(p => p.name));
+  check('and the commit phases come after it, naming where the last mile goes',
+    (() => { const names = seen.map(p => p.name);
+      return names.indexOf('shards-built') > names.indexOf('plan') &&
+        names.indexOf('committed') > names.indexOf('shards-built'); })(), seen.map(p => p.name));
   check('a run with no phase listener behaves identically',
     (await D.acquire({ report_id: 'SW-20260911-QQQQQ', scan_id: 'idx-q' },
       { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh,

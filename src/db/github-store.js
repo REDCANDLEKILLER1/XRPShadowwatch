@@ -253,7 +253,7 @@ async function commitRun(input, deps) {
       const written = await A.commitFiles(gh, branch, ref.object.sha, files,
         'evidence: ' + run.report_id + ' — state v' + state.state_version +
         ' — ' + state.sealed_run.complete_wallets + '/' + state.sealed_run.target_wallets +
-        ' — anchor ' + state.anchor_ledger);
+        ' — anchor ' + state.anchor_ledger, d.onBlob);
       return { status: 'COMMITTED', branch, commit_sha: written.commit_sha,
         state_version: state.state_version, state_sha256: state.state_sha256,
         files_written: written.files_written, bytes_written: written.bytes_written, retry_count: attempt };
