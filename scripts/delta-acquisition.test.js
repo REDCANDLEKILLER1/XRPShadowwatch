@@ -129,13 +129,42 @@ function fakeGithub(files) {
       if (!buf) throw Object.assign(new Error('404'), { status: 404 });
       return { sha, size: buf.length, encoding: 'base64', content: buf.toString('base64') };
     }
-    if (method === 'GET' && /^\/git\/commits\//.test(p)) return { tree: { sha: 't0' } };
+    // A commit names ITS OWN tree, and a tree can be listed. The fake used to
+    // answer 't0' for every commit and had no tree listing at all, which meant
+    // nothing could tell a path that exists on the branch from a path only a
+    // manifest remembers — the exact distinction the wedge turned on.
+    if (method === 'GET' && /^\/git\/commits\//.test(p)) {
+      const sha = decodeURIComponent(p.slice('/git/commits/'.length));
+      return { tree: { sha: 'tree-' + sha } };
+    }
+    if (method === 'GET' && /^\/git\/trees\//.test(p)) {
+      const treeSha = decodeURIComponent(p.slice('/git/trees/'.length).split('?')[0]);
+      const commitSha = treeSha.replace(/^tree-/, '');
+      // The head commit's tree IS the branch. Reading a snapshot taken at
+      // commit time instead would let the fake report files the branch no
+      // longer holds — which is the very thing being tested.
+      const snapshot = (commitSha === state.head || !commits.has(commitSha))
+        ? state.headFiles : commits.get(commitSha).files;
+      return { tree: [...snapshot.keys()].map(k => ({ path: k, type: 'blob' })) };
+    }
     if (method === 'POST' && p === '/git/blobs') {
       const sha = 'b' + (++state.n);
       blobs.set(sha, Buffer.from(body.content, 'base64'));
       return { sha };
     }
-    if (method === 'POST' && p === '/git/trees') { state.pending = body.tree; return { sha: 't' + (++state.n) }; }
+    if (method === 'POST' && p === '/git/trees') {
+      // A deletion for a path the tree does not hold is REFUSED. Whether the
+      // real API is this strict is not something this repository can test
+      // without a token — so the fake takes the strict reading, and the store
+      // is held to working under it. Code that only ever asks to delete what
+      // is really there is correct either way; code that does not is not.
+      for (const e of body.tree) {
+        if (e.sha === null && !state.headFiles.has(e.path)) {
+          throw Object.assign(new Error('422 tree delete of absent path: ' + e.path), { status: 422 });
+        }
+      }
+      state.pending = body.tree; return { sha: 't' + (++state.n) };
+    }
     if (method === 'POST' && p === '/git/commits') {
       const sha = 'c' + (++state.n);
       const f = new Map(state.headFiles);
@@ -756,6 +785,34 @@ async function main() {
     !JSON.stringify(JSON.parse(ghZ.files().get(Store.STATE_PATH).toString('utf8'))).includes('FORGED'));
   check('and the bad journal is discarded rather than refused again every run',
     !ghZ.files().get(Store.JOURNAL_PATH));
+  // ── AND IT STOPS CLAIMING THEM, NOT ONLY STOPS COMMITTING THEM ──────────
+  //
+  // Refusing the commit is half the contract. The other half is that the run
+  // must not still report those wallets as proved — the gauge read 408/408
+  // while every wallet behind it was refused, which is the same run telling
+  // the operator two different things. Existence can be checked cheaply at
+  // adoption; a WRONG-BYTES shard cannot, so this path has to hold.
+  check('no wallet recovered on rows that would not verify is reported proved',
+    outZ.wallets.filter(w => w.status === 'RECOVERED').every(w => w.proven === false) &&
+    outZ.wallets_recovered_from_journal === 0,
+    outZ.wallets.filter(w => w.status === 'RECOVERED').map(w => ({ a: w.address, p: w.proven })));
+  // The wallet this attempt walked ITSELF is still proved — its rows are in
+  // hand, not in the journal. Renderable and committable are different
+  // questions and only the journalled half failed.
+  check('the wallet this run walked itself is still proved',
+    outZ.complete_wallets === 1 &&
+    outZ.wallets.filter(w => w.proven).every(w => w.status === 'COMPLETE'),
+    { complete: outZ.complete_wallets, proven: outZ.wallets.filter(w => w.proven).map(w => w.status) });
+  check('every wallet detail entry agrees with that count',
+    outZ.wallets.filter(w => w.proven).length === outZ.complete_wallets,
+    outZ.wallets.map(w => ({ a: w.address, p: w.proven })));
+  check('and each unproved one carries the cause rather than a bare refusal',
+    outZ.wallets.filter(w => w.status === 'RECOVERED')
+      .every(w => /JOURNAL_ROWS_UNREADABLE/.test(String(w.error))),
+    outZ.wallets.map(w => w.error));
+  check('the freshness block says the same thing as the summary',
+    outZ.freshness.wallets_proven === outZ.complete_wallets &&
+    outZ.freshness.wallets_recovered_from_journal === 0, outZ.freshness);
   // Which means the NEXT run simply does the work itself.
   const peerZ2 = fakePeer({ transactions: crashTx, balances: BAL });
   const outZ2 = await D.acquire({ report_id: 'SW-20260911-AC125' },
@@ -1202,6 +1259,154 @@ async function main() {
     .catch(e => { crossed = e.message; });
   check('and one run cannot append into another run\'s journal',
     /JOURNAL_OWNED_BY_ANOTHER_RUN/.test(String(crossed)), crossed);
+
+  console.log('\n33. a manifest outliving its blobs is a wedge, and must not be one');
+  /* ── WHAT ACTUALLY HAPPENED ON 2026-09-14 ────────────────────────────────
+     Read out of the evidence repository, not inferred:
+
+       evidence/runs/resume/latest.json  named 19 shards, 0001-0020
+       the branch held                   0017, 0018, 0019, 0020
+       97fce69 "journal: discard"        had deleted the rest
+
+     A discard removed the row files, and a run still holding the old manifest
+     in memory re-established it — pointers and all — onto a branch where the
+     blobs behind those pointers were gone. Every run afterwards read shard
+     0001, got a 404, and refused with JOURNAL_ROWS_UNREADABLE at commit time.
+     The discard meant to clear that refusal asked to delete the same dead
+     paths, so it could not clear it either. Two runs, both wedged, both
+     reporting nothing more useful than a reason code.
+
+     Three separate things had to be true for that to be permanent, so three
+     things are asserted here. */
+  const ghWedge = fakeGithub(seeded(ANCHOR - 1000));
+  const wdeps = { env: ENV, gh: ghWedge.gh };
+  const wbase = Journal.begin({ report_id: 'SW-20260914-WEDGE', scan_id: 'idx-w',
+    started_at: '2026-09-14T06:00:00.000Z', from_state_version: 1,
+    from_state_sha256: JSON.parse(ghWedge.files().get(Store.STATE_PATH).toString('utf8')).state_sha256,
+    anchor_ledger: ANCHOR, anchor_close: '2026-09-14T06:00:00.000Z',
+    cold_from_ledger: null, admitted_wallets: [] });
+
+  const w1 = await Store.appendJournal(wbase, seg('rAlice', ['W1', 'W2']), wdeps);
+  check('a journal with rows names a shard that is really on the branch',
+    w1.journal.row_shards.length === 1 && !!ghWedge.files().get(w1.journal.row_shards[0].path));
+
+  // The discard, exactly as it happened: the row files go, the run keeps its copy.
+  await Store.clearJournal(w1.journal, wdeps);
+  check('the discard removed the manifest and the shard',
+    !ghWedge.files().get(Store.JOURNAL_PATH) &&
+    !ghWedge.files().get(w1.journal.row_shards[0].path));
+
+  // Now the run that was still holding w1 appends again. THIS is the moment.
+  const w2 = await Store.appendJournal(w1.journal, seg('rBob', ['W3']), wdeps);
+  check('a re-established journal never names a shard the discard deleted',
+    w2.journal.row_shards.every(sh => !!ghWedge.files().get(sh.path)),
+    w2.journal.row_shards.map(sh => sh.path).filter(x => !ghWedge.files().get(x)));
+  check('and it does not carry wallets whose rows are gone',
+    w2.journal.wallets.map(w => w.address).join(',') === 'rBob',
+    w2.journal.wallets.map(w => w.address));
+  // The rows it DOES name must come back, or the commit refuses forever.
+  const wrows = await Store.readJournalRows(w2.journal, wdeps);
+  check('so the rows it names read back',
+    wrows.length === 1 && wrows[0].hash === 'W3', wrows);
+
+  console.log('\n34. a discard can always clear a journal, however broken');
+  // Hand-build the wedged state the repository was actually in: a manifest
+  // naming shards that are not there.
+  const ghDead = fakeGithub(seeded(ANCHOR - 1000));
+  const ddeps = { env: ENV, gh: ghDead.gh };
+  const d1 = await Store.appendJournal(Journal.begin({ ...wbase, report_id: 'SW-20260914-DEAD1' }),
+    seg('rAlice', ['D1']), ddeps);
+  const d2 = await Store.appendJournal(d1.journal, seg('rBob', ['D2']), ddeps);
+  // Delete ONE shard's bytes behind the manifest's back, leaving the manifest
+  // naming two shards where the branch holds one.
+  const ghost = d2.journal.row_shards[0].path;
+  ghDead.files().delete(ghost);
+  check('the wedged state is set up: the manifest names a shard that is gone',
+    d2.journal.row_shards.length === 2 && !ghDead.files().get(ghost));
+
+  const missing = await Store.missingJournalShards(d2.journal, ddeps);
+  check('the store can name which row files are missing',
+    missing.length === 1 && missing[0] === ghost, missing);
+
+  const clearedDead = await Store.clearJournal(d2.journal, ddeps);
+  check('and the discard still succeeds rather than tripping over the dead path',
+    clearedDead.status === 'DISCARDED', clearedDead);
+  check('leaving nothing under the resume subtree',
+    ![...ghDead.files().keys()].some(k => /runs\/resume\//.test(k)),
+    [...ghDead.files().keys()].filter(k => /runs\/resume\//.test(k)));
+  check('and it asked to delete only paths that were really there',
+    clearedDead.missing_paths === 1, clearedDead);
+
+  console.log('\n35. a journal whose rows are gone is refused BEFORE it is adopted');
+  /* Test 20 covers a journal whose rows are the wrong bytes. This is the other
+     failure: the rows are not there at all.
+
+     Adopting such a journal means treating its wallets as already walked — so
+     the run walks nothing, reports them proved, and only discovers at commit
+     time that their evidence does not exist. That is where 2026-09-14 spent
+     two runs: eighteen seconds of work, 408 wallets "proved", nothing walked,
+     nothing committed, and no way out because the discard tripped over the
+     same dead paths.
+
+     Found at adoption instead, it costs one re-walk and the morning is saved. */
+  const ghGone = fakeGithub(seeded(ANCHOR - 1000));
+  await D.acquire({ report_id: 'SW-20260914-GONE1' },
+    { env: ENV, gh: ghGone.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+  const goneManifest = JSON.parse(ghGone.files().get(Store.JOURNAL_PATH).toString('utf8'));
+  check('a journal is waiting, and it names its rows',
+    goneManifest.row_shards.length > 0 && goneManifest.wallets.length > 0);
+  // The rows vanish; the manifest still names them. Exactly the repository
+  // state read out of the evidence store on 2026-09-14.
+  for (const sh of goneManifest.row_shards) ghGone.files().delete(sh.path);
+
+  const peerGone = fakePeer({ transactions: crashTx, balances: BAL });
+  const outGone = await D.acquire({ report_id: 'SW-20260914-GONE2' },
+    { env: ENV, gh: ghGone.gh, reader: peerGone.reader });
+  check('the journal is refused rather than adopted',
+    outGone.resumed && outGone.resumed.adopted === false &&
+    outGone.resumed.reason === 'JOURNAL_SHARDS_MISSING', outGone.resumed);
+  check('and it names which row files were missing, so the log can say why',
+    outGone.resumed.missing_shards === goneManifest.row_shards.length,
+    outGone.resumed);
+  check('no wallet is claimed as recovered from it',
+    outGone.wallets_recovered_from_journal === 0, outGone.wallets_recovered_from_journal);
+  check('so the run WALKS every wallet instead of reporting work it did not do',
+    peerGone.asked.filter(c => c.command === 'account_tx').length === 3,
+    peerGone.asked.filter(c => c.command === 'account_tx').length);
+  check('and it commits, rather than wedging on rows that do not exist',
+    outGone.committed === true, outGone.reason);
+  check('the dead journal is gone from the branch, not left for the next run',
+    !ghGone.files().get(Store.JOURNAL_PATH),
+    [...ghGone.files().keys()].filter(k => /runs\/resume\//.test(k)));
+
+  console.log('\n36. a recovered wallet is a proved wallet, and says so');
+  /* The report refused 408 of 408 wallets on a run where the server reported
+     408 of 408 PROVED. Both numbers came from this file: provedTotal counts a
+     journal-recovered wallet as proved, and the per-wallet projection labelled
+     it 'RECOVERED' while the report accepted only 'COMPLETE'. One run, two
+     answers, and the morning report was the one that lost. */
+  const ghRec = fakeGithub(seeded(ANCHOR - 1000));
+  const recBase = Journal.begin({ ...wbase, report_id: 'SW-20260914-RECOV' });
+  const r1 = await Store.appendJournal(recBase, seg('rAlice', ['R1']), { env: ENV, gh: ghRec.gh });
+  const recovered = r1.journal.wallets;
+  check('the journal holds the walked wallet', recovered.length === 1);
+  // The projection the server sends, built the way acquire() builds it.
+  const projected = recovered.map(w => ({ address: w.address, status: 'RECOVERED', proven: true }))
+    .concat([{ address: 'rBob', status: 'COMPLETE', proven: true },
+             { address: 'rCarol', status: 'FAILED', proven: false }]);
+  check('a journal-recovered wallet is marked proven',
+    projected.find(w => w.status === 'RECOVERED').proven === true);
+  check('a failed wallet is not',
+    projected.find(w => w.status === 'FAILED').proven === false);
+  // And the report layer must read the flag, not the string. Asserted against
+  // the shipped source, because the defect was that the two disagreed.
+  const layer45 = fs.readFileSync(path.join(ROOT, 'src/brief/45-delta-evidence-index-20260911.js'), 'utf8');
+  check('the report layer does not gate proving on status === COMPLETE alone',
+    !/w\.status\s*!==\s*'COMPLETE'/.test(layer45));
+  check('it reads the server\'s proven flag',
+    /w\.proven\s*===\s*true/.test(layer45));
+  check('and still treats RECOVERED as proved for a server that sends no flag',
+    /w\.status === 'RECOVERED'/.test(layer45));
 
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA ACQUISITION CHECKS PASS'));
   process.exit(fail ? 1 : 0);

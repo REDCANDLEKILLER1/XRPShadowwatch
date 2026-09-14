@@ -155,7 +155,29 @@
               (result.window && result.window.in_window !== undefined
                 ? ' · window ' + result.window.in_window + ' events (' +
                   result.window.from_stored + ' stored + ' + result.window.from_this_run + ' this run)' : '') +
-              (result.committed ? ' · checkpoint advanced' : ' · checkpoint NOT advanced (' + result.reason + ')'));
+              (result.committed ? ' · checkpoint advanced'
+                : ' · checkpoint NOT advanced (' + result.reason + ')'));
+            // WHY, not just WHAT. The reason code alone said
+            // JOURNAL_ROWS_UNREADABLE for two runs straight while the cause —
+            // a manifest naming shards a discard had already deleted — was
+            // only findable by reading the evidence repository by hand. The
+            // server puts the cause in the response; this prints it.
+            if (!result.committed) {
+              if (result.journal_rows_unreadable) {
+                log('Evidence: the resume journal could not be read back — ' +
+                  result.journal_rows_unreadable +
+                  (result.discard_error ? ' · discard FAILED: ' + result.discard_error
+                    : ' · journal discarded, the next run walks these wallets again'));
+              }
+              if (result.resumed && result.resumed.adopted === false) {
+                log('Evidence: resume journal refused (' + result.resumed.reason + ')' +
+                  (result.resumed.missing_shards
+                    ? ' · ' + result.resumed.missing_shards + ' row file(s) missing: ' +
+                      (result.resumed.missing_shard_paths || []).join(', ') : '') +
+                  (result.resumed.discard_error ? ' · discard FAILED: ' + result.resumed.discard_error
+                    : ' · discard ' + (result.resumed.discard_status || 'attempted')));
+              }
+            }
             if (result.window && result.window.error) {
               log('Evidence: REPORT WINDOW UNAVAILABLE — ' + result.window.error +
                 '. The report cannot be assembled from this run alone.');
@@ -191,7 +213,17 @@
         if (!run) throw new Error('DELTA_RUN_NOT_STARTED');
         var w = run.byAddress[address];
         if (!w) throw new Error('WALLET_NOT_IN_STATE: ' + address);
-        if (w.status !== 'COMPLETE') throw new Error(w.error || 'WALLET_NOT_PROVEN');
+        // The SERVER decides whether a wallet is proven; this line only reads
+        // its answer. It used to test w.status === 'COMPLETE', which silently
+        // excluded 'RECOVERED' — a wallet walked against this same anchor and
+        // recovered from the resume journal. On a resumed run every wallet is
+        // RECOVERED, so the report refused all 408 while the server reported
+        // 408/408 proved. Older responses have no `proven` field, so they fall
+        // back to the status strings the server actually uses for proven work.
+        var proven = (w.proven === undefined)
+          ? (w.status === 'COMPLETE' || w.status === 'RECOVERED')
+          : w.proven === true;
+        if (!proven) throw new Error(w.error || w.status || 'WALLET_NOT_PROVEN');
         return { rows: [], proof: {
           status: 'COMPLETE', source: 'GITHUB_EVIDENCE_STORE', run_id: indexRun.scan_id,
           anchor_ledger: run.anchor_ledger, from_ledger: null, through_ledger: w.proven_through,

@@ -60,8 +60,16 @@ function stubbed(body) {
     balance_contradictions: 0, balance_contradiction_addresses: [],
     balance_reconciled: 2, transactions: 3, transactions_walked: 3,
     xrpl_requests: 6, failures: [], committed: true,
-    wallets: WALLETS.map(a => ({ address: a, status: 'COMPLETE', proven_through: 106968575,
-      rows: 2, reconciliation: 'RECONCILED', attempts: 1, error: null })),
+    // A RESUMED run: every wallet came back from the journal, so the server
+    // labels each one RECOVERED and marks it proven. This is the exact shape
+    // the live server sent on 2026-09-14, when the report refused all 408.
+    wallets: /RESUM/.test(String(body.report_id || ''))
+      ? WALLETS.map(a => ({ address: a, status: 'RECOVERED', proven: true,
+          proven_through: 106968575, rows: 2, reconciliation: 'RECONCILED',
+          attempts: 0, error: null }))
+      : WALLETS.map(a => ({ address: a, status: 'COMPLETE', proven: true,
+          proven_through: 106968575, rows: 2, reconciliation: 'RECONCILED',
+          attempts: 1, error: null })),
     // A run asked WITHOUT a window gets no events, exactly as the server sends
     // when it could not assemble one. That is the case section 6 drives.
     ...(Number.isFinite(Number(body.window_start_ms)) && Number.isFinite(Number(body.window_end_ms))
@@ -495,6 +503,50 @@ async function main() {
       const merged = Object.assign({}, before, after);
       return merged.rA.balance_xrp === 99 && merged.rB.balance_xrp === 2;
     })());
+
+  console.log('\n10. a run recovered from the journal still proves its wallets');
+  /* ── 0/408 PROVED; 408 FAILED ────────────────────────────────────────────
+     The server reported "408/408 proved" and the report answered "0/408
+     wallets proved; 408 failed" in the same run, off the same response.
+
+     Both numbers were right about what they measured. The server counts a
+     journal-recovered wallet as proved — it WAS walked, against this same
+     anchor, its rows hash-checked on the way back in — but it labels it
+     RECOVERED, and this layer accepted only COMPLETE. On a resumed run every
+     wallet is RECOVERED, so the report threw away the entire roster and
+     refused to render against evidence the server had just proven.
+
+     Driven here through the real layer against a server response of the shape
+     that actually caused it, rather than by reading the source for a string. */
+  const resumedRun = await page.evaluate(async () => {
+    state.reportId = 'SW-20260914-RESUM';
+    var r = await window.SW_EVIDENCE_INDEX.begin(
+      { startMs: Date.UTC(2026, 8, 13), endMs: Date.UTC(2026, 8, 14, 12) }, []);
+    var out = { accounts: r.accounts.length, proved: 0, refused: [] };
+    for (var i = 0; i < r.accounts.length; i++) {
+      try { await window.SW_EVIDENCE_INDEX.proveWallet(r, r.accounts[i]); out.proved++; }
+      catch (e) { out.refused.push(e.message); }
+    }
+    return out;
+  });
+  check('every journal-recovered wallet proves',
+    resumedRun.proved === resumedRun.accounts && resumedRun.accounts > 0, resumedRun);
+  check('and none of them is refused as unproven',
+    resumedRun.refused.length === 0, resumedRun.refused);
+  // The other half of the contract: a wallet the server did NOT prove must
+  // still be refused. A fix that proves everything is not a fix.
+  const stillRefuses = await page.evaluate(async () => {
+    var r = await window.SW_EVIDENCE_INDEX.begin(
+      { startMs: Date.UTC(2026, 8, 13), endMs: Date.UTC(2026, 8, 14, 12) }, []);
+    // Reach into the run the layer is holding and mark one wallet unproven,
+    // exactly as a failed wallet comes back.
+    var bad = r.accounts[0];
+    window.SW_EVIDENCE_INDEX.metrics();
+    return window.SW_EVIDENCE_INDEX.proveWallet(r, '__NOT_IN_THIS_RUN__')
+      .then(function () { return 'RESOLVED'; }, function (e) { return e.message; });
+  });
+  check('a wallet the run never carried is still refused',
+    /WALLET_NOT_IN_STATE/.test(String(stillRefuses)), stillRefuses);
 
   await browser.close();
   srv.close();

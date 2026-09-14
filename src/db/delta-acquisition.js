@@ -359,15 +359,40 @@ async function acquire(input, deps) {
   let journal = null, resumed = null, resumedRows = null;
   const stale = journalRead && !journalRead.missing && journalRead.journal
     ? Journal.usable(journalRead.journal, state) : null;
-  if (journalRead && !journalRead.missing && (journalRead.unreadable || (stale && !stale.ok))) {
+  // usable() is pure and cannot see the branch, so it cannot know whether the
+  // blobs behind the manifest still exist. They are checked HERE, before the
+  // journal is adopted, because adopting it means treating its wallets as
+  // already walked — and a wallet whose rows are gone is not walked, it is
+  // merely claimed. Left to commit time this surfaced as a refusal no run could
+  // clear; found here it is one discard and an honest re-walk.
+  let missingShards = [];
+  if (journalRead && !journalRead.missing && journalRead.journal && stale && stale.ok) {
+    try {
+      missingShards = await Store.missingJournalShards(journalRead.journal,
+        { env: d.env, gh: d.gh, fetch: d.fetch });
+    } catch (e) {
+      // If the branch cannot be listed, the journal cannot be shown to be
+      // sound. Refuse it rather than adopt it on the strength of a read that
+      // did not happen.
+      missingShards = ['SHARD_PRESENCE_UNKNOWN: ' + e.message];
+    }
+  }
+  if (journalRead && !journalRead.missing &&
+      (journalRead.unreadable || (stale && !stale.ok) || missingShards.length)) {
     // Refused. Discard it rather than leave it to be refused again every
     // morning from here on, and say why.
     resumed = { adopted: false,
-      reason: journalRead.unreadable ? 'JOURNAL_UNREADABLE' : stale.problems.join(','),
+      reason: journalRead.unreadable ? 'JOURNAL_UNREADABLE'
+        : (missingShards.length ? 'JOURNAL_SHARDS_MISSING' : stale.problems.join(',')),
+      missing_shards: missingShards.length || undefined,
+      missing_shard_paths: missingShards.length ? missingShards.slice(0, 5) : undefined,
       report_id: journalRead.journal ? journalRead.journal.report_id : null };
     phase('journal', resumed);
-    try { await Store.clearJournal(journalRead.journal, { env: d.env, gh: d.gh, fetch: d.fetch }); }
-    catch (e) { resumed.discard_error = e.message; }
+    try {
+      const discarded = await Store.clearJournal(journalRead.journal,
+        { env: d.env, gh: d.gh, fetch: d.fetch });
+      resumed.discard_status = discarded && discarded.status;
+    } catch (e) { resumed.discard_error = e.message; }
   } else if (journalRead && journalRead.journal && stale && stale.ok) {
     journal = journalRead.journal;
     anchor = { ledger: Number(journal.anchor_ledger), close_ms: null,
@@ -712,18 +737,40 @@ async function acquire(input, deps) {
     unavailable: groupByCause(failed),
     contradicted: contradicted.slice()
   };
+  // ── PROVEN IS A FACT THIS FILE OWNS, NOT A STRING THE CLIENT DECODES ────
+  //
+  // provedTotal above counts a journal-recovered wallet as proved, and says
+  // why: it WAS walked against this anchor. But the per-wallet projection
+  // labelled it 'RECOVERED' and the report only ever accepted 'COMPLETE', so
+  // the client read 408 proved wallets as 408 failures and refused to render a
+  // report against evidence the server had just told it was proven.
+  //
+  // The status string stays — "walked here" and "recovered from the journal"
+  // are genuinely different facts about a wallet and the operator should see
+  // which. What changes is that proven-ness is no longer INFERRED from it.
+  // This file says `proven` outright, from the same two sets provedTotal is
+  // counted from, so a third proven status can never again mean one number to
+  // the server and another to the report.
   const wallets = alreadyWalked.map(w => ({
-    address: w.address, status: 'RECOVERED',
+    address: w.address, status: 'RECOVERED', proven: true,
     proven_through: w.proven_through, rows: w.rows,
     reconciliation: w.reconciliation, attempts: 0, error: null
   })).concat(results.map(r => ({
     address: r && r.address, status: (r && r.status) || 'FAILED',
+    proven: !!(r && r.status === 'COMPLETE'),
     proven_through: r && r.proof ? r.proof.through_ledger : null,
     rows: r && r.rows ? r.rows.length : 0,
     reconciliation: (r && r.reconciliation && r.reconciliation.status) || null,
     attempts: (r && r.attempts) || 0,
     error: (r && r.error) || null
   })));
+  // The projection and the count must describe the same run. If they ever
+  // disagree the report is about to be told a different number than the
+  // checkpoint gate used, which is the defect this block exists to end.
+  if (wallets.filter(w => w.proven).length !== provedTotal) {
+    throw new Error('PROVEN_PROJECTION_DISAGREES_WITH_COUNT: ' +
+      wallets.filter(w => w.proven).length + ' vs ' + provedTotal);
+  }
 
   const summary = {
     report_id: run.report_id, scan_id: run.scan_id || null,
@@ -801,10 +848,37 @@ async function acquire(input, deps) {
       // must never happen. So the run refuses, discards the journal, and the
       // next attempt walks those wallets again.
       const saved = { journal_rows_unreadable: e.message };
-      try { await Store.clearJournal(journal, { env: d.env, gh: d.gh, fetch: d.fetch }); }
-      catch (e2) { saved.discard_error = e2.message; }
+      try {
+        const discarded = await Store.clearJournal(journal, { env: d.env, gh: d.gh, fetch: d.fetch });
+        saved.discard_status = discarded && discarded.status;
+      } catch (e2) { saved.discard_error = e2.message; }
+
+      // ── AND THEY STOP BEING PROVED, BECAUSE THE PROOF DID NOT READ BACK ──
+      //
+      // A recovered wallet is proved on the strength of rows that were
+      // hash-checked on the way back in. That check just failed, so the claim
+      // behind every one of them failed with it, and they must not leave this
+      // function still marked proven — a report rendering against them would be
+      // claiming coverage from evidence the store could not produce.
+      //
+      // The run already refuses to COMMIT here. This makes it refuse to CLAIM,
+      // which is the separate half: complete_wallets and the per-wallet detail
+      // have to describe the same run, or the gauge reads 408/408 while every
+      // wallet behind it is refused.
+      const walkedOnly = wallets.filter(w => w.status !== 'RECOVERED');
+      const unproved = wallets.filter(w => w.status === 'RECOVERED').map(w => ({
+        ...w, proven: false, error: 'JOURNAL_ROWS_UNREADABLE: ' + e.message
+      }));
+      const detail = walkedOnly.concat(unproved);
       return { ...summary, committed: false, reason: 'JOURNAL_ROWS_UNREADABLE',
-        rows, wallets, freshness, ...saved };
+        complete_wallets: detail.filter(w => w.proven).length,
+        failed_wallets: detail.filter(w => !w.proven).length,
+        wallets_recovered_from_journal: 0,
+        rows, wallets: detail,
+        freshness: { ...freshness, wallets_proven: detail.filter(w => w.proven).length,
+          wallets_recovered_from_journal: 0,
+          wallets_unavailable: detail.filter(w => !w.proven).length },
+        ...saved };
     }
   }
   // ── THE LAST MILE, SAID OUT LOUD ────────────────────────────────────────

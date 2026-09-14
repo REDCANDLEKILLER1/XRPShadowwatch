@@ -38,6 +38,7 @@ const STATE_PATH = 'evidence/state/latest.json';
 // report assembly without first passing the whole-run gate and being written
 // into the evidence days properly.
 const JOURNAL_PATH = 'evidence/runs/resume/latest.json';
+const JOURNAL_PREFIX = 'evidence/runs/resume/';
 // ── WHY THE CONTENT HASH IS IN THE PATH ────────────────────────────────────
 //
 // It used to be report id plus segment number, and the segment number came from
@@ -193,9 +194,34 @@ async function appendJournal(journal, segment, deps) {
     const ref = await A.archiveRef(gh, branch);
     const text = await readFile(gh, branch, JOURNAL_PATH, ref.object.sha);
     // Apply to what is THERE. An absent manifest means someone discarded the
-    // journal underneath this run; our own copy is then the only record of the
-    // work, and re-establishing it is better than dropping it.
+    // journal underneath this run — and a discard deletes the ROW FILES, not
+    // just the manifest naming them.
+    //
+    // This used to re-establish from the run's in-memory copy, on the reasoning
+    // that our copy was the only surviving record of the work. It was not. A
+    // manifest is a set of POINTERS; once the blobs are gone the pointers name
+    // nothing, and the re-established journal claimed nineteen shards of which
+    // four still existed. Every run afterwards read shard 0001, got a 404, and
+    // refused with JOURNAL_ROWS_UNREADABLE — a wedge no run could clear,
+    // because the discard meant to clear it tripped over the same dead paths.
+    //
+    // So a discarded journal is GONE. This run re-establishes an empty one and
+    // contributes this segment to it. The wallets walked before the discard are
+    // re-walked tomorrow, which is one morning of work — the cost this file has
+    // always been willing to pay, and the one the alternative disguised as a
+    // saving while making the store unusable.
     let base = journal;
+    if (text === null) {
+      base = Journal.begin({
+        report_id: journal.report_id, scan_id: journal.scan_id,
+        started_at: journal.started_at,
+        from_state_version: journal.from_state_version,
+        from_state_sha256: journal.from_state_sha256,
+        anchor_ledger: journal.anchor_ledger, anchor_close: journal.anchor_close,
+        cold_from_ledger: journal.cold_from_ledger,
+        admitted_wallets: journal.admitted_wallets || []
+      });
+    }
     if (text !== null) {
       let onDisk = null;
       try { onDisk = JSON.parse(text); } catch (_) { onDisk = null; }
@@ -235,6 +261,39 @@ async function appendJournal(journal, segment, deps) {
   throw lastRefusal || new Error('JOURNAL_APPEND_RETRY_EXHAUSTED');
 }
 
+// What the branch ACTUALLY holds under a prefix, at a given commit. Used to
+// tell a path that exists from a path only a manifest remembers.
+async function listUnder(gh, commitSha, prefix) {
+  const commit = await gh('GET', '/git/commits/' + commitSha);
+  const tree = await gh('GET', '/git/trees/' + commit.tree.sha + '?recursive=1');
+  const out = new Set();
+  for (const e of ((tree && tree.tree) || [])) {
+    if (e && e.type === 'blob' && String(e.path).startsWith(prefix)) out.add(e.path);
+  }
+  return out;
+}
+
+// Which of a journal's row shards are no longer on the branch.
+//
+// A journal is a set of pointers, and pointers outlive what they point at. The
+// manifest is small and is read at the start of every run; its blobs are not
+// read until commit time, which is minutes later and — until this check existed
+// — the first moment anyone noticed they were gone. By then the run had walked
+// nothing, because the manifest said those wallets were already done.
+//
+// One tree read at adoption time turns that from a run that proves nothing into
+// a run that walks for real.
+async function missingJournalShards(journal, deps) {
+  const d = deps || {};
+  const shards = (journal && journal.row_shards) || [];
+  if (!shards.length) return [];
+  const { token, repo, branch } = target(d.env);
+  const gh = d.gh || A.client(token, repo, d.fetch || fetch);
+  const ref = await A.archiveRef(gh, branch);
+  const present = await listUnder(gh, ref.object.sha, JOURNAL_PREFIX);
+  return shards.map(sh => sh.path).filter(p => !present.has(p));
+}
+
 // Remove a journal and everything it owns, without touching anything else.
 // Used when a journal is refused: leaving it would offer the same refusal to
 // every run after this one.
@@ -257,11 +316,26 @@ async function clearJournal(journal, deps) {
   if (onDisk && journal && journal.report_id && onDisk.report_id !== journal.report_id) {
     return { status: 'NOT_OURS_TO_DISCARD', held_by: onDisk.report_id, files_removed: 0 };
   }
+  // ── DELETE ONLY WHAT IS ACTUALLY THERE ──────────────────────────────────
+  //
+  // A manifest can outlive the blobs it names — that is precisely the state
+  // this discard exists to clean up. Handing the tree API a deletion for a path
+  // that is no longer in the tree makes the whole commit depend on how it
+  // chooses to answer that, and a discard that cannot run is a journal no run
+  // can ever clear. So the branch is listed first and the deletion is the
+  // intersection: every owned path that still exists, and nothing else.
+  const present = await listUnder(gh, ref.object.sha, JOURNAL_PREFIX);
+  const owned = Journal.ownedPaths(onDisk, JOURNAL_PATH);
   const files = {};
-  for (const p of Journal.ownedPaths(onDisk, JOURNAL_PATH)) files[p] = null;
+  for (const p of owned) if (present.has(p)) files[p] = null;
+  const missing = owned.filter(p => !present.has(p));
+  if (!Object.keys(files).length) {
+    return { status: 'ALREADY_GONE', files_removed: 0, missing_paths: missing.length };
+  }
   const written = await A.commitFiles(gh, branch, ref.object.sha, files,
     'journal: discard ' + ((onDisk && onDisk.report_id) || 'unreadable') + ' — not resumable');
-  return { status: 'DISCARDED', commit_sha: written.commit_sha, files_removed: written.files_removed };
+  return { status: 'DISCARDED', commit_sha: written.commit_sha,
+    files_removed: written.files_removed, missing_paths: missing.length };
 }
 
 // THE RUN COMMIT. `run` is the completed acquisition; `files` are the delta
@@ -332,7 +406,15 @@ async function commitRun(input, deps) {
       // Only ours. If another run has taken the resume slot since, its journal
       // is not this commit's to remove.
       if (!onDisk || onDisk.report_id === run.journal.report_id) {
-        for (const p of Journal.ownedPaths(onDisk || run.journal, JOURNAL_PATH)) files[p] = null;
+        // Only paths the branch actually holds, for the same reason the
+        // discard does it: a manifest can name a blob that is already gone,
+        // and asking to delete it puts THIS commit — the one carrying the
+        // whole day's evidence — at the mercy of how the tree API answers a
+        // deletion for a path that is not there.
+        const present = await listUnder(gh, ref.object.sha, JOURNAL_PREFIX);
+        for (const p of Journal.ownedPaths(onDisk || run.journal, JOURNAL_PATH)) {
+          if (present.has(p)) files[p] = null;
+        }
       }
     }
 
@@ -425,4 +507,4 @@ async function readDays(days, deps, kind) {
 
 module.exports = { STATE_PATH, JOURNAL_PATH, historyPath, runPath, journalRowPath, readBytes,
   readState, commitRun, seedGenesis, readDays,
-  readJournal, readJournalRows, appendJournal, clearJournal };
+  readJournal, readJournalRows, appendJournal, clearJournal, missingJournalShards };
