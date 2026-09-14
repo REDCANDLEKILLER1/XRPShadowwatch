@@ -42,12 +42,34 @@
       method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
       body: JSON.stringify(Object.assign({ action: action }, body || {})), signal: controller.signal
     }).then(function (response) {
-      return response.json().catch(function () { return {}; }).then(function (data) {
-        if (!response.ok) { var e = new Error(data.error || 'DELTA_RUN_FAILED'); e.status = response.status; throw e; }
+      // Read the body as TEXT first. `response.json().catch(() => ({}))` turned
+      // a truncated or corrupt body on an HTTP 200 into an empty object, and
+      // the run then proceeded with an undefined anchor and no wallets — a cut
+      // response silently becoming a successful empty one. A body that will not
+      // parse is a body we did not receive.
+      return response.text().then(function (text) {
+        var data = null, parsed = false;
+        try { data = JSON.parse(text); parsed = true; } catch (_) { parsed = false; }
+        if (!response.ok) {
+          // The server answered. Its status is the fact, and its own error
+          // string if it managed to send one. Never retryable: an answer
+          // retried three times is the same answer three times slower.
+          var e = new Error((parsed && data && data.error) || ('DELTA_HTTP_' + response.status));
+          e.status = response.status;
+          e.transport = false;
+          throw e;
+        }
+        if (!parsed) {
+          var bad = new Error('DELTA_RESPONSE_UNPARSEABLE: ' + text.length + ' bytes');
+          bad.transport = true;      // we did not receive it; asking again is right
+          throw bad;
+        }
         return data;
       });
     }).catch(function (e) {
-      if (e.name === 'AbortError') throw new Error('DELTA_RUN_TIMEOUT');
+      if (e.name === 'AbortError') { var t = new Error('DELTA_RUN_TIMEOUT'); t.transport = true; throw t; }
+      // A rejected fetch never reached an answer: no status, nothing read.
+      if (e.status === undefined && e.transport === undefined) e.transport = true;
       throw e;
     }).then(function (v) { clearTimeout(timer); return inflateEvents(v); },
             function (e) { clearTimeout(timer); throw e; });
@@ -73,7 +95,12 @@
     function once() {
       attempt++;
       return post(action, body).catch(function (e) {
-        var transport = /Failed to fetch|NetworkError|DELTA_RUN_TIMEOUT|load failed/i.test(e.message || '');
+        // Decided by a TAG set where the outcome is known, not by matching the
+        // message. A server error whose body happens to contain the words
+        // "Failed to fetch" has a status and an opinion; retrying it is three
+        // identical refusals. Only something that never became an answer is
+        // worth asking again.
+        var transport = (e.transport === true) && (e.status === undefined);
         if (!transport || attempt >= tries) throw e;
         if (typeof log === 'function') {
           log('Evidence: the request was cut (' + e.message + ') — retrying ' +

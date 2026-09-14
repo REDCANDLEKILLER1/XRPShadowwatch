@@ -354,6 +354,54 @@ async function main() {
   check('a refusal from the server is not retried — it is an answer',
     serverSaidNo.calls === 1 && /EVIDENCE_STATE_MISSING/.test(serverSaidNo.threw || ''), serverSaidNo);
 
+  // ── THE TWO THAT DECIDING BY MESSAGE TEXT GOT WRONG ─────────────────────
+  //
+  // An HTTP error whose BODY happens to contain the words a regex was looking
+  // for is still an answer from the server. Retrying it is the same refusal
+  // three times slower.
+  const wordyError = await page.evaluate(async () => {
+    const real = window.fetch;
+    let calls = 0;
+    window.fetch = function () {
+      calls++;
+      return Promise.resolve(new Response(JSON.stringify({ error: 'NETWORK_ERROR: Failed to fetch upstream' }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }));
+    };
+    state.reportId = 'SW-20260914-WORDY';
+    try { await window.SW_EVIDENCE_INDEX.begin({ startMs: 1, endMs: 2 }, []); return { calls, threw: null }; }
+    catch (e) { return { calls, threw: e.message, status: e.status }; }
+    finally { window.fetch = real; }
+  });
+  check('a server error whose TEXT looks like a network failure is not retried',
+    wordyError.calls === 1 && wordyError.status === 500, wordyError);
+
+  // And the opposite: headers arrived, body did not. That used to become `{}`
+  // and the run proceeded with an undefined anchor and no wallets — a cut
+  // response silently becoming a successful empty one.
+  const truncated = await page.evaluate(async () => {
+    const real = window.fetch;
+    let calls = 0;
+    window.fetch = function () {
+      calls++;
+      if (calls === 1) {
+        return Promise.resolve(new Response('{"anchor_ledger":1069685',
+          { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
+      return real.apply(this, arguments);
+    };
+    state.reportId = 'SW-20260914-TRUNC';
+    try {
+      const run = await window.SW_EVIDENCE_INDEX.begin(
+        { startMs: Date.UTC(2026, 8, 13, 0, 0), endMs: Date.UTC(2026, 8, 14, 0, 0) }, []);
+      return { calls, ok: true, anchor: run.anchor_ledger };
+    } catch (e) { return { calls, ok: false, threw: e.message }; }
+    finally { window.fetch = real; }
+  });
+  check('a body that will not parse is a body we did not receive — so it retries',
+    truncated.calls === 2, truncated);
+  check('and the run never proceeds on the half of it that arrived',
+    truncated.ok === true && truncated.anchor === 106968575, truncated);
+
   // And the compression decision itself, which the fake server cannot test
   // because the fake does its own. What matters is that the API never sets
   // Content-Encoding: the platform negotiates that too, and a doubly
