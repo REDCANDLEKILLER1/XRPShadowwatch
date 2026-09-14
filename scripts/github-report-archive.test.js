@@ -76,6 +76,89 @@ async function main(){
   assert.ok(idx.some(x=>x.report_id===one.report_id)&&idx.some(x=>x.report_id===two.report_id));
   console.log('PASS simultaneous archives retain both reports through bounded non-fast-forward retry');
   assert.ok(factsCalls>=3);assert.ok(first.bytes_written<600*1024);
+
+  // ── A GITHUB-BACKED RUN CAN BE ARCHIVED AT ALL ──────────────────────────
+  //
+  // Every report produced since the delta migration identifies its acquisition
+  // as `gh-<anchor>`, and this layer accepted only Neon's `idx-<uuid>`. The
+  // live SW-20260914-FSO32 receipt failed with INVALID_EVIDENCE_SCAN_ID — a
+  // complete, sealed, correct report that archived nothing.
+  //
+  // No injected archiveFacts here: the point is the REAL selection between the
+  // two stores and the REAL derivation from committed evidence. The facts come
+  // out of a state read through github-store, hash-verified on the way in.
+  const State=require('../src/db/evidence-state');
+  const Store=require('../src/db/github-store');
+  const ANCHOR=106982842;
+  const WALLETS=['rAlice','rBob','rCarol'];
+  const ghState=State.advance(
+    State.genesis(WALLETS.map(a=>({address:a,scan_coverage_through:ANCHOR-500})),
+      {anchor_ledger:ANCHOR-500,anchor_close:'2026-09-14T00:00:00.000Z'}),
+    {report_id:'SW-20260914-FSO32',scan_id:null,sealed_at:null,
+     anchor_ledger:ANCHOR,anchor_close:'2026-09-14T15:43:40.000Z',
+     target_wallets:3,complete_wallets:3,balance_contradictions:0,
+     evidence_shards:[{path:'evidence/2026/09/14/events.ndjson.gz',sha256:'c'.repeat(64),rows:41782}],
+     wallets:WALLETS.map(a=>({address:a,last_proven_ledger:ANCHOR,
+       balance_drops:'1000000',balance_ledger:ANCHOR,reconciliation:'RECONCILED'}))});
+  // A store that answers with that committed state and nothing else.
+  const evidenceGh=async(method,path)=>{
+    if(method==='GET'&&/^\/contents\//.test(path)){
+      const file=decodeURIComponent(path.slice('/contents/'.length).split('?')[0]);
+      if(file===Store.STATE_PATH){
+        const buf=Buffer.from(State.serialize(ghState),'utf8');
+        return {sha:'s1',size:buf.length,encoding:'base64',content:buf.toString('base64')};
+      }
+      return null;
+    }
+    if(method==='GET'&&/^\/git\/ref\/heads\//.test(path))return {object:{sha:'c0'}};
+    return {};
+  };
+  const ghFacts=await A.archiveFactsFromEvidence('gh-'+ANCHOR,
+    {env:{SHADOWWATCH_EVIDENCE_TOKEN:'t'},gh:evidenceGh});
+  assert.equal(ghFacts.report_id,'SW-20260914-FSO32');
+  assert.equal(ghFacts.validated_anchor_ledger,ANCHOR);
+  assert.equal(ghFacts.transaction_windows_proved,3);
+  assert.equal(ghFacts.coverage_complete,true);
+  assert.equal(ghFacts.generated_at,'2026-09-14T15:43:40.000Z');
+  assert.equal(ghFacts.evidence_source,'GITHUB_EVIDENCE_STORE');
+  assert.equal(ghFacts.evidence_rows_committed,41782);
+  // Named honestly: the checkpoint holds committed rows, not the report's
+  // window, and the receipt must not pass one off as the other.
+  assert.equal(ghFacts.transactions_in_window,null);
+  console.log('PASS a GitHub-backed run derives its receipt facts from committed evidence');
+
+  const ghArchiveGh=fakeGithub();
+  const ghInput={report_id:'SW-20260914-FSO32',scan_id:'SC-FSO32',evidence_scan_id:'gh-'+ANCHOR,
+    generated_at:'2026-09-14T15:52:48.000Z',morning_report:'Coffee & Crypto\n408/408\n',
+    morning_hash:A.sha('Coffee & Crypto\n408/408\n'),public_hash:'c'.repeat(32),full_hash:'d'.repeat(32)};
+  const ghArchived=await A.archiveReport(ghInput,
+    {env:{...env,SHADOWWATCH_EVIDENCE_TOKEN:'t'},fetch:ghArchiveGh.fetch,gh:evidenceGh});
+  assert.equal(ghArchived.status,'ARCHIVED');
+  // Dated by the evidence, not by the caller's generated_at.
+  const ghRoot='reports/2026/09/14/SW-20260914-FSO32';
+  assert.equal(ghArchived.archive_path,ghRoot);
+  const ghReceipt=JSON.parse(ghArchiveGh.file(ghRoot+'/receipt.json'));
+  assert.equal(ghReceipt.evidence_source,'GITHUB_EVIDENCE_STORE');
+  assert.equal(ghReceipt.transaction_windows_proved,3);
+  assert.equal(ghReceipt.state_sha256,ghState.state_sha256);
+  assert.equal(ghArchiveGh.file(ghRoot+'/morning-report.txt'),ghInput.morning_report);
+  const ghIndex=JSON.parse(ghArchiveGh.file('reports/2026/09/14/index.json'));
+  assert.ok(ghIndex.some(r=>r.report_id==='SW-20260914-FSO32'));
+  console.log('PASS a GitHub-backed report writes its receipt, report and day index');
+
+  // A report the checkpoint did not seal cannot borrow its coverage.
+  await assert.rejects(()=>A.archiveReport({...ghInput,report_id:'SW-20260914-OTHER'},
+    {env:{...env,SHADOWWATCH_EVIDENCE_TOKEN:'t'},fetch:fakeGithub().fetch,gh:evidenceGh}),
+    /ARCHIVE_REPORT_NOT_IN_STATE/);
+  // And a run that is not the one the checkpoint stands at is refused outright.
+  await assert.rejects(()=>A.archiveFactsFromEvidence('gh-999999999',
+    {env:{SHADOWWATCH_EVIDENCE_TOKEN:'t'},gh:evidenceGh}),/ARCHIVE_RUN_NOT_CURRENT/);
+  // The legacy identity still validates, so old receipts keep working.
+  assert.ok(A.IDX_RUN.test(complete.evidence_scan_id));
+  await assert.rejects(()=>A.archiveReport({...input,evidence_scan_id:'nonsense'},
+    {env,fetch:gh.fetch,archiveFacts}),/INVALID_EVIDENCE_SCAN_ID/);
+  console.log('PASS an unsealed report, a stale run and a nonsense identity are all refused');
+
   console.log('ALL GITHUB REPORT ARCHIVE CHECKS PASS');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

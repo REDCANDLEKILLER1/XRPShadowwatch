@@ -17,12 +17,82 @@ const sha=text=>crypto.createHash('sha256').update(String(text),'utf8').digest('
 const json=value=>JSON.stringify(value,null,2)+'\n';
 const b64=text=>Buffer.from(text,'utf8').toString('base64');
 
+const IDX_RUN=/^idx-[a-f0-9-]{36}$/;   // a Neon acquisition run
+const GH_RUN=/^gh-\d+$/;               // a GitHub-backed run, named for its anchor
+
+// ── THE RECEIPT'S FACTS COME FROM THE CHECKPOINT, NOT FROM THE CALLER ──────
+//
+// The Neon path read them out of the database for exactly this reason: a caller
+// who could state its own coverage could archive a receipt saying it proved
+// four hundred wallets when it proved six. The GitHub path has to hold the same
+// line, so the facts are read back out of the committed state — which is
+// hash-verified on the way in by readState() — and the caller supplies nothing
+// but the report text and its own seal hashes.
+//
+// It also checks that the state's sealed run NAMES THIS REPORT. Without that a
+// report could be archived against whatever checkpoint happened to be current,
+// borrowing another run's coverage for its own receipt.
+async function archiveFactsFromEvidence(runId,deps={}){
+  // Required lazily: github-store requires this module, and a top-level require
+  // back into it would be a cycle. By call time both are loaded.
+  const Store=deps.store||require('./github-store');
+  // readState answers {state, missing, branch} and verifies the state's own
+  // hash before returning it — so a tampered checkpoint cannot become a
+  // receipt's facts.
+  const read=await Store.readState({env:deps.env,gh:deps.gh,fetch:deps.fetch});
+  const state=read&&read.state;
+  if(!state)throw new Error('ARCHIVE_EVIDENCE_STATE_MISSING');
+  const anchor=Number(state.anchor_ledger);
+  if(runId!=='gh-'+anchor)
+    throw new Error('ARCHIVE_RUN_NOT_CURRENT: '+runId+' but the checkpoint stands at gh-'+anchor);
+  const run=state.sealed_run||{};
+  const target=Number(run.target_wallets)||0,proved=Number(run.complete_wallets)||0;
+  return {
+    report_id:run.report_id||null,
+    scan_id:run.scan_id||null,
+    evidence_scan_id:runId,
+    evidence_source:'GITHUB_EVIDENCE_STORE',
+    state_version:Number(state.state_version)||null,
+    state_sha256:state.state_sha256||null,
+    // The instant the evidence describes, which is what dates the receipt.
+    // Never a clock read here and never a date the caller chose.
+    generated_at:state.anchor_close||null,
+    validated_anchor_ledger:anchor,
+    target_wallets:target,
+    transaction_windows_proved:proved,
+    coverage_complete:target>0&&proved===target&&Number(run.balance_contradictions||0)===0,
+    // What the checkpoint actually holds. Deliberately NOT called
+    // "transactions in window": the report's window spans the days it covers
+    // and is assembled separately, while this is every row the store has
+    // committed. Naming the second as the first would overstate the receipt.
+    evidence_rows_committed:(state.evidence_shards||[])
+      .reduce((n,shard)=>n+(Number(shard.rows)||0),0),
+    evidence_shards:(state.evidence_shards||[]).length,
+    wallet_count:Number(state.wallet_count)||target,
+    // Not derivable from a checkpoint, and not accepted from the caller, so
+    // they are absent rather than guessed.
+    transactions_in_window:null,
+    new_observations:null,
+    xrpl_requests:null
+  };
+}
+
 function validate(input){
   if(!input||typeof input!=='object'||Array.isArray(input))throw new Error('INVALID_ARCHIVE_REQUEST');
   for(const key of Object.keys(input))if(!ALLOWED.has(key))throw new Error('ARCHIVE_FIELD_NOT_ALLOWED: '+key);
   if(!/^SW-\d{8}-[A-Z0-9]{5}$/.test(input.report_id||''))throw new Error('INVALID_REPORT_ID');
   if(!/^SC-[A-Z0-9]+$/.test(input.scan_id||''))throw new Error('INVALID_SCAN_ID');
-  if(!/^idx-[a-f0-9-]{36}$/.test(input.evidence_scan_id||''))throw new Error('INVALID_EVIDENCE_SCAN_ID');
+  // TWO run identities, because there are two evidence stores and one of them
+  // is being retired. `idx-<uuid>` is a Neon acquisition run; `gh-<ledger>` is
+  // a GitHub-backed one, named for the anchor it proved. Every report produced
+  // since the delta migration carries the second shape, and this line rejecting
+  // it is why the live SW-20260914-FSO32 receipt failed with
+  // INVALID_EVIDENCE_SCAN_ID — every new run archived nothing at all.
+  //
+  // The legacy pattern is not loosened to admit the new one; they are separate
+  // and each is exact.
+  if(!GH_RUN.test(input.evidence_scan_id||'')&&!IDX_RUN.test(input.evidence_scan_id||''))
+    throw new Error('INVALID_EVIDENCE_SCAN_ID');
   if(typeof input.morning_report!=='string'||!input.morning_report.trim())throw new Error('MORNING_REPORT_REQUIRED');
   if(Buffer.byteLength(input.morning_report,'utf8')>MAX_REPORT_BYTES)throw new Error('ARCHIVE_PAYLOAD_TOO_LARGE');
   if(!/^[a-f0-9]{64}$/.test(input.morning_hash||'')||sha(input.morning_report)!==input.morning_hash)throw new Error('MORNING_REPORT_HASH_MISMATCH');
@@ -146,8 +216,26 @@ function archiveTarget(env){
 async function archiveReport(raw,deps={}){
   const input=validate(raw),env=deps.env||process.env;
   const {token,repo,branch}=archiveTarget(env);
-  const facts=await (deps.archiveFacts||E.archiveFacts)(input.evidence_scan_id);
+  // Whichever store proved this run answers for it. A gh- run never reaches
+  // Neon, which is what keeps the runtime free of it.
+  const facts=deps.archiveFacts
+    ? await deps.archiveFacts(input.evidence_scan_id)
+    : (GH_RUN.test(input.evidence_scan_id)
+        ? await archiveFactsFromEvidence(input.evidence_scan_id,deps)
+        : await E.archiveFacts(input.evidence_scan_id));
   if(!facts||!facts.target_wallets)throw new Error('ARCHIVE_RUN_NOT_FOUND');
+  // The receipt must describe the run that committed THIS report. Archiving a
+  // report against a checkpoint sealed by a different one would hand it
+  // coverage it never earned.
+  if(facts.report_id&&facts.report_id!==input.report_id)
+    throw new Error('ARCHIVE_REPORT_NOT_IN_STATE: checkpoint was sealed by '+facts.report_id);
+  // An INCOMPLETE run is still archived, with coverage_complete:false written
+  // into its receipt. That is deliberate and predates this change: refusing it
+  // would delete the record of a morning that did not finish, which is the
+  // opposite of what an evidence archive is for. What may be CLAIMED is the
+  // seal's business, and the seal already refuses without coverage. A run that
+  // never committed is a different matter, and the check above is what catches
+  // it — the checkpoint does not name the report.
   const reportHash=sha(input.morning_report);
   const evidenceHash=sha(json(facts));
   // Directory date and canonical run facts come from Neon, never from a
@@ -196,4 +284,5 @@ async function archiveReport(raw,deps={}){
 }
 
 module.exports={archiveReport,validate,sha,client,commitFiles,archiveRef,archiveTarget,archiveReadTarget,evidenceTarget,
+  archiveFactsFromEvidence,IDX_RUN,GH_RUN,
   BRANCH,REPO,EVIDENCE_BRANCH,EVIDENCE_REPO,MAX_REPORT_BYTES};

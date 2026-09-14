@@ -127,6 +127,34 @@ and the cause was not slowness — it was that the run said nothing while it
 worked. Fixed: the report path now streams, the gauges carry an EVIDENCE phase,
 and the abort fires on silence rather than on duration.
 
+## The archive could not accept the run that worked
+
+`SW-20260914-FSO32` sealed, rendered and committed — and archived nothing:
+
+    GitHub archive: FAILED
+    error: INVALID_EVIDENCE_SCAN_ID
+
+`github-archive.js` required `idx-<uuid>`, a Neon acquisition id, and called
+Neon's `archiveFacts` to build the receipt. Every report since the delta
+migration identifies its run as `gh-<anchor>`, so every one of them failed the
+same way. Found in review of the live run, confirmed on both lines of source.
+
+Both identities are now accepted — separately and exactly, neither loosened to
+admit the other — and a `gh-` run derives its receipt from the committed
+checkpoint, which `readState()` hash-verifies on the way in. The caller still
+supplies nothing but its report text and seal hashes.
+
+Two guards came with it: the checkpoint must NAME the report being archived, or
+a report could borrow another run's coverage for its receipt; and a run that is
+not the one the checkpoint stands at is refused outright.
+
+One review suggestion was declined. It asked that an incomplete run be refused;
+the archive deliberately preserves an honestly-sealed incomplete run with
+`coverage_complete: false` written into the receipt, and refusing would delete
+the record of a morning that did not finish. What may be CLAIMED is the seal's
+business. A run that never committed is a different matter, and the report-id
+check is what catches that.
+
 ## ASSUMED — believed, not yet observed
 
 Everything here is a claim I have NOT earned. Do not repeat any of it as fact.
@@ -148,7 +176,11 @@ Everything here is a claim I have NOT earned. Do not repeat any of it as fact.
 - **Production works.** `main` is 26 commits behind and still on the Neon path.
   Nothing on this branch has run outside the preview.
 - **The Production token exists.** `SHADOWWATCH_EVIDENCE_TOKEN` was set for
-  Preview. Production is unchecked.
+  Preview. Production is unchecked. Note the archive now needs it too: a `gh-`
+  receipt reads the evidence checkpoint to build its facts.
+- **A receipt actually lands.** The archive path is proven against a fake
+  GitHub using the real facts derivation; no `gh-` receipt has been written to
+  the real archive branch yet.
 - **`api/evidence.js` is unreachable.** It still imports the Neon connection.
   Layer 45 should have replaced every caller, but that is reasoning, not a
   measurement.
