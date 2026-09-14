@@ -815,13 +815,47 @@ async function acquire(input, deps) {
     return { journal_segments: journal.segments, journal_wallets: journal.wallet_count,
       journal_error: journalError };
   };
+  // ── A RECOVERED WALLET IS PROVEN ONLY WHERE ITS ROWS ARE ────────────────
+  //
+  // The journal's rows are hash-checked when they are READ BACK, and that read
+  // happens once, at the commit. Every path that returns BEFORE it — an
+  // incomplete run, a contradicted one, an unreadable journal — has not
+  // verified those bytes this run and does not carry them in `rows`, so the
+  // window it returns cannot contain the recovered wallets' transactions.
+  //
+  // Reporting them proved there would claim two things at once that are not
+  // both true: that their evidence was checked, and that the report window
+  // covers them. Neither is. So on every early return they come back unproven
+  // with the reason, and complete_wallets, the per-wallet detail and the
+  // freshness block are recomputed together so the three agree.
+  //
+  // The work is NOT lost — it stays in the journal and the next run adopts it.
+  // What is withheld is the CLAIM, which is the only thing that was ever
+  // unearned.
+  const withoutUnverifiedRecoveries = (reason) => {
+    const detail = wallets.map(w => w.status === 'RECOVERED'
+      ? { ...w, proven: false, error: w.error || reason } : w);
+    const proved = detail.filter(w => w.proven).length;
+    return {
+      wallets: detail,
+      complete_wallets: proved,
+      failed_wallets: detail.length - proved,
+      wallets_recovered_from_journal: 0,
+      freshness: { ...freshness, wallets_proven: proved,
+        wallets_recovered_from_journal: 0,
+        wallets_unavailable: detail.length - proved }
+    };
+  };
+
   if (failed.length) {
-    return { ...summary, committed: false, reason: 'RUN_INCOMPLETE',
-      rows, wallets, freshness, ...(await saveWork()) };
+    return { ...summary, committed: false, reason: 'RUN_INCOMPLETE', rows,
+      ...withoutUnverifiedRecoveries('RECOVERED_ROWS_NOT_VERIFIED_THIS_RUN'),
+      ...(await saveWork()) };
   }
   if (contradicted.length) {
-    return { ...summary, committed: false, reason: 'RUN_CONTRADICTED',
-      rows, wallets, freshness, ...(await saveWork()) };
+    return { ...summary, committed: false, reason: 'RUN_CONTRADICTED', rows,
+      ...withoutUnverifiedRecoveries('RECOVERED_ROWS_NOT_VERIFIED_THIS_RUN'),
+      ...(await saveWork()) };
   }
 
   // The gate has passed, so this run WILL commit — which is the only moment
@@ -865,19 +899,8 @@ async function acquire(input, deps) {
       // which is the separate half: complete_wallets and the per-wallet detail
       // have to describe the same run, or the gauge reads 408/408 while every
       // wallet behind it is refused.
-      const walkedOnly = wallets.filter(w => w.status !== 'RECOVERED');
-      const unproved = wallets.filter(w => w.status === 'RECOVERED').map(w => ({
-        ...w, proven: false, error: 'JOURNAL_ROWS_UNREADABLE: ' + e.message
-      }));
-      const detail = walkedOnly.concat(unproved);
-      return { ...summary, committed: false, reason: 'JOURNAL_ROWS_UNREADABLE',
-        complete_wallets: detail.filter(w => w.proven).length,
-        failed_wallets: detail.filter(w => !w.proven).length,
-        wallets_recovered_from_journal: 0,
-        rows, wallets: detail,
-        freshness: { ...freshness, wallets_proven: detail.filter(w => w.proven).length,
-          wallets_recovered_from_journal: 0,
-          wallets_unavailable: detail.filter(w => !w.proven).length },
+      return { ...summary, committed: false, reason: 'JOURNAL_ROWS_UNREADABLE', rows,
+        ...withoutUnverifiedRecoveries('JOURNAL_ROWS_UNREADABLE: ' + e.message),
         ...saved };
     }
   }

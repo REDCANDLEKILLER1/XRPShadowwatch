@@ -1379,7 +1379,74 @@ async function main() {
     !ghGone.files().get(Store.JOURNAL_PATH),
     [...ghGone.files().keys()].filter(k => /runs\/resume\//.test(k)));
 
-  console.log('\n36. a recovered wallet is a proved wallet, and says so');
+  console.log('\n36. a run that returns before the rows are verified claims nothing from them');
+  /* ── THE BRANCH THE FIRST FIX MISSED ─────────────────────────────────────
+     Raised in review of 0f8d472, and correct: the journal's rows are
+     hash-checked when they are READ BACK, and that read happens once, at the
+     commit. RUN_INCOMPLETE and RUN_CONTRADICTED return BEFORE it.
+
+     So a resumed run where 2 wallets came from the journal and 1 remaining
+     wallet fails used to return those 2 as proven having never verified their
+     bytes this run — and `rows` carries only what this attempt walked, so the
+     report window could not contain their transactions either. Proven, and
+     absent from the window: two claims that cannot both hold. */
+  const ghEarly = fakeGithub(seeded(ANCHOR - 1000));
+  await D.acquire({ report_id: 'SW-20260914-EARL1' },
+    { env: ENV, gh: ghEarly.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+  check('a journal is waiting with wallets in it',
+    JSON.parse(ghEarly.files().get(Store.JOURNAL_PATH).toString('utf8')).wallets.length === 2);
+  // The remaining wallet fails again, so the run returns at the whole-run gate
+  // — before readJournalRows() has ever looked at the recovered rows.
+  const outEarly = await D.acquire({ report_id: 'SW-20260914-EARL2' },
+    { env: ENV, gh: ghEarly.gh,
+      reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+  check('the run returns incomplete, before any row verification',
+    outEarly.committed === false && outEarly.reason === 'RUN_INCOMPLETE', outEarly.reason);
+  check('no recovered wallet is returned proven',
+    outEarly.wallets.filter(w => w.status === 'RECOVERED').every(w => w.proven === false),
+    outEarly.wallets.map(w => ({ s: w.status, p: w.proven })));
+  check('and each says why, rather than being silently downgraded',
+    outEarly.wallets.filter(w => w.status === 'RECOVERED')
+      .every(w => /RECOVERED_ROWS_NOT_VERIFIED_THIS_RUN/.test(String(w.error))),
+    outEarly.wallets.map(w => w.error));
+  check('the summary count agrees with the detail',
+    outEarly.complete_wallets === outEarly.wallets.filter(w => w.proven).length,
+    { summary: outEarly.complete_wallets, detail: outEarly.wallets.filter(w => w.proven).length });
+  check('and so does the freshness block',
+    outEarly.freshness.wallets_proven === outEarly.complete_wallets &&
+    outEarly.freshness.wallets_recovered_from_journal === 0, outEarly.freshness);
+  // The other half of the contract: nothing is PROVEN that the returned window
+  // cannot show. Every wallet still claimed has its rows in this attempt's set.
+  const rowAddrs = new Set();
+  for (const r of outEarly.rows) for (const v of (r.observed_via || [])) rowAddrs.add(v);
+  check('every wallet still claimed proven has its rows in this attempt\'s set',
+    outEarly.wallets.filter(w => w.proven).every(w => rowAddrs.has(w.address) || w.rows === 0),
+    outEarly.wallets.filter(w => w.proven).map(w => w.address));
+  // And the WORK is not lost — only the claim is withheld.
+  check('the journal survives, so the next run still inherits the work',
+    !!ghEarly.files().get(Store.JOURNAL_PATH));
+
+  console.log('\n37. present shards with the wrong bytes, on an incomplete run');
+  /* Review case 1, exactly: a shard that EXISTS so the presence check passes,
+     whose bytes are wrong, on a run that fails before the hash check. Nothing
+     may come back proven from it. */
+  const ghBytes = fakeGithub(seeded(ANCHOR - 1000));
+  await D.acquire({ report_id: 'SW-20260914-BYTE1' },
+    { env: ENV, gh: ghBytes.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+  const bytePath = JSON.parse(ghBytes.files().get(Store.JOURNAL_PATH).toString('utf8')).row_shards[0].path;
+  ghBytes.files().set(bytePath, zlib.gzipSync(Buffer.from('{"hash":"WRONG"}\n', 'utf8')));
+  const outBytes = await D.acquire({ report_id: 'SW-20260914-BYTE2' },
+    { env: ENV, gh: ghBytes.gh,
+      reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+  check('the shard is present, so the presence check alone would have passed',
+    !!ghBytes.files().get(bytePath));
+  check('no wallet recovered on those bytes is returned proven',
+    outBytes.wallets.filter(w => w.status === 'RECOVERED').every(w => w.proven === false),
+    outBytes.wallets.map(w => ({ s: w.status, p: w.proven })));
+  check('and the forged bytes never reached the checkpoint',
+    !JSON.stringify(JSON.parse(ghBytes.files().get(Store.STATE_PATH).toString('utf8'))).includes('WRONG'));
+
+  console.log('\n38. a recovered wallet is a proved wallet, and says so');
   /* The report refused 408 of 408 wallets on a run where the server reported
      408 of 408 PROVED. Both numbers came from this file: provedTotal counts a
      journal-recovered wallet as proved, and the per-wallet projection labelled
@@ -1405,8 +1472,16 @@ async function main() {
     !/w\.status\s*!==\s*'COMPLETE'/.test(layer45));
   check('it reads the server\'s proven flag',
     /w\.proven\s*===\s*true/.test(layer45));
-  check('and still treats RECOVERED as proved for a server that sends no flag',
-    /w\.status === 'RECOVERED'/.test(layer45));
+  // Fail CLOSED on the legacy shape. A response with no `proven` field may
+  // fall back to the status string only for 'COMPLETE' — a wallet this run
+  // walked itself, whose rows came back with it. 'RECOVERED' never falls back:
+  // that is exactly the shape the incident arrived in, and inferring proof from
+  // the label there would accept the very evidence that was missing.
+  check('a legacy COMPLETE still falls back to the status string',
+    /\(w\.status === 'COMPLETE'\)/.test(layer45));
+  check('but a legacy RECOVERED does not — it needs the flag said outright',
+    !/w\.status === 'RECOVERED'/.test(layer45),
+    (layer45.match(/.*RECOVERED.*/g) || []).filter(l => !/^\s*\/\//.test(l)).slice(0, 3));
 
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA ACQUISITION CHECKS PASS'));
   process.exit(fail ? 1 : 0);

@@ -218,10 +218,17 @@
         // excluded 'RECOVERED' — a wallet walked against this same anchor and
         // recovered from the resume journal. On a resumed run every wallet is
         // RECOVERED, so the report refused all 408 while the server reported
-        // 408/408 proved. Older responses have no `proven` field, so they fall
-        // back to the status strings the server actually uses for proven work.
+        // 408/408 proved.
+        //
+        // A response with no `proven` field falls back to the status string,
+        // but ONLY for 'COMPLETE' — a wallet this run walked itself, whose rows
+        // came back with it. 'RECOVERED' never falls back, because that is
+        // precisely the shape the incident arrived in: no explicit flag, the
+        // label RECOVERED, and journal rows that could not be read. Inferring
+        // proof from the label there would accept exactly the evidence that was
+        // missing. A server that means it says so.
         var proven = (w.proven === undefined)
-          ? (w.status === 'COMPLETE' || w.status === 'RECOVERED')
+          ? (w.status === 'COMPLETE')
           : w.proven === true;
         if (!proven) throw new Error(w.error || w.status || 'WALLET_NOT_PROVEN');
         return { rows: [], proof: {

@@ -63,7 +63,14 @@ function stubbed(body) {
     // A RESUMED run: every wallet came back from the journal, so the server
     // labels each one RECOVERED and marks it proven. This is the exact shape
     // the live server sent on 2026-09-14, when the report refused all 408.
-    wallets: /RESUM/.test(String(body.report_id || ''))
+    wallets: /LEGCY/.test(String(body.report_id || ''))
+      // The LEGACY shape, and the one the incident actually arrived in: the
+      // label RECOVERED, no explicit `proven`, journal rows that could not be
+      // read. The bridge must refuse it rather than infer proof from the label.
+      ? WALLETS.map(a => ({ address: a, status: 'RECOVERED',
+          proven_through: 106968575, rows: 2, reconciliation: 'RECONCILED',
+          attempts: 0, error: null }))
+      : /RESUM/.test(String(body.report_id || ''))
       ? WALLETS.map(a => ({ address: a, status: 'RECOVERED', proven: true,
           proven_through: 106968575, rows: 2, reconciliation: 'RECONCILED',
           attempts: 0, error: null }))
@@ -547,6 +554,24 @@ async function main() {
   });
   check('a wallet the run never carried is still refused',
     /WALLET_NOT_IN_STATE/.test(String(stillRefuses)), stillRefuses);
+
+  // And the legacy shape fails CLOSED. Raised in review of 0f8d472: the
+  // incident response was exactly this — RECOVERED, no explicit flag, rows
+  // that would not read — so a fallback that trusted the label would accept
+  // precisely the evidence that was missing.
+  const legacy = await page.evaluate(async () => {
+    state.reportId = 'SW-20260914-LEGCY';
+    var r = await window.SW_EVIDENCE_INDEX.begin(
+      { startMs: Date.UTC(2026, 8, 13), endMs: Date.UTC(2026, 8, 14, 12) }, []);
+    var out = { proved: 0, refused: [] };
+    for (var i = 0; i < r.accounts.length; i++) {
+      try { await window.SW_EVIDENCE_INDEX.proveWallet(r, r.accounts[i]); out.proved++; }
+      catch (e) { out.refused.push(e.message); }
+    }
+    return out;
+  });
+  check('a RECOVERED wallet with no explicit proven flag is refused, not assumed',
+    legacy.proved === 0 && legacy.refused.length > 0, legacy);
 
   await browser.close();
   srv.close();

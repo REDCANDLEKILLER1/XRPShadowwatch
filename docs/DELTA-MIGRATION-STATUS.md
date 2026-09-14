@@ -73,6 +73,20 @@ correctly objected that accepting every `RECOVERED` blindly would be unsafe —
 which is why the verification-failure path unproves them rather than the client
 trusting the label.
 
+A second review of that fix found the branch it missed, and was right again:
+the journal's rows are hash-checked when they are READ BACK, and that read
+happens once, at the commit. `RUN_INCOMPLETE` and `RUN_CONTRADICTED` return
+before it. A resumed run with 407 recovered wallets and one failure therefore
+returned 407 as proven having never verified their bytes this run — and `rows`
+carries only what this attempt walked, so the window could not contain their
+transactions either. Proven and absent from the window: two claims that cannot
+both hold.
+
+Now every path that returns before verification withholds the claim, and the
+client fails closed on the legacy shape — a missing `proven` field falls back to
+the status string only for `COMPLETE`, never for `RECOVERED`, because that is
+exactly the shape the incident arrived in.
+
 ## ASSUMED — believed, not yet observed
 
 Everything here is a claim I have NOT earned. Do not repeat any of it as fact.
