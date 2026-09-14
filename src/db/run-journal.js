@@ -145,7 +145,13 @@ function record(journal, segment) {
     if (!w.entry || w.entry.address !== w.address) reject('JOURNAL_WALLET_ENTRY_MISSING: ' + w.address);
     known.add(w.address);
   }
-  const shards = (s.row_shards || []).map(x => {
+  // A shard path now carries its own content hash, so the same path means the
+  // same bytes. Recording it twice would make the journal claim rows it holds
+  // once — harmless downstream, because rows dedupe by hash, but a count that
+  // disagrees with the evidence behind it is exactly what this file exists to
+  // prevent.
+  const seenPaths = new Set(((j.row_shards) || []).map(x => x.path));
+  const shards = (s.row_shards || []).filter(x => !(x && seenPaths.has(x.path))).map(x => {
     if (!x || !_s(x.path) || !/^[a-f0-9]{64}$/.test(String(x.sha256 || ''))) {
       reject('JOURNAL_SHARD_UNHASHED: every journalled row file must be named and hashed');
     }

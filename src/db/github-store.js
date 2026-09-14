@@ -38,8 +38,29 @@ const STATE_PATH = 'evidence/state/latest.json';
 // report assembly without first passing the whole-run gate and being written
 // into the evidence days properly.
 const JOURNAL_PATH = 'evidence/runs/resume/latest.json';
-const journalRowPath = (reportId, segment) =>
-  'evidence/runs/resume/' + String(reportId) + '-' + String(segment).padStart(4, '0') + '.ndjson.gz';
+// ── WHY THE CONTENT HASH IS IN THE PATH ────────────────────────────────────
+//
+// It used to be report id plus segment number, and the segment number came from
+// the run's OWN in-memory copy of the journal. Two runs against the same
+// journal therefore both believed they were writing segment 17, and both wrote
+// it to the same path. The second overwrote the first.
+//
+// That happened. In one afternoon: segment 17 written three times by two runs
+// with 408, 399 and 367 wallets, one of them then discarding a journal the
+// other was still appending to, and a surviving manifest left referencing
+// fifteen shards that no longer existed. Forty-two thousand rows of walked
+// evidence, unrecoverable.
+//
+// A path that includes the content's own hash cannot collide unless the content
+// is identical, in which case the collision is harmless.
+// CONTENT-ADDRESSED, with no segment number in it at all. The segment number
+// was the collision: it came from each run's own copy of the journal, so two
+// runs both wrote "segment 17" to one path and the second overwrote the first.
+// A path that is only the run and the content's hash cannot collide unless the
+// content is identical — and identical content is the same shard, which the
+// manifest then records once rather than twice.
+const journalRowPath = (reportId, digest) =>
+  'evidence/runs/resume/' + String(reportId) + '-' + String(digest).slice(0, 16) + '.ndjson.gz';
 const historyPath = version => 'evidence/state/history/' + String(version).padStart(8, '0') + '.json';
 const runPath = reportId => 'evidence/runs/' + String(reportId) + '.json';
 
@@ -152,41 +173,95 @@ async function readJournalRows(journal, deps) {
 // Append one segment: the finished wallets and the gzipped rows behind them,
 // in ONE commit. This is the only place the store writes without the whole-run
 // gate, and it is allowed to because nothing it writes is a claim.
+// Appends are OPTIMISTIC. The manifest is re-read inside the attempt and this
+// segment is applied to whatever is actually on the branch, not to the copy
+// this run started with. Without that, two runs each append to their own stale
+// view and one of them is silently lost — or worse, believes it holds evidence
+// the other has since removed.
 async function appendJournal(journal, segment, deps) {
   const d = deps || {};
   const { token, repo, branch } = target(d.env);
   const gh = d.gh || A.client(token, repo, d.fetch || fetch);
   const zlib = require('zlib');
-  const path = journalRowPath(journal.report_id, Number(journal.segments || 0) + 1);
   const packed = zlib.gzipSync(Buffer.from(
     (segment.rows || []).map(r => JSON.stringify(r)).join('\n') + ((segment.rows || []).length ? '\n' : ''),
     'utf8'), { level: 9 });
-  const shards = (segment.rows || []).length
-    ? [{ path, sha256: Journal.sha256(packed), rows: segment.rows.length }] : [];
-  const next = Journal.record(journal, { wallets: segment.wallets, row_shards: shards });
+  const digest = Journal.sha256(packed);
 
-  const files = { [JOURNAL_PATH]: Journal.serialize(next) };
-  if (shards.length) files[path] = packed;
-  const ref = await A.archiveRef(gh, branch);
-  const written = await A.commitFiles(gh, branch, ref.object.sha, files,
-    'journal: ' + next.report_id + ' segment ' + next.segments + ' — ' +
-    next.wallet_count + ' wallets walked — anchor ' + next.anchor_ledger);
-  return { journal: next, commit_sha: written.commit_sha };
+  let lastRefusal = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const ref = await A.archiveRef(gh, branch);
+    const text = await readFile(gh, branch, JOURNAL_PATH, ref.object.sha);
+    // Apply to what is THERE. An absent manifest means someone discarded the
+    // journal underneath this run; our own copy is then the only record of the
+    // work, and re-establishing it is better than dropping it.
+    let base = journal;
+    if (text !== null) {
+      let onDisk = null;
+      try { onDisk = JSON.parse(text); } catch (_) { onDisk = null; }
+      if (onDisk && onDisk.report_id === journal.report_id) base = onDisk;
+      else if (onDisk) {
+        // A different run owns the resume slot. Appending to it would mix two
+        // runs' evidence under one anchor, which is not a thing to repair
+        // later — so this run keeps its work in memory and says so.
+        const e = new Error('JOURNAL_OWNED_BY_ANOTHER_RUN: ' + onDisk.report_id);
+        e.journalConflict = true;
+        throw e;
+      }
+    }
+
+    // Wallets this segment carries that the base already has were recorded by
+    // someone else; recording them again is refused by record(), so they are
+    // dropped rather than duplicated.
+    const already = Journal.doneAddresses(base);
+    const fresh = (segment.wallets || []).filter(w => !already.has(w.address));
+    const path = journalRowPath(base.report_id, digest);
+    const shards = (segment.rows || []).length
+      ? [{ path, sha256: digest, rows: segment.rows.length }] : [];
+    const next = Journal.record(base, { wallets: fresh, row_shards: shards });
+
+    const files = { [JOURNAL_PATH]: Journal.serialize(next) };
+    if (shards.length) files[path] = packed;
+    try {
+      const written = await A.commitFiles(gh, branch, ref.object.sha, files,
+        'journal: ' + next.report_id + ' segment ' + next.segments + ' — ' +
+        next.wallet_count + ' wallets walked — anchor ' + next.anchor_ledger);
+      return { journal: next, commit_sha: written.commit_sha };
+    } catch (e) {
+      if (!e.refConflict || attempt === 3) throw e;
+      lastRefusal = e;
+    }
+  }
+  throw lastRefusal || new Error('JOURNAL_APPEND_RETRY_EXHAUSTED');
 }
 
 // Remove a journal and everything it owns, without touching anything else.
 // Used when a journal is refused: leaving it would offer the same refusal to
 // every run after this one.
+// Discards only what the manifest ON THE BRANCH names, read at the moment of
+// deletion — never a copy this run has been holding. A stale copy named fifteen
+// shards that a later run had already replaced, and deleting by it destroyed
+// work that was still being written.
+//
+// And only if the branch still holds the journal being discarded. If another
+// run has since started its own, that one is not ours to delete.
 async function clearJournal(journal, deps) {
   const d = deps || {};
   const { token, repo, branch } = target(d.env);
   const gh = d.gh || A.client(token, repo, d.fetch || fetch);
-  const files = {};
-  for (const p of Journal.ownedPaths(journal, JOURNAL_PATH)) files[p] = null;
   const ref = await A.archiveRef(gh, branch);
+  const text = await readFile(gh, branch, JOURNAL_PATH, ref.object.sha);
+  if (text === null) return { status: 'ALREADY_GONE', files_removed: 0 };
+  let onDisk = null;
+  try { onDisk = JSON.parse(text); } catch (_) { onDisk = null; }
+  if (onDisk && journal && journal.report_id && onDisk.report_id !== journal.report_id) {
+    return { status: 'NOT_OURS_TO_DISCARD', held_by: onDisk.report_id, files_removed: 0 };
+  }
+  const files = {};
+  for (const p of Journal.ownedPaths(onDisk, JOURNAL_PATH)) files[p] = null;
   const written = await A.commitFiles(gh, branch, ref.object.sha, files,
-    'journal: discard ' + ((journal && journal.report_id) || 'unreadable') + ' — not resumable');
-  return { commit_sha: written.commit_sha, files_removed: written.files_removed };
+    'journal: discard ' + ((onDisk && onDisk.report_id) || 'unreadable') + ' — not resumable');
+  return { status: 'DISCARDED', commit_sha: written.commit_sha, files_removed: written.files_removed };
 }
 
 // THE RUN COMMIT. `run` is the completed acquisition; `files` are the delta
@@ -245,8 +320,20 @@ async function commitRun(input, deps) {
     // same ref update. A second call to clean it up is a call that can fail
     // after the evidence has landed, leaving a stale journal for the next run
     // to refuse.
-    for (const p of Journal.ownedPaths(run.journal || null, JOURNAL_PATH)) {
-      if (run.journal) files[p] = null;
+    //
+    // Removed by what the BRANCH says it owns, read in this same attempt, not
+    // by the copy this run has been carrying. A stale copy names shards that a
+    // later append has already superseded, and deleting by it takes out files
+    // another run is still relying on.
+    if (run.journal) {
+      const journalText = await readFile(gh, branch, JOURNAL_PATH, ref.object.sha);
+      let onDisk = null;
+      if (journalText !== null) { try { onDisk = JSON.parse(journalText); } catch (_) { onDisk = null; } }
+      // Only ours. If another run has taken the resume slot since, its journal
+      // is not this commit's to remove.
+      if (!onDisk || onDisk.report_id === run.journal.report_id) {
+        for (const p of Journal.ownedPaths(onDisk || run.journal, JOURNAL_PATH)) files[p] = null;
+      }
     }
 
     try {

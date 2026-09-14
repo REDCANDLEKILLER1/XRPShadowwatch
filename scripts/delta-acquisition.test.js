@@ -26,6 +26,7 @@ const D = require(path.join(ROOT, 'src/db/delta-acquisition.js'));
 const groupOf = rows => D.groupByCause(rows);
 const State = require(path.join(ROOT, 'src/db/evidence-state.js'));
 const Store = require(path.join(ROOT, 'src/db/github-store.js'));
+const Journal = require(path.join(ROOT, 'src/db/run-journal.js'));
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail) => {
@@ -1113,6 +1114,94 @@ async function main() {
       { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh,
         reader: fakePeer({ transactions: quiet(), balances: BAL }).reader,
         startReserveMs: 0 })).committed === true);
+
+  console.log('\n31. two runs on one journal must not destroy each other');
+  /* ── WHAT HAPPENED ─────────────────────────────────────────────────────────
+     From the evidence repository, in one afternoon:
+
+       869db86  segment 17 — 408 wallets      run A
+       1d2d6fc  segment 17 — 399 wallets      run B, SAME path, "M" not "A"
+       97fce69  journal: discard — not resumable   deleted 0001–0017 + manifest
+       5e3e5a5  segment 17 — 367 wallets      run A, recreating the manifest
+
+     Segment numbers came from each run's own in-memory copy, so both wrote
+     "segment 17" to the same filename and the second overwrote the first. Then
+     one run discarded a journal the other was still appending to, by a stale
+     list of paths. The surviving manifest referenced eighteen shards of which
+     fifteen no longer existed: 42,599 rows of walked evidence, unrecoverable.
+
+     None of the tests written before this could have caught it — every one of
+     them ran a single run against a fresh store. */
+  const ghRace = fakeGithub(seeded(ANCHOR - 1000));
+  const deps = { env: ENV, gh: ghRace.gh };
+  const base = Journal.begin({ report_id: 'SW-20260911-RACEA', scan_id: 'idx-a',
+    started_at: '2026-09-11T06:00:00.000Z', from_state_version: 1,
+    from_state_sha256: JSON.parse(ghRace.files().get(Store.STATE_PATH).toString('utf8')).state_sha256,
+    anchor_ledger: ANCHOR, anchor_close: '2026-09-11T06:00:00.000Z',
+    cold_from_ledger: null, admitted_wallets: [] });
+  const seg = (address, rows) => ({
+    wallets: [{ address, proven_from: ANCHOR - 999, proven_through: ANCHOR, rows: rows.length,
+      reconciliation: 'RECONCILED', entry: { address, last_proven_ledger: ANCHOR } }],
+    rows: rows.map((h, i) => ({ hash: h, ledger_index: ANCHOR - 10 + i }))
+  });
+
+  // Both runs start from the SAME manifest — the situation that caused it.
+  const a1 = await Store.appendJournal(base, seg('rAlice', ['A1', 'A2']), deps);
+  const b1 = await Store.appendJournal(base, seg('rBob', ['B1']), deps);
+  check('the second run appends onto what is actually on the branch',
+    b1.journal.wallet_count === 2, b1.journal.wallet_count);
+  check('and neither run\'s rows were overwritten by the other',
+    b1.journal.row_shards.length === 2 &&
+    b1.journal.row_shards.every(sh => !!ghRace.files().get(sh.path)),
+    b1.journal.row_shards.map(sh => sh.path));
+  check('the shard paths differ, because the content does',
+    new Set(b1.journal.row_shards.map(sh => sh.path)).size === 2);
+  check('and carry no segment number — that was the thing that collided',
+    b1.journal.row_shards.every(sh => !/-\d{4}-/.test(sh.path)),
+    b1.journal.row_shards.map(sh => sh.path));
+  check('every wallet from both runs survives in one manifest',
+    b1.journal.wallets.map(w => w.address).sort().join(',') === 'rAlice,rBob');
+
+  // A wallet already recorded by the other run is dropped, not duplicated.
+  const dup = await Store.appendJournal(a1.journal, seg('rBob', ['B1']), deps);
+  check('a wallet the other run already banked is not recorded twice',
+    dup.journal.wallets.filter(w => w.address === 'rBob').length === 1,
+    dup.journal.wallets.map(w => w.address));
+  // Same content, same path, so the shard is the same shard. Listing it twice
+  // would have the journal claim rows it holds once.
+  check('and its shard is not listed twice either',
+    new Set(dup.journal.row_shards.map(sh => sh.path)).size === dup.journal.row_shards.length,
+    dup.journal.row_shards.map(sh => sh.path));
+
+  console.log('\n32. discarding a journal removes only what is really there');
+  // The stale-copy deletion, exactly: hold an OLD manifest, then discard.
+  const stale = a1.journal;              // knows 1 shard; the branch now has 2
+  const cleared = await Store.clearJournal(stale, deps);
+  check('the discard removes what the BRANCH names, not the stale copy',
+    cleared.files_removed === 3, cleared);
+  check('so no shard is left behind orphaned',
+    ![...ghRace.files().keys()].some(k => /runs\/resume\//.test(k)),
+    [...ghRace.files().keys()].filter(k => /runs\/resume\//.test(k)));
+
+  // And a journal that belongs to a DIFFERENT run is not ours to delete.
+  const ghOther = fakeGithub(seeded(ANCHOR - 1000));
+  const mine = Journal.begin({ report_id: 'SW-20260911-MINE1', scan_id: 'm',
+    started_at: 'x', from_state_version: 1, from_state_sha256: 'z',
+    anchor_ledger: ANCHOR, anchor_close: null, cold_from_ledger: null, admitted_wallets: [] });
+  const theirs = Journal.begin({ ...mine, report_id: 'SW-20260911-THEIR' });
+  await Store.appendJournal(theirs, seg('rCarol', ['C1']), { env: ENV, gh: ghOther.gh });
+  const refusedClear = await Store.clearJournal(mine, { env: ENV, gh: ghOther.gh });
+  check('a journal held by another run is refused, not deleted',
+    refusedClear.status === 'NOT_OURS_TO_DISCARD' &&
+    refusedClear.held_by === 'SW-20260911-THEIR', refusedClear);
+  check('and its files are untouched',
+    !!ghOther.files().get(Store.JOURNAL_PATH));
+  // Appending to someone else's journal is refused for the same reason.
+  let crossed = null;
+  await Store.appendJournal(mine, seg('rDave', ['D1']), { env: ENV, gh: ghOther.gh })
+    .catch(e => { crossed = e.message; });
+  check('and one run cannot append into another run\'s journal',
+    /JOURNAL_OWNED_BY_ANOTHER_RUN/.test(String(crossed)), crossed);
 
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA ACQUISITION CHECKS PASS'));
   process.exit(fail ? 1 : 0);
