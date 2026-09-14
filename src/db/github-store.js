@@ -303,25 +303,30 @@ async function seedGenesis(input, deps) {
 //
 // A day with no shard is not an error. It means nothing was committed for that
 // day, which for a day inside a proven window means nothing happened.
-async function readDays(days, deps) {
+async function readDays(days, deps, kind) {
   const d = deps || {};
   const { token, repo, branch } = target(d.env);
   const gh = d.gh || A.client(token, repo, d.fetch || fetch);
   const zlib = require('zlib');
+  // 'events' by default; 'participants' reads the provenance shards alongside
+  // them. The participants file is what records WHICH watched wallet's walk saw
+  // a transaction, and the report attributes every movement by that — without
+  // it every row comes back unattributed.
+  const name = kind === 'participants' ? 'participants' : 'events';
   const out = { events: [], files: [], missing: [] };
   for (const day of (days || [])) {
     const base = 'evidence/' + String(day).replace(/-/g, '/');
     // Shards are numbered only when a day had to be split, so try the plain
     // name first and then the numbered series until one is absent.
-    const candidates = ['/events.ndjson.gz'];
-    for (let i = 1; i <= 999; i++) candidates.push('/events.' + String(i).padStart(3, '0') + '.ndjson.gz');
+    const candidates = ['/' + name + '.ndjson.gz'];
+    for (let i = 1; i <= 999; i++) candidates.push('/' + name + '.' + String(i).padStart(3, '0') + '.ndjson.gz');
     let found = 0;
     for (const suffix of candidates) {
       const path = base + suffix;
       // Day shards are routinely larger than a megabyte — a busy day can hold
       // tens of thousands of events — so they go through the same path.
       const packed = await readBytes(gh, branch, path);
-      if (packed === null) { if (suffix === '/events.ndjson.gz') continue; break; }
+      if (packed === null) { if (suffix === '/' + name + '.ndjson.gz') continue; break; }
       const text = zlib.gunzipSync(packed).toString('utf8');
       for (const line of text.split('\n')) { if (line) out.events.push(JSON.parse(line)); }
       out.files.push(path); found++;

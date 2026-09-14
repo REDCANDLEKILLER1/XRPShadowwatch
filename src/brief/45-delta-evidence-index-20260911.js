@@ -44,7 +44,13 @@
       var reportId = (window.state && state.reportId) || (window.state && state.seal && state.seal.report_id) || null;
       if (!reportId) throw new Error('DELTA_REPORT_ID_REQUIRED');
       if (typeof log === 'function') log('Evidence: reading checkpoint and walking the delta (one server call)...');
-      return post('run', { report_id: reportId, scan_id: (window.state && state.scanId) || null })
+      // The window travels with the request. Without it the server has no way
+      // to know which days the report covers, and can only hand back this run's
+      // delta — which on a second run of the same day is nearly empty while the
+      // morning's transactions sit committed in the evidence repository.
+      var w = windowRange || {};
+      return post('run', { report_id: reportId, scan_id: (window.state && state.scanId) || null,
+        window_start_ms: w.startMs, window_end_ms: w.endMs })
         .then(function (result) {
           run = result;
           run.byAddress = Object.create(null);
@@ -53,7 +59,14 @@
             log('Evidence: anchor ' + result.anchor_ledger + ' · ' + result.complete_wallets + '/' +
               result.target_wallets + ' proved · ' + (result.transactions || 0) + ' transactions · ' +
               (result.xrpl_requests || 0) + ' XRPL reads' +
+              (result.window && result.window.in_window !== undefined
+                ? ' · window ' + result.window.in_window + ' events (' +
+                  result.window.from_stored + ' stored + ' + result.window.from_this_run + ' this run)' : '') +
               (result.committed ? ' · checkpoint advanced' : ' · checkpoint NOT advanced (' + result.reason + ')'));
+            if (result.window && result.window.error) {
+              log('Evidence: REPORT WINDOW UNAVAILABLE — ' + result.window.error +
+                '. The report cannot be assembled from this run alone.');
+            }
           }
           return {
             scan_id: result.scan_id || ('gh-' + result.anchor_ledger),
@@ -70,7 +83,8 @@
       if (!run) return null;
       return { scan_id: run.scan_id, target_wallets: run.target_wallets, indexed_wallets: run.complete_wallets,
         requests: run.xrpl_requests, rows_fetched: run.transactions, errors: (run.failures || []),
-        stored_transactions_loaded: run.transactions,
+        stored_transactions_loaded: (run.window && run.window.from_stored) || 0,
+        report_window: run.window || null,
         balance_contradictions: run.balance_contradictions,
         balance_contradiction_addresses: run.balance_contradiction_addresses || [],
         checkpoint_advanced: !!run.committed, freshness: run.freshness };
@@ -96,23 +110,33 @@
       });
     },
 
-    // The canonical stream, already deduplicated by the run.
+    // THE REPORT WINDOW, assembled by the server: what is already committed for
+    // the days this report covers, unioned with what this run just walked, each
+    // transaction once. Not the run's delta — see begin().
+    //
+    // An absent window is refused rather than substituted. Rendering a day from
+    // a delta that does not cover it is exactly the kind of quiet
+    // understatement this project exists to prevent.
     readRun: function () {
       return Promise.resolve().then(function () {
         if (!run) throw new Error('DELTA_RUN_NOT_STARTED');
-        return (run.rows || []).map(function (r) {
+        if (!run.events) {
+          throw new Error('REPORT_WINDOW_UNAVAILABLE: ' +
+            ((run.window && run.window.error) || 'the server did not assemble the window'));
+        }
+        return run.events.map(function (e) {
           return {
-            hash: r.hash, ledger_index: r.ledger_index, date: r.close_time_iso || r.close_time,
-            type: r.tx_type, tx_result: r.tx_result, validated: r.validated === true,
-            from: r.from_account || '', to: r.escrow_destination || r.to_account || '',
-            amount: r.amount_drops !== null && r.amount_drops !== undefined ? String(r.amount_drops)
-                  : (r.amount_value !== null && r.amount_value !== undefined ? String(r.amount_value) : null),
-            currency: r.currency || 'XRP', issuer: r.issuer || '',
-            destination_tag: r.destination_tag, sig_mode: r.sig_mode || 'unknown',
-            signer_count: Number(r.signer_count) || 0, escrow_owner: r.escrow_owner || '',
-            escrow_amount_drops: r.escrow_amount_drops === null || r.escrow_amount_drops === undefined
-              ? null : String(r.escrow_amount_drops),
-            observed_via: Array.isArray(r.observed_via) ? r.observed_via : (r.observed_via ? [r.observed_via] : [])
+            hash: e.hash, ledger_index: e.ledger_index, date: e.close_time,
+            type: e.tx_type, tx_result: e.tx_result, validated: e.validated === true,
+            from: e.from_account || '', to: e.escrow_destination || e.to_account || '',
+            amount: e.amount_drops !== null && e.amount_drops !== undefined ? String(e.amount_drops)
+                  : (e.amount_value !== null && e.amount_value !== undefined ? String(e.amount_value) : null),
+            currency: e.currency || 'XRP', issuer: e.issuer || '',
+            destination_tag: e.destination_tag, sig_mode: e.sig_mode || 'unknown',
+            signer_count: Number(e.signer_count) || 0, escrow_owner: e.escrow_owner || '',
+            escrow_amount_drops: e.escrow_amount_drops === null || e.escrow_amount_drops === undefined
+              ? null : String(e.escrow_amount_drops),
+            observed_via: Array.isArray(e.observed_via) ? e.observed_via : []
           };
         });
       });

@@ -874,20 +874,54 @@ async function readReportWindow(input, deps) {
        t <= to.getTime(); t += 86400000) {
     days.push(new Date(t).toISOString().slice(0, 10));
   }
-  const stored = await Store.readDays(days, d);
+  // Events and their provenance, read together. Nothing else in the archive is
+  // touched: two small file sets for the one or two days the window covers.
+  const [stored, seen] = await Promise.all([
+    Store.readDays(days, d),
+    Store.readDays(days, d, 'participants')
+  ]);
   const fresh = (input.rows || []).map(r => X.eventOf({ ...r, close_time: r.close_time_iso || r.close_time }));
   const byHash = new Map();
   // Freshly walked rows win on a tie: they came from this run's proven range.
   for (const event of stored.events) byHash.set(event.hash, event);
   for (const event of fresh) byHash.set(event.hash, event);
+
+  // ── WHO SAW IT ──────────────────────────────────────────────────────────
+  //
+  // A transaction with no observer is a transaction the report cannot attribute
+  // to any watched wallet — it renders with an empty account, label and
+  // category. The event projection deliberately does not carry provenance
+  // (provenance is not a property of the transaction), so it is rejoined here
+  // from the participants shards, where every walk that saw a transaction was
+  // recorded as an OBSERVED_VIA row.
+  const observers = new Map();
+  const note = (hash, address) => {
+    if (!hash || !address) return;
+    let list = observers.get(hash);
+    if (!list) { list = []; observers.set(hash, list); }
+    if (list.indexOf(address) < 0) list.push(address);
+  };
+  // The role constant, not a string literal — the writer and the reader must
+  // not be able to drift apart on the one field this join depends on.
+  for (const p of seen.events) { if (p && p.role === T.ROLE.OBSERVED_VIA) note(p.tx_hash, p.address); }
+  // This run's own rows already know their observers; they are not in any shard
+  // yet because the commit that writes them may not have happened.
+  for (const r of (input.rows || [])) {
+    const via = Array.isArray(r.observed_via) ? r.observed_via : (r.observed_via ? [r.observed_via] : []);
+    for (const address of via) note(r.hash, address);
+  }
+
   const events = [...byHash.values()]
     .filter(e => {
       const t = Date.parse(e.close_time);
       return Number.isFinite(t) && t >= from.getTime() && t <= to.getTime();
     })
+    .map(e => ({ ...e, observed_via: observers.get(e.hash) || [] }))
     .sort(X.orderEvents);
-  return { events, days, shards_read: stored.files, days_without_shards: stored.missing,
-    from_stored: stored.events.length, from_this_run: fresh.length, in_window: events.length };
+  return { events, days, shards_read: stored.files.concat(seen.files),
+    days_without_shards: stored.missing,
+    from_stored: stored.events.length, from_this_run: fresh.length, in_window: events.length,
+    unattributed: events.filter(e => !e.observed_via.length).length };
 }
 
 module.exports = { acquire, walkWallet, buildShards, readReportWindow, groupByCause, PAGE_LIMIT };

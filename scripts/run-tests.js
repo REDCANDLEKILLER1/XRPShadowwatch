@@ -58,6 +58,7 @@ const SUITES = [
   ['evidence-state',         'evidence-state.test.js',             null],
   ['github-evidence-store',  'github-evidence-store.test.js',      null],
   // A morning run with no database: GitHub in, XRPL delta, GitHub out.
+  ['delta-report-path',      'delta-report-path.test.js',        8213],
   ['run-journal',            'run-journal.test.js',              null],
   ['delta-acquisition',      'delta-acquisition.test.js',          null],
   // The checkpoint was in the repository all along: a sealed 255/255 report

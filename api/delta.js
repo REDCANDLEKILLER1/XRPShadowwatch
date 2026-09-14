@@ -10,6 +10,7 @@
 // somewhere, and a serverless function cannot hold it between invocations. A
 // run that exceeds the budget commits nothing and the next attempt repeats the
 // same bounded edge, which costs one account_tx per wallet.
+const zlib = require('zlib');
 const D = require('../src/db/delta-acquisition');
 const Store = require('../src/db/github-store');
 const State = require('../src/db/evidence-state');
@@ -26,6 +27,71 @@ const READ_BUDGET_MS = 240000;
 // a status check into a 500 — the checkpoint is still readable and still worth
 // reporting — so it degrades to null rather than throwing.
 const rosterCount = () => { try { return roster.select().accounts.length; } catch (_) { return null; } };
+
+// ── WHAT THE REPORT ACTUALLY NEEDS BACK ────────────────────────────────────
+//
+// Not the evidence. The evidence — every raw_tx and raw_meta the walk fetched —
+// belongs in the repository, and a run that walked two hundred thousand of them
+// cannot hand that to a browser over one response. The REPORT needs the
+// transactions inside its window, once each, with enough of each to render a
+// line about it.
+//
+// And the window is not the same thing as the delta. The first run of a day
+// walks the day; a second run walks only what happened since the first, and its
+// delta is nearly empty while the morning's transactions sit committed in the
+// repository. Handing the report that delta would render an empty morning and
+// call it a quiet day. So the window is ASSEMBLED — what is stored for the days
+// it touches, unioned with what this run just walked.
+const REPORT_KEYS = ['hash', 'ledger_index', 'close_time', 'tx_type', 'tx_result', 'validated',
+  'from_account', 'to_account', 'amount_drops', 'amount_value', 'currency', 'issuer',
+  'destination_tag', 'sig_mode', 'signer_count', 'escrow_owner', 'escrow_destination',
+  'escrow_amount_drops', 'observed_via'];
+const slim = event => {
+  const out = {};
+  for (const key of REPORT_KEYS) { if (event[key] !== null && event[key] !== undefined) out[key] = event[key]; }
+  return out;
+};
+
+async function respondWithWindow(res, result, input, reader) {
+  const startMs = Number(input.window_start_ms), endMs = Number(input.window_end_ms);
+  const body = { ...result };
+  // The rows never cross the wire. They are the evidence; the repository holds
+  // them, and the browser has no use for a raw ledger payload.
+  delete body.rows;
+  body.transactions_walked = (result.rows || []).length;
+
+  if (Number.isFinite(startMs) && Number.isFinite(endMs)) {
+    try {
+      const assembled = await D.readReportWindow(
+        { window_start_ms: startMs, window_end_ms: endMs, rows: result.rows || [] }, {});
+      body.events = assembled.events.map(slim);
+      body.window = { from: new Date(startMs).toISOString(), to: new Date(endMs).toISOString(),
+        days: assembled.days, in_window: assembled.in_window,
+        from_stored: assembled.from_stored, from_this_run: assembled.from_this_run,
+        days_without_shards: assembled.days_without_shards,
+        unattributed: assembled.unattributed };
+    } catch (e) {
+      // The window could not be assembled. Say so rather than quietly handing
+      // back this run's delta as though it were the day.
+      body.events = null;
+      body.window = { error: String(e.message || 'REPORT_WINDOW_UNAVAILABLE') };
+    }
+  } else {
+    body.events = null;
+    body.window = { error: 'REPORT_WINDOW_NOT_REQUESTED' };
+  }
+
+  // Gzipped. A day of this roster is tens of thousands of events, which is
+  // megabytes of JSON and more than a function response is willing to carry —
+  // and it compresses by roughly an order of magnitude.
+  const json = Buffer.from(JSON.stringify(body), 'utf8');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  if (json.length > 65536) {
+    res.setHeader('Content-Encoding', 'gzip');
+    return res.end(zlib.gzipSync(json, { level: 6 }));
+  }
+  return res.end(json);
+}
 
 module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
@@ -273,7 +339,7 @@ module.exports = async function handler(req, res) {
     }
 
     const result = await D.acquire(job, { reader, concurrency });
-    return res.json(result);
+    return await respondWithWindow(res, result, input, reader);
   } catch (e) {
     // A connection string can appear in a driver error; it must never leave
     // the server even though this path no longer uses one.

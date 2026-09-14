@@ -404,8 +404,19 @@ async function main() {
   const shard = zlib.gzipSync(Buffer.from(JSON.stringify(storedEvent) + '\n', 'utf8'), { level: 9 });
   const ghWindow = fakeGithub(seeded(ANCHOR - 1000));
   ghWindow.files().set('evidence/2026/09/11/events.ndjson.gz', shard);
+  // The provenance shard beside it. WHICH watched wallet's walk saw a
+  // transaction is not a property of the transaction, so the event projection
+  // does not carry it — but the report attributes every movement by it, and an
+  // event with no observer renders with an empty account, label and category.
+  const storedParts = [
+    { tx_hash: storedEvent.hash, address: 'rAlice', role: 'observed_via' },
+    { tx_hash: storedEvent.hash, address: 'rBob', role: 'submitter' }
+  ].map(x => JSON.stringify(x)).join('\n') + '\n';
+  ghWindow.files().set('evidence/2026/09/11/participants.ndjson.gz',
+    zlib.gzipSync(Buffer.from(storedParts, 'utf8'), { level: 9 }));
   const freshRow = { hash: 'F'.repeat(64), ledger_index: ANCHOR - 100,
-    close_time_iso: DAY + 'T05:00:00.000Z', tx_type: 'Payment', validated: true, evidence: {} };
+    close_time_iso: DAY + 'T05:00:00.000Z', tx_type: 'Payment', validated: true, evidence: {},
+    observed_via: ['rCarol'] };
 
   const win = await D.readReportWindow({
     window_start_ms: Date.parse(DAY + 'T00:00:00.000Z'),
@@ -417,6 +428,18 @@ async function main() {
     { from_stored: win.from_stored, shards: win.shards_read });
   check('and combined with the rows this run walked',
     win.from_this_run === 1 && win.in_window === 2, { run: win.from_this_run, total: win.in_window });
+  // Without this the report loses wallet attribution for everything it did not
+  // walk itself — which, on a second run of the day, is nearly all of it.
+  check('a stored event is reunited with the wallet whose walk saw it',
+    (win.events.find(e => e.hash === storedEvent.hash) || {}).observed_via
+      && win.events.find(e => e.hash === storedEvent.hash).observed_via.join(',') === 'rAlice',
+    win.events.map(e => e.hash.slice(0, 4) + ':' + JSON.stringify(e.observed_via)));
+  check('only the OBSERVED_VIA role counts as provenance, not every participant',
+    !win.events.find(e => e.hash === storedEvent.hash).observed_via.includes('rBob'));
+  check('a row this run walked keeps its own observers',
+    win.events.find(e => e.hash === freshRow.hash).observed_via.join(',') === 'rCarol');
+  check('and nothing in the window is left unattributed',
+    win.unattributed === 0, win.unattributed);
   check('the window is ordered, so the report reads it in ledger-time order',
     win.events[0].close_time < win.events[1].close_time);
   check('only the days the window touches are fetched, not the archive',
