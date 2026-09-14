@@ -229,7 +229,10 @@ module.exports = async function handler(req, res) {
         const result = await D.acquire(job, { reader, concurrency,
           // The lanes report as they land, so a stalled XRPL connect is visible
           // as a missing anchor rather than as a run that is simply quiet.
-          onPhase: (name, detail) => { lastPhase = name === 'plan' ? 'wallets' : name;
+          // 'reserve' is an announcement, not a thing the run waits on — it
+          // was overwriting "wallets" and making a healthy walk read as stuck.
+          onPhase: (name, detail) => {
+            if (name !== 'reserve') lastPhase = name === 'plan' ? 'wallets' : name;
             line({ t: 'phase', phase: name, ...detail, ms: Date.now() - startedAt }); },
           // One line per PAGE of a long wallet. Thirty-one pages is four
           // minutes; without this it is four minutes of nothing.

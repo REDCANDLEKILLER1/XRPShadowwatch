@@ -3,12 +3,22 @@ const WebSocket = require('ws');
 const { randomUUID } = require('crypto');
 const coverage = require('./coverage');
 const admission = require('./xrpl-admission');
-const ENDPOINTS = ['wss://xrplcluster.com', 'wss://xrpl.ws', 'wss://s1.ripple.com', 'wss://s2.ripple.com'];
+// Ordered by how they have actually behaved, not alphabetically. Across every
+// live run today: xrpl.ws carried 427 requests with ZERO refusals, s2 carried
+// 319 with one, s1 158 with one, and xrplcluster refused 15 times in 59. The
+// order matters because a run with only one wallet left to walk hands out
+// exactly one lane, and on a fresh process every lane's cost is zero — so the
+// first entry is the one that wallet gets. It should not be the strictest
+// server on the list.
+const ENDPOINTS = ['wss://xrpl.ws', 'wss://s2.ripple.com', 'wss://s1.ripple.com', 'wss://xrplcluster.com'];
 // How much one refusal counts against a lane when choosing where the next
 // wallet goes. Two seconds' worth per refusal: enough that a server refusing
 // repeatedly is steered away from, small enough that one bad moment does not
 // exile an otherwise healthy endpoint for the rest of the run.
 const REFUSAL_PENALTY_MS = 2000;
+// A cooldown longer than this is worth restarting a paged walk elsewhere rather
+// than sitting through. Below it, waiting is cheaper than re-fetching pages.
+const LANE_SWITCH_MS = 3000;
 const validatedHeaders = new Map();
 const idleReaders = [];
 function acquireReader() {
@@ -117,14 +127,19 @@ class Reader {
   // Pick the lane that can carry a request soonest. Ties go to the least busy,
   // so four concurrent wallets land on four different servers rather than
   // queueing behind one.
-  pickLane() {
+  pickLane(exclude) {
     let best = null;
-    for (const lane of this.lanes) {
-      if (lane.retired) continue;
-      if (!best) { best = lane; continue; }
-      if (lane.cost() < best.cost()) best = lane;
+    // Rotated, so equal-cost lanes are not all the same lane. Without this the
+    // first entry wins every tie and a run with one wallet always lands on one
+    // server no matter how many are configured.
+    const n = this.lanes.length;
+    const start = this.endpointIndex++ % n;
+    for (let i = 0; i < n; i++) {
+      const lane = this.lanes[(start + i) % n];
+      if (lane.retired || lane === exclude) continue;
+      if (!best || lane.cost() < best.cost()) best = lane;
     }
-    if (!best) throw new Error('XRPL_ALL_ENDPOINTS_RETIRED');
+    if (!best) { if (exclude) return null; throw new Error('XRPL_ALL_ENDPOINTS_RETIRED'); }
     return best;
   }
 
@@ -267,9 +282,27 @@ class Reader {
           lane.refusals++;
           this.event({ event: 'cooldown', retry_after_ms: ms, endpoint: lane.endpoint, gap_ms: lane.clock.gap() });
           // An unpinned read simply moves to whichever lane is free soonest —
-          // often immediately, on a server that never refused. Only a pinned
-          // walk has to wait, because its marker cannot travel.
-          if (pin) await this.wait(ms);
+          // often immediately, on a server that never refused.
+          //
+          // A pinned walk cannot carry its marker to another server, so it used
+          // to sit out the cooldown. That is the right trade for a short wait
+          // and the wrong one for a long one: a wallet needing thirty pages on
+          // a server that refuses every few requests makes no progress at all,
+          // while three idle servers wait. So when the wait is long and another
+          // lane is READY NOW, the walk is abandoned and restarted there. It
+          // loses the pages already fetched, which is the price of a marker
+          // that cannot travel — and cheaper than the wait it replaces.
+          if (pin) {
+            const alternative = this.pickLane(lane);
+            if (ms > LANE_SWITCH_MS && alternative && alternative.readyIn() === 0) {
+              this.event({ event: 'lane_switch', from: lane.endpoint, to: alternative.endpoint,
+                would_have_waited_ms: ms });
+              const swap = new Error('XRPL_LANE_COOLING');
+              swap.laneSwitch = true;
+              throw swap;
+            }
+            await this.wait(ms);
+          }
         } else if (e.closed || (e.silent && sock.silentReads >= 3)) {
           this.closeLane(lane); lane.reconnects++; this.stats.reconnects++;
           if (lane.reconnects >= 3) {

@@ -274,9 +274,72 @@ console.log('\n7. four endpoints, four lanes — the thing that was configured b
     try { reader.pickLane(); } catch (e) { threw = e.message; }
     check('and a pool with none left says so rather than returning nothing',
       threw === 'XRPL_ALL_ENDPOINTS_RETIRED', threw);
+  })().then(runLaneSwitchChecks);
+}
+
+function runLaneSwitchChecks() {
+console.log('\n8. a paged walk does not sit out a long cooldown alone');
+/* A run with ONE wallet left to walk hands out exactly one lane. On a fresh
+   process every lane's cost is zero, so the first entry won every tie — and
+   that entry was xrplcluster, which across every live run today refused 15
+   times in 59 requests while xrpl.ws did 427 with none. The wallet then sat
+   through cooldown after cooldown while three idle servers waited. */
+{
+  const R = require(path.join(ROOT, 'src/db/xrpl-reader.js'));
+  // A VIRTUAL clock that actually advances. A frozen now() with a no-op sleep
+  // can never expire a cooldown, so admit() spins forever — the test hangs and
+  // proves nothing. Time moves when something sleeps.
+  let t = 0;
+  const clocks = new Map();
+  const clockFor = e => { if (!clocks.has(e)) clocks.set(e, A.createClock({ now: () => t, sleep: async ms => { t += ms; } })); return clocks.get(e); };
+  const reader = new R.Reader({ clockFor });
+  reader.openLane = async lane => { lane.sock = { readyState: 1, url: lane.endpoint }; return lane.sock; };
+
+  check('the endpoint that refused most is not first in line',
+    reader.lanes[0].endpoint !== 'wss://xrplcluster.com', reader.lanes.map(l => l.endpoint));
+  // Equal cost must not mean "always the same lane".
+  const picks = new Set();
+  for (let i = 0; i < 4; i++) picks.add(reader.pickLane().endpoint);
+  check('equal-cost lanes are rotated, not always the first one',
+    picks.size === 4, [...picks]);
+  check('pickLane can be asked for anything BUT one lane',
+    reader.pickLane(reader.lanes[0]).endpoint !== reader.lanes[0].endpoint);
+  check('and returns null rather than throwing when the excluded one is all there is',
+    (() => { const solo = new R.Reader({ clockFor });
+      solo.lanes.forEach((l, i) => { if (i) l.retired = true; });
+      return solo.pickLane(solo.lanes[0]) === null; })());
+
+  (async () => {
+    // A pinned walk on a lane that refuses with a LONG retry-after, while
+    // another lane is ready: abandon rather than wait.
+    const lane = reader.lanes[0];
+    reader.raw = async () => { const e = new Error('rate limit: units quota exhausted, retry in ~9891ms');
+      e.code = 'slowDown'; e.retry_after_ms = 9891; throw e; };
+    let err = null;
+    try { await reader.request({ command: 'account_tx', account: 'rX' }, lane.epoch, lane); }
+    catch (e) { err = e; }
+    check('a long cooldown on a pinned lane restarts the walk elsewhere',
+      err && err.message === 'XRPL_LANE_COOLING' && err.laneSwitch === true, err && err.message);
+    check('and it is a retryable error, so the wallet is re-walked rather than failed',
+      !/INVALID|MALFORMED|OUTSIDE_PROVEN_RANGE|CONFLICTING/.test((err && err.message) || ''));
+    check('the switch is recorded with what it avoided',
+      reader.stats.events.some(ev => ev.event === 'lane_switch' && ev.would_have_waited_ms === 9891),
+      reader.stats.events.filter(ev => ev.event === 'lane_switch'));
+
+    // A SHORT cooldown is cheaper to wait out than to re-fetch pages for.
+    let t2 = 0;
+    const r2 = new R.Reader({ clockFor: () => A.createClock({ now: () => t2, sleep: async ms => { t2 += ms; } }) });
+    r2.openLane = async l => { l.sock = { readyState: 1, url: l.endpoint }; return l.sock; };
+    let calls = 0;
+    r2.raw = async () => { if (++calls === 1) { const e = new Error('tooBusy'); e.code = 'tooBusy'; e.retry_after_ms = 200; throw e; }
+      return { ok: true }; };
+    r2.wait = async ms => { t2 += ms; };
+    const out = await r2.request({ command: 'account_tx', account: 'rY' }, r2.lanes[0].epoch, r2.lanes[0]);
+    check('a short cooldown is waited out instead — re-fetching pages costs more',
+      out && out.ok === true && calls === 2, { calls });
   })().then(() => {
     console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' XRPL ADMISSION CHECKS PASS'));
     process.exit(fail ? 1 : 0);
   });
 }
-
+}
