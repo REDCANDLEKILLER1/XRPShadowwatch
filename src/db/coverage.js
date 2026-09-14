@@ -709,11 +709,25 @@ function checkpointAdvance(input) {
 // and it is a function rather than a rule in a comment that someone has to
 // remember. `rowCount` is passed in only so the honest case can be named; a
 // non-zero count is never "quiet" regardless of coverage.
-function mayReportQuiet(decision, rowCount) {
+//
+// `reconciliation` is the balance cross-check (src/db/balance.js), optional
+// because it is not always computable. When it IS computable and says the
+// balance moved by more than the acquired evidence explains, zero rows is the
+// most dangerous possible reading: it is the shape a pass-through wallet takes
+// when its transactions were missed. That case is added to the list above —
+//
+//   proven, retained, nothing there, balance moved  ->  "nothing happened"  A LIE
+//
+// and it fails closed here, before any caller has a chance to render it.
+function mayReportQuiet(decision, rowCount, reconciliation) {
   const d = decision || {};
   const n = _int(rowCount);
   if (n === null || n < 0) return { quiet: false, reason: 'ROW_COUNT_UNKNOWN' };
   if (n > 0) return { quiet: false, reason: 'ROWS_PRESENT' };
+  if (reconciliation && reconciliation.status === 'CONTRADICTION') {
+    return { quiet: false, reason: reconciliation.reason || 'BALANCE_UNEXPLAINED',
+      unexplained_drops: reconciliation.unexplained_drops || null };
+  }
   // Zero rows. Only a window the index fully owns may be called quiet, and
   // only once the edge has actually been fetched.
   if (!d.served_from_index) {

@@ -30,10 +30,15 @@ async function main(){
       emptyHeaders.push({ledger:h.ledger,closed:new Date(h.close_ms)});
     }
   }finally{headerReader.close();}
-  const evidence=(await read(`SELECT t.* FROM transactions t WHERE ledger_index>=$2 AND ledger_index<=$3 AND
+  // The payload lives in transaction_raw since migration 005 and expires at 48
+  // hours, so it is joined rather than selected; a row whose payload has aged
+  // out cannot be replayed through rowFromAccountTx and is skipped below.
+  const evidence=(await read(`SELECT t.*,x.raw_tx,x.raw_meta FROM transactions t
+    LEFT JOIN transaction_raw x ON x.hash=t.hash
+    WHERE ledger_index>=$2 AND ledger_index<=$3 AND
     EXISTS(SELECT 1 FROM transaction_accounts a WHERE a.tx_hash=t.hash AND a.address=$1 AND a.role='observed_via')`,
     [actual.address,actual.proof.from_ledger,actual.proof.through_ledger])).rows;
-  const rows=evidence.map(r=>T.rowFromAccountTx({tx_json:r.raw_tx,meta:r.raw_meta,hash:r.hash,ledger_index:Number(r.ledger_index),validated:r.validated},
+  const rows=evidence.filter(r=>r.raw_tx&&r.raw_meta).map(r=>T.rowFromAccountTx({tx_json:r.raw_tx,meta:r.raw_meta,hash:r.hash,ledger_index:Number(r.ledger_index),validated:r.validated},
     {observedVia:actual.address,rosterVersion:run.roster_hash}));
   const namespace='sw_acceptance_'+randomUUID().replace(/-/g,'');
   const transaction=db.transaction;let injected=false;
@@ -64,12 +69,12 @@ async function main(){
       const conflicting=JSON.parse(JSON.stringify(rows[0]));
       conflicting.raw_meta.TransactionIndex=Number(conflicting.raw_meta.TransactionIndex||0)+1;
       await assert.rejects(()=>E.persist(run,actual.address,[rows[0],conflicting],actual.proof,metrics),/CONFLICTING_TRANSACTION_SIGHTINGS/);
-      for(const table of ['transactions','transaction_accounts','wallet_coverage','coverage_advances'])
+      for(const table of ['transactions','transaction_raw','transaction_accounts','wallet_coverage','coverage_advances','wallet_state','wallet_routes'])
         assert.equal(Number((await q('SELECT count(*) AS n FROM '+table)).rows[0].n),0,table+' unchanged after raw disagreement');
       console.log('PASS equal-size raw metadata disagreement cannot disappear through deduplication or advance coverage');
       injected=true;
       await assert.rejects(()=>E.persist(run,actual.address,rows,actual.proof,metrics),/INJECTED_FAILURE/);
-      for(const table of ['transactions','transaction_accounts','wallet_coverage','coverage_advances'])
+      for(const table of ['transactions','transaction_raw','transaction_accounts','wallet_coverage','coverage_advances','wallet_state','wallet_routes'])
         assert.equal(Number((await q('SELECT count(*) AS n FROM '+table)).rows[0].n),0,table+' rolled back');
       console.log('PASS actual Neon transaction rolls back evidence, participants, checkpoint and audit together');
       injected=false;await E.persist(run,actual.address,rows,actual.proof,metrics);
