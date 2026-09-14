@@ -322,7 +322,12 @@ async function archiveReport(raw,deps={}){
     let index=[];
     if(indexFile){try{index=JSON.parse(Buffer.from(indexFile.content||'','base64').toString('utf8'));}catch(_){throw new Error('ARCHIVE_INDEX_INVALID');}}
     index=Array.isArray(index)?index:[];
-    if(!index.some(row=>row.report_id===input.report_id))index.push({report_id:input.report_id,generated_at:generatedAt,
+    // The day index carries the scan id too. It is the surface a reader lands
+    // on first, and a row that names the report but not the scan sends them
+    // into the receipt to find it. Taken from the receipt, so the index and the
+    // receipt cannot say different things.
+    if(!index.some(row=>row.report_id===input.report_id))index.push({report_id:input.report_id,
+      scan_id:receipt.scan_id||null,generated_at:generatedAt,
       coverage_complete:facts.coverage_complete,anchor:facts.validated_anchor_ledger,transactions:facts.transactions_in_window,report_hash:reportHash});
     files[dayRoot+'/index.json']=json(index.sort((a,b)=>String(a.report_id).localeCompare(String(b.report_id))));
     try{

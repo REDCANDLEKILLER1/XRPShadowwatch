@@ -164,7 +164,14 @@ async function main(){
   // the browser after acquisition. Spreading the facts over the validated id
   // wrote that null straight into the receipt and the day index.
   assert.equal(ghReceipt.scan_id,'SC-FSO32');
-  assert.equal(ghIndex.find(r=>r.report_id==='SW-20260914-FSO32').scan_id||'SC-FSO32','SC-FSO32');
+  // Asserted DIRECTLY. The first version of this line read
+  //   ghIndex.find(...).scan_id || 'SC-FSO32'
+  // which supplies the expected value when the field is missing — so it passed
+  // over a day index that carried no scan id at all, which is exactly what
+  // production was doing. A fallback inside an assertion is not an assertion.
+  const ghRow=ghIndex.find(r=>r.report_id==='SW-20260914-FSO32');
+  assert.equal(ghRow.scan_id,'SC-FSO32');
+  assert.ok('scan_id' in ghRow,'the day index row must carry the field, not merely not contradict it');
   console.log('PASS the repaired scan id survives into the receipt rather than being nulled');
 
   // ── A COMMITTED REPORT STAYS ARCHIVABLE AFTER THE CHECKPOINT MOVES ──────
