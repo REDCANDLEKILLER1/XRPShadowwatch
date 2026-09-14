@@ -51,7 +51,34 @@
   //
   // So the run is streamed, every line is published to the gauges as it lands,
   // and the final line carries exactly what the plain response carried.
+  // ── PROGRESS ONLY EVER GOES FORWARD ─────────────────────────────────────
+  //
+  // The server numbers a wallet by everything proven so far, journal
+  // recoveries included, so its own count is monotonic across attempts. The
+  // CLIENT was the one that could go backwards: a retry's `start` line carries
+  // no wallets yet, and the five-second ticks report zero until the first
+  // wallet of that attempt lands — which on a resumed run is a minute of the
+  // gauge reading less than it did before.
+  //
+  // A bar that falls is worse than one that stalls: it reads as work being
+  // lost, and on a resumed run the opposite is true — that work is exactly
+  // what was saved. So the high-water mark is kept for the whole run.
+  // Per RUN, not per page. A second report in the same session would otherwise
+  // inherit the first one's floor and show its bar already part-full.
+  var progressHigh = 0, progressTotal = 0;
+  function resetProgress() { progressHigh = 0; progressTotal = 0; }
   function onProgress(kind, value) {
+    if (value) {
+      if (Number(value.total) > 0) progressTotal = Number(value.total);
+      else if (progressTotal) value.total = progressTotal;
+      // Every published event carries the floor, including the ones that have
+      // no count of their own — an attempt starting, a phase changing. A gauge
+      // told "nothing" is a gauge that decides for itself what to show, and
+      // what it decided was zero.
+      var done = Number(value.done);
+      if (isFinite(done) && done > progressHigh) progressHigh = done;
+      value.done = progressHigh;
+    }
     try {
       if (typeof window.updateShadowEvidenceProgress === 'function') {
         window.updateShadowEvidenceProgress(value);
@@ -206,6 +233,9 @@
   function postWithRetry(action, body, attempts) {
     var tries = attempts || 3;
     var attempt = 0;
+    // The floor belongs to this run. Retries below must NOT reset it — that is
+    // the whole point — so it is cleared here, once, before the first attempt.
+    resetProgress();
     function once() {
       attempt++;
       // The attempt number is part of the progress the operator needs: a run on
@@ -222,9 +252,14 @@
           onProgress('start', { total: value.roster_wallets, done: 0, attempt: attempt,
             waiting_on: 'starting' });
         } else if (value.t === 'phase') {
+          // A resumed run says up front how many wallets it inherited. Taking
+          // it here means the bar shows the true floor immediately instead of
+          // sitting at the previous attempt's number until the first fresh
+          // wallet finishes.
           onProgress('phase', { waiting_on: value.phase, attempt: attempt,
             phase: value.phase, wallets: value.wallets, shards: value.shards,
-            rows: value.rows, took_ms: value.took_ms });
+            rows: value.rows, took_ms: value.took_ms,
+            done: Number(value.wallets_already_walked) || undefined });
         }
       }).catch(function (e) {
         // Decided by a TAG set where the outcome is known, not by matching the

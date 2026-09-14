@@ -127,6 +127,14 @@ and the cause was not slowness — it was that the run said nothing while it
 worked. Fixed: the report path now streams, the gauges carry an EVIDENCE phase,
 and the abort fires on silence rather than on duration.
 
+And the gauge only ever moves forward. The server numbers each wallet by
+everything proven so far, journal recoveries included, so its own count climbs
+across attempts — but the first version of the client published `done: 0` on
+every retry's `start` line, and the five-second ticks report zero until that
+attempt's first wallet lands. On this run that would have been a bar falling
+for a minute, three times, at exactly the moments work was being RECOVERED.
+Caught by reviewing the change rather than by running it.
+
 ## The archive could not accept the run that worked
 
 `SW-20260914-FSO32` sealed, rendered and committed — and archived nothing:

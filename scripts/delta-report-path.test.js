@@ -690,6 +690,31 @@ async function main() {
     /DELTA_STREAM_ENDED_WITHOUT_RESULT/.test(L45) &&
     /cut\.transport = true/.test(L45));
 
+  // ── A RETRY MUST NOT LOOK LIKE LOST WORK ────────────────────────────────
+  //
+  // The live run took three attempts. The server numbers every wallet by
+  // everything proven so far, journal recoveries included, so ITS count climbs
+  // across attempts — but the client published `done: 0` on each `start` line
+  // and the five-second ticks report zero until that attempt's first wallet
+  // lands. On a resumed run that is a bar falling for a minute, which reads as
+  // work being thrown away at exactly the moment it is being recovered.
+  dropNext = 1;                   // cut the first attempt mid-stream
+  const retried = await page.evaluate(async () => {
+    var seen = [];
+    var realUpdate = window.updateShadowEvidenceProgress;
+    window.updateShadowEvidenceProgress = function (m) { seen.push(m.done); realUpdate(m); };
+    state.reportId = 'SW-20260914-RETRY';
+    var r = await window.SW_EVIDENCE_INDEX.begin(
+      { startMs: Date.UTC(2026, 8, 13), endMs: Date.UTC(2026, 8, 14, 12) }, []);
+    window.updateShadowEvidenceProgress = realUpdate;
+    return { accounts: r.accounts.length, seen: seen };
+  });
+  check('the run still completes after being cut and retried',
+    retried.accounts === 2, retried.accounts);
+  check('and the wallet count never goes backwards across the retry',
+    retried.seen.every((n, i) => i === 0 || n >= retried.seen[i - 1]),
+    retried.seen);
+
   await browser.close();
   srv.close();
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail)
