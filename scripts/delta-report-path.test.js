@@ -119,9 +119,45 @@ async function main() {
   page.on('request', r => { const u = new URL(r.url()); if (u.pathname.startsWith('/api/')) hits.push(u.pathname); });
   check('the page had no script errors', pageErrors.length === 0, pageErrors.slice(0, 3));
 
-  console.log('\n2. begin() sends the report window');
+  console.log('\n2. the run is NAMED before it starts, not after');
+  /* THE DEFECT THIS EXISTS FOR. begin() requires a report id — every
+     acquisition commits a run manifest under it, and that is how a sealed
+     report is traced back to the walk that produced it. But the seal used to
+     mint that id at the END of the run, so at begin() time it did not exist
+     and begin() threw on every single report. The log said "Report ID:
+     unknown", "coverage NOT MEASURED", "0 of 0 wallets".
+
+     An earlier version of THIS test set state.reportId by hand before calling
+     begin — doing the job the page was failing to do, and passing against a
+     page that could never work. It does not touch it now. */
+  const CORE = fs.readFileSync(path.join(ROOT, 'src/brief/02-core.js'), 'utf8');
+  const mintedAt = CORE.indexOf("state.reportId = 'SW-'");
+  const beginAt = CORE.indexOf('SW_EVIDENCE_INDEX.begin(');
+  check('the page mints the report id somewhere', mintedAt > -1);
+  check('and does it BEFORE the evidence index is asked to begin',
+    mintedAt > -1 && beginAt > -1 && mintedAt < beginAt, { mintedAt, beginAt });
+  check('the seal adopts that id rather than minting a second one',
+    /const reportId = \(state && state\.reportId\) \|\|/.test(CORE));
+  // And if it is ever absent again, begin must refuse by name rather than
+  // committing evidence under an id nothing else knows.
+  // begin() refuses synchronously, before any promise exists — so the check has
+  // to catch it the way layer 17 does, inside a try, rather than off a rejected
+  // promise that is never created.
+  const unnamed = await page.evaluate(() => {
+    window.state = window.state || {};
+    delete state.reportId; delete state.seal;
+    try {
+      var p = window.SW_EVIDENCE_INDEX.begin({ startMs: 1, endMs: 2 }, []);
+      return p && typeof p.then === 'function' ? p.then(() => null, e => e.message) : null;
+    } catch (e) { return e.message; }
+  });
+  check('an unnamed run is refused by name, not run anyway',
+    unnamed === 'DELTA_REPORT_ID_REQUIRED', unnamed);
+
+  console.log('\n3. begin() sends the report window');
   const began = await page.evaluate(async () => {
     window.state = window.state || {};
+    // Exactly what the scan entry now does at 02-core.js:1653.
     state.reportId = 'SW-20260914-TEST1';
     // Exactly what layer 17 does at 02-core.js:1670 — including storing the
     // descriptor, which every later call is handed.
@@ -143,7 +179,7 @@ async function main() {
   check('begin returns the anchor and roster the run proved',
     began.anchor_ledger === 106968575 && began.accounts.length === 2, began);
 
-  console.log('\n3. readRun returns the assembled WINDOW, not this run\'s delta');
+  console.log('\n4. readRun returns the assembled WINDOW, not this run\'s delta');
   const facts = await page.evaluate(() => window.SW_EVIDENCE_INDEX.readRun(state.indexRun));
   check('every event in the window comes back', facts.length === 3, facts.length);
   check('including the two already committed before this run started',
@@ -158,7 +194,7 @@ async function main() {
   check('no raw ledger payload crossed the wire',
     !JSON.stringify(facts).includes('raw_tx') && !JSON.stringify(facts).includes('raw_meta'));
 
-  console.log('\n4. the run\'s own account of itself');
+  console.log('\n5. the run\'s own account of itself');
   const metrics = await page.evaluate(() => window.SW_EVIDENCE_INDEX.metrics());
   check('metrics name the window, separately from the delta',
     metrics.report_window && metrics.report_window.in_window === 3 &&
@@ -171,7 +207,7 @@ async function main() {
   check('finish reports COMPLETE when the checkpoint advanced',
     finished.status === 'COMPLETE' && finished.checkpoint_advanced === true, finished);
 
-  console.log('\n5. a proven wallet, and one that was not');
+  console.log('\n6. a proven wallet, and one that was not');
   const proof = await page.evaluate(() =>
     window.SW_EVIDENCE_INDEX.proveWallet(state.indexRun, 'rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh'));
   check('a completed wallet returns its proof', proof.proof.status === 'COMPLETE' &&
@@ -182,7 +218,7 @@ async function main() {
   check('a wallet the run never proved throws rather than claiming coverage',
     /WALLET_NOT_IN_STATE/.test(refused), refused);
 
-  console.log('\n6. a missing window is refused, never substituted');
+  console.log('\n7. a missing window is refused, never substituted');
   /* The failure that matters most: if the server could not assemble the window,
      handing back the run's delta would render a partial day as a whole one. */
   // Driven end to end: a run asked without a window comes back without events,

@@ -1640,6 +1640,18 @@ async function scanWallets(ws) {
   // proof is stamped with this id, and anything carrying a different one is
   // not evidence about this run.
   state.runId = 'run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  // ── THE REPORT'S IDENTITY, MINTED BEFORE THE RUN RATHER THAN AFTER IT ────
+  //
+  // The seal used to invent this id at the end, which was fine when nothing
+  // needed it earlier. The evidence store does: every acquisition commits a run
+  // manifest under the report's id, and that is how a sealed report is traced
+  // back to the walk that produced it. An id minted after the walk cannot name
+  // the walk.
+  //
+  // So it is minted HERE, once, and buildEvidenceSeal adopts it. Same format,
+  // same seal, same hashes — only the moment of naming moved.
+  state.reportId = 'SW-' + today().replace(/-/g, '') + '-' +
+    Math.random().toString(36).slice(2, 7).toUpperCase();
   state.txScanCoverage = null;
   state.pack = null;
   // Reset run evidence, but respect a server cooldown that has not expired.
@@ -15940,7 +15952,10 @@ async function sha256(text) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 async function buildEvidenceSeal(p, report, bundle) {
-  const reportId = 'SW-' + today().replace(/-/g, '') + '-' + Math.random().toString(36).slice(2, 7).toUpperCase();
+  // Adopted from the run when there is one. A seal that minted a fresh id here
+  // would name a report the evidence store has never heard of.
+  const reportId = (state && state.reportId) ||
+    ('SW-' + today().replace(/-/g, '') + '-' + Math.random().toString(36).slice(2, 7).toUpperCase());
   const scanId = 'SC-' + Date.now().toString(36).toUpperCase();
   const morningText=(state&&state.morningStoryReport)||'';
   const [pubHash, fullHash, morningHash] = await Promise.all([sha256(report), sha256(bundle), sha256(morningText)]);
