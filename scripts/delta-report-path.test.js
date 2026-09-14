@@ -442,6 +442,60 @@ async function main() {
     !/setHeader\(\s*['"]Content-Encoding/i.test(API),
     (API.match(/.*Content-Encoding.*/g) || []).slice(0, 2));
 
+
+  console.log('\n9. a run that reads nothing does not erase what we already knew');
+  /* ── SILENT DATA LOSS, FOUND IN REVIEW ─────────────────────────────────────
+     The legacy scanner writes the balance snapshot from
+     `rows.filter(w => w.status === 'CHECKED')` — only the wallets THIS run
+     managed to read. Every wallet it did not reach is dropped, and a run that
+     reads none at all writes `{}`.
+
+     Today's live logs said "BALANCES: stopped after 0/408" on run after run.
+     Each one erased the operator's entire delta baseline, silently, while the
+     report itself correctly refused to seal. The refusal was visible; this was
+     not.
+
+     Restoring only on a thrown scan did not cover it: a fail-closed run RETURNS
+     normally. */
+  const BASELINE = {
+    rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh: { label: 'BINANCE_HOT', balance_xrp: 1234567, ts: '2026-09-13T06:00:00.000Z' },
+    rw2ciyaNshpHe7bCHo4bRWq6pqqynnWKQg: { label: 'COINBASE_HOT', balance_xrp: 7654321, ts: '2026-09-13T06:00:00.000Z' },
+    rw7m3CtVHwGSdhFjV4MyJozmZJv3DYQnsA: { label: 'BITBANK_JP', balance_xrp: 555, ts: '2026-09-13T06:00:00.000Z' }
+  };
+  const KEY = 'shadowwatch_snapshot_v30';
+
+  // A run that checks NOTHING — exactly what "stopped after 0/408" produces.
+  const readNothing = await page.evaluate(async ([key, baseline]) => {
+    localStorage.setItem(key, JSON.stringify(baseline));
+    const before = localStorage.getItem(key);
+    // What the legacy scanner does on a run that checked no wallet.
+    localStorage.setItem(key, '{}');
+    // …and what the wrapper's finally must then do about it.
+    const previousRaw = before;
+    const after = JSON.parse(localStorage.getItem(key) || '{}');
+    const prev = JSON.parse(previousRaw);
+    const merged = Object.assign({}, prev, after);
+    localStorage.setItem(key, JSON.stringify(merged));
+    return { before, now: localStorage.getItem(key) };
+  }, [KEY, BASELINE]);
+  check('the baseline survives a run that read no wallets',
+    Object.keys(JSON.parse(readNothing.now)).length === 3, readNothing.now);
+
+  // The rule the shipped code has to implement, checked against the shipped code.
+  const L17 = fs.readFileSync(path.join(ROOT, 'src/brief/17-report-scan-tuning-20260816.js'), 'utf8')
+    .split('\n').map(l => l.replace(/^\s*\/\/.*$/, '')).join('\n');
+  check('the wrapper merges the previous baseline rather than only restoring on a throw',
+    /for \(key in before\)/.test(L17) && /for \(key in after\)/.test(L17), 'merge loop absent');
+  check('and it still restores byte-for-byte when the scan actually threw',
+    /if \(!completed\) \{[\s\S]{0,220}localStorage\.setItem\(SNAPSHOT_KEY, previousRaw\)/.test(L17));
+  check('a fresh reading wins over the kept one — this run is more recent',
+    (() => {
+      const before = { rA: { balance_xrp: 1 }, rB: { balance_xrp: 2 } };
+      const after = { rA: { balance_xrp: 99 } };
+      const merged = Object.assign({}, before, after);
+      return merged.rA.balance_xrp === 99 && merged.rB.balance_xrp === 2;
+    })());
+
   await browser.close();
   srv.close();
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail)
