@@ -44,6 +44,7 @@ tested.
 | cold admission cost | 30 sampled: 18 silent, 9 one page, 3 multi-page; 0.39 s each |
 | commit CPU cost | 240k rows: build 3.8 s, merge 2.7 s, shard+gzip 26.6 s, base64 0.1 s |
 | the runtime needs no database | `xrpl-reader.js` imports no connection module; asserted in the suite |
+| the fix clears the REAL wedged journal | the live `SW-20260914-6KAMF` manifest and the real branch listing, run through the shipped `ownedPaths`/intersection logic: 15 of 19 shards missing → adoption REFUSED, discard removes 5 including the manifest, skips 15 dead, leaves nothing behind |
 
 ## FIXED 2026-09-14 — the wedge, diagnosed from the repository
 
@@ -80,9 +81,11 @@ Everything here is a claim I have NOT earned. Do not repeat any of it as fact.
   branch. Three causes have been found and fixed — `begin()` throwing, the
   window never assembling, and now the journal wedge. Each fix is proven in the
   suite and none is proven on the preview.
-- **The wedged journal clears itself.** The next run should refuse
-  `SW-20260914-6KAMF` at adoption, discard it, and walk all 408. That is what
-  the tests do against a fake; the live journal is still on the branch.
+- **The wedged journal clears itself ON THE PREVIEW.** The decision is now
+  proven against the real manifest and the real branch listing (see PROVEN),
+  so what is left unobserved is narrow: that the GitHub call behind it
+  succeeds. The deletion set contains only paths that exist, so there is no
+  dead path left for it to trip on — but that is reasoning, not a run.
 - **The commit is fast now.** Parallel reads and uploads are in and tested for
   correctness, not for speed. No run has been timed since.
 - **The report window assembles against the real store.** Proven against a
