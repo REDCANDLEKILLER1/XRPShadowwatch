@@ -505,6 +505,6 @@ async function readDays(days, deps, kind) {
   return out;
 }
 
-module.exports = { STATE_PATH, JOURNAL_PATH, historyPath, runPath, journalRowPath, readBytes,
+module.exports = { STATE_PATH, JOURNAL_PATH, historyPath, runPath, journalRowPath, readBytes, readFile,
   readState, commitRun, seedGenesis, readDays,
   readJournal, readJournalRows, appendJournal, clearJournal, missingJournalShards };

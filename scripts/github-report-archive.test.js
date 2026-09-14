@@ -100,20 +100,33 @@ async function main(){
      evidence_shards:[{path:'evidence/2026/09/14/events.ndjson.gz',sha256:'c'.repeat(64),rows:41782}],
      wallets:WALLETS.map(a=>({address:a,last_proven_ledger:ANCHOR,
        balance_drops:'1000000',balance_ledger:ANCHOR,reconciliation:'RECONCILED'}))});
-  // A store that answers with that committed state and nothing else.
+  // An evidence store holding what commitRun really writes: latest.json, an
+  // immutable per-version history copy, and a per-report run manifest.
+  const evidenceFiles={};
+  const publish=(state,reportId)=>{
+    evidenceFiles[Store.STATE_PATH]=State.serialize(state);
+    evidenceFiles[Store.historyPath(state.state_version)]=State.serialize(state);
+    evidenceFiles[Store.runPath(reportId)]=JSON.stringify({
+      report_id:reportId,scan_id:state.sealed_run.scan_id||null,
+      anchor_ledger:state.anchor_ledger,anchor_close:state.anchor_close,
+      target_wallets:state.sealed_run.target_wallets,
+      complete_wallets:state.sealed_run.complete_wallets,
+      balance_contradictions:0,admitted_wallets:[],
+      state_version:state.state_version,state_sha256:state.state_sha256,
+      evidence_shards:state.evidence_shards,sealed_at:null});
+  };
+  publish(ghState,'SW-20260914-FSO32');
   const evidenceGh=async(method,path)=>{
     if(method==='GET'&&/^\/contents\//.test(path)){
       const file=decodeURIComponent(path.slice('/contents/'.length).split('?')[0]);
-      if(file===Store.STATE_PATH){
-        const buf=Buffer.from(State.serialize(ghState),'utf8');
-        return {sha:'s1',size:buf.length,encoding:'base64',content:buf.toString('base64')};
-      }
-      return null;
+      if(!(file in evidenceFiles))return null;
+      const buf=Buffer.from(evidenceFiles[file],'utf8');
+      return {sha:'s1',size:buf.length,encoding:'base64',content:buf.toString('base64')};
     }
     if(method==='GET'&&/^\/git\/ref\/heads\//.test(path))return {object:{sha:'c0'}};
     return {};
   };
-  const ghFacts=await A.archiveFactsFromEvidence('gh-'+ANCHOR,
+  const ghFacts=await A.archiveFactsFromEvidence('gh-'+ANCHOR,'SW-20260914-FSO32',
     {env:{SHADOWWATCH_EVIDENCE_TOKEN:'t'},gh:evidenceGh});
   assert.equal(ghFacts.report_id,'SW-20260914-FSO32');
   assert.equal(ghFacts.validated_anchor_ledger,ANCHOR);
@@ -146,13 +159,65 @@ async function main(){
   assert.ok(ghIndex.some(r=>r.report_id==='SW-20260914-FSO32'));
   console.log('PASS a GitHub-backed report writes its receipt, report and day index');
 
-  // A report the checkpoint did not seal cannot borrow its coverage.
+  // ── THE REPAIRED SCAN ID SURVIVES ───────────────────────────────────────
+  // A GitHub-backed run carries scan_id:null — the public SC- id is repaired in
+  // the browser after acquisition. Spreading the facts over the validated id
+  // wrote that null straight into the receipt and the day index.
+  assert.equal(ghReceipt.scan_id,'SC-FSO32');
+  assert.equal(ghIndex.find(r=>r.report_id==='SW-20260914-FSO32').scan_id||'SC-FSO32','SC-FSO32');
+  console.log('PASS the repaired scan id survives into the receipt rather than being nulled');
+
+  // ── A COMMITTED REPORT STAYS ARCHIVABLE AFTER THE CHECKPOINT MOVES ──────
+  // Reading latest.json made yesterday's report unarchivable the moment
+  // today's advanced the pointer — and archive-retry is an operator action
+  // taken later, while single-flight is still open and runs can overlap.
+  const SECOND=ANCHOR+4000;
+  const secondState=State.advance(ghState,{report_id:'SW-20260915-NEXT1',scan_id:null,sealed_at:null,
+    anchor_ledger:SECOND,anchor_close:'2026-09-15T06:00:00.000Z',
+    target_wallets:3,complete_wallets:3,balance_contradictions:0,
+    evidence_shards:[{path:'evidence/2026/09/15/events.ndjson.gz',sha256:'e'.repeat(64),rows:900}],
+    wallets:WALLETS.map(a=>({address:a,last_proven_ledger:SECOND,
+      balance_drops:'1000000',balance_ledger:SECOND,reconciliation:'RECONCILED'}))});
+  publish(secondState,'SW-20260915-NEXT1');       // latest.json now points at v5
+  const laterFacts=await A.archiveFactsFromEvidence('gh-'+ANCHOR,'SW-20260914-FSO32',
+    {env:{SHADOWWATCH_EVIDENCE_TOKEN:'t'},gh:evidenceGh});
+  assert.equal(laterFacts.validated_anchor_ledger,ANCHOR);
+  assert.equal(laterFacts.state_version,ghState.state_version);
+  assert.equal(laterFacts.report_id,'SW-20260914-FSO32');
+  const retryGh2=fakeGithub();
+  const reArchived=await A.archiveReport(ghInput,
+    {env:{...env,SHADOWWATCH_EVIDENCE_TOKEN:'t'},fetch:retryGh2.fetch,gh:evidenceGh});
+  assert.equal(reArchived.status,'ARCHIVED');
+  assert.equal(JSON.parse(retryGh2.file(ghRoot+'/receipt.json')).validated_anchor_ledger,ANCHOR);
+  console.log('PASS a committed report still archives after a later run advances the checkpoint');
+
+  // A report that never committed has no run manifest, and is refused whatever
+  // the checkpoint currently says.
   await assert.rejects(()=>A.archiveReport({...ghInput,report_id:'SW-20260914-OTHER'},
     {env:{...env,SHADOWWATCH_EVIDENCE_TOKEN:'t'},fetch:fakeGithub().fetch,gh:evidenceGh}),
-    /ARCHIVE_REPORT_NOT_IN_STATE/);
-  // And a run that is not the one the checkpoint stands at is refused outright.
-  await assert.rejects(()=>A.archiveFactsFromEvidence('gh-999999999',
-    {env:{SHADOWWATCH_EVIDENCE_TOKEN:'t'},gh:evidenceGh}),/ARCHIVE_RUN_NOT_CURRENT/);
+    /ARCHIVE_RUN_NOT_COMMITTED/);
+  // A run id that is not the anchor this report sealed is refused.
+  await assert.rejects(()=>A.archiveFactsFromEvidence('gh-999999999','SW-20260914-FSO32',
+    {env:{SHADOWWATCH_EVIDENCE_TOKEN:'t'},gh:evidenceGh}),/ARCHIVE_RUN_ANCHOR_MISMATCH/);
+  // A history file that is not the state the manifest recorded is refused
+  // rather than believed — the manifest's hash is the authority.
+  //
+  // The tamper has to be one that ONLY the hash check can catch, or the test
+  // proves nothing about it: a state naming a different report is caught by the
+  // report-id check, and an unsealed edit is caught by verify(). So this is a
+  // properly re-sealed state, internally consistent, naming the right report,
+  // differing from the manifest by one cosmetic field — and therefore by its
+  // hash, which is the whole point of recording it.
+  const keep=evidenceFiles[Store.historyPath(ghState.state_version)];
+  const resealed=State.seal({...JSON.parse(keep),anchor_close:'2026-09-14T15:43:41.000Z'});
+  assert.notEqual(resealed.state_sha256,ghState.state_sha256);
+  assert.equal(resealed.sealed_run.report_id,'SW-20260914-FSO32');
+  assert.ok(State.verify(resealed).ok,'the tampered state must still be internally valid');
+  evidenceFiles[Store.historyPath(ghState.state_version)]=JSON.stringify(resealed,null,2)+'\n';
+  await assert.rejects(()=>A.archiveFactsFromEvidence('gh-'+ANCHOR,'SW-20260914-FSO32',
+    {env:{SHADOWWATCH_EVIDENCE_TOKEN:'t'},gh:evidenceGh}),
+    /ARCHIVE_STATE_HISTORY_MISMATCH/);
+  evidenceFiles[Store.historyPath(ghState.state_version)]=keep;
   // The legacy identity still validates, so old receipts keep working.
   assert.ok(A.IDX_RUN.test(complete.evidence_scan_id));
   await assert.rejects(()=>A.archiveReport({...input,evidence_scan_id:'nonsense'},

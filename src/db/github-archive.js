@@ -32,24 +32,66 @@ const GH_RUN=/^gh-\d+$/;               // a GitHub-backed run, named for its anc
 // It also checks that the state's sealed run NAMES THIS REPORT. Without that a
 // report could be archived against whatever checkpoint happened to be current,
 // borrowing another run's coverage for its own receipt.
-async function archiveFactsFromEvidence(runId,deps={}){
+// ── THE RUN'S OWN MANIFEST, NOT THE MOVING POINTER ────────────────────────
+//
+// The first version of this read `state/latest.json` and refused unless the
+// run being archived was the one the checkpoint currently stood at. That proves
+// the run committed, but it makes a committed report UNARCHIVABLE the moment
+// the next report advances the checkpoint — and archive-retry is a real
+// operator action, taken minutes or hours later, while single-flight is still
+// open and two runs can overlap.
+//
+// The store already writes immutable material for every successful run:
+//
+//     evidence/runs/<report_id>.json        the run's own manifest
+//     evidence/state/history/<version>.json the state it sealed, by version
+//
+// So the report's ID leads to its manifest, the manifest names the state
+// version and hash it sealed, and the history copy is checked against that hash
+// before a single fact is taken from it. Nothing here consults latest.json,
+// which means yesterday's report archives exactly as well as this morning's.
+async function archiveFactsFromEvidence(runId,reportId,deps={}){
   // Required lazily: github-store requires this module, and a top-level require
   // back into it would be a cycle. By call time both are loaded.
   const Store=deps.store||require('./github-store');
-  // readState answers {state, missing, branch} and verifies the state's own
-  // hash before returning it — so a tampered checkpoint cannot become a
-  // receipt's facts.
-  const read=await Store.readState({env:deps.env,gh:deps.gh,fetch:deps.fetch});
-  const state=read&&read.state;
-  if(!state)throw new Error('ARCHIVE_EVIDENCE_STATE_MISSING');
-  const anchor=Number(state.anchor_ledger);
+  const {token,repo,branch}=evidenceTarget(deps.env||process.env);
+  const gh=deps.gh||client(token,repo,deps.fetch||fetch);
+  const manifestText=await Store.readFile(gh,branch,Store.runPath(reportId));
+  // No manifest means this report never committed a run. That is a stronger
+  // refusal than the old one: it does not depend on what the checkpoint
+  // happens to say right now.
+  if(manifestText===null)
+    throw new Error('ARCHIVE_RUN_NOT_COMMITTED: no evidence run for '+reportId);
+  let manifest;
+  try{manifest=JSON.parse(manifestText);}catch(_){throw new Error('ARCHIVE_RUN_MANIFEST_UNREADABLE');}
+  const anchor=Number(manifest.anchor_ledger);
   if(runId!=='gh-'+anchor)
-    throw new Error('ARCHIVE_RUN_NOT_CURRENT: '+runId+' but the checkpoint stands at gh-'+anchor);
+    throw new Error('ARCHIVE_RUN_ANCHOR_MISMATCH: '+runId+' but '+reportId+' sealed gh-'+anchor);
+  // The state AS THIS RUN SEALED IT, by version, checked against the hash the
+  // manifest recorded. A rewritten history file disagrees with the manifest and
+  // is refused rather than believed.
+  const stateText=await Store.readFile(gh,branch,Store.historyPath(manifest.state_version));
+  if(stateText===null)
+    throw new Error('ARCHIVE_STATE_HISTORY_MISSING: v'+manifest.state_version);
+  let state;
+  try{state=JSON.parse(stateText);}catch(_){throw new Error('ARCHIVE_STATE_HISTORY_UNREADABLE');}
+  const verdict=require('./evidence-state').verify(state);
+  if(!verdict.ok)throw new Error('ARCHIVE_STATE_HISTORY_UNVERIFIED: '+verdict.problems.join(','));
+  if(state.state_sha256!==manifest.state_sha256)
+    throw new Error('ARCHIVE_STATE_HISTORY_MISMATCH: v'+manifest.state_version+
+      ' is not the state '+reportId+' sealed');
   const run=state.sealed_run||{};
+  if(run.report_id&&run.report_id!==reportId)
+    throw new Error('ARCHIVE_REPORT_NOT_IN_STATE: v'+manifest.state_version+
+      ' was sealed by '+run.report_id);
   const target=Number(run.target_wallets)||0,proved=Number(run.complete_wallets)||0;
   return {
-    report_id:run.report_id||null,
-    scan_id:run.scan_id||null,
+    report_id:run.report_id||reportId,
+    // The evidence's scan id when it has one; otherwise ABSENT, so the
+    // validated one from the request survives the spread into the receipt
+    // rather than being overwritten with null. A run that DOES carry one is
+    // checked against the request below — the two must not disagree quietly.
+    ...(run.scan_id?{scan_id:run.scan_id}:{}),
     evidence_scan_id:runId,
     evidence_source:'GITHUB_EVIDENCE_STORE',
     state_version:Number(state.state_version)||null,
@@ -221,7 +263,7 @@ async function archiveReport(raw,deps={}){
   const facts=deps.archiveFacts
     ? await deps.archiveFacts(input.evidence_scan_id)
     : (GH_RUN.test(input.evidence_scan_id)
-        ? await archiveFactsFromEvidence(input.evidence_scan_id,deps)
+        ? await archiveFactsFromEvidence(input.evidence_scan_id,input.report_id,deps)
         : await E.archiveFacts(input.evidence_scan_id));
   if(!facts||!facts.target_wallets)throw new Error('ARCHIVE_RUN_NOT_FOUND');
   // The receipt must describe the run that committed THIS report. Archiving a
@@ -229,6 +271,11 @@ async function archiveReport(raw,deps={}){
   // coverage it never earned.
   if(facts.report_id&&facts.report_id!==input.report_id)
     throw new Error('ARCHIVE_REPORT_NOT_IN_STATE: checkpoint was sealed by '+facts.report_id);
+  // Two scan ids for one report is not something to pick a winner from. The
+  // evidence run and the sealed report have to be talking about the same scan.
+  if(facts.scan_id&&input.scan_id&&facts.scan_id!==input.scan_id)
+    throw new Error('ARCHIVE_SCAN_ID_MISMATCH: evidence says '+facts.scan_id+
+      ', report says '+input.scan_id);
   // An INCOMPLETE run is still archived, with coverage_complete:false written
   // into its receipt. That is deliberate and predates this change: refusing it
   // would delete the record of a morning that did not finish, which is the
@@ -243,7 +290,13 @@ async function archiveReport(raw,deps={}){
   const generatedAt=facts.generated_at;
   const date=/^\d{4}-\d{2}-\d{2}/.test(generatedAt)?generatedAt.slice(0,10):new Date().toISOString().slice(0,10);
   const root='reports/'+date.replace(/-/g,'/')+'/'+input.report_id;
-  const receipt={report_id:input.report_id,scan_id:input.scan_id,...facts,sealed_at:input.generated_at||null,
+  // Facts FIRST, then the validated canonical identifiers. The other order let
+  // a fact of `scan_id: null` — which is exactly what a GitHub-backed run
+  // carries, since the public scan id is repaired in the browser after
+  // acquisition — overwrite the validated SC- id and drop it from both the
+  // receipt and the day index.
+  const receipt={...facts,report_id:input.report_id,scan_id:input.scan_id||facts.scan_id||null,
+    sealed_at:input.generated_at||null,
     production_sha:env.VERCEL_GIT_COMMIT_SHA||null,
     report_hash:reportHash,evidence_hash:evidenceHash,seal_public_hash:input.public_hash,seal_evidence_hash:input.full_hash,archive_branch:branch};
   const summary={report_id:receipt.report_id,generated_at:receipt.generated_at,coverage_complete:receipt.coverage_complete,

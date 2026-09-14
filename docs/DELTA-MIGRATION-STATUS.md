@@ -152,9 +152,23 @@ admit the other — and a `gh-` run derives its receipt from the committed
 checkpoint, which `readState()` hash-verifies on the way in. The caller still
 supplies nothing but its report text and seal hashes.
 
-Two guards came with it: the checkpoint must NAME the report being archived, or
-a report could borrow another run's coverage for its receipt; and a run that is
-not the one the checkpoint stands at is refused outright.
+Two guards came with it: the state must NAME the report being archived, or a
+report could borrow another run's coverage for its receipt; and a run id that
+is not the anchor that report sealed is refused outright.
+
+The first version of that read `state/latest.json` — the MOVING pointer — which
+made a committed report unarchivable the moment the next one advanced it. That
+is not theoretical: archive-retry is an operator action taken later, and
+single-flight is still open so two runs can overlap. It now reads the run's own
+immutable manifest at `evidence/runs/<report_id>.json`, takes the state version
+and hash from there, and checks the `state/history/<version>.json` copy against
+that hash before using a single fact from it. Nothing consults latest.json, so
+yesterday's report archives exactly as well as this morning's.
+
+It also nulled the scan id. A GitHub-backed run carries `scan_id: null` — the
+public `SC-` id is repaired in the browser after acquisition — and the facts
+were spread OVER the validated one, writing that null into the receipt and the
+day index.
 
 One review suggestion was declined. It asked that an incomplete run be refused;
 the archive deliberately preserves an honestly-sealed incomplete run with
