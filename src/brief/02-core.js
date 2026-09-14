@@ -10760,6 +10760,15 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     walletsChecked: 0,
     txWalletsTotal: 0,
     txWalletsChecked: 0,
+    // The evidence walk is the LONGEST part of a run — measured at 463 seconds
+    // on 2026-09-14 — and until these existed it was the only part with no
+    // number behind it. The screen sat at one percentage for nearly eight
+    // minutes and the operator's reading was "it stopped".
+    evidenceWallets: 0,
+    evidenceTotal:   0,
+    evidenceRequests: 0,
+    evidenceAttempt: 0,
+    evidenceWaitingOn: '',
     newXrplObservations: 0,
     storedTransactionsAnalyzed: 0,
     queueCount:     0,
@@ -10787,6 +10796,12 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     TX_PROGRESS:      function(s) { return 'Transaction evidence: ' + (s.txWalletsChecked||0) + ' of ' +
       (s.txWalletsTotal||s.walletsTotal||0) + ' wallets proved, ' + (s.newXrplObservations||0).toLocaleString() +
       ' new XRPL observations, ' + (s.storedTransactionsAnalyzed||0).toLocaleString() + ' stored transactions loaded.'; },
+    EVIDENCE:         function(s) {
+      var n = s.evidenceWallets || 0, t = s.evidenceTotal || 0;
+      return 'Walking the ledger for evidence' + (t ? ': ' + n + ' of ' + t + ' wallets' : '') +
+        (s.evidenceRequests ? ' \u00b7 ' + s.evidenceRequests + ' XRPL reads' : '') +
+        (s.evidenceAttempt > 1 ? ' \u00b7 attempt ' + s.evidenceAttempt : '') + '.';
+    },
     BALANCE:          function() { return 'Checking balances against local memory.'; },
     FLOW:             function() { return 'Wallet scan is complete. I\u2019m checking large transfers and receiver behavior.'; },
     NEWS:             function() { return 'I\u2019m checking the news lane now.'; },
@@ -10808,6 +10823,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     IDLE:            0,
     INIT:            5,
     LEDGER:          15,
+    EVIDENCE:        14,   // dynamic 5..15 in render — it runs BEFORE the wallet pass
     WALLET_PROGRESS: 45,   // dynamic 15..45 in render
     TX_PROGRESS:     54,   // dynamic 50..58 in render
     BALANCE:         50,
@@ -10829,6 +10845,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     IDLE:            'idle',
     INIT:            'listening',
     LEDGER:          'scanning',
+    EVIDENCE:        'scanning',
     WALLET_PROGRESS: 'scanning',
     TX_PROGRESS:     'scanning',
     BALANCE:         'thinking',
@@ -10884,7 +10901,14 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       var wrap   = document.getElementById('xaiMissionProgress');
       if (!stepEl || !pctEl || !fillEl) return;
       var phase = XAI_SCAN_PROGRESS.phase || 'IDLE';
-      stepEl.textContent = phase === 'WALLET_PROGRESS'
+      stepEl.textContent = phase === 'EVIDENCE'
+        ? 'EVIDENCE ' + XAI_SCAN_PROGRESS.evidenceWallets + '/' +
+          (XAI_SCAN_PROGRESS.evidenceTotal || XAI_SCAN_PROGRESS.walletsTotal || '?') +
+          (XAI_SCAN_PROGRESS.evidenceRequests
+            ? ' \u00b7 ' + XAI_SCAN_PROGRESS.evidenceRequests.toLocaleString() + ' READS' : '') +
+          (XAI_SCAN_PROGRESS.evidenceAttempt > 1
+            ? ' \u00b7 TRY ' + XAI_SCAN_PROGRESS.evidenceAttempt : '')
+        : phase === 'WALLET_PROGRESS'
         ? 'WALLETS ' + XAI_SCAN_PROGRESS.walletsChecked + '/' + XAI_SCAN_PROGRESS.walletsTotal
         : phase === 'TX_PROGRESS'
           ? 'TRANSACTIONS ' + XAI_SCAN_PROGRESS.txWalletsChecked + '/' + (XAI_SCAN_PROGRESS.txWalletsTotal||XAI_SCAN_PROGRESS.walletsTotal) +
@@ -10895,6 +10919,12 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       if (typeof pct === 'undefined') pct = 0;
       // ERROR_WAIT: hold previous percent, just style degraded
       if (pct === -1) pct = _lastRenderedPct;
+      // The evidence walk owns 5..15%, the block before the wallet pass. It is
+      // the longest phase of the run, so it must be the one that MOVES.
+      if (phase === 'EVIDENCE' && XAI_SCAN_PROGRESS.evidenceTotal > 0) {
+        var evPct = Math.min(1, XAI_SCAN_PROGRESS.evidenceWallets / XAI_SCAN_PROGRESS.evidenceTotal);
+        pct = Math.round(5 + (evPct * 10));
+      }
       // Wallet progress: scale within wallet block (15..45%)
       if (phase === 'WALLET_PROGRESS' && XAI_SCAN_PROGRESS.walletsTotal > 0) {
         var walletPct = XAI_SCAN_PROGRESS.walletsChecked / XAI_SCAN_PROGRESS.walletsTotal;
@@ -10914,6 +10944,20 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     } catch (_) {}
   }
   if (typeof window !== 'undefined') window.renderXaiMissionUI = _renderMissionUI;
+  // Published by the delta evidence layer as the server streams its progress.
+  // Kept beside updateShadowTxProgress because it is the same kind of thing:
+  // a phase that knows its own numbers reporting them to the one place the
+  // gauges read.
+  if (typeof window !== 'undefined') window.updateShadowEvidenceProgress = function(m) {
+    m = m || {};
+    if (m.total !== undefined) XAI_SCAN_PROGRESS.evidenceTotal = Number(m.total) || 0;
+    if (m.done !== undefined) XAI_SCAN_PROGRESS.evidenceWallets = Number(m.done) || 0;
+    if (m.requests !== undefined) XAI_SCAN_PROGRESS.evidenceRequests = Number(m.requests) || 0;
+    if (m.attempt !== undefined) XAI_SCAN_PROGRESS.evidenceAttempt = Number(m.attempt) || 0;
+    if (m.waiting_on !== undefined) XAI_SCAN_PROGRESS.evidenceWaitingOn = String(m.waiting_on || '');
+    if (m.done_phase !== true) XAI_SCAN_PROGRESS.phase = 'EVIDENCE';
+    try { _renderMissionUI(); } catch (_) {}
+  };
   if (typeof window !== 'undefined') window.updateShadowTxProgress = function(m) {
     m=m||{};
     XAI_SCAN_PROGRESS.txWalletsTotal=Number(m.target_wallets)||XAI_SCAN_PROGRESS.walletsTotal||0;

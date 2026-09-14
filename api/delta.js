@@ -18,10 +18,29 @@ const A = require('../src/db/github-archive');
 const roster = require('../src/db/roster');
 const { acquireReader, releaseReader } = require('../src/db/xrpl-reader');
 
-// Leave room inside the function's own ceiling to serialise and return a
-// result. A run that is going to be cut off should say so rather than be killed
-// mid-sentence.
-const READ_BUDGET_MS = 240000;
+// ── THE WALK GETS WHAT IS LEFT AFTER THE ENDING IS PAID FOR ───────────────
+//
+// The function's ceiling is 300 s (vercel.json). This used to give the walk
+// 240 s of it, leaving 60 s for everything after: flushing the journal, and
+// assembling the report window — which is ~101k events out of ~138k stored and
+// was measured at roughly eighteen seconds on its own.
+//
+// Live on 2026-09-14 that was not enough. A run starting at 15:43:27 had still
+// not answered when the browser gave up 290 seconds later, with the whole of
+// that time showing nothing at all.
+//
+// The asymmetry that decides this: an attempt that RETURNS writes its journal,
+// and the next attempt resumes from it. An attempt killed by the platform
+// mid-flush can lose that write, and then the next attempt walks the same
+// wallets again — so a shorter walk that finishes is worth more than a longer
+// one that is cut off. Ninety seconds of reserve buys the ending twice over.
+//
+// This is a tuning figure derived from one measured overrun, not a proven
+// optimum. The run reports 'journal-loaded', 'shards-built' and 'committed'
+// with their own durations; read those rather than re-guessing this number.
+const FUNCTION_CEILING_MS = 300000;
+const ENDING_RESERVE_MS = 90000;
+const READ_BUDGET_MS = FUNCTION_CEILING_MS - ENDING_RESERVE_MS;
 
 // The roster is parsed out of committed source. A parse failure must not turn
 // a status check into a 500 — the checkpoint is still readable and still worth
@@ -52,9 +71,13 @@ const slim = event => {
   return out;
 };
 
-async function respondWithWindow(res, result, input, reader) {
+// Assembling the window is the same job whichever way the answer travels, so
+// it is done in one place. It used to live inside the non-streaming responder
+// only, which quietly made the streaming endpoint unable to serve the report at
+// all: it ended at 'done' with no events, so the report path could not use the
+// one endpoint that says what it is doing while it does it.
+async function attachWindow(body, result, input) {
   const startMs = Number(input.window_start_ms), endMs = Number(input.window_end_ms);
-  const body = { ...result };
   // The rows never cross the wire. They are the evidence; the repository holds
   // them, and the browser has no use for a raw ledger payload.
   delete body.rows;
@@ -80,6 +103,25 @@ async function respondWithWindow(res, result, input, reader) {
     body.events = null;
     body.window = { error: 'REPORT_WINDOW_NOT_REQUESTED' };
   }
+  return body;
+}
+
+// The final NDJSON line, built in ONE place so the fake server in the suite can
+// build it the same way the real one does. A test whose fixture assembles its
+// own version of this would pass over a server that had stopped attaching the
+// window at all — which is exactly the defect worth catching, because the
+// report cannot be rendered without it.
+async function buildStreamDone(summary, wallets, result, input) {
+  const done = await attachWindow({ t: 'done', ...summary, wallets_detail: wallets },
+    result, input);
+  // Same packer as the non-streaming path, so the two cannot drift into
+  // sending differently-shaped events.
+  packEvents(done);
+  return done;
+}
+
+async function respondWithWindow(res, result, input, reader) {
+  const body = await attachWindow({ ...result }, result, input);
 
   // ── COMPRESSED INSIDE THE JSON, NOT AROUND IT ──────────────────────────
   //
@@ -336,7 +378,13 @@ module.exports = async function handler(req, res) {
         // The rows themselves are large and the page does not render them;
         // the counts and the freshness block are what a reader needs.
         const { rows, wallets, ...summary } = result;
-        line({ t: 'done', ...summary, wallets_detail: wallets,
+        // The window is the expensive part of the ending and the report cannot
+        // be assembled without it, so the caller is told it is happening rather
+        // than left watching the last wallet line for another twenty seconds.
+        lastPhase = 'window';
+        line({ t: 'phase', phase: 'window', ms: Date.now() - startedAt });
+        const done = await buildStreamDone(summary, wallets, result, input);
+        line({ ...done,
           xrpl: { requests: reader.stats.requests, retries: reader.stats.retries,
             reconnects: reader.stats.reconnects, waits_ms: reader.stats.waits_ms,
             lanes: typeof reader.laneStats === 'function' ? reader.laneStats() : null,
@@ -371,4 +419,5 @@ module.exports = async function handler(req, res) {
 };
 
 module.exports.packEvents = packEvents;
+module.exports.buildStreamDone = buildStreamDone;
 module.exports.GZIP_EVENTS_ABOVE = GZIP_EVENTS_ABOVE;

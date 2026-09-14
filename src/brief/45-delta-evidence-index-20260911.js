@@ -35,13 +35,133 @@
       .text().then(function (text) { result.events = JSON.parse(text); return result; });
   }
 
-  function post(action, body) {
+  // ── THE RUN SAYS WHAT IT IS DOING WHILE IT DOES IT ──────────────────────
+  //
+  // Measured on 2026-09-14: the evidence walk took 463 seconds across three
+  // attempts and emitted NOTHING for any of it. The report came out correct at
+  // the end — 408/408, checkpoint advanced — but for nearly eight minutes the
+  // screen held one percentage and the only honest reading of it was "it
+  // stopped". A run that cannot be told apart from a hang is a run nobody can
+  // wait out.
+  //
+  // The server has emitted per-wallet lines, phase lines and a five-second
+  // heartbeat since the streaming endpoint was written. This layer simply never
+  // asked for them: it posted without `stream`, took the single JSON body, and
+  // threw away the only progress that existed.
+  //
+  // So the run is streamed, every line is published to the gauges as it lands,
+  // and the final line carries exactly what the plain response carried.
+  function onProgress(kind, value) {
+    try {
+      if (typeof window.updateShadowEvidenceProgress === 'function') {
+        window.updateShadowEvidenceProgress(value);
+      }
+    } catch (_) {}
+    try {
+      if (kind === 'phase' && typeof log === 'function' && value && value.phase) {
+        log('Evidence: ' + value.phase +
+          (value.wallets ? ' \u00b7 ' + value.wallets + ' wallets' : '') +
+          (value.shards ? ' \u00b7 ' + value.shards + ' shards' : '') +
+          (value.rows ? ' \u00b7 ' + value.rows.toLocaleString() + ' rows' : '') +
+          (value.took_ms ? ' \u00b7 ' + Math.round(value.took_ms / 1000) + 's' : ''));
+      }
+    } catch (_) {}
+  }
+
+  // ── ABORT ON SILENCE, NOT ON DURATION ───────────────────────────────────
+  //
+  // The old timeout was a flat 290 seconds from the first byte, which cut a
+  // run that was alive and working — the server had a 300-second ceiling and
+  // was still inside it. A long run is not a broken one; a QUIET one is. So the
+  // clock is reset by every byte that arrives, and firing means the connection
+  // genuinely stopped speaking.
+  var IDLE_LIMIT_MS = 45000;
+
+  function post(action, body, onLine) {
     var controller = new AbortController();
-    var timer = setTimeout(function () { controller.abort(); }, 290000);
+    var timer = null;
+    function idle() {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(function () { controller.abort(); }, IDLE_LIMIT_MS);
+    }
+    idle();
+    var streaming = typeof onLine === 'function';
     return fetch('/api/delta', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
-      body: JSON.stringify(Object.assign({ action: action }, body || {})), signal: controller.signal
+      body: JSON.stringify(Object.assign({ action: action, stream: streaming || undefined },
+        body || {})), signal: controller.signal
     }).then(function (response) {
+      if (streaming && response.ok && response.body && response.body.getReader) {
+        return readNdjson(response, onLine, idle);
+      }
+      return plainBody(response);
+    }).then(function (v) { if (timer) clearTimeout(timer); return v; },
+            function (e) {
+              if (timer) clearTimeout(timer);
+              if (e && e.name === 'AbortError') {
+                var t = new Error('DELTA_RUN_SILENT'); t.transport = true; throw t;
+              }
+              if (e && e.status === undefined && e.transport === undefined) e.transport = true;
+              throw e;
+            });
+  }
+
+  // One NDJSON line per event. The LAST line that carries `t: 'done'` or
+  // `t: 'error'` is the result; everything before it is progress. A stream that
+  // ends without one never finished, and is a transport failure rather than an
+  // answer — which is the same distinction the plain path draws between a cut
+  // body and an empty one.
+  function readNdjson(response, onLine, idle) {
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder();
+    var buffered = '', final = null;
+    function take(text) {
+      buffered += text;
+      var parts = buffered.split('\n');
+      buffered = parts.pop();
+      for (var i = 0; i < parts.length; i++) {
+        if (!parts[i]) continue;
+        var value = null;
+        try { value = JSON.parse(parts[i]); } catch (_) { continue; }
+        if (value.t === 'done' || value.t === 'error') final = value;
+        else onLine(value);
+      }
+    }
+    function pump() {
+      return reader.read().then(function (chunk) {
+        idle();
+        if (chunk.done) {
+          if (buffered) take('\n');
+          if (!final) {
+            var cut = new Error('DELTA_STREAM_ENDED_WITHOUT_RESULT');
+            cut.transport = true;
+            throw cut;
+          }
+          // The streaming line names the per-wallet array `wallets_detail`,
+          // because on that endpoint `wallets` was already a count. The rest of
+          // this layer should not have to know which endpoint answered it, so
+          // the two shapes are made one here and nowhere else.
+          if (final.wallets === undefined && Array.isArray(final.wallets_detail)) {
+            final.wallets = final.wallets_detail;
+          }
+          if (final.t === 'error') {
+            // The server had an opinion. That is an answer, not a dropped
+            // connection, and asking again gives the same answer more slowly.
+            var e = new Error(final.error || 'DELTA_RUN_FAILED');
+            e.status = 200; e.transport = false; e.runSummary = final;
+            throw e;
+          }
+          return inflateEvents(final);
+        }
+        take(decoder.decode(chunk.value, { stream: true }));
+        return pump();
+      });
+    }
+    return pump();
+  }
+
+  function plainBody(response) {
+    return Promise.resolve(response).then(function (response) {
       // Read the body as TEXT first. `response.json().catch(() => ({}))` turned
       // a truncated or corrupt body on an HTTP 200 into an empty object, and
       // the run then proceeded with an undefined anchor and no wallets — a cut
@@ -66,13 +186,7 @@
         }
         return data;
       });
-    }).catch(function (e) {
-      if (e.name === 'AbortError') { var t = new Error('DELTA_RUN_TIMEOUT'); t.transport = true; throw t; }
-      // A rejected fetch never reached an answer: no status, nothing read.
-      if (e.status === undefined && e.transport === undefined) e.transport = true;
-      throw e;
-    }).then(function (v) { clearTimeout(timer); return inflateEvents(v); },
-            function (e) { clearTimeout(timer); throw e; });
+    }).then(inflateEvents);
   }
 
   // ── A DROPPED REQUEST IS NOT A FAILED RUN ───────────────────────────────
@@ -94,7 +208,25 @@
     var attempt = 0;
     function once() {
       attempt++;
-      return post(action, body).catch(function (e) {
+      // The attempt number is part of the progress the operator needs: a run on
+      // its third try looks identical to one on its first without it, and the
+      // difference is exactly what tells a slow run from a looping one.
+      onProgress('attempt', { attempt: attempt, waiting_on: 'connecting' });
+      return post(action, body, function (value) {
+        if (value.t === 'wallet') {
+          onProgress('wallet', { done: value.n, total: value.total, attempt: attempt });
+        } else if (value.t === 'tick') {
+          onProgress('tick', { done: value.wallets_done, requests: value.xrpl_requests,
+            waiting_on: value.waiting_on, attempt: attempt });
+        } else if (value.t === 'start') {
+          onProgress('start', { total: value.roster_wallets, done: 0, attempt: attempt,
+            waiting_on: 'starting' });
+        } else if (value.t === 'phase') {
+          onProgress('phase', { waiting_on: value.phase, attempt: attempt,
+            phase: value.phase, wallets: value.wallets, shards: value.shards,
+            rows: value.rows, took_ms: value.took_ms });
+        }
+      }).catch(function (e) {
         // Decided by a TAG set where the outcome is known, not by matching the
         // message. A server error whose body happens to contain the words
         // "Failed to fetch" has a status and an opinion; retrying it is three

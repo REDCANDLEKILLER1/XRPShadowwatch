@@ -44,6 +44,7 @@ tested.
 | cold admission cost | 30 sampled: 18 silent, 9 one page, 3 multi-page; 0.39 s each |
 | commit CPU cost | 240k rows: build 3.8 s, merge 2.7 s, shard+gzip 26.6 s, base64 0.1 s |
 | the runtime needs no database | `xrpl-reader.js` imports no connection module; asserted in the suite |
+| **the morning report produces a report** | SW-20260914-FSO32: state v4 in the repo, 408/408, 140,821 transactions rendered |
 | the fix clears the REAL wedged journal | the live `SW-20260914-6KAMF` manifest and the real branch listing, run through the shipped `ownedPaths`/intersection logic: 15 of 19 shards missing → adoption REFUSED, discard removes 5 including the manifest, skips 15 dead, leaves nothing behind |
 
 ## FIXED 2026-09-14 — the wedge, diagnosed from the repository
@@ -87,14 +88,54 @@ client fails closed on the legacy shape — a missing `proven` field falls back 
 the status string only for `COMPLETE`, never for `RECOVERED`, because that is
 exactly the shape the incident arrived in.
 
+## THE REPORT RAN — 2026-09-14, SW-20260914-FSO32
+
+The biggest assumption in this file is now observed. A full morning report
+rendered: 408 wallets, 140,821 transactions across 72h, escrow verified 20/20,
+news lane populated, verdict scored. Read back out of the evidence repository,
+not taken from the report text:
+
+    state_version  3 -> 4          the checkpoint ADVANCED
+    anchor_ledger  106982842       close 2026-09-14T15:43:40Z
+    wallets        408, all 408 at that anchor
+    sealed_run     SW-20260914-FSO32  408/408
+
+The wedge cleared itself exactly as designed, and the re-establish fix earned
+itself inside this very run. The commit order shows it:
+
+    segment 4  — 34 wallets    <- a second attempt, still alive server-side
+    segment 1  — 22 wallets
+    evidence: SW-20260914-FSO32 — state v4 — 408/408
+    segment 19 — 402 wallets   <- the attempt that committed
+
+The commit deleted the journal; an attempt still running found no manifest and
+re-established a FRESH one (segment 1), rather than resurrecting pointers to
+the shards the commit had just removed. Before the fix that second path is what
+re-created the wedge. The leftover journal is refused on two independent counts
+next run — CHECKPOINT_MOVED_SINCE and ANCHOR_NO_LONGER_AHEAD — and discarded.
+
+It cost three attempts and 9m21s, of which 463 seconds was the evidence walk
+with no feedback at all:
+
+    15:43:27  start
+    15:48:17  attempt 1 cut at 290s — the client's own flat timeout
+    15:50:02  attempt 2 cut — phone backgrounded
+    15:51:10  attempt 3: 408/408, 41,782 transactions, checkpoint advanced
+
+Operator's reading: "took forever and looked like nothing happened." Correct,
+and the cause was not slowness — it was that the run said nothing while it
+worked. Fixed: the report path now streams, the gauges carry an EVIDENCE phase,
+and the abort fires on silence rather than on duration.
+
 ## ASSUMED — believed, not yet observed
 
 Everything here is a claim I have NOT earned. Do not repeat any of it as fact.
 
-- **The morning report produces a report.** It has never rendered one on this
-  branch. Three causes have been found and fixed — `begin()` throwing, the
-  window never assembling, and now the journal wedge. Each fix is proven in the
-  suite and none is proven on the preview.
+- **The streaming report path works live.** Proven in a real browser against a
+  fake server that uses the real done-line builder; never run against the
+  preview. This is the change most likely to need another round.
+- **The 90-second ending reserve is enough.** A tuning figure from one measured
+  overrun, not a measurement of the ending itself.
 - **The wedged journal clears itself ON THE PREVIEW.** The decision is now
   proven against the real manifest and the real branch listing (see PROVEN),
   so what is left unobserved is narrow: that the GitHub call behind it

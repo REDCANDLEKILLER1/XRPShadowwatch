@@ -49,6 +49,7 @@ const event = (i, over) => Object.assign({
 
 let lastRequest = null;
 let dropNext = 0;          // simulate a browser killing an in-flight fetch
+let builderAttached = null; // did the REAL done-line builder attach a window?
 let requestCount = 0;
 function stubbed(body) {
   return {
@@ -112,6 +113,52 @@ function server() {
         // this exchange would then be testing a compression the server no
         // longer performs.
         require(path.join(ROOT, 'api/delta.js')).packEvents(out);
+        // ── THE STREAMING SHAPE, BECAUSE THAT IS WHAT THE REPORT NOW ASKS FOR ──
+        //
+        // The report path sends `stream: true` and reads NDJSON: progress lines
+        // first, then one final line carrying exactly what the plain response
+        // carried. A fake that answered plain JSON to a streaming request would
+        // let the client's parser go untested against the shape it actually
+        // meets in production.
+        if (body.stream) {
+          res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8' });
+          const line = v => res.write(JSON.stringify(v) + '\n');
+          line({ t: 'start', report_id: body.report_id, roster_wallets: WALLETS.length });
+          line({ t: 'phase', phase: 'anchor', ledger: 106968575 });
+          WALLETS.forEach((a, i) => line({ t: 'wallet', n: i + 1, total: WALLETS.length,
+            address: a, status: 'COMPLETE', rows: 2 }));
+          line({ t: 'tick', waiting_on: 'wallets', wallets_done: WALLETS.length, xrpl_requests: 6 });
+          line({ t: 'phase', phase: 'window' });
+          // The REAL builder, for the same reason the plain path uses the real
+          // packer: a fixture that assembles its own done line would pass over
+          // a server that had stopped attaching the report window, and the
+          // report cannot be rendered without it.
+          // The summary the REAL server hands the builder is the acquisition
+          // result: it has no events and no window, because attaching those is
+          // the builder's whole job. Passing the stub's copy in would make the
+          // keys present whether or not the builder ran, which is precisely the
+          // thing being checked.
+          const { rows, wallets, events, events_gz, events_count, window: _w,
+            ...summary } = out;
+          return require(path.join(ROOT, 'api/delta.js'))
+            .buildStreamDone(summary, wallets, { rows: [] }, body)
+            .then(done => {
+              // The builder re-derives the window from the evidence store,
+              // which this fixture does not have — so it comes back as an
+              // error window. What matters is that it came back AT ALL: a
+              // builder that stopped attaching one leaves these keys undefined,
+              // and that is the defect this records rather than papers over.
+              builderAttached = ('window' in done) && ('events' in done);
+              // Having proved the builder ran, substitute the stub's window so
+              // the rest of the exchange has something to render.
+              if (out.events_gz !== undefined) { done.events_gz = out.events_gz;
+                done.events_count = out.events_count; done.events = null; }
+              else { done.events = out.events; }
+              done.window = out.window;
+              line(done);
+              res.end();
+            });
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(out));
       });
@@ -572,6 +619,76 @@ async function main() {
   });
   check('a RECOVERED wallet with no explicit proven flag is refused, not assumed',
     legacy.proved === 0 && legacy.refused.length > 0, legacy);
+
+  console.log('\n11. a long run is not a silent one');
+  /* ── 463 SECONDS OF NOTHING ──────────────────────────────────────────────
+     Measured on 2026-09-14, on the run that finally worked:
+
+       15:43:27  start
+       15:48:17  attempt 1 cut at 290s — the client's own flat timeout
+       15:50:02  attempt 2 cut — phone backgrounded
+       15:51:10  attempt 3: 408/408 proved, checkpoint advanced
+
+     The report was correct. But for 463 seconds the screen held one number and
+     the only honest reading of it was "it stopped". The server had been
+     emitting per-wallet lines, phases and a five-second heartbeat the whole
+     time; this layer posted without `stream` and threw all of it away. */
+  const streamed = await page.evaluate(async () => {
+    var seen = [];
+    var realUpdate = window.updateShadowEvidenceProgress;
+    window.updateShadowEvidenceProgress = function (m) {
+      seen.push(m);
+      if (typeof realUpdate === 'function') realUpdate(m);
+    };
+    state.reportId = 'SW-20260914-STRM1';
+    var r = await window.SW_EVIDENCE_INDEX.begin(
+      { startMs: Date.UTC(2026, 8, 13), endMs: Date.UTC(2026, 8, 14, 12) }, []);
+    window.updateShadowEvidenceProgress = realUpdate;
+    return { accounts: r.accounts.length, seen: seen,
+      phase: window.XAI_SCAN_PROGRESS && window.XAI_SCAN_PROGRESS.phase,
+      evWallets: window.XAI_SCAN_PROGRESS && window.XAI_SCAN_PROGRESS.evidenceWallets,
+      evTotal: window.XAI_SCAN_PROGRESS && window.XAI_SCAN_PROGRESS.evidenceTotal };
+  });
+  check('the run still returns the same roster it always did',
+    streamed.accounts === 2, streamed.accounts);
+  check('progress arrived DURING the run, not only at the end',
+    streamed.seen.length >= 4, streamed.seen.length);
+  check('and it carried a wallet count that climbs',
+    streamed.seen.some(m => m.done === 1) && streamed.seen.some(m => m.done === 2),
+    streamed.seen.map(m => m.done));
+  check('the gauge knows how many wallets there are in total',
+    streamed.evTotal === 2, streamed.evTotal);
+  check('and the run is showing as the EVIDENCE phase while it walks',
+    streamed.phase === 'EVIDENCE', streamed.phase);
+  check('the request actually asked the server to stream',
+    lastRequest && lastRequest.stream === true, lastRequest && lastRequest.stream);
+  // The whole point of streaming is the window still comes back with it.
+  const streamedWindow = await page.evaluate(async () => {
+    var rows = await window.SW_EVIDENCE_INDEX.readRun();
+    return { rows: rows.length, first: rows[0] && rows[0].hash };
+  });
+  check('and the report window survives the streaming path',
+    streamedWindow.rows === 3, streamedWindow);
+  // Observed on the SERVER side of the exchange, not inferred from the client:
+  // the real done-line builder attached a window rather than the fixture
+  // inventing one.
+  check('the server\'s own done-line builder attached the window',
+    builderAttached === true, builderAttached);
+
+  // ── SILENCE, NOT DURATION ───────────────────────────────────────────────
+  // The old timeout fired at a flat 290 seconds whether or not the server was
+  // still talking. This asserts the shipped source no longer works that way;
+  // the live behaviour is covered by the run above, which takes longer than
+  // zero and is never cut.
+  const L45 = fs.readFileSync(path.join(ROOT, 'src/brief/45-delta-evidence-index-20260911.js'), 'utf8')
+    .split('\n').map(l => l.replace(/^\s*\/\/.*$/, '')).join('\n');
+  check('the abort clock is reset by arriving bytes rather than set once',
+    /function idle\s*\(\)/.test(L45) && /idle\(\);/.test(L45));
+  check('and no flat 290-second deadline survives',
+    !/290000/.test(L45), (L45.match(/.*290000.*/g) || []).slice(0, 2));
+  check('a stream that ends with no result is a transport failure, not an answer',
+    /DELTA_STREAM_ENDED_WITHOUT_RESULT/.test(L45) &&
+    /cut\.transport = true/.test(L45));
 
   await browser.close();
   srv.close();
