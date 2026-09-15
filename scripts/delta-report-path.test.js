@@ -1182,6 +1182,76 @@ async function main() {
       fallbackDate.beforeSummary === true, fallbackDate.beforeSummary);
   }
 
+  console.log('\n21. a wallet cannot repeatedly transfer to itself');
+  /* ── CONTAMINATED MEMORY, FOUND ON AIR ───────────────────────────────────
+     SW-20260915-R8U2E published this in PATTERN MEMORY:
+
+       [HIGH] Repeated large transfer: rSwGFM…4Cbm → rSwGFM…4Cbm
+              (1.00B XRP flags). (flagged 308x)
+
+     rSwGFM…4Cbm is the wallet from the tecPATH_DRY investigation. Those are
+     failed partial payments whose Amount is a 1B XRP ceiling and whose balance
+     delta is ten drops of fee. The movement figures were fixed, but pattern
+     memory had already banked 308 sightings of a transfer that never happened,
+     and it persists in browser storage across runs.
+
+     Two things are wrong and both need saying: a self-directed payment is not
+     a transfer BETWEEN PARTIES and should never have been recorded as one, and
+     the entries already banked have to go. */
+  const pm = await page.evaluate(() => {
+    if (typeof updatePatternMemory !== 'function' || typeof getPatternMemory !== 'function') {
+      return { unavailable: true };
+    }
+    var SELF = 'rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm';
+    var A = 'rAlicezzzzzzzzzzzzzzzzzzzzzzzzzzzz', B = 'rBobzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz';
+    try { localStorage.removeItem('SHADOW_WATCH_PATTERN_MEMORY_V1'); } catch (_) {}
+    // A run containing a self-directed 1B "transfer" and a genuine one.
+    updatePatternMemory({ report_id: 'SW-20260915-PMTST', large_transfers: [
+      { from: SELF, to: SELF, amount: 1000000000, sender_label: 'WATCHED', receiver_label: 'WATCHED' },
+      { from: A, to: B, amount: 2000000, sender_label: 'WATCHED_A', receiver_label: 'WATCHED_B' }
+    ] });
+    var keys = Object.keys(getPatternMemory().patterns || {});
+    var selfKeys = keys.filter(function (k) {
+      var p = k.split(':'); return p[0] === 'sender_receiver' && p[1] === p[2]; });
+    var realKeys = keys.filter(function (k) { return k === 'sender_receiver:' + A + ':' + B; });
+    return { selfCreated: selfKeys.length, genuineCreated: realKeys.length, keys: keys };
+  });
+  if (!pm.unavailable) {
+    check('a self-directed large transfer records no sender→receiver pattern',
+      pm.selfCreated === 0, pm.keys);
+    check('while a genuine transfer between two wallets still does',
+      pm.genuineCreated === 1, pm.keys);
+  }
+  // And the entries already banked, which no new run can clear on its own.
+  const purged = await page.evaluate(() => {
+    if (typeof getPatternMemory !== 'function') return { unavailable: true };
+    var SELF = 'rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm';
+    var legacy = { version: 'v1', updated_at: null, patterns: {} };
+    legacy.patterns['sender_receiver:' + SELF + ':' + SELF] = {
+      key: 'sender_receiver:' + SELF + ':' + SELF, type: 'REPEATED_SENDER_RECEIVER',
+      times_seen: 308, confidence: 'HIGH',
+      public_summary: 'Repeated large transfer: X → X (1.00B XRP flags).', evidence_refs: [] };
+    legacy.patterns['sender_receiver:rA:rB'] = {
+      key: 'sender_receiver:rA:rB', type: 'REPEATED_SENDER_RECEIVER',
+      times_seen: 12, confidence: 'HIGH',
+      public_summary: 'Repeated large transfer: rA → rB.', evidence_refs: [] };
+    legacy.patterns['multi_watched_receiver:rC'] = {
+      key: 'multi_watched_receiver:rC', type: 'MULTI_WATCHED_RECEIVER',
+      times_seen: 5, confidence: 'MEDIUM', public_summary: 'rC received from 3.', evidence_refs: [] };
+    try { localStorage.setItem('SHADOW_WATCH_PATTERN_MEMORY_V1', JSON.stringify(legacy)); } catch (_) {}
+    var loaded = getPatternMemory();
+    return { keys: Object.keys(loaded.patterns || {}) };
+  });
+  if (!purged.unavailable) {
+    check('the banked self-directed entries are dropped on load',
+      purged.keys.every(function (k) {
+        var p = k.split(':'); return !(p[0] === 'sender_receiver' && p[1] === p[2]); }),
+      purged.keys);
+    check('and every legitimate pattern survives the purge',
+      purged.keys.indexOf('sender_receiver:rA:rB') > -1 &&
+      purged.keys.indexOf('multi_watched_receiver:rC') > -1, purged.keys);
+  }
+
   await browser.close();
   srv.close();
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail)

@@ -16491,13 +16491,47 @@ function _emptyPatternMemory() {
   return { version: 'v1', snapshots: [], wallets: {}, patterns: {}, updated_at: '' };
 }
 
+// ── THE ENTRIES ALREADY BANKED HAVE TO GO ─────────────────────────────────
+//
+// Pattern memory persists in the operator's browser across runs, so fixing the
+// movement figures does not clear what was recorded before the fix. Every
+// self-directed "repeated large transfer" in the store came from the same
+// defect and describes something that never happened.
+//
+// This removes exactly those — a sender_receiver key whose two addresses are
+// the same — and nothing else. Pattern memory is a derived cache rebuilt from
+// evidence, never evidence itself, so dropping a contaminated entry costs
+// nothing that cannot be re-earned. It says what it removed rather than doing
+// it silently, because quietly rewriting stored state is how a defect becomes
+// folklore.
+function _purgeSelfDirected(memory) {
+  try {
+    const patterns = (memory && memory.patterns) || {};
+    const removed = Object.keys(patterns).filter(k => {
+      const parts = String(k).split(':');
+      return parts[0] === 'sender_receiver' && parts.length >= 3 && parts[1] === parts[2];
+    });
+    if (!removed.length) return memory;
+    removed.forEach(k => { delete patterns[k]; });
+    try {
+      if (typeof log === 'function') {
+        log('Pattern memory: dropped ' + removed.length +
+          ' self-directed transfer pattern(s) — a wallet paying itself is not a ' +
+          'transfer between parties, and these were recorded from failed payments.');
+      }
+    } catch (_) {}
+    try { localStorage.setItem(PATTERN_MEMORY_KEY, JSON.stringify(memory)); } catch (_) {}
+  } catch (_) {}
+  return memory;
+}
+
 // Load from localStorage (or create fresh)
 function getPatternMemory() {
   try {
     const raw = localStorage.getItem(PATTERN_MEMORY_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && parsed.version === 'v1') return parsed;
+      if (parsed && parsed.version === 'v1') return _purgeSelfDirected(parsed);
     }
   } catch (_) {}
   return _emptyPatternMemory();
@@ -16755,7 +16789,16 @@ function updatePatternMemory(pack) {
 
   // 1. Repeated sender → receiver large transfers
   (pack.large_transfers || []).forEach(t => {
-    if (t.from && t.to) {
+    // ── A WALLET PAYING ITSELF IS NOT A TRANSFER BETWEEN PARTIES ─────────
+    // "Repeated large transfer: X → X" asserts a relationship between two
+    // wallets, and there is only one. SW-20260915-R8U2E published three of
+    // these at [HIGH], the largest claiming 308 sightings of one billion XRP
+    // moving from rSwGFM…4Cbm to rSwGFM…4Cbm — failed partial payments whose
+    // Amount is a ceiling and whose balance delta is ten drops of fee.
+    //
+    // The movement totals no longer count those, but this memory had already
+    // banked them, so the pattern outlived the defect that created it.
+    if (t.from && t.to && t.from !== t.to) {
       const key = 'sender_receiver:' + t.from + ':' + t.to;
       const sLabel = _swWho(t.from, t.sender_label);
       const rLabel = _swWho(t.to, t.receiver_label);
