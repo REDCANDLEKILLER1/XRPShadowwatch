@@ -330,6 +330,31 @@ A fully observed window is not labelled partial, so the warning means something
 when it appears. Nothing already committed is altered: reconstruction ADDS
 rows.
 
+### Dry run over the real archive — nothing written
+
+```
+day          events   attributed before   derived rows   after    status
+2026-09-09    26038          100.0%              0   100.0%   UNCHANGED
+2026-09-10    53842          100.0%              0   100.0%   UNCHANGED
+2026-09-11    54797          100.0%              0   100.0%   UNCHANGED
+2026-09-12    52017           19.1%          52570    99.6%   PARTIAL_RECONSTRUCTED
+2026-09-13    29963          100.0%              0   100.0%   UNCHANGED
+2026-09-14    41787            0.0%          51947    99.6%   PARTIAL_RECONSTRUCTED
+2026-09-15     6880          100.0%              0   100.0%   UNCHANGED
+```
+
+Two days of seven would be touched. 104,517 derived rows. Attribution across
+the archive goes from 68.4% to 99.9%, and 369 events (0.14%) stay
+unattributable for good — walks that saw a transaction without being a party to
+it, which nothing can reconstruct.
+
+**The dry run earned its keep before a single row was written.** The first
+version derived for EVERY event with a watched party, including the five days
+that were never damaged — 338,063 rows instead of 104,517, layering weaker
+`derived_via` claims on top of intact observations and marking five healthy days
+`PARTIAL_RECONSTRUCTED`. A day that needs no repair now keeps its own status,
+and the suite pins it.
+
 ## One word in a lookup table cost a whole morning report
 
 `SW-20260915-20EV1` published the KGMT fallback — no volume, no attribution, no

@@ -1065,29 +1065,43 @@ function reconstructProvenance(input) {
   let derivedRows = 0, withoutProvenance = 0;
   const attributed = new Set(existing.filter(p => p && (p.role === T.ROLE.OBSERVED_VIA ||
     p.role === T.ROLE.DERIVED_VIA)).map(p => p.tx_hash));
+  // ── ONLY WHERE THE OBSERVATION IS ACTUALLY MISSING ──────────────────────
+  //
+  // Found by the dry run before a single row was written: this derived for
+  // EVERY event with a watched party, including the five committed days that
+  // were never damaged and are already 100% attributed. That would have layered
+  // 223,000 weaker derived_via rows on top of intact observations and marked
+  // five healthy days PARTIAL_RECONSTRUCTED for no reason.
+  //
+  // A derived row is a repair. Where nothing is broken there is nothing to
+  // repair, and adding a weaker claim beside a stronger one only makes the
+  // stronger one harder to see.
+  const observedFor = new Set(existing.filter(p => p && p.role === T.ROLE.OBSERVED_VIA)
+    .map(p => p.tx_hash));
   for (const e of events) {
     if (!e || !e.hash) continue;
+    if (observedFor.has(e.hash)) continue;   // the walk that saw it survived
     // Only the two roles the EVENT can prove. A submitter is the signer, which
     // is not the same as a party to the movement, and is deliberately not used
     // here: this repair claims only what the surviving row demonstrates.
     const parties = [e.from_account, e.to_account].filter(a => a && roster.has(a));
-    let gained = false;
     for (const address of parties) {
-      if (add(e.hash, address, T.ROLE.DERIVED_VIA)) { derivedRows++; gained = true; }
-      else gained = true;
+      if (add(e.hash, address, T.ROLE.DERIVED_VIA)) derivedRows++;
     }
     if (parties.length) attributed.add(e.hash);
     if (!attributed.has(e.hash)) withoutProvenance++;
-    void gained;
   }
 
   return {
     participants: out,
     coverage: {
       day: i.day || null,
-      // Never 'COMPLETE'. A repaired day is partial by construction: the rows
-      // that could not be derived are gone for good.
-      status: 'PARTIAL_RECONSTRUCTED',
+      // Never 'COMPLETE' once anything has been derived: a repaired day is
+      // partial by construction, because the rows that could not be derived are
+      // gone for good. A day that needed NO repair keeps its own status — it
+      // was never damaged, and calling it reconstructed would be a false
+      // downgrade of intact evidence.
+      status: derivedRows > 0 ? 'PARTIAL_RECONSTRUCTED' : 'UNCHANGED',
       observed_rows: observedRows,
       derived_rows: derivedRows,
       events: events.length,

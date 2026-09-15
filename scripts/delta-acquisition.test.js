@@ -1721,8 +1721,23 @@ async function main() {
   check('the surviving observation comes through untouched',
     (rebuilt.participants || []).some(p => p.tx_hash === survivor.tx_hash &&
       p.address === survivor.address && p.role === 'observed_via'));
-  check('the day is marked partial, never complete',
+  check('a day that needed repair is marked partial, never complete',
     rebuilt.coverage && rebuilt.coverage.status === 'PARTIAL_RECONSTRUCTED', rebuilt.coverage);
+  // ── AND AN UNDAMAGED DAY IS LEFT ALONE ──────────────────────────────────
+  // The dry run over the real archive caught this before anything was written:
+  // deriving for every event with a watched party would have added 223,000
+  // weaker rows to five days that were already fully attributed, and marked
+  // them reconstructed. Where nothing is broken there is nothing to repair.
+  const intactEvents = [
+    { hash: 'E'.repeat(64), close_time: RDAY + 'T05:00:00.000Z', tx_type: 'Payment',
+      tx_result: 'tesSUCCESS', validated: true, from_account: 'rAlice', to_account: 'rStranger' }
+  ];
+  const intact = D.reconstructProvenance({ events: intactEvents, roster: watched,
+    existing: [{ tx_hash: 'E'.repeat(64), address: 'rAlice', role: 'observed_via' }], day: RDAY });
+  check('an already-observed event gains no derived row',
+    intact.coverage.derived_rows === 0, intact.coverage);
+  check('and an undamaged day is not downgraded to reconstructed',
+    intact.coverage.status === 'UNCHANGED', intact.coverage.status);
   check('and it counts the two kinds separately, because they are not the same claim',
     rebuilt.coverage.observed_rows === 1 && rebuilt.coverage.derived_rows === 2, rebuilt.coverage);
   check('a transaction with a SURVIVING observation still counts as attributed',
