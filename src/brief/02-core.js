@@ -10956,6 +10956,30 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     if (m.attempt !== undefined) XAI_SCAN_PROGRESS.evidenceAttempt = Number(m.attempt) || 0;
     if (m.waiting_on !== undefined) XAI_SCAN_PROGRESS.evidenceWaitingOn = String(m.waiting_on || '');
     if (m.done_phase !== true) XAI_SCAN_PROGRESS.phase = 'EVIDENCE';
+    // The smoother owns the dial — its 120ms ticker rewrites whatever
+    // _renderMissionUI puts there — so the real number has to be given to IT,
+    // not only painted. Told nothing, it creeps; told the truth, it tracks.
+    try {
+      if (XAI_SCAN_PROGRESS.evidenceTotal > 0 && window.XAI_PROGRESS_SMOOTHER &&
+          typeof window.XAI_PROGRESS_SMOOTHER.setTarget === 'function') {
+        var share = Math.min(1, XAI_SCAN_PROGRESS.evidenceWallets / XAI_SCAN_PROGRESS.evidenceTotal);
+        window.XAI_PROGRESS_SMOOTHER.setTarget(Math.round(5 + share * 10));
+      }
+    } catch (_) {}
+    // And the runtime phase panel, which is a THIRD model of the same run and
+    // was still naming Wallet Snapshot as both completed and running.
+    try {
+      if (window.SW_PHASE_PROGRESS_RUNTIME_20260820 &&
+          typeof window.SW_PHASE_PROGRESS_RUNTIME_20260820.setPhase === 'function') {
+        window.SW_PHASE_PROGRESS_RUNTIME_20260820.setPhase('EVIDENCE_ACQUISITION',
+          XAI_SCAN_PROGRESS.evidenceTotal
+            ? Math.round(100 * XAI_SCAN_PROGRESS.evidenceWallets / XAI_SCAN_PROGRESS.evidenceTotal)
+            : 0,
+          XAI_SCAN_PROGRESS.evidenceWallets + ' of ' + XAI_SCAN_PROGRESS.evidenceTotal +
+            ' wallets walked' + (XAI_SCAN_PROGRESS.evidenceAttempt > 1
+              ? ' \u00b7 attempt ' + XAI_SCAN_PROGRESS.evidenceAttempt : ''));
+      }
+    } catch (_) {}
     try { _renderMissionUI(); } catch (_) {}
   };
   if (typeof window !== 'undefined') window.updateShadowTxProgress = function(m) {
@@ -12149,6 +12173,11 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     READY:           2,
     IDLE:            2,
     INIT:            15,
+    // The evidence walk owns the band before the wallet pass. Without an entry
+    // here the lookup below fell through to a ceiling of 100 and the soft creep
+    // ran the dial to 98% — while the run was two minutes into its longest
+    // phase with 234 of 408 wallets walked.
+    EVIDENCE:        16,
     LEDGER:          26,
     WALLET_PROGRESS: 45,
     TX_PROGRESS:     58,
@@ -12188,7 +12217,14 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       try {
         var phase = (window.XAI_SCAN_PROGRESS && window.XAI_SCAN_PROGRESS.phase) || 'IDLE';
         var ceil = PHASE_CEILING[phase];
-        if (typeof ceil === 'undefined') ceil = 100;
+        // An UNKNOWN phase used to default to a ceiling of 100, which let the
+        // soft creep below run the dial to 98% for as long as that phase lasted.
+        // A phase this table has never heard of is exactly the phase whose
+        // duration is unknown, so it gets no creep headroom at all: the dial
+        // holds where it is rather than inventing progress. Adding a phase
+        // elsewhere can no longer silently produce a fake 98%.
+        var known = typeof ceil !== 'undefined';
+        if (!known) ceil = Math.max(this.targetPct, this.visualPct);
         // DONE / FAILED: snap to 100
         if (phase === 'DONE' || phase === 'FAILED') {
           this.targetPct = 100;

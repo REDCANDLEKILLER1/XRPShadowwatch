@@ -715,6 +715,66 @@ async function main() {
     retried.seen.every((n, i) => i === 0 || n >= retried.seen[i - 1]),
     retried.seen);
 
+  console.log('\n12. the dial shows the walk, not a creep toward 98%');
+  /* ── OBSERVED ON THE PHONE ───────────────────────────────────────────────
+     EVIDENCE 234/408 · 504 READS ... and 98% next to it.
+
+     THREE systems model a run's phases, and the EVIDENCE phase was registered
+     in exactly one of them:
+
+       XAI_SCAN_PROGRESS / PHASE_PROGRESS_PCT   added
+       PHASE_CEILING / XAI_PROGRESS_SMOOTHER    missing -> ceiling defaulted
+                                                to 100, soft creep ran to 98
+       layer 37 ORDER / LABEL                   missing -> "Wallet Snapshot"
+                                                shown completed AND running
+
+     The smoother owns the dial: a 120ms ticker rewrites whatever anything else
+     paints there. So this drives the REAL smoother and reads the REAL element,
+     rather than recomputing the percentage the way the source does — which
+     would agree with the bug. */
+  // The creep is SLOW — 0.22 per 120ms tick, about 1.8%/second — so waiting on
+  // the real timer for a couple of seconds cannot reproduce what the phone saw.
+  // It took MINUTES of evidence walking to reach 98. So the ticker is driven
+  // directly, which is both deterministic and long enough to matter: 900 ticks
+  // is the better part of two minutes of a real walk.
+  const spin = (ticks) => `
+    window.XAI_PROGRESS_SMOOTHER._lastTargetChange = Date.now() - 5000;
+    for (var i = 0; i < ${ticks}; i++) window.XAI_PROGRESS_SMOOTHER.tick();
+  `;
+  const dial = await page.evaluate(`(async () => {
+    var out = {};
+    window.XAI_PROGRESS_SMOOTHER.reset();
+    window.updateShadowEvidenceProgress({ total: 408, done: 234, requests: 504 });
+    ${spin(900)}
+    out.phase = window.XAI_SCAN_PROGRESS.phase;
+    out.shown = parseInt((document.getElementById('xaiMissionPct') || {}).textContent || '0', 10);
+    out.runtimePhase = window.XAI_SCAN_PROGRESS.runtimePhase || null;
+    out.runtimeLabel = window.XAI_SCAN_PROGRESS.runtimePhaseLabel || null;
+    return out;
+  })()`);
+  check('the run reports itself as the EVIDENCE phase',
+    dial.phase === 'EVIDENCE', dial.phase);
+  check('and the dial stays inside the evidence band instead of creeping to 98',
+    dial.shown > 0 && dial.shown <= 16, dial.shown);
+  // The specific number the phone showed, named so a regression is unmistakable.
+  check('98% in particular is gone',
+    dial.shown !== 98, dial.shown);
+  check('the runtime phase panel names the evidence walk rather than Wallet Snapshot',
+    dial.runtimePhase === 'EVIDENCE_ACQUISITION' &&
+    dial.runtimeLabel === 'Evidence Acquisition',
+    { phase: dial.runtimePhase, label: dial.runtimeLabel });
+  // And the general defect behind it: a phase the ceiling table has never heard
+  // of must not be handed a ceiling of 100.
+  const unknown = await page.evaluate(`(async () => {
+    window.XAI_PROGRESS_SMOOTHER.reset();
+    window.XAI_SCAN_PROGRESS.phase = 'A_PHASE_NOBODY_REGISTERED';
+    window.XAI_PROGRESS_SMOOTHER.setTarget(7);
+    ${spin(900)}
+    return parseInt((document.getElementById('xaiMissionPct') || {}).textContent || '0', 10);
+  })()`);
+  check('an unregistered phase holds its number rather than creeping to 98',
+    unknown <= 8, unknown);
+
   await browser.close();
   srv.close();
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail)

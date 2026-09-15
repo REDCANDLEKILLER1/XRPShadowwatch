@@ -13,6 +13,7 @@
   var ORDER = [
     'INIT',
     'NEWS_COLLECTION',
+    'EVIDENCE_ACQUISITION',
     'WALLET_SNAPSHOT',
     'WALLET_HISTORY_SCAN',
     'TRANSACTION_ANALYSIS',
@@ -26,6 +27,11 @@
   var LABEL = {
     INIT: 'Initialization',
     NEWS_COLLECTION: 'News Collection / Router',
+    // The delta walk against the evidence store. It runs BEFORE the wallet
+    // snapshot and is the longest phase of a cold morning — several minutes —
+    // so without its own name the panel showed Wallet Snapshot as completed
+    // AND running for the whole of it.
+    EVIDENCE_ACQUISITION: 'Evidence Acquisition',
     WALLET_SNAPSHOT: 'Wallet Snapshot',
     WALLET_HISTORY_SCAN: 'Wallet History Scan',
     TRANSACTION_ANALYSIS: 'Transaction Analysis',
