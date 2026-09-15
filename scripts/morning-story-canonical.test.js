@@ -34,6 +34,10 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const PORT = Number(process.env.SW_TEST_PORT || 8281);
+// The Morning Report of SW-20260915-R8U2E: 5,149 characters, 1,149 over the
+// posting field it is written for. Driven through the REAL copy surface below.
+const OVERSIZED = fs.readFileSync(
+  path.join(__dirname, 'fixtures', 'morning-report-SW-20260915-R8U2E.txt'), 'utf8');
 const MIME = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
                '.json':'application/json', '.svg':'image/svg+xml', '.png':'image/png' };
 
@@ -339,6 +343,91 @@ const check = (name, ok, detail) => {
   check('XRPL-only RLUSD obligations are distinguished from aggregate supply', r.xrplNamed);
   check('finalization is idempotent', r.finalizationStable);
   check('debug summary reads acquired metrics from the actual scan state', r.debugUsesScanState);
+
+  // ══ 5. THE COPY IS BOUND BY THE POSTING FIELD, THE DOWNLOAD IS NOT ════════
+  // Two publication surfaces, two different jobs. Download is the archival and
+  // on-air artifact and must stay byte-identical to the canonical text (proved
+  // above). Copy is the paste-into-the-post path and is bound by a
+  // 4,000-character field — SW-20260915-R8U2E handed over 5,149 and could not
+  // be posted at all.
+  //
+  // This drives the REAL MRF.copy with the REAL oversized report, capturing
+  // what reaches the clipboard. Asserting on the governor's own function would
+  // prove only that the governor works; the defect was that nothing called it.
+  const c = await page.evaluate((oversized) => {
+    const out = { oversizedLen: oversized.length };
+    try {
+      const MRF = window.MORNING_REPORT_FLOAT;
+      out.copyExists = !!(MRF && typeof MRF.copy === 'function');
+      if (!out.copyExists) return out;
+      let clipped = null;
+      const realCopySafe = window.copySafe;
+      const realClipboard = navigator.clipboard && navigator.clipboard.writeText;
+      window.copySafe = function (t) { clipped = t; };
+      // The drawer prefers _copyLastReport; this is what a sealed run leaves there.
+      const prev = MRF._copyLastReport;
+      MRF._copyLastReport = oversized;
+      try { MRF.copy(); } finally {
+        MRF._copyLastReport = prev;
+        window.copySafe = realCopySafe;
+        if (realClipboard) navigator.clipboard.writeText = realClipboard;
+      }
+      out.captured = clipped != null;
+      out.copyLen = (clipped || '').length;
+      out.copyCodePoints = [...(clipped || '')].length;
+      // It must still be the morning's report, not a stub.
+      out.keptHeadline = (clipped || '').indexOf('121.36M XRP') > -1;
+      out.keptDiagnostics = (clipped || '').indexOf('LEDGER DIAGNOSTICS') > -1;
+      out.keptScripture = (clipped || '').indexOf('Psalm 24:1') > -1;
+      // THE DOWNLOAD MUST NOT BE GOVERNED — and the parity check above cannot
+      // prove that on its own, because its canonical text is already under the
+      // 3,900-character target, where govern() is a no-op. So drive the real
+      // download with a canonical text that IS over the limit: it must come
+      // back byte for byte. The downloaded file is the archival and on-air
+      // artifact; only the paste-into-the-post path is bound by the field.
+      try {
+        const prevMs = state.morningStoryReport;
+        let body = null;
+        const realDl = window.downloadTextFile;
+        window.downloadTextFile = function (fname, b) { body = b; };
+        state.morningStoryReport = oversized;
+        try { MRF.download(); } finally {
+          window.downloadTextFile = realDl;
+          state.morningStoryReport = prevMs;
+        }
+        out.dlOversizedCaptured = body != null;
+        out.dlOversizedLen = (body || '').length;
+        out.dlOversizedUngoverned = body === oversized;
+      } catch (e) { out.dlErr = String(e && e.message); }
+
+      // And the governor must be reachable from the page at all.
+      const G = window.SW_PUBLIC_MORNING_4K_20260817;
+      out.governorPresent = !!(G && typeof G.publicText === 'function');
+      out.governorAtBoundary = !!(G && G.enforced_at === 'PUBLICATION');
+      // The render chain must NOT carry the budget — that is the shipped defect.
+      out.rendererUngoverned = !(window.buildMorningStoryText || {})._swPublic4kGovernor20260817;
+    } catch (e) { out.err = String(e && e.message); }
+    return out;
+  }, OVERSIZED);
+
+  console.log('\n5. the copy fits the posting field, the download stays canonical');
+  console.log('     copy in: ' + c.oversizedLen + ' chars  ->  out: ' + c.copyLen + ' chars');
+  check('the fixture is genuinely over the limit (not a vacuous pass)',
+        c.oversizedLen > 4000, c.oversizedLen);
+  check('the governor is reachable from the page', c.governorPresent, c.err);
+  check('it is enforced at the publication boundary, not in the render chain',
+        c.governorAtBoundary && c.rendererUngoverned,
+        { at: c.governorAtBoundary, rendererClean: c.rendererUngoverned });
+  check('the real MRF.copy body was captured', c.captured, c.err);
+  check('MRF.copy() output is within the 4,000-character field',
+        c.copyLen > 0 && c.copyLen <= 4000, c.copyLen);
+  check('and within it counted in code points', c.copyCodePoints <= 4000, c.copyCodePoints);
+  check('the copy is still the morning report, not a stub',
+        c.keptHeadline && c.keptDiagnostics && c.keptScripture,
+        { headline: c.keptHeadline, diagnostics: c.keptDiagnostics, scripture: c.keptScripture });
+  check('an OVER-LIMIT canonical text still downloads whole (parity is not vacuous)',
+        c.dlOversizedCaptured && c.dlOversizedLen > 4000 && c.dlOversizedUngoverned,
+        { captured: c.dlOversizedCaptured, len: c.dlOversizedLen, err: c.dlErr });
 
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 

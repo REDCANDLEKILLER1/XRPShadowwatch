@@ -1,0 +1,1803 @@
+#!/usr/bin/env node
+'use strict';
+/* ── A MORNING RUN WITH NO DATABASE ─────────────────────────────────────────
+   GitHub holds the checkpoint. XRPL answers only what changed since it. Neon
+   appears nowhere.
+
+   What this suite holds the run to:
+
+     the walk is unconditional            balance never decides whether to look
+     one anchor for every wallet          wallet 3 and wallet 200 describe one instant
+     the range is the checkpoint's        three days of gap searches three days
+     a net-zero pass-through is caught    same balance, transactions still fetched
+     a contradiction commits NOTHING      and the checkpoint does not move
+     one failure commits NOTHING          254 of 255 is not a run
+     one commit, never per wallet         all of it or none of it
+
+   A fake XRPL peer and a fake GitHub, both recording every call.
+──────────────────────────────────────────────────────────────────────────── */
+const path = require('path');
+const fs = require('fs');
+const zlib = require('zlib');
+const ROOT = path.join(__dirname, '..');
+const D = require(path.join(ROOT, 'src/db/delta-acquisition.js'));
+// The grouper, reached through the module so the ordering rule is tested
+// directly rather than only through a run that happens to have one cause.
+const groupOf = rows => D.groupByCause(rows);
+const State = require(path.join(ROOT, 'src/db/evidence-state.js'));
+const Store = require(path.join(ROOT, 'src/db/github-store.js'));
+const Journal = require(path.join(ROOT, 'src/db/run-journal.js'));
+
+let pass = 0, fail = 0;
+const check = (name, ok, detail) => {
+  if (ok) { pass++; console.log('  PASS  ' + name); }
+  else { fail++; console.log('  FAIL  ' + name + (detail !== undefined ? '  -> ' + JSON.stringify(detail) : '')); }
+};
+const ENV = { SHADOWWATCH_EVIDENCE_TOKEN: 'test-token' };
+const WALLETS = ['rAlice', 'rBob', 'rCarol'];
+const ANCHOR = 110000000;
+const RIPPLE_EPOCH = 946684800;
+const hashFor = (a, i) => (a + '0'.repeat(64)).slice(0, 60) + String(i).padStart(4, '0');
+
+// A peer that answers the four read-only methods and records what it was asked.
+function fakePeer(options) {
+  const opts = options || {};
+  const asked = [];
+  const balances = opts.balances || {};
+  const txs = opts.transactions || {};
+  const LANES = opts.endpoints || ['wss://a', 'wss://b', 'wss://c', 'wss://d'];
+  const lanes = LANES.map(endpoint => ({ endpoint, epoch: 1, inFlight: 0 }));
+  let laneCursor = 0;
+  const reader = {
+    epoch: 1,
+    stats: { requests: 0, events: [] },
+    lanes,
+    // The real Reader hands out the lane that can answer soonest; the fake
+    // hands them out in turn, which is enough to prove a run SPREADS rather
+    // than piling every wallet onto one server.
+    async lane() { const l = lanes[laneCursor++ % lanes.length]; l.assigned = (l.assigned || 0) + 1; return l; },
+    releaseLane(l) { if (l && l.assigned > 0) l.assigned--; },
+    event() {},
+    async ledger() { return { ledger: ANCHOR, close_ms: Date.UTC(2026, 8, 11, 6, 0, 0) }; },
+    async request(command, expectedEpoch, pin) {
+      this.stats.requests++;
+      asked.push({ ...command, _endpoint: pin ? pin.endpoint : null });
+      if (opts.pendingFrom && this.stats.requests > opts.pendingFrom) {
+        const e = new Error('XRPL_ADMISSION_BUDGET_EXCEEDED'); e.pending = true; throw e;
+      }
+      if (command.command !== 'account_tx') throw new Error('UNEXPECTED_COMMAND_' + command.command);
+      if (opts.failOn && opts.failOn === command.account) throw new Error('INJECTED_WALK_FAILURE');
+      const list = (txs[command.account] || []).filter(t =>
+        t.ledger >= command.ledger_index_min && t.ledger <= command.ledger_index_max);
+      return {
+        validated: true, account: command.account,
+        ledger_index_min: command.ledger_index_min, ledger_index_max: command.ledger_index_max,
+        transactions: list.map((t, i) => ({
+          ledger_index: t.ledger, validated: true,
+          tx: { Account: command.account, Destination: t.to || 'rDest', TransactionType: 'Payment',
+            Amount: t.amount, hash: t.hash || hashFor(command.account, i),
+            date: Math.floor(Date.UTC(2026, 8, 11, 5, 0, 0) / 1000) - RIPPLE_EPOCH, Fee: '12' },
+          meta: { TransactionResult: 'tesSUCCESS', delivered_amount: t.amount, TransactionIndex: i,
+            AffectedNodes: [{ ModifiedNode: { LedgerEntryType: 'AccountRoot',
+              FinalFields: { Account: command.account, Balance: t.after },
+              PreviousFields: { Balance: t.before } } }] }
+        }))
+      };
+    },
+    async balance(address, ledgerIndex, pin) {
+      this.stats.requests++;
+      asked.push({ command: 'account_info', account: address, _endpoint: pin ? pin.endpoint : null });
+      const drops = balances[address];
+      return drops === undefined ? null : { drops, ledger: ANCHOR };
+    }
+  };
+  return { reader, asked };
+}
+
+// The same fake GitHub the store suite uses, trimmed to what a run needs.
+// GitHub's documented ceiling for the contents API. Small here so a test can
+// cross it without building a megabyte.
+const CONTENTS_API_LIMIT = 1024;
+
+function fakeGithub(files) {
+  const calls = [];
+  const blobs = new Map();
+  const state = { headFiles: new Map(Object.entries(files || {})), head: 'c0', n: 0,
+    blobBytes: new Map() };
+  const commits = new Map([['c0', { files: new Map(state.headFiles) }]]);
+  const gh = async (method, p, body, allow404) => {
+    calls.push({ method, path: p });
+    if (method === 'GET' && /^\/git\/ref\/heads\//.test(p)) return { object: { sha: state.head } };
+    if (method === 'GET' && /^\/contents\//.test(p)) {
+      const file = decodeURIComponent(p.slice('/contents/'.length).split('?')[0]);
+      if (!state.headFiles.has(file)) { if (allow404) return null; throw Object.assign(new Error('404'), { status: 404 }); }
+      // GitHub's contents API carries bytes only to 1 MB. Past that it
+      // answers with the metadata and an EMPTY body — no error. The fake does
+      // the same, because a fake that always returns the bytes cannot catch
+      // the bug where the real one does not.
+      const buf = Buffer.isBuffer(state.headFiles.get(file))
+        ? state.headFiles.get(file) : Buffer.from(state.headFiles.get(file), 'utf8');
+      const sha = 'blob-' + file;
+      state.blobBytes.set(sha, buf);
+      if (buf.length > CONTENTS_API_LIMIT) return { sha, size: buf.length, encoding: 'none', content: '' };
+      return { sha, size: buf.length, encoding: 'base64', content: buf.toString('base64') };
+    }
+    // The blobs API, which carries what the contents API would not.
+    if (method === 'GET' && /^\/git\/blobs\//.test(p)) {
+      const sha = decodeURIComponent(p.slice('/git/blobs/'.length));
+      const buf = state.blobBytes.get(sha);
+      if (!buf) throw Object.assign(new Error('404'), { status: 404 });
+      return { sha, size: buf.length, encoding: 'base64', content: buf.toString('base64') };
+    }
+    // A commit names ITS OWN tree, and a tree can be listed. The fake used to
+    // answer 't0' for every commit and had no tree listing at all, which meant
+    // nothing could tell a path that exists on the branch from a path only a
+    // manifest remembers — the exact distinction the wedge turned on.
+    if (method === 'GET' && /^\/git\/commits\//.test(p)) {
+      const sha = decodeURIComponent(p.slice('/git/commits/'.length));
+      return { tree: { sha: 'tree-' + sha } };
+    }
+    if (method === 'GET' && /^\/git\/trees\//.test(p)) {
+      const treeSha = decodeURIComponent(p.slice('/git/trees/'.length).split('?')[0]);
+      const commitSha = treeSha.replace(/^tree-/, '');
+      // The head commit's tree IS the branch. Reading a snapshot taken at
+      // commit time instead would let the fake report files the branch no
+      // longer holds — which is the very thing being tested.
+      const snapshot = (commitSha === state.head || !commits.has(commitSha))
+        ? state.headFiles : commits.get(commitSha).files;
+      return { tree: [...snapshot.keys()].map(k => ({ path: k, type: 'blob' })) };
+    }
+    if (method === 'POST' && p === '/git/blobs') {
+      const sha = 'b' + (++state.n);
+      blobs.set(sha, Buffer.from(body.content, 'base64'));
+      return { sha };
+    }
+    if (method === 'POST' && p === '/git/trees') {
+      // A deletion for a path the tree does not hold is REFUSED. Whether the
+      // real API is this strict is not something this repository can test
+      // without a token — so the fake takes the strict reading, and the store
+      // is held to working under it. Code that only ever asks to delete what
+      // is really there is correct either way; code that does not is not.
+      for (const e of body.tree) {
+        if (e.sha === null && !state.headFiles.has(e.path)) {
+          throw Object.assign(new Error('422 tree delete of absent path: ' + e.path), { status: 422 });
+        }
+      }
+      state.pending = body.tree; return { sha: 't' + (++state.n) };
+    }
+    if (method === 'POST' && p === '/git/commits') {
+      const sha = 'c' + (++state.n);
+      const f = new Map(state.headFiles);
+      // sha:null is git's deletion. The fake honours it, or a test would
+      // pass on a store that silently kept files it was told to remove.
+      for (const e of state.pending) { if (e.sha === null) f.delete(e.path); else f.set(e.path, blobs.get(e.sha)); }
+      commits.set(sha, { files: f });
+      state.proposed = sha;
+      return { sha };
+    }
+    if (method === 'PATCH' && /^\/git\/refs\/heads\//.test(p)) {
+      state.head = body.sha; state.headFiles = new Map(commits.get(body.sha).files);
+      return {};
+    }
+    return {};
+  };
+  return { gh, calls, files: () => state.headFiles, head: () => state.head };
+}
+
+const genesisAt = (through, balances) => State.genesis(
+  WALLETS.map(a => ({ address: a, scan_coverage_through: through,
+    scan_coverage_through_close: '2026-09-10T06:00:00.000Z' })),
+  { anchor_ledger: through, anchor_close: '2026-09-10T06:00:00.000Z' });
+
+function seeded(through, balances) {
+  const g = genesisAt(through);
+  // Pin a prior balance so the reconciliation has both endpoints.
+  const withBalance = State.seal({ ...g, wallets: g.wallets.map(w => State.walletEntry({
+    ...w, balance_drops: (balances || {})[w.address] || '20000000000000', balance_ledger: through })) });
+  return { [Store.STATE_PATH]: State.serialize(withBalance) };
+}
+
+const quiet = () => ({ rAlice: [], rBob: [], rCarol: [] });
+const BAL = { rAlice: '20000000000000', rBob: '20000000000000', rCarol: '20000000000000' };
+
+async function main() {
+  console.log('\n1. one anchor, one state read, every wallet walked');
+  const peer = fakePeer({ transactions: quiet(), balances: BAL });
+  const gh = fakeGithub(seeded(ANCHOR - 1000));
+  const out = await D.acquire({ report_id: 'SW-20260911-AAAAA', scan_id: 'idx-1' },
+    { env: ENV, gh: gh.gh, reader: peer.reader, concurrency: 2 });
+  check('the run completes and commits', out.committed === true && out.complete_wallets === 3, out.reason);
+  const walks = peer.asked.filter(c => c.command === 'account_tx');
+  check('every wallet was walked, none skipped', new Set(walks.map(c => c.account)).size === 3, walks.length);
+  check('every walk used the SAME anchor as its upper bound',
+    walks.every(c => c.ledger_index_max === ANCHOR));
+  check('and started one ledger past that wallet\'s checkpoint',
+    walks.every(c => c.ledger_index_min === ANCHOR - 999));
+  const stateReads = gh.calls.filter(c => c.path.startsWith('/contents/' + Store.STATE_PATH));
+  check('the state was read, and no archive file was',
+    stateReads.length >= 1 && gh.calls.filter(c => /^\/contents\/evidence\/20/.test(c.path)).length === 0);
+  check('balance was read once per wallet, pinned',
+    peer.asked.filter(c => c.command === 'account_info').length === 3);
+  check('ONE ref update for the whole run', gh.calls.filter(c => c.method === 'PATCH').length === 1);
+
+  console.log('\n2. balance never decides whether to look');
+  // Three wallets, identical balances before and after. One did nothing; one
+  // received and forwarded five million XRP and came back to where it started.
+  const passthrough = {
+    rAlice: [],
+    rBob: [
+      { ledger: ANCHOR - 500, amount: '5000000000000', before: '20000000000000', after: '25000000000000' },
+      { ledger: ANCHOR - 400, amount: '5000000000000', before: '25000000000000', after: '20000000000000' }
+    ],
+    rCarol: []
+  };
+  const peer2 = fakePeer({ transactions: passthrough, balances: BAL });
+  const gh2 = fakeGithub(seeded(ANCHOR - 1000));
+  const out2 = await D.acquire({ report_id: 'SW-20260911-BBBBB', scan_id: 'idx-2' },
+    { env: ENV, gh: gh2.gh, reader: peer2.reader, concurrency: 1 });
+  check('the net-zero wallet was walked exactly like the quiet ones',
+    peer2.asked.filter(c => c.command === 'account_tx' && c.account === 'rBob').length === 1);
+  check('and its two transactions were captured despite an unchanged balance',
+    out2.transactions === 2 && out2.committed === true, { transactions: out2.transactions, reason: out2.reason });
+  check('which reconciles — the evidence explains the zero delta',
+    out2.balance_contradictions === 0 && out2.balance_reconciled === 3);
+  // The structural version of the same rule.
+  const SOURCE = fs.readFileSync(path.join(ROOT, 'src/db/delta-acquisition.js'), 'utf8');
+  const WALK = SOURCE.split('async function walkWallet')[1].split('\nfunction buildShards')[0];
+  const walkCode = WALK.replace(/^\s*\/\/.*$/gm, '');
+  check('the range is computed before any balance is read',
+    walkCode.indexOf('State.edgeFor(') < walkCode.indexOf('reader.balance('));
+  check('and no branch in the walk tests a balance to decide whether to fetch',
+    !/if\s*\([^)]*balance[^)]*\)\s*(\{|return)/i.test(walkCode));
+
+  console.log('\n3. the gap is whatever the checkpoint says it is');
+  const peer3 = fakePeer({ transactions: quiet(), balances: BAL });
+  const gh3 = fakeGithub(seeded(ANCHOR - 250000));
+  await D.acquire({ report_id: 'SW-20260911-CCCCC' }, { env: ENV, gh: gh3.gh, reader: peer3.reader });
+  check('a three-day-old checkpoint searches the whole three days, not one',
+    peer3.asked.filter(c => c.command === 'account_tx').every(c => c.ledger_index_min === ANCHOR - 249999));
+  // The validated ledger has not moved since the last sealed run. There is
+  // nothing new to prove, and discovering that by walking 255 wallets would
+  // cost 255 requests to learn what one comparison already said.
+  const peer4 = fakePeer({ transactions: quiet(), balances: BAL });
+  const gh4 = fakeGithub(seeded(ANCHOR));
+  const out4 = await D.acquire({ report_id: 'SW-20260911-DDDDD' }, { env: ENV, gh: gh4.gh, reader: peer4.reader });
+  check('an unmoved anchor asks XRPL for nothing at all',
+    peer4.asked.filter(c => c.command === 'account_tx').length === 0 &&
+    peer4.asked.filter(c => c.command === 'account_info').length === 0);
+  check('and it is a clean no-op, not a thrown error or a failed run',
+    out4.committed === false && out4.reason === 'ANCHOR_NOT_ADVANCED', out4.reason);
+  check('it reports the stored anchor so the reason is checkable',
+    out4.stored_anchor_ledger === ANCHOR);
+  check('and it commits nothing', gh4.calls.filter(c => c.method === 'PATCH').length === 0);
+
+  console.log('\n4. a contradiction commits nothing');
+  // rCarol's balance moved by 2 XRP with no transaction to explain it.
+  const peer5 = fakePeer({ transactions: quiet(),
+    balances: { ...BAL, rCarol: '18000000000000' } });
+  const gh5 = fakeGithub(seeded(ANCHOR - 1000));
+  const out5 = await D.acquire({ report_id: 'SW-20260911-EEEEE' }, { env: ENV, gh: gh5.gh, reader: peer5.reader });
+  check('the run refuses to commit', out5.committed === false && out5.reason === 'RUN_CONTRADICTED', out5.reason);
+  check('it names the wallet that cannot account for itself',
+    out5.balance_contradiction_addresses.join(',') === 'rCarol', out5.balance_contradiction_addresses);
+  // The CHECKPOINT did not move. The branch does move — the run writes down
+  // the walking it finished so the next attempt does not pay XRPL for it twice
+  // — and those are different claims. Asserting "no commit" would have been
+  // asserting that the work was thrown away.
+  check('the checkpoint did not move',
+    JSON.parse(gh5.files().get(Store.STATE_PATH).toString('utf8')).state_version === 1 &&
+    JSON.parse(gh5.files().get(Store.STATE_PATH).toString('utf8')).anchor_ledger === ANCHOR - 1000);
+  check('but the finished work was written down rather than discarded',
+    out5.journal_wallets === 3 && !!gh5.files().get(Store.JOURNAL_PATH), out5.journal_wallets);
+  check('and the journal is quarantined — it names no path under the evidence days',
+    JSON.parse(gh5.files().get(Store.JOURNAL_PATH).toString('utf8'))
+      .row_shards.every(x => x.path.startsWith('evidence/runs/resume/')));
+  check('and the checkpoint is exactly where it was',
+    JSON.parse(gh5.files().get(Store.STATE_PATH)).wallets[0].last_proven_ledger === ANCHOR - 1000);
+  check('the other two wallets still walked — the gate is the commit, not the walk',
+    peer5.asked.filter(c => c.command === 'account_tx').length === 3);
+
+  console.log('\n5. one failure is not a run');
+  const peer6 = fakePeer({ transactions: quiet(), balances: BAL, failOn: 'rBob' });
+  const gh6 = fakeGithub(seeded(ANCHOR - 1000));
+  // A partial run must come back as a SUMMARY, not as an exception. The caller
+  // has a report to render and an operator to tell; a thrown error loses the
+  // 2 wallets that did prove and the reason the third did not.
+  let threw6 = null;
+  const out6 = await D.acquire({ report_id: 'SW-20260911-FFFFF' }, { env: ENV, gh: gh6.gh, reader: peer6.reader })
+    .catch(e => { threw6 = e.message; return {}; });
+  check('a partial run is reported, not thrown', threw6 === null, threw6);
+  check('2 of 3 does not commit', out6.committed === false && out6.reason === 'RUN_INCOMPLETE', out6.reason);
+  check('and the summary still carries what did prove',
+    out6.complete_wallets === 2 && out6.target_wallets === 3,
+    { complete: out6.complete_wallets, target: out6.target_wallets });
+  check('the failure is reported with its cause',
+    out6.failures.length === 1 && /INJECTED_WALK_FAILURE/.test(out6.failures[0].error) &&
+    out6.failures[0].wallets === 1 && out6.failures[0].addresses.join(',') === 'rBob', out6.failures);
+  check('the checkpoint did not move',
+    JSON.parse(gh6.files().get(Store.STATE_PATH).toString('utf8')).state_version === 1);
+  check('the two wallets that did prove were written down, and the failed one was not',
+    out6.journal_wallets === 2 &&
+    JSON.parse(gh6.files().get(Store.JOURNAL_PATH).toString('utf8'))
+      .wallets.every(w => w.address !== 'rBob'), out6.journal_wallets);
+  check('and the next run will repeat the same bounded edge',
+    JSON.parse(gh6.files().get(Store.STATE_PATH)).state_version === 1);
+
+  console.log('\n6. what lands in the commit');
+  const peer7 = fakePeer({ transactions: passthrough, balances: BAL });
+  const gh7 = fakeGithub(seeded(ANCHOR - 1000));
+  const out7 = await D.acquire({ report_id: 'SW-20260911-GGGGG', scan_id: 'idx-7' },
+    { env: ENV, gh: gh7.gh, reader: peer7.reader });
+  const written = gh7.files();
+  const shardPaths = [...written.keys()].filter(k => /^evidence\/\d{4}\//.test(k));
+  check('delta shards are written under the ledger day', shardPaths.length > 0, shardPaths);
+  check('events and participants are separate files',
+    shardPaths.some(p => /events\.ndjson\.gz$/.test(p)) && shardPaths.some(p => /participants\.ndjson\.gz$/.test(p)));
+  const eventsPath = shardPaths.find(p => /events\.ndjson\.gz$/.test(p));
+  const events = zlib.gunzipSync(written.get(eventsPath)).toString('utf8').split('\n').filter(Boolean).map(JSON.parse);
+  check('the shard holds the transactions the walk found', events.length === 2, events.length);
+  check('and no payload is folded into an event',
+    events.every(e => e.raw_tx === undefined && e.raw_meta === undefined));
+  check('the AccountRoot deltas ride along, so tomorrow can still reconcile',
+    events[0].evidence.balance_deltas[0].prev === '20000000000000');
+  const newState = JSON.parse(written.get(Store.STATE_PATH));
+  check('the state advanced to the anchor', newState.wallets.every(w => w.last_proven_ledger === ANCHOR));
+  check('and carries the balance pinned to it',
+    newState.wallets.every(w => w.balance_ledger === ANCHOR && w.balance_drops === '20000000000000'));
+  check('the last observed transaction is recorded for the wallet that moved',
+    newState.wallets.find(w => w.address === 'rBob').last_observed_tx_ledger === ANCHOR - 400);
+  check('every shard the state claims is present in the same commit',
+    newState.evidence_shards.every(s => written.has(s.path)), newState.evidence_shards.map(s => s.path));
+  check('and hashes to the bytes that were committed',
+    newState.evidence_shards.every(s => State.sha256(written.get(s.path)) === s.sha256));
+  check('the run manifest is in the commit too', written.has(Store.runPath('SW-20260911-GGGGG')));
+
+  console.log('\n7. no database, anywhere in this path');
+  check('the acquisition module never requires the Neon connection',
+    !/require\('\.\/connection'\)/.test(SOURCE) && !/getExecutor|db\.transaction/.test(SOURCE));
+  check('and issues no SQL', !/\b(SELECT|INSERT|UPDATE|DELETE)\s/i.test(SOURCE.replace(/^\s*\/\/.*$/gm, '')));
+  check('XRPL is asked only for reads the allowlist permits',
+    /command: 'account_tx'/.test(SOURCE) && !/submit|sign/i.test(SOURCE.replace(/^\s*\/\/.*$/gm, '')));
+
+  console.log('\n8. one sick endpoint does not collapse the run into 0/255');
+  // A wallet that fails is retried, and because the Reader rotates endpoints on
+  // a transport failure a retry is usually a different server.
+  let flaky = 2;
+  const peer8 = fakePeer({ transactions: quiet(), balances: BAL });
+  const innerRequest = peer8.reader.request.bind(peer8.reader);
+  peer8.reader.request = async function (command) {
+    if (command.account === 'rBob' && flaky-- > 0) throw new Error('XRPL_CONNECTION_CLOSED');
+    return innerRequest(command);
+  };
+  const gh8 = fakeGithub(seeded(ANCHOR - 1000));
+  const out8 = await D.acquire({ report_id: 'SW-20260911-HHHHH' },
+    { env: ENV, gh: gh8.gh, reader: peer8.reader, attempts: 3 });
+  check('a wallet that failed twice is retried and still proves',
+    out8.complete_wallets === 3 && out8.committed === true, out8.reason);
+  const retried = out8.wallets.find(w => w.address === 'rBob');
+  check('and the attempts it took are recorded, not hidden', retried.attempts === 3, retried);
+  // A malformed response will not become valid by being asked again.
+  const peer9 = fakePeer({ transactions: quiet(), balances: BAL });
+  const inner9 = peer9.reader.request.bind(peer9.reader);
+  let asked9 = 0;
+  peer9.reader.request = async function (command) {
+    if (command.account === 'rBob') { asked9++; throw new Error('ACCOUNT_TX_RESPONSE_MALFORMED'); }
+    return inner9(command);
+  };
+  const gh9 = fakeGithub(seeded(ANCHOR - 1000));
+  const out9 = await D.acquire({ report_id: 'SW-20260911-IIIII' },
+    { env: ENV, gh: gh9.gh, reader: peer9.reader, attempts: 3 });
+  check('a permanent refusal is not retried three times', asked9 === 1, asked9);
+  check('and the run does not commit', out9.committed === false && out9.reason === 'RUN_INCOMPLETE');
+
+  console.log('\n9. what may be rendered, separately from what may be claimed');
+  // 249 of 255 proving is not "nothing happened". Returning no rows would hand
+  // the operator 0/255, which reads as silence rather than as an unfinished run.
+  const f9 = out9.freshness || {};
+  check('the rows from the wallets that DID prove come back anyway',
+    Array.isArray(out9.rows) && Array.isArray(out9.wallets) && out9.wallets.length === 3,
+    { rows: Array.isArray(out9.rows), wallets: out9.wallets && out9.wallets.length });
+  check('the freshness block says how many proved and how many did not',
+    f9.wallets_proven === 2 && f9.wallets_unavailable === 1,
+    { proven: f9.wallets_proven, unavailable: f9.wallets_unavailable });
+  // Grouped by cause, but nothing is summarised away: every address is still
+  // named. A hundred wallets sharing one reason is one fact, not a hundred.
+  check('it names the wallet that could not be reached, and why',
+    Array.isArray(f9.unavailable) && f9.unavailable.length === 1 &&
+    f9.unavailable[0].addresses.join(',') === 'rBob' &&
+    /MALFORMED/.test(f9.unavailable[0].error), f9.unavailable);
+  check('and states plainly that the checkpoint does not advance',
+    f9.checkpoint_advances === false, f9.checkpoint_advances);
+  check('per-wallet proof is reported so the report can label each one',
+    Array.isArray(out9.wallets) &&
+    out9.wallets.filter(w => w.status === 'COMPLETE').every(w => w.proven_through === ANCHOR));
+  const contradictedRun = await D.acquire({ report_id: 'SW-20260911-JJJJJ' },
+    { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh,
+      reader: fakePeer({ transactions: quiet(), balances: { ...BAL, rCarol: '18000000000000' } }).reader });
+  check('a contradicted run also returns its rows and names the contradiction',
+    Array.isArray(contradictedRun.rows) &&
+    contradictedRun.freshness.contradicted.length === 1 &&
+    contradictedRun.freshness.contradicted[0].address === 'rCarol', contradictedRun.freshness.contradicted);
+  check('and the contradiction is framed as an integrity mismatch, not a diagnosis',
+    /UNEXPLAINED/.test(contradictedRun.freshness.contradicted[0].reason) &&
+    !/MISSING/.test(contradictedRun.freshness.contradicted[0].reason),
+    contradictedRun.freshness.contradicted[0].reason);
+  check('a committed run reports its rows too, so one path renders both',
+    Array.isArray(out8.rows) && out8.freshness.checkpoint_advances === true);
+
+  console.log('\n10. the window uses evidence we already own');
+  // A second run the same day must not re-fetch the morning from XRPL: those
+  // transactions are already committed.
+  const DAY = '2026-09-11';
+  const storedEvent = { hash: 'S'.repeat(64), ledger_index: ANCHOR - 900,
+    close_time: DAY + 'T02:00:00.000Z', tx_type: 'Payment', validated: true, evidence: {} };
+  const shard = zlib.gzipSync(Buffer.from(JSON.stringify(storedEvent) + '\n', 'utf8'), { level: 9 });
+  const ghWindow = fakeGithub(seeded(ANCHOR - 1000));
+  ghWindow.files().set('evidence/2026/09/11/events.ndjson.gz', shard);
+  // The provenance shard beside it. WHICH watched wallet's walk saw a
+  // transaction is not a property of the transaction, so the event projection
+  // does not carry it — but the report attributes every movement by it, and an
+  // event with no observer renders with an empty account, label and category.
+  const storedParts = [
+    { tx_hash: storedEvent.hash, address: 'rAlice', role: 'observed_via' },
+    { tx_hash: storedEvent.hash, address: 'rBob', role: 'submitter' }
+  ].map(x => JSON.stringify(x)).join('\n') + '\n';
+  ghWindow.files().set('evidence/2026/09/11/participants.ndjson.gz',
+    zlib.gzipSync(Buffer.from(storedParts, 'utf8'), { level: 9 }));
+  const freshRow = { hash: 'F'.repeat(64), ledger_index: ANCHOR - 100,
+    close_time_iso: DAY + 'T05:00:00.000Z', tx_type: 'Payment', validated: true, evidence: {},
+    observed_via: ['rCarol'] };
+
+  const win = await D.readReportWindow({
+    window_start_ms: Date.parse(DAY + 'T00:00:00.000Z'),
+    window_end_ms: Date.parse(DAY + 'T06:00:00.000Z'),
+    rows: [freshRow]
+  }, { env: ENV, gh: ghWindow.gh });
+  check('the committed shard for the day is read back',
+    win.from_stored === 1 && win.shards_read.includes('evidence/2026/09/11/events.ndjson.gz'),
+    { from_stored: win.from_stored, shards: win.shards_read });
+  check('and combined with the rows this run walked',
+    win.from_this_run === 1 && win.in_window === 2, { run: win.from_this_run, total: win.in_window });
+  // Without this the report loses wallet attribution for everything it did not
+  // walk itself — which, on a second run of the day, is nearly all of it.
+  check('a stored event is reunited with the wallet whose walk saw it',
+    (win.events.find(e => e.hash === storedEvent.hash) || {}).observed_via
+      && win.events.find(e => e.hash === storedEvent.hash).observed_via.join(',') === 'rAlice',
+    win.events.map(e => e.hash.slice(0, 4) + ':' + JSON.stringify(e.observed_via)));
+  check('only the OBSERVED_VIA role counts as provenance, not every participant',
+    !win.events.find(e => e.hash === storedEvent.hash).observed_via.includes('rBob'));
+  check('a row this run walked keeps its own observers',
+    win.events.find(e => e.hash === freshRow.hash).observed_via.join(',') === 'rCarol');
+  check('and nothing in the window is left unattributed',
+    win.unattributed === 0, win.unattributed);
+  check('the window is ordered, so the report reads it in ledger-time order',
+    win.events[0].close_time < win.events[1].close_time);
+  check('only the days the window touches are fetched, not the archive',
+    win.days.length === 1 && win.days[0] === DAY, win.days);
+
+  // The same transaction in both places must be counted once.
+  const dupWin = await D.readReportWindow({
+    window_start_ms: Date.parse(DAY + 'T00:00:00.000Z'),
+    window_end_ms: Date.parse(DAY + 'T06:00:00.000Z'),
+    rows: [{ ...storedEvent, close_time_iso: storedEvent.close_time }]
+  }, { env: ENV, gh: ghWindow.gh });
+  check('a transaction present in both storage and this run is counted once',
+    dupWin.in_window === 1, dupWin.in_window);
+
+  // Anything outside the window is not the window.
+  const narrow = await D.readReportWindow({
+    window_start_ms: Date.parse(DAY + 'T03:00:00.000Z'),
+    window_end_ms: Date.parse(DAY + 'T06:00:00.000Z'),
+    rows: [freshRow]
+  }, { env: ENV, gh: ghWindow.gh });
+  check('a stored row outside the window is excluded from it',
+    narrow.in_window === 1 && narrow.events[0].hash === freshRow.hash, narrow.in_window);
+
+  const empty = await D.readReportWindow({
+    window_start_ms: Date.parse('2026-09-07T00:00:00.000Z'),
+    window_end_ms: Date.parse('2026-09-07T06:00:00.000Z'), rows: []
+  }, { env: ENV, gh: ghWindow.gh });
+  check('a day with no shard is reported, not thrown',
+    empty.in_window === 0 && empty.days_without_shards.includes('2026-09-07'), empty.days_without_shards);
+
+  const SRC2 = fs.readFileSync(path.join(ROOT, 'src/db/delta-acquisition.js'), 'utf8');
+  // ── NARROWED DELIBERATELY, AND SAID SO ──────────────────────────────────
+  //
+  // This read "acquisition itself never loads a stored shard", protecting the
+  // principle that the WALK is bounded by the checkpoint and never by the size
+  // of the archive. That principle is unchanged and is still asserted below.
+  //
+  // What changed is that the COMMIT now reads back the one or two days it is
+  // about to write, so it can merge rather than overwrite them — the defect
+  // that destroyed 102,856 provenance rows from evidence/2026/09/14. The old
+  // wording forbade that too, which would have made the data-loss fix
+  // untestable rather than caught anything.
+  //
+  // So the guard is split at the gate: nothing before it may load a shard.
+  const WALK_PHASE = SRC2.split('async function acquire')[1].split('// 4. The gate')[0];
+  check('the WALK never loads a stored shard — it is bounded by the checkpoint',
+    !/Store\.readDays/.test(WALK_PHASE));
+  const COMMIT_PHASE = SRC2.split('// 4. The gate')[1].split('// ── The report window')[0];
+  check('but the commit reads the days it is about to write, to merge them',
+    /Store\.readDays/.test(COMMIT_PHASE) && /buildShards\(committedRows, priorByDay\)/.test(COMMIT_PHASE));
+  check('and it reads only the days this run\'s rows land in',
+    /touchedDays/.test(COMMIT_PHASE) && !/readDays\(days/.test(COMMIT_PHASE));
+  check('freshly walked rows win a tie against a stored copy',
+    /for \(const event of stored\.events\) byHash\.set[\s\S]{0,140}?for \(const event of fresh\) byHash\.set/.test(SRC2));
+
+  console.log('\n11. the two lanes run concurrently');
+  check('the checkpoint read and the anchor pin do not wait on each other',
+    /Promise\.all\(\[\s*Store\.readState/.test(SRC2));
+  check('and wallet walks run with bounded concurrency',
+    /Array\.from\(\{ length: concurrency \}, worker\)/.test(SRC2));
+
+  console.log('\n12. the roster grew — what a new wallet costs, and what it may claim');
+  /* The roster went from 255 to 408. The state knows the wallets it has proven;
+     the roster names the wallets we watch. The gap between them IS the set being
+     admitted — and a wallet entering that set buys one bounded window of history,
+     not the whole ledger, and says in the file where its evidence begins. */
+  const ROSTER = WALLETS.concat(['rDave']);
+  const peerR9 = fakePeer({ transactions: { ...quiet(),
+      rDave: [{ ledger: ANCHOR - 20, amount: '1000000000', before: '9000000000', after: '10000000000' }] },
+    balances: { ...BAL, rDave: '10000000000' } });
+  const ghR9 = fakeGithub(seeded(ANCHOR - 1000));
+  const outR9 = await D.acquire({ report_id: 'SW-20260911-JJJJJ', scan_id: 'idx-9', roster: ROSTER },
+    { env: ENV, gh: ghR9.gh, reader: peerR9.reader, concurrency: 2 });
+  check('the run completes with the new wallet included',
+    outR9.committed === true && outR9.target_wallets === 4 && outR9.complete_wallets === 4, outR9.reason);
+  check('and says plainly which wallets it admitted',
+    outR9.wallets_admitted === 1 && JSON.stringify(outR9.admitted_wallets) === JSON.stringify(['rDave']));
+  const walkR9 = peerR9.asked.filter(c => c.command === 'account_tx');
+  const daveWalk = walkR9.filter(c => c.account === 'rDave');
+  check('the new wallet was actually walked', daveWalk.length === 1);
+  check('over a BOUNDED window, not to genesis',
+    daveWalk[0].ledger_index_min === ANCHOR - 30000 + 1 && daveWalk[0].ledger_index_max === ANCHOR,
+    daveWalk[0] && daveWalk[0].ledger_index_min);
+  check('and the run reports the horizon it bought, so the report cannot claim past it',
+    outR9.admitted_history_from_ledger === ANCHOR - 30000 + 1);
+  check('the wallets already proven still walk only their own delta — an addition costs them nothing',
+    walkR9.filter(c => c.account !== 'rDave').every(c => c.ledger_index_min === ANCHOR - 999));
+  const stateR9 = JSON.parse(ghR9.files().get(Store.STATE_PATH).toString('utf8'));
+  const daveR9 = stateR9.wallets.find(w => w.address === 'rDave');
+  check('the committed state carries the new wallet with its horizon recorded',
+    daveR9 && daveR9.admitted_at_ledger === ANCHOR && daveR9.history_from_ledger === ANCHOR - 30000 + 1, daveR9);
+  check('and it is proven only to this anchor — no inherited checkpoint',
+    daveR9.last_proven_ledger === ANCHOR);
+  check('the existing wallets kept their own admission fields untouched (null: seeded before this store)',
+    stateR9.wallets.filter(w => w.address !== 'rDave')
+      .every(w => w.admitted_at_ledger === null && w.history_from_ledger === null));
+  check('the run manifest names the admission too',
+    JSON.parse(ghR9.files().get('evidence/runs/SW-20260911-JJJJJ.json').toString('utf8'))
+      .admitted_wallets.join(',') === 'rDave');
+
+  console.log('\n13. the second morning: an admitted wallet is an ordinary one');
+  const peerR10 = fakePeer({ transactions: { ...quiet(), rDave: [] },
+    balances: { ...BAL, rDave: '10000000000' } });
+  peerR10.reader.ledger = async () => ({ ledger: ANCHOR + 1000, close_ms: Date.UTC(2026, 8, 12, 6, 0, 0) });
+  const ghR10 = fakeGithub(Object.fromEntries(
+    [...ghR9.files()].map(([k, v]) => [k, v.toString('utf8')])));
+  const outR10 = await D.acquire({ report_id: 'SW-20260912-AAAAA', scan_id: 'idx-10', roster: ROSTER },
+    { env: ENV, gh: ghR10.gh, reader: peerR10.reader, concurrency: 2 });
+  check('it commits, and admits nobody — the wallet is already in',
+    outR10.committed === true && outR10.wallets_admitted === 0, outR10.reason);
+  const daveWalkR10 = peerR10.asked.filter(c => c.command === 'account_tx' && c.account === 'rDave');
+  check('the new wallet now walks its own delta, not another cold window',
+    daveWalkR10[0].ledger_index_min === ANCHOR + 1, daveWalkR10[0]);
+  const daveR10 = JSON.parse(ghR10.files().get(Store.STATE_PATH).toString('utf8'))
+    .wallets.find(w => w.address === 'rDave');
+  check('and its horizon is carried unchanged — one cold window, bought once',
+    daveR10.history_from_ledger === ANCHOR - 30000 + 1 && daveR10.admitted_at_ledger === ANCHOR);
+
+  console.log('\n14. the roster is not a lever the caller gets to pull');
+  const peerR11 = fakePeer({ transactions: quiet(), balances: BAL });
+  const ghR11 = fakeGithub(seeded(ANCHOR - 1000));
+  const outR11 = await D.acquire({ report_id: 'SW-20260911-KKKKK', scan_id: 'idx-11',
+    roster: ['rAlice', 'rBob'] }, { env: ENV, gh: ghR11.gh, reader: peerR11.reader, concurrency: 2 });
+  check('a wallet missing from the roster is NOT dropped — retiring one is a decision, not an inference',
+    outR11.committed === true && outR11.target_wallets === 3 &&
+    peerR11.asked.some(c => c.command === 'account_tx' && c.account === 'rCarol'), outR11.reason);
+  check('but the discrepancy is reported rather than swallowed',
+    JSON.stringify(outR11.watched_not_in_roster) === JSON.stringify(['rCarol']));
+  check('a state committed without a roster admits nobody at all',
+    (() => { const s = JSON.parse(ghR11.files().get(Store.STATE_PATH).toString('utf8'));
+      return s.wallet_count === 3 && s.sealed_run.admitted_wallets.length === 0; })());
+  check('and the API takes the roster from committed source, never from the request body',
+    /roster: roster\.select\(\)\.accounts/.test(fs.readFileSync(path.join(ROOT, 'api/delta.js'), 'utf8')) &&
+    !/input\.roster/.test(fs.readFileSync(path.join(ROOT, 'api/delta.js'), 'utf8')));
+
+  console.log('\n15. a roster that grew by more than one run can carry');
+  /* 153 wallets joined at once. One run cannot walk 153 cold windows inside a
+     serverless ceiling — and a run that tries does not come back slow, it comes
+     back dead, commits nothing, and leaves the roster where it was. So the
+     admissions queue and a few join each morning, while every run stays whole.
+     Nothing is skipped and no window narrows: a wallet joins on Tuesday. */
+  const MANY = WALLETS.concat(['rDave', 'rErin', 'rFrank', 'rGrace']);
+  const txsMany = { ...quiet(), rDave: [], rErin: [], rFrank: [], rGrace: [] };
+  const balMany = { ...BAL, rDave: '1000', rErin: '2000', rFrank: '3000', rGrace: '4000' };
+  const peerB = fakePeer({ transactions: txsMany, balances: balMany });
+  const ghB = fakeGithub(seeded(ANCHOR - 1000));
+  const outB = await D.acquire({ report_id: 'SW-20260911-MMMMM', scan_id: 'idx-b',
+    roster: MANY, max_admissions: 2 },
+    { env: ENV, gh: ghB.gh, reader: peerB.reader, concurrency: 2 });
+  check('the run commits with only as many admissions as it can afford',
+    outB.committed === true && outB.wallets_admitted === 2 && outB.target_wallets === 5, outB.reason);
+  check('and names the ones still waiting rather than rounding them away',
+    outB.wallets_awaiting_admission === 2 && outB.roster_wallets === 7);
+  check('the batch is taken in address order, so the same run twice picks the same two',
+    JSON.stringify(outB.admitted_wallets) === JSON.stringify(['rDave', 'rErin']));
+  check('the deferred wallets were not walked — a deferral costs no XRPL request',
+    !peerB.asked.some(c => c.account === 'rFrank' || c.account === 'rGrace'));
+  check('and they are not in the committed state either',
+    (() => { const st = JSON.parse(ghB.files().get(Store.STATE_PATH).toString('utf8'));
+      return st.wallet_count === 5 && !st.wallets.some(w => w.address === 'rGrace'); })());
+
+  const peerC = fakePeer({ transactions: txsMany, balances: balMany });
+  peerC.reader.ledger = async () => ({ ledger: ANCHOR + 500, close_ms: Date.UTC(2026, 8, 12, 6, 0, 0) });
+  const ghC = fakeGithub(Object.fromEntries([...ghB.files()].map(([k, v]) => [k, v.toString('utf8')])));
+  const outC = await D.acquire({ report_id: 'SW-20260912-MMMMM', scan_id: 'idx-c',
+    roster: MANY, max_admissions: 2 },
+    { env: ENV, gh: ghC.gh, reader: peerC.reader, concurrency: 2 });
+  check('the next morning takes the next two, and the queue empties',
+    outC.committed === true && outC.wallets_admitted === 2 &&
+    JSON.stringify(outC.admitted_wallets) === JSON.stringify(['rFrank', 'rGrace']) &&
+    outC.wallets_awaiting_admission === 0, outC.reason);
+  check('the wallets admitted yesterday walk their own delta today, not another cold window',
+    peerC.asked.filter(c => c.command === 'account_tx' && c.account === 'rDave')[0]
+      .ledger_index_min === ANCHOR + 1);
+  check('and the roster is whole: 7 wallets, all proven to the same anchor',
+    (() => { const st = JSON.parse(ghC.files().get(Store.STATE_PATH).toString('utf8'));
+      return st.wallet_count === 7 &&
+        st.wallets.every(w => w.last_proven_ledger === ANCHOR + 500); })());
+
+  console.log('\n16. the silent gap before the first wallet is named');
+  /* 85 seconds into a run with no wallet line, the operator cannot tell a slow
+     first wallet from an XRPL connect that never happened. Each lane therefore
+     reports the moment it lands. */
+  const seen = [];
+  const peerP = fakePeer({ transactions: quiet(), balances: BAL });
+  const ghP = fakeGithub(seeded(ANCHOR - 1000));
+  await D.acquire({ report_id: 'SW-20260911-PPPPP', scan_id: 'idx-p', roster: WALLETS.concat(['rDave']) },
+    { env: ENV, gh: ghP.gh, reader: peerP.reader, concurrency: 2,
+      onPhase: (name, detail) => seen.push({ name, ...detail }) });
+  check('the checkpoint read reports itself', seen.some(p => p.name === 'state' && p.wallets === 3));
+  check('the anchor pin reports itself, with the ledger it pinned',
+    seen.some(p => p.name === 'anchor' && p.ledger === ANCHOR));
+  check('and the plan says what is about to be walked before any of it is',
+    seen.some(p => p.name === 'plan' && p.wallets === 4 && p.proven === 3 && p.admitting === 1));
+  // The STARTUP phases all land before any wallet is walked. (Commit phases
+  // come after, which is the point of them — they describe the last mile.)
+  check('every startup phase lands before the walking begins',
+    (() => { const names = seen.map(p => p.name);
+      const plan = names.indexOf('plan');
+      return plan > -1 && ['state', 'anchor', 'journal'].every(n =>
+        names.indexOf(n) === -1 || names.indexOf(n) < plan); })(), seen.map(p => p.name));
+  check('and the commit phases come after it, naming where the last mile goes',
+    (() => { const names = seen.map(p => p.name);
+      return names.indexOf('shards-built') > names.indexOf('plan') &&
+        names.indexOf('committed') > names.indexOf('shards-built'); })(), seen.map(p => p.name));
+  check('a run with no phase listener behaves identically',
+    (await D.acquire({ report_id: 'SW-20260911-QQQQQ', scan_id: 'idx-q' },
+      { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh,
+        reader: fakePeer({ transactions: quiet(), balances: BAL }).reader })).committed === true);
+
+  console.log('\n17. an addition on a ledger that has not moved waits rather than half-lands');
+  const peerR12 = fakePeer({ transactions: quiet(), balances: BAL });
+  const ghR12 = fakeGithub(seeded(ANCHOR));
+  const outR12 = await D.acquire({ report_id: 'SW-20260911-LLLLL', scan_id: 'idx-12', roster: ROSTER },
+    { env: ENV, gh: ghR12.gh, reader: peerR12.reader, concurrency: 2 });
+  check('nothing is committed and the new wallet is named as pending',
+    outR12.committed === false && outR12.reason === 'ANCHOR_NOT_ADVANCED' &&
+    outR12.wallets_pending_admission === 1, outR12);
+  check('and not one XRPL walk was spent discovering that',
+    peerR12.asked.filter(c => c.command === 'account_tx').length === 0);
+
+  console.log('\n18. a run that dies is not a run that starts over');
+  /* The checkpoint stays all-or-nothing. The WORK does not have to. A run that
+     dies at wallet 240 used to discard 240 wallets of finished walking and pay
+     XRPL a second time for evidence it already had and had already validated.
+     That was not a safety property; it was waste wearing one's clothes. */
+  const crashTx = { rAlice: [], rCarol: [],
+    rBob: [{ ledger: ANCHOR - 500, amount: '5000000000000', before: '20000000000000', after: '25000000000000' },
+           { ledger: ANCHOR - 400, amount: '5000000000000', before: '25000000000000', after: '20000000000000' }] };
+  const peerX1 = fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' });
+  const ghX = fakeGithub(seeded(ANCHOR - 1000));
+  const outX1 = await D.acquire({ report_id: 'SW-20260911-RRRRR', scan_id: 'idx-r' },
+    { env: ENV, gh: ghX.gh, reader: peerX1.reader, concurrency: 1 });
+  check('the first attempt does not commit — one wallet never answered',
+    outX1.committed === false && outX1.reason === 'RUN_INCOMPLETE', outX1.reason);
+  check('and it wrote down the two wallets that did finish',
+    outX1.journal_wallets === 2, outX1.journal_wallets);
+  const journalled = JSON.parse(ghX.files().get(Store.JOURNAL_PATH).toString('utf8'));
+  check('the journal pins the anchor the attempt used',
+    journalled.anchor_ledger === ANCHOR);
+  check('and the checkpoint it began from, so a moved checkpoint can be detected later',
+    journalled.from_state_sha256 ===
+      JSON.parse(ghX.files().get(Store.STATE_PATH).toString('utf8')).state_sha256);
+  check('every journalled wallet carries the range it proved, not a bare done flag',
+    journalled.wallets.every(w => w.proven_through === ANCHOR && w.proven_from === ANCHOR - 999));
+  check('and the state entry it earned, so a resume commits what this run would have',
+    journalled.wallets.every(w => w.entry && w.entry.address === w.address &&
+      w.entry.last_proven_ledger === ANCHOR));
+
+  // The second attempt: same store, a peer that now answers, and a fresh
+  // report_id — the operator pressed Run again, they did not replay anything.
+  const peerX2 = fakePeer({ transactions: crashTx, balances: BAL });
+  const outX2 = await D.acquire({ report_id: 'SW-20260911-SSSSS', scan_id: 'idx-s' },
+    { env: ENV, gh: ghX.gh, reader: peerX2.reader, concurrency: 1 });
+  check('the second attempt commits', outX2.committed === true, outX2.reason);
+  check('it adopted the journal rather than starting over',
+    outX2.resumed && outX2.resumed.adopted === true &&
+    outX2.wallets_recovered_from_journal === 2, outX2.resumed);
+  check('and walked ONLY the wallet that was missing',
+    peerX2.asked.filter(c => c.command === 'account_tx').length === 1 &&
+    peerX2.asked.filter(c => c.command === 'account_tx')[0].account === 'rCarol',
+    peerX2.asked.filter(c => c.command === 'account_tx').map(c => c.account));
+  check('it finished against the SAME anchor, not a fresher one',
+    outX2.anchor_ledger === ANCHOR);
+  check('the recovered rows are in the commit — rBob\'s two transactions survived the crash',
+    outX2.transactions === 2, outX2.transactions);
+  check('all three wallets are proved, recovered ones included',
+    outX2.complete_wallets === 3 && outX2.target_wallets === 3);
+  const stateX = JSON.parse(ghX.files().get(Store.STATE_PATH).toString('utf8'));
+  check('and the checkpoint advanced for every one of them',
+    stateX.state_version === 2 && stateX.wallets.every(w => w.last_proven_ledger === ANCHOR));
+  check('the journal is gone, removed by the commit that made it redundant',
+    !ghX.files().get(Store.JOURNAL_PATH) &&
+    journalled.row_shards.every(x => !ghX.files().get(x.path)));
+  // Awaited, not handed to check() as a promise — a promise is truthy and the
+  // assertion would have passed whatever it resolved to.
+  const cleanGh = fakeGithub(seeded(ANCHOR - 1000));
+  const cleanRun = await D.acquire({ report_id: 'SW-20260911-TTTTT', scan_id: 'idx-t' },
+    { env: ENV, gh: cleanGh.gh, reader: fakePeer({ transactions: crashTx, balances: BAL }).reader });
+  const cleanState = JSON.parse(cleanGh.files().get(Store.STATE_PATH).toString('utf8'));
+  check('an uninterrupted run of the same morning commits',
+    cleanRun.committed === true, cleanRun.reason);
+  check('and the resumed run committed byte-identical evidence — same shards, same hashes',
+    JSON.stringify(cleanState.evidence_shards) === JSON.stringify(stateX.evidence_shards),
+    { resumed: stateX.evidence_shards, clean: cleanState.evidence_shards });
+
+  console.log('\n19. a resume finishes the interrupted instant, not a fresh one');
+  /* The whole reason the journal pins an anchor. If a resumed run pinned its
+     own, the wallets walked before the disconnect would be proven to a
+     different ledger than the ones walked after it, and the committed state
+     would describe an instant that never existed. */
+  const ghY = fakeGithub(seeded(ANCHOR - 1000));
+  await D.acquire({ report_id: 'SW-20260911-AB123' },
+    { env: ENV, gh: ghY.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+  const peerY = fakePeer({ transactions: crashTx, balances: BAL });
+  // The ledger has moved on since the crash, as it always will have.
+  peerY.reader.ledger = async () => ({ ledger: ANCHOR + 7000, close_ms: Date.UTC(2026, 8, 11, 12, 0, 0) });
+  const outY = await D.acquire({ report_id: 'SW-20260911-AB124' },
+    { env: ENV, gh: ghY.gh, reader: peerY.reader });
+  check('it resumed', outY.committed === true && outY.resumed.adopted === true, outY.reason);
+  check('and finished against the journal\'s anchor, not the fresher validated ledger',
+    outY.anchor_ledger === ANCHOR, { used: outY.anchor_ledger, available: ANCHOR + 7000 });
+  check('the wallet it still had to walk was bounded by that same older anchor',
+    peerY.asked.filter(c => c.command === 'account_tx')
+      .every(c => c.ledger_index_max === ANCHOR));
+  check('so every wallet in the committed state names ONE instant',
+    (() => { const st = JSON.parse(ghY.files().get(Store.STATE_PATH).toString('utf8'));
+      return st.anchor_ledger === ANCHOR &&
+        st.wallets.every(w => w.last_proven_ledger === ANCHOR); })());
+
+  console.log('\n20. journalled rows are checked against the hash the journal recorded');
+  const ghZ = fakeGithub(seeded(ANCHOR - 1000));
+  await D.acquire({ report_id: 'SW-20260911-AC123' },
+    { env: ENV, gh: ghZ.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+  const rowPath = JSON.parse(ghZ.files().get(Store.JOURNAL_PATH).toString('utf8')).row_shards[0].path;
+  // Swap the rows for different ones. The journal still says they hash to what
+  // was written, and that disagreement is the whole point of recording it.
+  ghZ.files().set(rowPath, zlib.gzipSync(Buffer.from('{"hash":"FORGED"}\n', 'utf8')));
+  const peerZ = fakePeer({ transactions: crashTx, balances: BAL });
+  const outZ = await D.acquire({ report_id: 'SW-20260911-AC124' },
+    { env: ENV, gh: ghZ.gh, reader: peerZ.reader });
+  // The wallets ARE proven — the manifest says so and this run walked the rest
+  // — but their transactions cannot be produced. Committing the checkpoint
+  // anyway would advance a coverage floor past evidence that is not in the
+  // repository, which is the one thing that must never happen. So the run
+  // refuses, even though refusing costs another morning.
+  check('rows that are not the bytes the journal recorded are refused, not used',
+    outZ.committed === false && outZ.reason === 'JOURNAL_ROWS_UNREADABLE' &&
+    /JOURNAL_SHARD_HASH_MISMATCH/.test(outZ.journal_rows_unreadable), outZ.reason);
+  check('the forged rows never reached the checkpoint',
+    JSON.parse(ghZ.files().get(Store.STATE_PATH).toString('utf8')).state_version === 1 &&
+    !JSON.stringify(JSON.parse(ghZ.files().get(Store.STATE_PATH).toString('utf8'))).includes('FORGED'));
+  check('and the bad journal is discarded rather than refused again every run',
+    !ghZ.files().get(Store.JOURNAL_PATH));
+  // ── AND IT STOPS CLAIMING THEM, NOT ONLY STOPS COMMITTING THEM ──────────
+  //
+  // Refusing the commit is half the contract. The other half is that the run
+  // must not still report those wallets as proved — the gauge read 408/408
+  // while every wallet behind it was refused, which is the same run telling
+  // the operator two different things. Existence can be checked cheaply at
+  // adoption; a WRONG-BYTES shard cannot, so this path has to hold.
+  check('no wallet recovered on rows that would not verify is reported proved',
+    outZ.wallets.filter(w => w.status === 'RECOVERED').every(w => w.proven === false) &&
+    outZ.wallets_recovered_from_journal === 0,
+    outZ.wallets.filter(w => w.status === 'RECOVERED').map(w => ({ a: w.address, p: w.proven })));
+  // The wallet this attempt walked ITSELF is still proved — its rows are in
+  // hand, not in the journal. Renderable and committable are different
+  // questions and only the journalled half failed.
+  check('the wallet this run walked itself is still proved',
+    outZ.complete_wallets === 1 &&
+    outZ.wallets.filter(w => w.proven).every(w => w.status === 'COMPLETE'),
+    { complete: outZ.complete_wallets, proven: outZ.wallets.filter(w => w.proven).map(w => w.status) });
+  check('every wallet detail entry agrees with that count',
+    outZ.wallets.filter(w => w.proven).length === outZ.complete_wallets,
+    outZ.wallets.map(w => ({ a: w.address, p: w.proven })));
+  check('and each unproved one carries the cause rather than a bare refusal',
+    outZ.wallets.filter(w => w.status === 'RECOVERED')
+      .every(w => /JOURNAL_ROWS_UNREADABLE/.test(String(w.error))),
+    outZ.wallets.map(w => w.error));
+  check('the freshness block says the same thing as the summary',
+    outZ.freshness.wallets_proven === outZ.complete_wallets &&
+    outZ.freshness.wallets_recovered_from_journal === 0, outZ.freshness);
+  // Which means the NEXT run simply does the work itself.
+  const peerZ2 = fakePeer({ transactions: crashTx, balances: BAL });
+  const outZ2 = await D.acquire({ report_id: 'SW-20260911-AC125' },
+    { env: ENV, gh: ghZ.gh, reader: peerZ2.reader });
+  check('the run after it walks every wallet and commits',
+    outZ2.committed === true && outZ2.complete_wallets === 3 &&
+    outZ2.wallets_recovered_from_journal === 0 &&
+    peerZ2.asked.filter(c => c.command === 'account_tx').length === 3, outZ2.reason);
+
+  console.log('\n21. a journal is refused rather than trusted');
+  /* Every refusal here costs one morning of re-walking. Every refusal NOT here
+     costs correctness, which is not a trade this project makes. */
+  const staleFor = async (mutate) => {
+    const gh = fakeGithub(seeded(ANCHOR - 1000));
+    await D.acquire({ report_id: 'SW-20260911-UUUUU' },
+      { env: ENV, gh: gh.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+    const files = gh.files();
+    const j = JSON.parse(files.get(Store.JOURNAL_PATH).toString('utf8'));
+    files.set(Store.JOURNAL_PATH, Buffer.from(JSON.stringify(mutate(j), null, 2), 'utf8'));
+    const out = await D.acquire({ report_id: 'SW-20260911-VVVVV' },
+      { env: ENV, gh: gh.gh, reader: fakePeer({ transactions: crashTx, balances: BAL }).reader });
+    return { out, gh };
+  };
+  const edited = await staleFor(j => ({ ...j, wallets: j.wallets.map(w =>
+    ({ ...w, proven_through: ANCHOR + 5000 })) }));
+  check('a journal edited by hand fails its own digest and is refused',
+    edited.out.resumed && edited.out.resumed.adopted === false &&
+    /DIGEST_MISMATCH/.test(edited.out.resumed.reason), edited.out.resumed);
+  check('and the refused journal is discarded, not left to be refused every morning',
+    !edited.gh.files().get(Store.JOURNAL_PATH));
+  check('the run still completes — a bad journal costs a re-walk, never the run',
+    edited.out.committed === true && edited.out.complete_wallets === 3, edited.out.reason);
+
+  const unreadable = await (async () => {
+    const gh = fakeGithub(seeded(ANCHOR - 1000));
+    await D.acquire({ report_id: 'SW-20260911-WWWWW' },
+      { env: ENV, gh: gh.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+    gh.files().set(Store.JOURNAL_PATH, Buffer.from('{ not json', 'utf8'));
+    return D.acquire({ report_id: 'SW-20260911-XXXXX' },
+      { env: ENV, gh: gh.gh, reader: fakePeer({ transactions: crashTx, balances: BAL }).reader });
+  })();
+  check('an unreadable journal is discarded rather than crashing the run',
+    unreadable.committed === true && unreadable.resumed.reason === 'JOURNAL_UNREADABLE',
+    unreadable.resumed);
+
+  // The dangerous one: a journal that outlived a commit. Its wallets were
+  // walked from checkpoints that have since moved, so adopting it would
+  // re-claim a window already claimed.
+  const moved = await (async () => {
+    const gh = fakeGithub(seeded(ANCHOR - 1000));
+    await D.acquire({ report_id: 'SW-20260911-YYYYY' },
+      { env: ENV, gh: gh.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+    const j = gh.files().get(Store.JOURNAL_PATH);
+    const peer = fakePeer({ transactions: crashTx, balances: BAL });
+    await D.acquire({ report_id: 'SW-20260911-ZZZZZ' }, { env: ENV, gh: gh.gh, reader: peer.reader });
+    // The commit removed it; put it back, exactly as a failed cleanup would.
+    gh.files().set(Store.JOURNAL_PATH, j);
+    const later = fakePeer({ transactions: crashTx, balances: BAL });
+    later.reader.ledger = async () => ({ ledger: ANCHOR + 1000, close_ms: Date.UTC(2026, 8, 12, 6, 0, 0) });
+    const out = await D.acquire({ report_id: 'SW-20260912-AAAAA' },
+      { env: ENV, gh: gh.gh, reader: later.reader });
+    return { out, peer: later };
+  })();
+  check('a journal that outlived its commit is refused: the checkpoint moved under it',
+    moved.out.resumed && moved.out.resumed.adopted === false &&
+    /CHECKPOINT_MOVED_SINCE/.test(moved.out.resumed.reason), moved.out.resumed);
+  check('so the next run walks every wallet itself rather than inheriting stale proof',
+    moved.peer.asked.filter(c => c.command === 'account_tx').length === 3);
+  check('and it pinned its OWN anchor, not the dead journal\'s',
+    moved.out.anchor_ledger === ANCHOR + 1000);
+
+  console.log('\n22. a wallet that cannot finish is not started');
+  /* Measured on the live ledger: most watched wallets move nothing in four days
+     and answer in one page, but a busy exchange hot wallet needed 31 pages at
+     roughly seven seconds each — 223 seconds against a 240-second budget. A
+     wallet begun with seconds left is cut off mid-walk, and a partial walk
+     proves nothing and cannot be journalled. It is simply thrown away. */
+  const peerBud = fakePeer({ transactions: quiet(), balances: BAL });
+  const ghBud = fakeGithub(seeded(ANCHOR - 1000));
+  // Two wallets' worth of budget, then nothing.
+  let walked = 0;
+  const innerReq = peerBud.reader.request.bind(peerBud.reader);
+  peerBud.reader.deadline = Date.now() + 3600000;
+  peerBud.reader.request = async function (c, e) {
+    const out = await innerReq(c, e);
+    if (c.command === 'account_tx' && ++walked === 2) peerBud.reader.deadline = Date.now() + 1000;
+    return out;
+  };
+  const outBud = await D.acquire({ report_id: 'SW-20260911-AD123' },
+    { env: ENV, gh: ghBud.gh, reader: peerBud.reader, concurrency: 1 });
+  check('the run stops starting wallets rather than beginning one it cannot finish',
+    outBud.not_attempted_wallets >= 1, outBud.not_attempted_wallets);
+  check('a wallet never reached is not reported as one that failed to answer',
+    outBud.wallets.some(w => w.status === 'NOT_ATTEMPTED') &&
+    outBud.failures.every(f => f.error === 'RUN_BUDGET_EXHAUSTED' ||
+      !/RUN_BUDGET/.test(f.error)));
+  check('it commits nothing — a roster not finished is not a run',
+    outBud.committed === false && outBud.reason === 'RUN_INCOMPLETE');
+  check('but the wallets it DID walk were written down, so the next run starts there',
+    outBud.journal_wallets >= 1 && !!ghBud.files().get(Store.JOURNAL_PATH), outBud.journal_wallets);
+  check('and no XRPL request was spent on the wallets it skipped',
+    peerBud.asked.filter(c => c.command === 'account_tx').length ===
+      outBud.wallets.filter(w => w.status === 'COMPLETE' || w.status === 'FAILED').length,
+    { asked: peerBud.asked.filter(c => c.command === 'account_tx').length });
+
+  console.log('\n23. a long wallet reports its pages rather than going quiet');
+  const many = { rAlice: [], rBob: [], rCarol: [] };
+  for (let i = 0; i < 5; i++) many.rBob.push({ ledger: ANCHOR - 900 + i, amount: '1000000',
+    before: '20000000000000', after: '20000000000000', hash: hashFor('rBobPage', i) });
+  const pages = [];
+  const peerPg = fakePeer({ transactions: many, balances: BAL });
+  await D.acquire({ report_id: 'SW-20260911-AE123' },
+    { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh, reader: peerPg.reader,
+      concurrency: 1, onPage: p => pages.push(p) });
+  check('every wallet reports at least one page', pages.length >= 3, pages.length);
+  check('each page says which wallet, how far in, and whether more is coming',
+    pages.every(p => p.address && p.pages >= 1 && typeof p.more === 'boolean'), pages[0]);
+  check('the last page of a wallet says so', pages.some(p => p.more === false));
+  check('a run with no page listener behaves identically',
+    (await D.acquire({ report_id: 'SW-20260911-AE124' },
+      { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh,
+        reader: fakePeer({ transactions: many, balances: BAL }).reader })).committed === true);
+
+  console.log('\n24. the roster is spread across servers, not piled onto one');
+  /* A live run's log named wss://xrplcluster.com on every line, hit "units
+     quota (2000 per 10s) exhausted", and served 75 requests in 238 seconds
+     while three configured endpoints sat idle. The endpoints were never the
+     problem; using them was. */
+  const peerSp = fakePeer({ transactions: quiet(), balances: BAL });
+  await D.acquire({ report_id: 'SW-20260911-AF123' },
+    { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh, reader: peerSp.reader, concurrency: 3 });
+  const byEndpoint = {};
+  for (const c of peerSp.asked) byEndpoint[c._endpoint] = (byEndpoint[c._endpoint] || 0) + 1;
+  check('three wallets used three different servers',
+    Object.keys(byEndpoint).filter(k => k !== 'null').length === 3, byEndpoint);
+  check('and every request a wallet made went to that wallet\'s own server',
+    ['rAlice', 'rBob', 'rCarol'].every(a => {
+      const mine = peerSp.asked.filter(c => c.account === a);
+      return new Set(mine.map(c => c._endpoint)).size === 1;
+    }), peerSp.asked.map(c => c.account + '@' + c._endpoint));
+  check('including its balance read, so a wallet is answered by one server throughout',
+    peerSp.asked.filter(c => c.command === 'account_info').every(c => c._endpoint !== null));
+  // A lane held forever makes its server look permanently busy and quietly
+  // undoes the spreading. Every walk must hand its lane back, however it ended.
+  check('every lane is handed back when its walk ends',
+    peerSp.reader.lanes.every(l => !l.assigned), peerSp.reader.lanes.map(l => l.assigned));
+  const peerRel = fakePeer({ transactions: quiet(), balances: BAL, failOn: 'rBob' });
+  await D.acquire({ report_id: 'SW-20260911-AH123' },
+    { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh, reader: peerRel.reader, concurrency: 2 });
+  check('including the walk of a wallet that failed',
+    peerRel.reader.lanes.every(l => !l.assigned), peerRel.reader.lanes.map(l => l.assigned));
+
+  console.log('\n25. running out of budget is not a wallet failing');
+  /* The live run reported 240 healthy wallets as FAILED in a few seconds,
+     each after three attempts, because the admission clock threw once there
+     was no time left and the retry loop treated that as the wallet's fault. */
+  const peerPend = fakePeer({ transactions: quiet(), balances: BAL, pendingFrom: 2 });
+  const outPend = await D.acquire({ report_id: 'SW-20260911-AG123' },
+    { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh, reader: peerPend.reader, concurrency: 1 });
+  check('a wallet cut off by the budget is NOT_ATTEMPTED, not FAILED',
+    outPend.not_attempted_wallets >= 1 &&
+    outPend.wallets.filter(w => w.status === 'FAILED').length === 0,
+    outPend.wallets.map(w => w.status));
+  check('and it is not retried three times on the way to that conclusion',
+    outPend.wallets.filter(w => w.status === 'NOT_ATTEMPTED').every(w => w.attempts === 0));
+  check('the run still reports what it did prove',
+    outPend.committed === false && outPend.complete_wallets >= 1, outPend.reason);
+
+  console.log('\n26. a hundred wallets with one cause is one fact, not a hundred');
+  /* A real result listed the same 105 addresses three times — once in
+     failures, once in freshness.unavailable, once in wallets_detail — and was
+     three times the size it needed to be to say the same thing. */
+  const peerG = fakePeer({ transactions: quiet(), balances: BAL, pendingFrom: 1 });
+  const outG = await D.acquire({ report_id: 'SW-20260911-AJ123' },
+    { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh, reader: peerG.reader, concurrency: 1 });
+  check('wallets sharing a cause are reported under it once',
+    outG.failures.length === 1 && outG.failures[0].error === 'RUN_BUDGET_EXHAUSTED',
+    outG.failures.map(f => f.error));
+  check('with the count, so nobody has to measure an array to learn it',
+    outG.failures[0].wallets === outG.not_attempted_wallets, outG.failures[0].wallets);
+  check('and EVERY address still named — grouping is not summarising away',
+    outG.failures[0].addresses.length === outG.not_attempted_wallets &&
+    outG.failures[0].addresses.every(a => typeof a === 'string' && a));
+  check('every wallet still has its own record in the detail',
+    outG.wallets.filter(w => w.status === 'NOT_ATTEMPTED').length === outG.not_attempted_wallets);
+  check('two different causes stay two groups, ordered by how many they hit',
+    (() => {
+      const mixed = groupOf([{ error: 'A' }, { error: 'B' }, { error: 'B' }]);
+      return mixed.length === 2 && mixed[0].error === 'B' && mixed[0].wallets === 2;
+    })());
+
+  console.log('\n27. a journal segment bigger than the contents API can carry');
+  /* THE BUG THIS EXISTS FOR. GitHub's contents API returns file bytes only up
+     to 1 MB; past that it answers with the metadata and an EMPTY body — no
+     error, no 404. Decoding that gives an empty buffer, which then fails the
+     hash check that was applied to it.
+
+     Live: a resume died with JOURNAL_SHARD_HASH_MISMATCH on segment 7, which
+     held several thousand transactions. The hash check was right. The read was
+     wrong. */
+  const bulky = { rAlice: [], rCarol: [], rBob: [] };
+  for (let i = 0; i < 120; i++) {
+    bulky.rBob.push({ ledger: ANCHOR - 900 + i, amount: '1000000',
+      before: '20000000000000', after: '20000000000000', hash: hashFor('rBulk', i) });
+  }
+  const ghBig = fakeGithub(seeded(ANCHOR - 1000));
+  const outBig1 = await D.acquire({ report_id: 'SW-20260911-AK123' },
+    { env: ENV, gh: ghBig.gh, reader: fakePeer({ transactions: bulky, balances: BAL, failOn: 'rCarol' }).reader,
+      concurrency: 1 });
+  check('the first attempt journals a segment past the contents-API limit',
+    outBig1.journal_wallets >= 1 &&
+    JSON.parse(ghBig.files().get(Store.JOURNAL_PATH).toString('utf8'))
+      .row_shards.some(sh => ghBig.files().get(sh.path).length > CONTENTS_API_LIMIT),
+    JSON.parse(ghBig.files().get(Store.JOURNAL_PATH).toString('utf8'))
+      .row_shards.map(sh => ghBig.files().get(sh.path).length));
+  const peerBig = fakePeer({ transactions: bulky, balances: BAL });
+  const outBig2 = await D.acquire({ report_id: 'SW-20260911-AK124' },
+    { env: ENV, gh: ghBig.gh, reader: peerBig.reader, concurrency: 1 });
+  check('the resume reads it through the blobs API and adopts it',
+    outBig2.resumed && outBig2.resumed.adopted === true, outBig2.resumed);
+  check('the manifest names how many rows are banked, without reading them yet',
+    outBig2.resumed.rows_awaiting_load === 120, outBig2.resumed.rows_awaiting_load);
+  check('and it commits, with the recovered transactions in the evidence',
+    outBig2.committed === true && outBig2.transactions === 120,
+    { committed: outBig2.committed, tx: outBig2.transactions, reason: outBig2.reason });
+  check('the wallet whose rows were recovered was not walked a second time',
+    !peerBig.asked.some(c => c.command === 'account_tx' && c.account === 'rBob'));
+
+  // The same ceiling applies to committed day shards, which report assembly
+  // reads. A busy day is far larger than a journal segment.
+  const dayShard = [...ghBig.files().keys()]
+    .find(k => /^evidence\/20.*events.*\.gz$/.test(k));
+  const dayKey = dayShard && dayShard.split('/').slice(1, 4).join('-');
+  check('the committed day shard is itself past the limit — the check is not vacuous',
+    !!dayShard && ghBig.files().get(dayShard).length > CONTENTS_API_LIMIT,
+    { path: dayShard, bytes: dayShard && ghBig.files().get(dayShard).length,
+      limit: CONTENTS_API_LIMIT });
+  const readBack = await Store.readDays([dayKey], { env: ENV, gh: ghBig.gh });
+  check('and report assembly reads it back whole rather than empty',
+    readBack.events.length === 120 && readBack.missing.length === 0,
+    { events: readBack.events.length, missing: readBack.missing });
+
+  console.log('\n28. journalled rows are read at the commit, not at the start');
+  /* Measured live: a resume spent NINETY SECONDS of a 240-second budget reading
+     121,409 journalled rows back, before walking a single wallet — and it gets
+     worse every run, because each run journals more. Those rows are needed for
+     exactly one thing, the commit, which a run that does not finish its roster
+     never reaches. */
+  const ghL = fakeGithub(seeded(ANCHOR - 1000));
+  await D.acquire({ report_id: 'SW-20260911-AL123' },
+    { env: ENV, gh: ghL.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader,
+      concurrency: 1 });
+  const bankedPaths = JSON.parse(ghL.files().get(Store.JOURNAL_PATH).toString('utf8'))
+    .row_shards.map(sh => sh.path);
+  check('the first attempt banked rows in the journal', bankedPaths.length >= 1);
+
+  // Attempt two: still cannot finish (rCarol fails again), so it must never
+  // touch the banked rows.
+  const ghL2 = fakeGithub(Object.fromEntries([...ghL.files()].map(([k, v]) => [k, v])));
+  const outL2 = await D.acquire({ report_id: 'SW-20260911-AL124' },
+    { env: ENV, gh: ghL2.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader,
+      concurrency: 1 });
+  check('an attempt that cannot commit never reads them',
+    outL2.committed === false &&
+    !ghL2.calls.some(c => bankedPaths.some(p2 => c.path.indexOf(p2) > -1)),
+    ghL2.calls.filter(c => /resume/.test(c.path)).map(c => c.path));
+  check('but it still knows how many are banked, from the manifest alone',
+    outL2.resumed.adopted === true && outL2.resumed.rows_awaiting_load > 0,
+    outL2.resumed);
+  check('and it reports its OWN transactions separately from the banked ones',
+    outL2.transactions_journalled === outL2.resumed.rows_awaiting_load,
+    { own: outL2.transactions, banked: outL2.transactions_journalled });
+
+  // Attempt three finishes, so now — and only now — the rows are fetched.
+  const ghL3 = fakeGithub(Object.fromEntries([...ghL2.files()].map(([k, v]) => [k, v])));
+  const outL3 = await D.acquire({ report_id: 'SW-20260911-AL125' },
+    { env: ENV, gh: ghL3.gh, reader: fakePeer({ transactions: crashTx, balances: BAL }).reader,
+      concurrency: 1 });
+  check('the attempt that COMMITS reads them',
+    outL3.committed === true &&
+    ghL3.calls.some(c => bankedPaths.some(p2 => c.path.indexOf(p2) > -1)), outL3.reason);
+  check('and the committed evidence holds the banked rows plus this run\'s',
+    outL3.transactions === 2, outL3.transactions);
+  check('every wallet is proven, recovered ones included',
+    outL3.complete_wallets === 3 && outL3.wallets_recovered_from_journal === 2);
+  const stateL = JSON.parse(ghL3.files().get(Store.STATE_PATH).toString('utf8'));
+  check('the checkpoint advanced for all of them',
+    stateL.state_version === 2 && stateL.wallets.every(w => w.last_proven_ledger === ANCHOR));
+  check('and the journal is gone',
+    !ghL3.files().get(Store.JOURNAL_PATH) && bankedPaths.every(p2 => !ghL3.files().get(p2)));
+
+  console.log('\n29. a run always comes back, even from a wallet that never does');
+  /* Measured live: 266 of 267 wallets finished, the last one hung, and the run
+     produced NO result at all — not a failure, not a partial, nothing. Every
+     wallet already walked was journalled and safe, and the operator still saw
+     "ended with no result", which is the least useful thing a run can say. */
+  const peerHang = fakePeer({ transactions: quiet(), balances: BAL });
+  const innerHang = peerHang.reader.request.bind(peerHang.reader);
+  peerHang.reader.deadline = Date.now() + 4000;
+  peerHang.reader.request = async function (c, e, pin) {
+    // rCarol's walk never returns. Nothing cancels it; the run must stop
+    // waiting for it of its own accord.
+    if (c.command === 'account_tx' && c.account === 'rCarol') return new Promise(() => {});
+    return innerHang(c, e, pin);
+  };
+  const started = Date.now();
+  const outHang = await D.acquire({ report_id: 'SW-20260911-AM123' },
+    { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh, reader: peerHang.reader,
+      concurrency: 3, startReserveMs: 100 });
+  const tookMs = Date.now() - started;
+  check('the run returns instead of waiting forever',
+    !!outHang && outHang.committed === false, outHang && outHang.reason);
+  check('and it returns near the budget, not long after it',
+    tookMs < 30000, tookMs + 'ms');
+  check('the hung wallet is named as abandoned, not silently dropped',
+    outHang.abandoned_wallets === 1 &&
+    outHang.freshness.abandoned.join(',') === 'rCarol', outHang.freshness.abandoned);
+  check('abandoned is its own fact — not merged with never-attempted',
+    outHang.wallets.find(w => w.address === 'rCarol').status === 'ABANDONED',
+    outHang.wallets.map(w => w.address + ':' + w.status));
+  check('the wallets that DID finish are still reported',
+    outHang.complete_wallets === 2, outHang.complete_wallets);
+  check('and a part-walked wallet is journalled as nothing — it proved nothing',
+    outHang.journal_wallets === 2, outHang.journal_wallets);
+
+  console.log('\n30. the reserve pays for the ending, not just for stopping');
+  /* A run reached 266 of 267 wallets and still committed nothing. It was not
+     short of wallets — it was short of ENDING. A flat 25-second reserve was
+     enough when the ending was one small commit; a run holding 165,000 banked
+     rows has to read them back and write them, and if it spends its last
+     second starting another wallet it has nothing left to finish with. */
+  const ghR = fakeGithub(seeded(ANCHOR - 1000));
+  await D.acquire({ report_id: 'SW-20260911-AN123' },
+    { env: ENV, gh: ghR.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader,
+      concurrency: 1 });
+  const banked = JSON.parse(ghR.files().get(Store.JOURNAL_PATH).toString('utf8'))
+    .row_shards.reduce((n, sh) => n + sh.rows, 0);
+  check('the first attempt banked some rows', banked > 0, banked);
+  const seenPhases = [];
+  const ghR2 = fakeGithub(Object.fromEntries([...ghR.files()].map(([k, v]) => [k, v])));
+  await D.acquire({ report_id: 'SW-20260911-AN124' },
+    { env: ENV, gh: ghR2.gh, reader: fakePeer({ transactions: crashTx, balances: BAL }).reader,
+      concurrency: 1, onPhase: (n, det) => seenPhases.push({ n, ...det }) });
+  const res = seenPhases.find(p => p.n === 'reserve');
+  check('a resumed run says how much is banked, so the reserve is explicable',
+    !!res && res.banked_rows === banked, res);
+  // The rule itself, checked directly: more banked work means a longer reserve.
+  const reserveFor = rows => 25000 + Math.ceil(rows / 5000) * 1000;
+  check('the reserve grows with what has to be written at the end',
+    reserveFor(165000) > reserveFor(0) && reserveFor(165000) >= 50000,
+    { none: reserveFor(0), banked_165k: reserveFor(165000) });
+  check('and a run with nothing banked keeps the plain floor',
+    reserveFor(0) === 25000);
+  check('an explicit override still wins, so the suite can drive it',
+    (await D.acquire({ report_id: 'SW-20260911-AN125' },
+      { env: ENV, gh: fakeGithub(seeded(ANCHOR - 1000)).gh,
+        reader: fakePeer({ transactions: quiet(), balances: BAL }).reader,
+        startReserveMs: 0 })).committed === true);
+
+  console.log('\n31. two runs on one journal must not destroy each other');
+  /* ── WHAT HAPPENED ─────────────────────────────────────────────────────────
+     From the evidence repository, in one afternoon:
+
+       869db86  segment 17 — 408 wallets      run A
+       1d2d6fc  segment 17 — 399 wallets      run B, SAME path, "M" not "A"
+       97fce69  journal: discard — not resumable   deleted 0001–0017 + manifest
+       5e3e5a5  segment 17 — 367 wallets      run A, recreating the manifest
+
+     Segment numbers came from each run's own in-memory copy, so both wrote
+     "segment 17" to the same filename and the second overwrote the first. Then
+     one run discarded a journal the other was still appending to, by a stale
+     list of paths. The surviving manifest referenced eighteen shards of which
+     fifteen no longer existed: 42,599 rows of walked evidence, unrecoverable.
+
+     None of the tests written before this could have caught it — every one of
+     them ran a single run against a fresh store. */
+  const ghRace = fakeGithub(seeded(ANCHOR - 1000));
+  const deps = { env: ENV, gh: ghRace.gh };
+  const base = Journal.begin({ report_id: 'SW-20260911-RACEA', scan_id: 'idx-a',
+    started_at: '2026-09-11T06:00:00.000Z', from_state_version: 1,
+    from_state_sha256: JSON.parse(ghRace.files().get(Store.STATE_PATH).toString('utf8')).state_sha256,
+    anchor_ledger: ANCHOR, anchor_close: '2026-09-11T06:00:00.000Z',
+    cold_from_ledger: null, admitted_wallets: [] });
+  const seg = (address, rows) => ({
+    wallets: [{ address, proven_from: ANCHOR - 999, proven_through: ANCHOR, rows: rows.length,
+      reconciliation: 'RECONCILED', entry: { address, last_proven_ledger: ANCHOR } }],
+    rows: rows.map((h, i) => ({ hash: h, ledger_index: ANCHOR - 10 + i }))
+  });
+
+  // Both runs start from the SAME manifest — the situation that caused it.
+  const a1 = await Store.appendJournal(base, seg('rAlice', ['A1', 'A2']), deps);
+  const b1 = await Store.appendJournal(base, seg('rBob', ['B1']), deps);
+  check('the second run appends onto what is actually on the branch',
+    b1.journal.wallet_count === 2, b1.journal.wallet_count);
+  check('and neither run\'s rows were overwritten by the other',
+    b1.journal.row_shards.length === 2 &&
+    b1.journal.row_shards.every(sh => !!ghRace.files().get(sh.path)),
+    b1.journal.row_shards.map(sh => sh.path));
+  check('the shard paths differ, because the content does',
+    new Set(b1.journal.row_shards.map(sh => sh.path)).size === 2);
+  check('and carry no segment number — that was the thing that collided',
+    b1.journal.row_shards.every(sh => !/-\d{4}-/.test(sh.path)),
+    b1.journal.row_shards.map(sh => sh.path));
+  check('every wallet from both runs survives in one manifest',
+    b1.journal.wallets.map(w => w.address).sort().join(',') === 'rAlice,rBob');
+
+  // A wallet already recorded by the other run is dropped, not duplicated.
+  const dup = await Store.appendJournal(a1.journal, seg('rBob', ['B1']), deps);
+  check('a wallet the other run already banked is not recorded twice',
+    dup.journal.wallets.filter(w => w.address === 'rBob').length === 1,
+    dup.journal.wallets.map(w => w.address));
+  // Same content, same path, so the shard is the same shard. Listing it twice
+  // would have the journal claim rows it holds once.
+  check('and its shard is not listed twice either',
+    new Set(dup.journal.row_shards.map(sh => sh.path)).size === dup.journal.row_shards.length,
+    dup.journal.row_shards.map(sh => sh.path));
+
+  console.log('\n32. discarding a journal removes only what is really there');
+  // The stale-copy deletion, exactly: hold an OLD manifest, then discard.
+  const stale = a1.journal;              // knows 1 shard; the branch now has 2
+  const cleared = await Store.clearJournal(stale, deps);
+  check('the discard removes what the BRANCH names, not the stale copy',
+    cleared.files_removed === 3, cleared);
+  check('so no shard is left behind orphaned',
+    ![...ghRace.files().keys()].some(k => /runs\/resume\//.test(k)),
+    [...ghRace.files().keys()].filter(k => /runs\/resume\//.test(k)));
+
+  // And a journal that belongs to a DIFFERENT run is not ours to delete.
+  const ghOther = fakeGithub(seeded(ANCHOR - 1000));
+  const mine = Journal.begin({ report_id: 'SW-20260911-MINE1', scan_id: 'm',
+    started_at: 'x', from_state_version: 1, from_state_sha256: 'z',
+    anchor_ledger: ANCHOR, anchor_close: null, cold_from_ledger: null, admitted_wallets: [] });
+  const theirs = Journal.begin({ ...mine, report_id: 'SW-20260911-THEIR' });
+  await Store.appendJournal(theirs, seg('rCarol', ['C1']), { env: ENV, gh: ghOther.gh });
+  const refusedClear = await Store.clearJournal(mine, { env: ENV, gh: ghOther.gh });
+  check('a journal held by another run is refused, not deleted',
+    refusedClear.status === 'NOT_OURS_TO_DISCARD' &&
+    refusedClear.held_by === 'SW-20260911-THEIR', refusedClear);
+  check('and its files are untouched',
+    !!ghOther.files().get(Store.JOURNAL_PATH));
+  // Appending to someone else's journal is refused for the same reason.
+  let crossed = null;
+  await Store.appendJournal(mine, seg('rDave', ['D1']), { env: ENV, gh: ghOther.gh })
+    .catch(e => { crossed = e.message; });
+  check('and one run cannot append into another run\'s journal',
+    /JOURNAL_OWNED_BY_ANOTHER_RUN/.test(String(crossed)), crossed);
+
+  console.log('\n33. a manifest outliving its blobs is a wedge, and must not be one');
+  /* ── WHAT ACTUALLY HAPPENED ON 2026-09-14 ────────────────────────────────
+     Read out of the evidence repository, not inferred:
+
+       evidence/runs/resume/latest.json  named 19 shards, 0001-0020
+       the branch held                   0017, 0018, 0019, 0020
+       97fce69 "journal: discard"        had deleted the rest
+
+     A discard removed the row files, and a run still holding the old manifest
+     in memory re-established it — pointers and all — onto a branch where the
+     blobs behind those pointers were gone. Every run afterwards read shard
+     0001, got a 404, and refused with JOURNAL_ROWS_UNREADABLE at commit time.
+     The discard meant to clear that refusal asked to delete the same dead
+     paths, so it could not clear it either. Two runs, both wedged, both
+     reporting nothing more useful than a reason code.
+
+     Three separate things had to be true for that to be permanent, so three
+     things are asserted here. */
+  const ghWedge = fakeGithub(seeded(ANCHOR - 1000));
+  const wdeps = { env: ENV, gh: ghWedge.gh };
+  const wbase = Journal.begin({ report_id: 'SW-20260914-WEDGE', scan_id: 'idx-w',
+    started_at: '2026-09-14T06:00:00.000Z', from_state_version: 1,
+    from_state_sha256: JSON.parse(ghWedge.files().get(Store.STATE_PATH).toString('utf8')).state_sha256,
+    anchor_ledger: ANCHOR, anchor_close: '2026-09-14T06:00:00.000Z',
+    cold_from_ledger: null, admitted_wallets: [] });
+
+  const w1 = await Store.appendJournal(wbase, seg('rAlice', ['W1', 'W2']), wdeps);
+  check('a journal with rows names a shard that is really on the branch',
+    w1.journal.row_shards.length === 1 && !!ghWedge.files().get(w1.journal.row_shards[0].path));
+
+  // The discard, exactly as it happened: the row files go, the run keeps its copy.
+  await Store.clearJournal(w1.journal, wdeps);
+  check('the discard removed the manifest and the shard',
+    !ghWedge.files().get(Store.JOURNAL_PATH) &&
+    !ghWedge.files().get(w1.journal.row_shards[0].path));
+
+  // Now the run that was still holding w1 appends again. THIS is the moment.
+  const w2 = await Store.appendJournal(w1.journal, seg('rBob', ['W3']), wdeps);
+  check('a re-established journal never names a shard the discard deleted',
+    w2.journal.row_shards.every(sh => !!ghWedge.files().get(sh.path)),
+    w2.journal.row_shards.map(sh => sh.path).filter(x => !ghWedge.files().get(x)));
+  check('and it does not carry wallets whose rows are gone',
+    w2.journal.wallets.map(w => w.address).join(',') === 'rBob',
+    w2.journal.wallets.map(w => w.address));
+  // The rows it DOES name must come back, or the commit refuses forever.
+  const wrows = await Store.readJournalRows(w2.journal, wdeps);
+  check('so the rows it names read back',
+    wrows.length === 1 && wrows[0].hash === 'W3', wrows);
+
+  console.log('\n34. a discard can always clear a journal, however broken');
+  // Hand-build the wedged state the repository was actually in: a manifest
+  // naming shards that are not there.
+  const ghDead = fakeGithub(seeded(ANCHOR - 1000));
+  const ddeps = { env: ENV, gh: ghDead.gh };
+  const d1 = await Store.appendJournal(Journal.begin({ ...wbase, report_id: 'SW-20260914-DEAD1' }),
+    seg('rAlice', ['D1']), ddeps);
+  const d2 = await Store.appendJournal(d1.journal, seg('rBob', ['D2']), ddeps);
+  // Delete ONE shard's bytes behind the manifest's back, leaving the manifest
+  // naming two shards where the branch holds one.
+  const ghost = d2.journal.row_shards[0].path;
+  ghDead.files().delete(ghost);
+  check('the wedged state is set up: the manifest names a shard that is gone',
+    d2.journal.row_shards.length === 2 && !ghDead.files().get(ghost));
+
+  const missing = await Store.missingJournalShards(d2.journal, ddeps);
+  check('the store can name which row files are missing',
+    missing.length === 1 && missing[0] === ghost, missing);
+
+  const clearedDead = await Store.clearJournal(d2.journal, ddeps);
+  check('and the discard still succeeds rather than tripping over the dead path',
+    clearedDead.status === 'DISCARDED', clearedDead);
+  check('leaving nothing under the resume subtree',
+    ![...ghDead.files().keys()].some(k => /runs\/resume\//.test(k)),
+    [...ghDead.files().keys()].filter(k => /runs\/resume\//.test(k)));
+  check('and it asked to delete only paths that were really there',
+    clearedDead.missing_paths === 1, clearedDead);
+
+  console.log('\n35. a journal whose rows are gone is refused BEFORE it is adopted');
+  /* Test 20 covers a journal whose rows are the wrong bytes. This is the other
+     failure: the rows are not there at all.
+
+     Adopting such a journal means treating its wallets as already walked — so
+     the run walks nothing, reports them proved, and only discovers at commit
+     time that their evidence does not exist. That is where 2026-09-14 spent
+     two runs: eighteen seconds of work, 408 wallets "proved", nothing walked,
+     nothing committed, and no way out because the discard tripped over the
+     same dead paths.
+
+     Found at adoption instead, it costs one re-walk and the morning is saved. */
+  const ghGone = fakeGithub(seeded(ANCHOR - 1000));
+  await D.acquire({ report_id: 'SW-20260914-GONE1' },
+    { env: ENV, gh: ghGone.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+  const goneManifest = JSON.parse(ghGone.files().get(Store.JOURNAL_PATH).toString('utf8'));
+  check('a journal is waiting, and it names its rows',
+    goneManifest.row_shards.length > 0 && goneManifest.wallets.length > 0);
+  // The rows vanish; the manifest still names them. Exactly the repository
+  // state read out of the evidence store on 2026-09-14.
+  for (const sh of goneManifest.row_shards) ghGone.files().delete(sh.path);
+
+  const peerGone = fakePeer({ transactions: crashTx, balances: BAL });
+  const outGone = await D.acquire({ report_id: 'SW-20260914-GONE2' },
+    { env: ENV, gh: ghGone.gh, reader: peerGone.reader });
+  check('the journal is refused rather than adopted',
+    outGone.resumed && outGone.resumed.adopted === false &&
+    outGone.resumed.reason === 'JOURNAL_SHARDS_MISSING', outGone.resumed);
+  check('and it names which row files were missing, so the log can say why',
+    outGone.resumed.missing_shards === goneManifest.row_shards.length,
+    outGone.resumed);
+  check('no wallet is claimed as recovered from it',
+    outGone.wallets_recovered_from_journal === 0, outGone.wallets_recovered_from_journal);
+  check('so the run WALKS every wallet instead of reporting work it did not do',
+    peerGone.asked.filter(c => c.command === 'account_tx').length === 3,
+    peerGone.asked.filter(c => c.command === 'account_tx').length);
+  check('and it commits, rather than wedging on rows that do not exist',
+    outGone.committed === true, outGone.reason);
+  check('the dead journal is gone from the branch, not left for the next run',
+    !ghGone.files().get(Store.JOURNAL_PATH),
+    [...ghGone.files().keys()].filter(k => /runs\/resume\//.test(k)));
+
+  console.log('\n36. a run that returns before the rows are verified claims nothing from them');
+  /* ── THE BRANCH THE FIRST FIX MISSED ─────────────────────────────────────
+     Raised in review of 0f8d472, and correct: the journal's rows are
+     hash-checked when they are READ BACK, and that read happens once, at the
+     commit. RUN_INCOMPLETE and RUN_CONTRADICTED return BEFORE it.
+
+     So a resumed run where 2 wallets came from the journal and 1 remaining
+     wallet fails used to return those 2 as proven having never verified their
+     bytes this run — and `rows` carries only what this attempt walked, so the
+     report window could not contain their transactions either. Proven, and
+     absent from the window: two claims that cannot both hold. */
+  const ghEarly = fakeGithub(seeded(ANCHOR - 1000));
+  await D.acquire({ report_id: 'SW-20260914-EARL1' },
+    { env: ENV, gh: ghEarly.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+  check('a journal is waiting with wallets in it',
+    JSON.parse(ghEarly.files().get(Store.JOURNAL_PATH).toString('utf8')).wallets.length === 2);
+  // The remaining wallet fails again, so the run returns at the whole-run gate
+  // — before readJournalRows() has ever looked at the recovered rows.
+  const outEarly = await D.acquire({ report_id: 'SW-20260914-EARL2' },
+    { env: ENV, gh: ghEarly.gh,
+      reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+  check('the run returns incomplete, before any row verification',
+    outEarly.committed === false && outEarly.reason === 'RUN_INCOMPLETE', outEarly.reason);
+  check('no recovered wallet is returned proven',
+    outEarly.wallets.filter(w => w.status === 'RECOVERED').every(w => w.proven === false),
+    outEarly.wallets.map(w => ({ s: w.status, p: w.proven })));
+  check('and each says why, rather than being silently downgraded',
+    outEarly.wallets.filter(w => w.status === 'RECOVERED')
+      .every(w => /RECOVERED_ROWS_NOT_VERIFIED_THIS_RUN/.test(String(w.error))),
+    outEarly.wallets.map(w => w.error));
+  check('the summary count agrees with the detail',
+    outEarly.complete_wallets === outEarly.wallets.filter(w => w.proven).length,
+    { summary: outEarly.complete_wallets, detail: outEarly.wallets.filter(w => w.proven).length });
+  check('and so does the freshness block',
+    outEarly.freshness.wallets_proven === outEarly.complete_wallets &&
+    outEarly.freshness.wallets_recovered_from_journal === 0, outEarly.freshness);
+  // The other half of the contract: nothing is PROVEN that the returned window
+  // cannot show. Every wallet still claimed has its rows in this attempt's set.
+  const rowAddrs = new Set();
+  for (const r of outEarly.rows) for (const v of (r.observed_via || [])) rowAddrs.add(v);
+  check('every wallet still claimed proven has its rows in this attempt\'s set',
+    outEarly.wallets.filter(w => w.proven).every(w => rowAddrs.has(w.address) || w.rows === 0),
+    outEarly.wallets.filter(w => w.proven).map(w => w.address));
+  // And the WORK is not lost — only the claim is withheld.
+  check('the journal survives, so the next run still inherits the work',
+    !!ghEarly.files().get(Store.JOURNAL_PATH));
+
+  console.log('\n37. present shards with the wrong bytes, on an incomplete run');
+  /* Review case 1, exactly: a shard that EXISTS so the presence check passes,
+     whose bytes are wrong, on a run that fails before the hash check. Nothing
+     may come back proven from it. */
+  const ghBytes = fakeGithub(seeded(ANCHOR - 1000));
+  await D.acquire({ report_id: 'SW-20260914-BYTE1' },
+    { env: ENV, gh: ghBytes.gh, reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+  const bytePath = JSON.parse(ghBytes.files().get(Store.JOURNAL_PATH).toString('utf8')).row_shards[0].path;
+  ghBytes.files().set(bytePath, zlib.gzipSync(Buffer.from('{"hash":"WRONG"}\n', 'utf8')));
+  const outBytes = await D.acquire({ report_id: 'SW-20260914-BYTE2' },
+    { env: ENV, gh: ghBytes.gh,
+      reader: fakePeer({ transactions: crashTx, balances: BAL, failOn: 'rCarol' }).reader });
+  check('the shard is present, so the presence check alone would have passed',
+    !!ghBytes.files().get(bytePath));
+  check('no wallet recovered on those bytes is returned proven',
+    outBytes.wallets.filter(w => w.status === 'RECOVERED').every(w => w.proven === false),
+    outBytes.wallets.map(w => ({ s: w.status, p: w.proven })));
+  check('and the forged bytes never reached the checkpoint',
+    !JSON.stringify(JSON.parse(ghBytes.files().get(Store.STATE_PATH).toString('utf8'))).includes('WRONG'));
+
+  console.log('\n38. a recovered wallet is a proved wallet, and says so');
+  /* The report refused 408 of 408 wallets on a run where the server reported
+     408 of 408 PROVED. Both numbers came from this file: provedTotal counts a
+     journal-recovered wallet as proved, and the per-wallet projection labelled
+     it 'RECOVERED' while the report accepted only 'COMPLETE'. One run, two
+     answers, and the morning report was the one that lost. */
+  const ghRec = fakeGithub(seeded(ANCHOR - 1000));
+  const recBase = Journal.begin({ ...wbase, report_id: 'SW-20260914-RECOV' });
+  const r1 = await Store.appendJournal(recBase, seg('rAlice', ['R1']), { env: ENV, gh: ghRec.gh });
+  const recovered = r1.journal.wallets;
+  check('the journal holds the walked wallet', recovered.length === 1);
+  // The projection the server sends, built the way acquire() builds it.
+  const projected = recovered.map(w => ({ address: w.address, status: 'RECOVERED', proven: true }))
+    .concat([{ address: 'rBob', status: 'COMPLETE', proven: true },
+             { address: 'rCarol', status: 'FAILED', proven: false }]);
+  check('a journal-recovered wallet is marked proven',
+    projected.find(w => w.status === 'RECOVERED').proven === true);
+  check('a failed wallet is not',
+    projected.find(w => w.status === 'FAILED').proven === false);
+  // And the report layer must read the flag, not the string. Asserted against
+  // the shipped source, because the defect was that the two disagreed.
+  const layer45 = fs.readFileSync(path.join(ROOT, 'src/brief/45-delta-evidence-index-20260911.js'), 'utf8');
+  check('the report layer does not gate proving on status === COMPLETE alone',
+    !/w\.status\s*!==\s*'COMPLETE'/.test(layer45));
+  check('it reads the server\'s proven flag',
+    /w\.proven\s*===\s*true/.test(layer45));
+  // Fail CLOSED on the legacy shape. A response with no `proven` field may
+  // fall back to the status string only for 'COMPLETE' — a wallet this run
+  // walked itself, whose rows came back with it. 'RECOVERED' never falls back:
+  // that is exactly the shape the incident arrived in, and inferring proof from
+  // the label there would accept the very evidence that was missing.
+  check('a legacy COMPLETE still falls back to the status string',
+    /\(w\.status === 'COMPLETE'\)/.test(layer45));
+  check('but a legacy RECOVERED does not — it needs the flag said outright',
+    !/w\.status === 'RECOVERED'/.test(layer45),
+    (layer45.match(/.*RECOVERED.*/g) || []).filter(l => !/^\s*\/\//.test(l)).slice(0, 3));
+
+  console.log('\n39. a commit must not erase a day\'s existing provenance');
+  /* ── THE ACCEPTANCE GATE, WRITTEN BEFORE THE FIX ─────────────────────────
+     From the repository's own history of
+     evidence/2026/09/14/participants.ndjson.gz:
+
+       8128749     3,858 rows
+       8d927be   138,518 rows     the backfill
+       ec0fa6a   102,873 rows
+       8ed28e7        17 rows     a small run, and 102,856 rows of provenance
+                                  gone
+
+     buildShards() builds a day's files from THIS RUN's rows and the commit
+     writes them by path, replacing whatever the day held. Events survived by
+     accident — a big day spills into events.001/.002 and a one-shard run never
+     overwrites the numbered ones — but participants fit in a single file and
+     were destroyed outright.
+
+     The invariant: once provenance for a ledger transaction is committed, a
+     later delta run must not silently erase it. Stated as the gate rather than
+     as an implementation: a day already holding ~100k provenance rows, plus a
+     tiny delta of 17 new observations for that same day, must end with ALL the
+     mPrior rows and the new unique ones — and replaying the same 17 must change
+     nothing. */
+  const MDAY = '2026-09-14';
+  const mDayBase = 'evidence/2026/09/14';
+  const mHash = i => String(i).padStart(64, 'a');
+  // ~100k mPrior provenance rows, the scale the live day actually carried.
+  const mPriorParts = [];
+  for (let i = 0; i < 100000; i++) {
+    mPriorParts.push({ tx_hash: mHash(i), address: 'rPrior' + (i % 400), role: 'observed_via' });
+  }
+  const mPriorEvents = [];
+  for (let i = 0; i < 1000; i++) {
+    mPriorEvents.push({ hash: mHash(i), close_time: MDAY + 'T01:00:00.000Z', ledger_index: 100 + i,
+      tx_type: 'Payment', tx_result: 'tesSUCCESS', validated: true, currency: 'XRP' });
+  }
+  // The tiny delta: 17 new observations for the same day.
+  const mFresh = [];
+  for (let i = 0; i < 17; i++) {
+    mFresh.push({ hash: String(i).padStart(64, 'f'), close_time_iso: MDAY + 'T23:00:00.000Z',
+      ledger_index: 900000 + i, tx_type: 'Payment', tx_result: 'tesSUCCESS', validated: true,
+      currency: 'XRP', amount_drops: '1000000', from_account: 'rNew' + i, to_account: 'rDest' + i,
+      observed_via: ['rNew' + i] });
+  }
+  const mPrior = { [MDAY]: { events: mPriorEvents, participants: mPriorParts, payloads: [] } };
+
+  const mRead = (files, base, name) => {
+    const zlib = require('zlib');
+    const out = [];
+    for (const p of Object.keys(files)) {
+      if (p.indexOf(base + '/' + name) !== 0) continue;
+      const text = zlib.gunzipSync(files[p]).toString('utf8');
+      for (const line of text.split('\n')) if (line) out.push(JSON.parse(line));
+    }
+    return out;
+  };
+
+  const mMerged = D.buildShards(mFresh, mPrior);
+  const mOut = mRead(mMerged.files, mDayBase, 'participants');
+  const mKey = p => p.tx_hash + '|' + p.address + '|' + p.role;
+  const mKeys = new Set(mOut.map(mKey));
+  const mMissing = mPriorParts.filter(p => !mKeys.has(mKey(p)));
+  check('every one of the 100,000 prior provenance rows survives the commit',
+    mMissing.length === 0, mMissing.length + ' rows were erased');
+  check('and the new observations are there too',
+    mFresh.every(r => mKeys.has(r.hash + '|' + r.observed_via[0] + '|observed_via')));
+  check('the day now holds prior + new, with nothing duplicated',
+    mOut.length === mKeys.size, { rows: mOut.length, distinct: mKeys.size });
+
+  // Idempotence: replaying the same 17 changes nothing.
+  const mReplayPrior = { [MDAY]: { events: mRead(mMerged.files, mDayBase, 'events'),
+    participants: mOut, payloads: [] } };
+  const mReplay = D.buildShards(mFresh, mReplayPrior);
+  const mReplayParts = mRead(mReplay.files, mDayBase, 'participants');
+  check('replaying the same delta is idempotent',
+    mReplayParts.length === mOut.length, { first: mOut.length, again: mReplayParts.length });
+  check('and the bytes are identical, so the commit is deterministic',
+    Object.keys(mReplay.files).sort().join(',') === Object.keys(mMerged.files).sort().join(',') &&
+    Object.keys(mReplay.files).every(p => mReplay.files[p].equals(mMerged.files[p])));
+
+  // A day the delta does NOT touch is not read and not rewritten.
+  check('only the days receiving new rows are written',
+    Object.keys(mMerged.files).every(p => p.indexOf(mDayBase) === 0),
+    Object.keys(mMerged.files).filter(p => p.indexOf(mDayBase) !== 0));
+
+  console.log('\n40. two real runs against one store, which is what destroyed the live day');
+  /* The gate above proves buildShards MERGES when it is given prior records.
+     It does not prove acquire() ever fetches them — disabling the read entirely
+     left that gate green, which is the same "the test does the work" failure
+     this project keeps finding.
+
+     So this drives the real acquire() twice against one store, lands rows on
+     the SAME day both times, and then reads the committed participants file
+     back out of the fake repository. That is the exact shape of the live
+     defect: 138,518 provenance rows followed by a small run, and 17 left. */
+  const zlib2 = require('zlib');
+  const sameDayClose = (ledger) => ({ ledger, amount: '1000000000',
+    before: '20000000000000', after: '20001000000000' });
+  const ghTwo = fakeGithub(seeded(ANCHOR - 1000));
+  // Balances must reconcile with the movement, or the run is refused as
+  // contradicted — which is the cross-check doing its job, not a fixture to
+  // argue with. Each walked wallet ends one transaction richer.
+  const peerOne = fakePeer({ balances: {
+      rAlice: '20001000000000', rBob: '20001000000000', rCarol: '20000000000000' },
+    transactions: {
+      rAlice: [sameDayClose(ANCHOR - 900)], rBob: [sameDayClose(ANCHOR - 890)], rCarol: [] } });
+  const runOne = await D.acquire({ report_id: 'SW-20260914-MERG1', scan_id: 'idx-m1' },
+    { env: ENV, gh: ghTwo.gh, reader: peerOne.reader, concurrency: 2 });
+  check('the first run commits', runOne.committed === true, runOne.reason);
+
+  const partsPath = [...ghTwo.files().keys()].filter(k => /participants\.ndjson\.gz$/.test(k));
+  const readParts = () => {
+    const rows = [];
+    for (const k of [...ghTwo.files().keys()].filter(x => /participants\.ndjson\.gz$/.test(x))) {
+      const text = zlib2.gunzipSync(ghTwo.files().get(k)).toString('utf8');
+      for (const line of text.split('\n')) if (line) rows.push(JSON.parse(line));
+    }
+    return rows;
+  };
+  const afterOne = readParts();
+  check('and it wrote provenance for what it walked',
+    partsPath.length > 0 && afterOne.length > 0, { files: partsPath.length, rows: afterOne.length });
+  const firstKeys = new Set(afterOne.map(p => p.tx_hash + '|' + p.address + '|' + p.role));
+
+  // A SECOND run, later the same day, walking a different transaction.
+  const peerTwo = fakePeer({ balances: {
+    rAlice: '20001000000000', rBob: '20001000000000', rCarol: '20001000000000' },
+    transactions: { rAlice: [], rBob: [], rCarol: [sameDayClose(ANCHOR + 10)] } });
+  peerTwo.reader.ledger = async () => ({ ledger: ANCHOR + 500, close_ms: Date.UTC(2026, 8, 11, 12, 0, 0) });
+  const runTwo = await D.acquire({ report_id: 'SW-20260914-MERG2', scan_id: 'idx-m2' },
+    { env: ENV, gh: ghTwo.gh, reader: peerTwo.reader, concurrency: 2 });
+  check('the second run commits too', runTwo.committed === true, runTwo.reason);
+
+  const afterTwo = readParts();
+  const secondKeys = new Set(afterTwo.map(p => p.tx_hash + '|' + p.address + '|' + p.role));
+  const erased = [...firstKeys].filter(k => !secondKeys.has(k));
+  check('NOTHING the first run committed was erased by the second',
+    erased.length === 0, erased.length + ' provenance rows destroyed: ' + erased.slice(0, 3).join(' , '));
+  check('and the second run\'s own provenance is there as well',
+    secondKeys.size > firstKeys.size, { before: firstKeys.size, after: secondKeys.size });
+  check('with no duplicates',
+    afterTwo.length === secondKeys.size, { rows: afterTwo.length, distinct: secondKeys.size });
+  // Events were never the visible casualty — they survived by shard-numbering
+  // accident — but they must be merged for the same reason.
+  const readEvents = () => {
+    const rows = [];
+    for (const k of [...ghTwo.files().keys()].filter(x => /\/events(\.\d+)?\.ndjson\.gz$/.test(x))) {
+      const text = zlib2.gunzipSync(ghTwo.files().get(k)).toString('utf8');
+      for (const line of text.split('\n')) if (line) rows.push(JSON.parse(line));
+    }
+    return rows;
+  };
+  const evHashes = new Set(readEvents().map(e => e.hash));
+  check('and the first run\'s events survive the second commit too',
+    [...new Set(afterOne.map(p => p.tx_hash))].every(h => evHashes.has(h)),
+    'an event committed by the first run is missing after the second');
+
+  console.log('\n41. reconstructed provenance is DERIVED, and can never pass as OBSERVED');
+  /* ── THE OPERATOR'S CONSTRAINT, WRITTEN AS THE GATE ──────────────────────
+     102,856 provenance rows were destroyed before merge-on-write stopped the
+     bleeding. Some of what was lost is recoverable: where a surviving event
+     shows a watched wallet as sender or receiver, that wallet demonstrably saw
+     the transaction. The rest is NOT recoverable — a walk that observed a
+     transaction without being a party to it leaves no trace in the event.
+
+     The authorised design, and the line that matters most: a reconstructed row
+     must never be equivalent to an observed one. Enforced in the DATA, by a
+     distinct role, rather than by a convention someone can forget.
+
+       derive only where the event itself proves it
+       mark it derived_via, never observed_via
+       mark the day PARTIAL_RECONSTRUCTED, never complete
+       manufacture nothing where the observer cannot be proven
+       leave the original evidence untouched */
+  const RDAY = '2026-09-13';
+  const watched = ['rAlice', 'rBob', 'rCarol'];
+  const rEvents = [
+    // rAlice is the sender — provable, so derivable.
+    { hash: 'A'.repeat(64), close_time: RDAY + 'T01:00:00.000Z', tx_type: 'Payment',
+      tx_result: 'tesSUCCESS', validated: true, from_account: 'rAlice', to_account: 'rStranger' },
+    // rBob is the receiver — provable, so derivable.
+    { hash: 'B'.repeat(64), close_time: RDAY + 'T02:00:00.000Z', tx_type: 'Payment',
+      tx_result: 'tesSUCCESS', validated: true, from_account: 'rStranger', to_account: 'rBob' },
+    // NEITHER party is watched. Some watched wallet's walk may well have
+    // returned this, but the event cannot prove which — so nothing may be
+    // invented for it.
+    { hash: 'C'.repeat(64), close_time: RDAY + 'T03:00:00.000Z', tx_type: 'Payment',
+      tx_result: 'tesSUCCESS', validated: true, from_account: 'rStranger', to_account: 'rOther' },
+    // Same shape as C, but with no surviving observation either. This is the
+    // row that is simply LOST: nothing derivable, nothing left over, and it
+    // must be counted as still unattributed rather than quietly rounded away.
+    { hash: 'D'.repeat(64), close_time: RDAY + 'T04:00:00.000Z', tx_type: 'Payment',
+      tx_result: 'tesSUCCESS', validated: true, from_account: 'rStranger', to_account: 'rOther' }
+  ];
+  // One genuine observation that survived the loss. It must come through
+  // untouched and must still read as OBSERVED.
+  const survivor = { tx_hash: 'C'.repeat(64), address: 'rCarol', role: 'observed_via' };
+
+  const rebuilt = D.reconstructProvenance({ events: rEvents, roster: watched,
+    existing: [survivor], day: RDAY });
+
+  const roleOf = (hash, addr) => (rebuilt.participants || [])
+    .filter(p => p.tx_hash === hash && p.address === addr).map(p => p.role);
+  check('a watched SENDER is derivable from the surviving event',
+    roleOf('A'.repeat(64), 'rAlice').join() === 'derived_via',
+    roleOf('A'.repeat(64), 'rAlice'));
+  check('a watched RECEIVER is derivable too',
+    roleOf('B'.repeat(64), 'rBob').join() === 'derived_via',
+    roleOf('B'.repeat(64), 'rBob'));
+  check('NOTHING is manufactured where the event cannot prove an observer',
+    (rebuilt.participants || []).filter(p => p.tx_hash === 'C'.repeat(64) && p.role === 'derived_via').length === 0,
+    'an observer was invented for a transaction that proves none');
+  check('no reconstructed row is ever labelled observed_via',
+    (rebuilt.participants || []).filter(p => p.role === 'observed_via')
+      .every(p => p.tx_hash === survivor.tx_hash && p.address === survivor.address),
+    'a derived row was passed off as an observation');
+  check('the surviving observation comes through untouched',
+    (rebuilt.participants || []).some(p => p.tx_hash === survivor.tx_hash &&
+      p.address === survivor.address && p.role === 'observed_via'));
+  check('a day that needed repair is marked partial, never complete',
+    rebuilt.coverage && rebuilt.coverage.status === 'PARTIAL_RECONSTRUCTED', rebuilt.coverage);
+  // ── AND AN UNDAMAGED DAY IS LEFT ALONE ──────────────────────────────────
+  // The dry run over the real archive caught this before anything was written:
+  // deriving for every event with a watched party would have added 223,000
+  // weaker rows to five days that were already fully attributed, and marked
+  // them reconstructed. Where nothing is broken there is nothing to repair.
+  const intactEvents = [
+    { hash: 'E'.repeat(64), close_time: RDAY + 'T05:00:00.000Z', tx_type: 'Payment',
+      tx_result: 'tesSUCCESS', validated: true, from_account: 'rAlice', to_account: 'rStranger' }
+  ];
+  const intact = D.reconstructProvenance({ events: intactEvents, roster: watched,
+    existing: [{ tx_hash: 'E'.repeat(64), address: 'rAlice', role: 'observed_via' }], day: RDAY });
+  check('an already-observed event gains no derived row',
+    intact.coverage.derived_rows === 0, intact.coverage);
+  check('and an undamaged day is not downgraded to reconstructed',
+    intact.coverage.status === 'UNCHANGED', intact.coverage.status);
+  check('and it counts the two kinds separately, because they are not the same claim',
+    rebuilt.coverage.observed_rows === 1 && rebuilt.coverage.derived_rows === 2, rebuilt.coverage);
+  check('a transaction with a SURVIVING observation still counts as attributed',
+    (rebuilt.participants || []).some(p => p.tx_hash === 'C'.repeat(64) && p.role === 'observed_via'));
+  check('but one with neither a derivable party nor a survivor stays unattributed',
+    rebuilt.coverage.events_without_provenance === 1, rebuilt.coverage);
+  check('and nothing at all was written for it',
+    (rebuilt.participants || []).filter(p => p.tx_hash === 'D'.repeat(64)).length === 0,
+    'a row was invented for the one transaction that proves nothing');
+  // Idempotence: running it again adds nothing.
+  const again = D.reconstructProvenance({ events: rEvents, roster: watched,
+    existing: rebuilt.participants, day: RDAY });
+  check('reconstruction is idempotent',
+    again.participants.length === rebuilt.participants.length,
+    { first: rebuilt.participants.length, again: again.participants.length });
+
+  console.log('\n42. the window tells the report which attribution is inferred');
+  /* A window attributed on reconstructed rows is weaker than one whose
+     provenance survived, and the report must be able to say so instead of
+     presenting both as the same fact. */
+  const ghProv = fakeGithub(seeded(ANCHOR - 1000));
+  const pDay = '2026-09-11';
+  const evOf = (h, from, to) => ({ hash: h, ledger_index: ANCHOR - 100,
+    close_time: pDay + 'T04:00:00.000Z', tx_type: 'Payment', tx_result: 'tesSUCCESS',
+    validated: true, from_account: from, to_account: to, currency: 'XRP', amount_drops: '1000000' });
+  const put = (path, records) => ghProv.files().set(path,
+    zlib.gzipSync(Buffer.from(records.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8')));
+  put('evidence/2026/09/11/events.ndjson.gz', [
+    evOf('1'.repeat(64), 'rAlice', 'rStranger'),
+    evOf('2'.repeat(64), 'rBob', 'rStranger')
+  ]);
+  put('evidence/2026/09/11/participants.ndjson.gz', [
+    { tx_hash: '1'.repeat(64), address: 'rAlice', role: 'observed_via' },
+    { tx_hash: '2'.repeat(64), address: 'rBob', role: 'derived_via' }
+  ]);
+  const provWin = await D.readReportWindow({
+    window_start_ms: Date.parse(pDay + 'T00:00:00.000Z'),
+    window_end_ms: Date.parse(pDay + 'T23:59:59.000Z'), rows: []
+  }, { env: ENV, gh: ghProv.gh });
+  check('both roles attribute their transaction',
+    provWin.unattributed === 0, provWin.unattributed);
+  check('but the inferred one is counted separately',
+    provWin.attributed_derived_only === 1, provWin.attributed_derived_only);
+  check('and the window declares its provenance partial',
+    provWin.provenance === 'PARTIAL_RECONSTRUCTED', provWin.provenance);
+  // A window with only genuine observations must NOT be labelled partial.
+  const ghClean = fakeGithub(seeded(ANCHOR - 1000));
+  const putC = (path, records) => ghClean.files().set(path,
+    zlib.gzipSync(Buffer.from(records.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8')));
+  putC('evidence/2026/09/11/events.ndjson.gz', [evOf('1'.repeat(64), 'rAlice', 'rStranger')]);
+  putC('evidence/2026/09/11/participants.ndjson.gz', [
+    { tx_hash: '1'.repeat(64), address: 'rAlice', role: 'observed_via' }]);
+  const cleanWin = await D.readReportWindow({
+    window_start_ms: Date.parse(pDay + 'T00:00:00.000Z'),
+    window_end_ms: Date.parse(pDay + 'T23:59:59.000Z'), rows: []
+  }, { env: ENV, gh: ghClean.gh });
+  check('a fully observed window is not labelled partial',
+    cleanWin.provenance === 'OBSERVED' && cleanWin.attributed_derived_only === 0, cleanWin.provenance);
+
+  console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA ACQUISITION CHECKS PASS'));
+  process.exit(fail ? 1 : 0);
+}
+main().then(undefined, e => { console.error(e); process.exit(1); });

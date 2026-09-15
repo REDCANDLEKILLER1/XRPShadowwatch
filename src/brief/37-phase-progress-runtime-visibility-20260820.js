@@ -13,6 +13,7 @@
   var ORDER = [
     'INIT',
     'NEWS_COLLECTION',
+    'EVIDENCE_ACQUISITION',
     'WALLET_SNAPSHOT',
     'WALLET_HISTORY_SCAN',
     'TRANSACTION_ANALYSIS',
@@ -26,6 +27,11 @@
   var LABEL = {
     INIT: 'Initialization',
     NEWS_COLLECTION: 'News Collection / Router',
+    // The delta walk against the evidence store. It runs BEFORE the wallet
+    // snapshot and is the longest phase of a cold morning — several minutes —
+    // so without its own name the panel showed Wallet Snapshot as completed
+    // AND running for the whole of it.
+    EVIDENCE_ACQUISITION: 'Evidence Acquisition',
     WALLET_SNAPSHOT: 'Wallet Snapshot',
     WALLET_HISTORY_SCAN: 'Wallet History Scan',
     TRANSACTION_ANALYSIS: 'Transaction Analysis',
@@ -39,7 +45,7 @@
 
   var runtime = {
     phase: 'INIT',
-    pct: 0,
+    pct: null,
     detail: '',
     completed: [],
     history: [],
@@ -59,13 +65,20 @@
 
   function resetRuntime() {
     runtime.phase = 'INIT';
-    runtime.pct = 0;
+    runtime.pct = null;
     runtime.detail = '';
     runtime.completed = [];
     runtime.history = [];
     runtime.scanActive = true;
     render();
   }
+
+  // A phase with no fraction behind it reports null, and null renders as a dash
+  // rather than as "0%". Those are different claims: one says the phase has not
+  // started, the other says nobody is counting. Most phases here have no
+  // counter at all — only the wallet passes and the evidence walk do — and
+  // printing 0% for the rest made a working run look stalled.
+  function pctText(v) { return (v === null || v === undefined) ? '—' : v + '%'; }
 
   function setPhase(name, pct, detail) {
     if (/^(COMPLETE|EXPORT_SEALING)$/.test(name) && typeof state !== 'undefined' && state.pack &&
@@ -77,9 +90,15 @@
     if (runtime.phase !== name) {
       if (runtime.scanActive) remember(runtime.phase);
       runtime.phase = name;
-      runtime.pct = 0;
+      runtime.pct = null;
       runtime.detail = '';
       runtime.history.push({ phase: name, at: new Date().toISOString() });
+      // A phase that is RUNNING is not a phase that is finished. Re-entering
+      // one left it in both lists, so the panel read
+      //   Completed: ... ✓ Wallet Snapshot      Running: → Wallet Snapshot
+      // which is two contradictory claims about the same phase.
+      var done = runtime.completed.indexOf(name);
+      if (done >= 0) runtime.completed.splice(done, 1);
     }
     if (pct != null) runtime.pct = clampPct(pct);
     if (detail != null) runtime.detail = String(detail);
@@ -87,7 +106,7 @@
       runtime.pct = 100;
       runtime.scanActive = false;
     }
-    if (name === 'INCOMPLETE') { runtime.pct = 0; runtime.scanActive = false; }
+    if (name === 'INCOMPLETE') { runtime.pct = null; runtime.scanActive = false; }
     try {
       if (window.XAI_SCAN_PROGRESS) {
         window.XAI_SCAN_PROGRESS.runtimePhase = name;
@@ -158,12 +177,13 @@
     var label = LABEL[runtime.phase] || runtime.phase;
     var detail = runtime.detail ? ' · ' + runtime.detail : '';
     setText('swPhaseRuntimeLabel', label + detail);
-    setText('swPhaseRuntimePct', runtime.phase === 'INCOMPLETE' ? '—' : runtime.pct + '%');
+    setText('swPhaseRuntimePct', runtime.phase === 'INCOMPLETE' ? '—' : pctText(runtime.pct));
     setText('swPhaseRuntimeCompleted', 'Completed: ' + (runtime.completed.length ? runtime.completed.map(function (p) { return '✓ ' + LABEL[p]; }).join(' · ') : '—'));
     setText('swPhaseRuntimeRunning', /^(COMPLETE|INCOMPLETE)$/.test(runtime.phase) ? 'Running: —' : 'Running: → ' + label);
     setText('xaiPhaseRuntimeLabel', label);
-    setText('xaiPhaseRuntimePct', runtime.phase === 'INCOMPLETE' ? '—' : runtime.pct + '%');
-    try { var fill = document.getElementById('swPhaseRuntimeFill'); if (fill) fill.style.width = runtime.pct + '%'; } catch (_) {}
+    setText('xaiPhaseRuntimePct', runtime.phase === 'INCOMPLETE' ? '—' : pctText(runtime.pct));
+    try { var fill = document.getElementById('swPhaseRuntimeFill');
+      if (fill) fill.style.width = (runtime.pct === null || runtime.pct === undefined ? 0 : runtime.pct) + '%'; } catch (_) {}
   }
 
   function phaseFromShadowSay(rawPhase) {
@@ -190,7 +210,13 @@
           var semantic = phaseFromShadowSay(phase);
           if (semantic) {
             if (semantic === 'INIT' && (!runtime.scanActive || runtime.phase === 'COMPLETE')) resetRuntime();
-            setPhase(semantic, semantic === 'COMPLETE' ? 100 : 0, status || '');
+            // null, NOT 0. Passing 0 here re-zeroed the phase percentage on
+            // every shadowSay — which fires constantly — so the sub-bar under
+            // CURRENT PHASE sat at 0% for the whole run even for the two
+            // phases that DO report a fraction. setPhase already resets the
+            // percentage when the phase genuinely changes, so preserving it
+            // here loses nothing and stops the stomping.
+            setPhase(semantic, semantic === 'COMPLETE' ? 100 : null, status || '');
           }
           return out;
         };
@@ -207,7 +233,11 @@
       if (typeof originalProgress === 'function' && !originalProgress._swPhaseRuntime20260820) {
         var wrappedProgress = function (phaseStart, phaseEnd, fraction) {
           var out = originalProgress.apply(this, arguments);
-          if (runtime.phase === 'WALLET_SNAPSHOT' || runtime.phase === 'WALLET_HISTORY_SCAN') {
+          // Whatever phase is actually running. This was pinned to two phase
+          // names, so a fraction reported during any other one was discarded
+          // and that phase showed 0% however far through it was.
+          if (runtime.scanActive && !/^(COMPLETE|INCOMPLETE)$/.test(runtime.phase) &&
+              isFinite(Number(fraction))) {
             setPhase(runtime.phase, clampPct(Number(fraction) * 100));
           }
           return out;

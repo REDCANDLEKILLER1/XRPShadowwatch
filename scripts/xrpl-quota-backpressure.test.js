@@ -303,8 +303,16 @@ const QUOTA_MSG = 'rate limit: units quota (10000 per 60s) exhausted, retry in ~
     return { elapsed: Math.round(performance.now() - t0), waits: n(state._quotaWaits) };
   });
   console.log('     ' + JSON.stringify(r10));
+  // `waits === 1` is the property, and it is exact: eight callers took one
+  // cooldown between them. The elapsed check exists only to catch a shape where
+  // the counter says one but the callers still queued — so the threshold is
+  // derived from what it must exclude rather than guessed. Eight 80 ms
+  // cooldowns in series is 640 ms; anything under 500 ms cannot be that, and
+  // the observed figure is ~330 ms, which leaves room for a loaded machine
+  // without letting a serialised run pass.
+  const SERIALISED_MS = 8 * 80;
   check('THE REGRESSION — eight callers cost ONE cooldown, not eight in series',
-        r10.waits === 1 && r10.elapsed < 400, r10);
+        r10.waits === 1 && r10.elapsed < SERIALISED_MS * 0.78, { ...r10, serialised_would_be: SERIALISED_MS });
 
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 

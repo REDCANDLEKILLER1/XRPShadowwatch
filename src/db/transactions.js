@@ -48,7 +48,19 @@ const ROLE = {
   ESCROW_DEST:  'escrow_dest',    // the escrow object's Destination
   ISSUER:       'issuer',         // IOU issuer
   SIGNER:       'signer',         // an entry in tx.Signers
-  OBSERVED_VIA: 'observed_via'    // the watched wallet whose account_tx returned this
+  OBSERVED_VIA: 'observed_via',   // the watched wallet whose account_tx returned this
+  // ── NOT THE SAME CLAIM, AND THE DATA SAYS SO ────────────────────────────
+  // An OBSERVED_VIA row is a record that a wallet's walk actually returned
+  // this transaction. A DERIVED_VIA row is weaker and honest about it: the
+  // surviving event shows that wallet as sender or receiver, so it must have
+  // seen the transaction — but the original observation was destroyed and this
+  // is inference from the event, not a record of the walk.
+  //
+  // They are separate roles rather than a flag on one role, because a flag can
+  // be dropped by any consumer that does not know to look for it, and a
+  // reconstructed provenance row that reads as an observation is exactly the
+  // false certainty this whole repair is meant to avoid.
+  DERIVED_VIA:  'derived_via'
 };
 
 const XRPL_EPOCH_OFFSET_MS = 946684800000;   // 2000-01-01T00:00:00Z, the ripple-epoch base

@@ -334,6 +334,171 @@ const WATCHLIST = [
   ['LARGE_RECV_rK59uk',   'rK59ukHjuj3pBLmUusPTwu5Bu2kCQj73Bs', 'discovered_receiver'],        // watch-net · 3.49M from whale rhuqpD…dvE7 · RECEIVER_STILL_HOLDING_SIZE · richlist #591 (7,206,889) · seen 4 scans · score 160/200
   ['SPLITTER_rpscz3',     'rpscz3HCXwdLj82nQcoGXZAT5WARSFxzAY', 'next_hop_splitter'],          // routing-node · 3.61M from receiving wallet raN2ev…p9Jg · NEXT_HOP_FORWARDING_DETECTED · no richlist reading · seen 6 scans · score 125/200
   ['LARGE_RECV_rNMWdx',   'rNMWdxH8uUw17Fj9REhs2cJSWxCHwkzKK3', 'discovered_receiver'],        // watch-net · 3.60M from whale rhuqpD…dvE7 · RECEIVER_STILL_HOLDING_SIZE · no richlist reading · seen 3 scans · score 125/200
+  // ── v3.6: the roster reaches 408 ────────────────────────────────────────
+  // 153 addresses added from the operator's manifest of wallets moving size on
+  // XRPL. They are added as WATCHED and 'unclassified' on purpose: nothing has
+  // been proven about any of them yet, and a label is a claim. They get a
+  // behavioral name once their own evidence earns one — flagged, not identified.
+  //
+  // Each one enters the checkpoint on its first complete run as a COLD
+  // ADMISSION: one bounded window of history (see COLD_WINDOW_LEDGERS in
+  // src/db/delta-acquisition.js), and the state records per wallet the ledger
+  // it was admitted at and the horizon it actually read from. Nothing before
+  // that horizon has been read, and the report may not speak about it.
+  // The 255 wallets above are untouched by this and keep their checkpoints.
+  ['WATCHED_r3GNZ9',     'r3GNZ9D5hzzecocx5pi6dNmrQ342VpKxUh', 'unclassified'],
+  ['WATCHED_r3Gm5X',     'r3Gm5XFLAsMfY6jzXxw18TrBzR5dcDoKH6', 'unclassified'],
+  ['WATCHED_r3QxBX',     'r3QxBXQs2XZ9oMPLsjB2fkFgKTcxC5TRMq', 'unclassified'],
+  ['WATCHED_r3Ys13',     'r3Ys13vy1H7qRj7W8bLt3FgjHy5KRxEPFq', 'unclassified'],
+  ['WATCHED_r3eNBA',     'r3eNBAfNV2WggTptRe6jVfXQeVg1pPRaMK', 'unclassified'],
+  ['WATCHED_r3kcWL',     'r3kcWLCLaqVaC9VeLDakKHW26LuYcYHZpZ', 'unclassified'],
+  ['WATCHED_r3nLub',     'r3nLubDPPMcnqVoqhb6jiHrfFtt1Gm7ZY3', 'unclassified'],
+  ['WATCHED_r3rWg3',     'r3rWg3hEpicGT2h3i7aDHZ4kzfiYYWbXNQ', 'unclassified'],
+  ['WATCHED_r3zJ7y',     'r3zJ7yDcKbDedRC61nSiSem1xaFESMxkfp', 'unclassified'],
+  ['WATCHED_r4FXuS',     'r4FXuSk8BhbtjHeQnFVzaheREc4jRnyy2Q', 'unclassified'],
+  ['WATCHED_r4JEiH',     'r4JEiHeGJCgVixS1EGrjMFDWtXgGzigGz9', 'unclassified'],
+  ['WATCHED_r4UFak',     'r4UFakD1QdC2gFnPBCXdvVigsP85btzbEa', 'unclassified'],
+  ['WATCHED_r4V2XA',     'r4V2XA3pD89znBVbAJ13mNj4gpJQzC9qPJ', 'unclassified'],
+  ['WATCHED_r4WqZN',     'r4WqZNsVreseK9t6yTRLqPaJLyzFkFgcuB', 'unclassified'],
+  ['WATCHED_r4dGz6',     'r4dGz6JsrEEYcBxZPAovV4NZPSq2yUpPTG', 'unclassified'],
+  ['WATCHED_r4nnFB',     'r4nnFBQGUmbnHT23AyNJJtjJh4EGQyJaiH', 'unclassified'],
+  ['WATCHED_r4rjtV',     'r4rjtVAtG3gmcDHU3nmXdYKcVSbvGPF7Fa', 'unclassified'],
+  ['WATCHED_r9DhDp',     'r9DhDpCokcPTzt9Aj71X8AJcKJCPEYAxGJ', 'unclassified'],
+  ['WATCHED_r9XEBj',     'r9XEBjPDV7wwHEUNHhSwVLmgKB16gXBNvB', 'unclassified'],
+  ['WATCHED_r9m6Mw',     'r9m6MwViR4GnUNqoGXGa8eroBrZ9FAPHFS', 'unclassified'],
+  ['WATCHED_rBA7oB',     'rBA7oBScBPccjDcmGhkmCY82v2ZeLa2K2f', 'unclassified'],
+  ['WATCHED_rBAuFZ',     'rBAuFZLxcLwjdoiZFMV9EibwLsGf3QwmwA', 'unclassified'],
+  ['WATCHED_rBDHJB',     'rBDHJBMUmPDWNJs7CLoCVz8XyNXugBzbGc', 'unclassified'],
+  ['WATCHED_rBRtFJ',     'rBRtFJJEX5TimQxZK732MjsDnvwSM92pKW', 'unclassified'],
+  ['WATCHED_rByV8Y',     'rByV8YhK1PS92TGi3WuMZbsNQpwPS1iU93', 'unclassified'],
+  ['WATCHED_rCqe9k',     'rCqe9kZJvUcQv4VN4pGLBbkLXksgcxtco', 'unclassified'],
+  ['WATCHED_rD1mtG',     'rD1mtG62xhTMHrwaC1q9NbQX3CtvoTFw9o', 'unclassified'],
+  ['WATCHED_rD34s5',     'rD34s5crbKvcf8PfPun3cTrnAkQrm1UnqT', 'unclassified'],
+  ['WATCHED_rD37r1',     'rD37r1cciGqmdBpqou2DneEiWA1iQsAphP', 'unclassified'],
+  ['WATCHED_rD4YeN',     'rD4YeNS8d5jwmNGFiwywidTxBvGPQdigBA', 'unclassified'],
+  ['WATCHED_rD65ok',     'rD65okgyRLdBUGWsYWpYfmkygVC7zZxcKW', 'unclassified'],
+  ['WATCHED_rDNvjM',     'rDNvjMc6LjtpR7BdfiSNvavUBjznhhmpNq', 'unclassified'],
+  ['WATCHED_rDYU1V',     'rDYU1VVzoFgpbERRozvBPmjMBLn1Bhnnt9', 'unclassified'],
+  ['WATCHED_rDbf8a',     'rDbf8aaRm453vAXt9TGYTH4te2cHXJYgWQ', 'unclassified'],
+  ['WATCHED_rDqKUh',     'rDqKUhYB7wDqUuRsqGtkCrrCLatjR5A9RJ', 'unclassified'],
+  ['WATCHED_rDxRRK',     'rDxRRKJ39WBE3CV8qBxP7iPUScEmicZMRg', 'unclassified'],
+  ['WATCHED_rDxSQY',     'rDxSQYR1QS7LtAPQMunu8hQWsND8Caurnk', 'unclassified'],
+  ['WATCHED_rDzbAA',     'rDzbAAxHwbyAtPUsd5mBF4wE32JiX8mek8', 'unclassified'],
+  ['WATCHED_rEA51i',     'rEA51iJKanYTDaPsbJSz13B4pE6oLdf5fF', 'unclassified'],
+  ['WATCHED_rEKoEZ',     'rEKoEZqrowAYQ8sF9jP2mnHyjwD2LMzg76', 'unclassified'],
+  ['WATCHED_rEQjQm',     'rEQjQmKnSwdwcePyAdNWbm4VoSNvbodsti', 'unclassified'],
+  ['WATCHED_rEYCB6',     'rEYCB6oPE5BpbAWiYP4cxAQyUsAStmYmUj', 'unclassified'],
+  ['WATCHED_rEd1wQ',     'rEd1wQqeKPqHbaHVfGCHgH2SeXsSkrEi6K', 'unclassified'],
+  ['WATCHED_rEdP7w',     'rEdP7wDoHo6LW9nertpTbxgtF6uFkyS7b5', 'unclassified'],
+  ['WATCHED_rEhWot',     'rEhWotAnEhRKecPtq4w5jC9ukXzoZYQ4xT', 'unclassified'],
+  ['WATCHED_rEoePA',     'rEoePAacBgKHAZUyscGfABJrTib8i5pMNm', 'unclassified'],
+  ['WATCHED_rG94GL',     'rG94GLDbtti5FZSWoHKUDKTcpGDdiipCT8', 'unclassified'],
+  ['WATCHED_rG9Aar',     'rG9AarzAZTD8bZHrKSoNnsniroteDrmt6u', 'unclassified'],
+  ['WATCHED_rGCEB4',     'rGCEB4TQDkdU6GLjc5pyE5yT1ksrGqPebK', 'unclassified'],
+  ['WATCHED_rGTtGv',     'rGTtGv2rcQj4gvpQER3vWFh4ytzaY1fWkB', 'unclassified'],
+  ['WATCHED_rGuVpU',     'rGuVpUBfprkb1cmKFGbL8c48fQWT3xEwyZ', 'unclassified'],
+  ['WATCHED_rGxqCw',     'rGxqCwFuN8w89ECUxmeY61oFfuskssLPnd', 'unclassified'],
+  ['WATCHED_rHHzSu',     'rHHzSu3XQW1GU7wHQse44fpMojw3VNzky2', 'unclassified'],
+  ['WATCHED_rHm6iv',     'rHm6ivKz9BwkUysELvSgeJ9MPxSnVaq1fB', 'unclassified'],
+  ['WATCHED_rHmNtA',     'rHmNtAPWN5A3QRhgqtJoU4xAZzYv8KfdJk', 'unclassified'],
+  ['WATCHED_rJ6TRz',     'rJ6TRzwd1MVfWdcaFqgDJw2Go1nVPScHur', 'unclassified'],
+  ['WATCHED_rJ8hb4',     'rJ8hb4jMHgRNhEQ7BTGz6vt14kWn2z6H78', 'unclassified'],
+  ['WATCHED_rJWA8Q',     'rJWA8Q18Wrbu3t3gngEWpL8k5jAb3Jmpm1', 'unclassified'],
+  ['WATCHED_rJnv7N',     'rJnv7NpK1vn5joLDsMBwJaTeF4Pgiaf88Q', 'unclassified'],
+  ['WATCHED_rJoYTh',     'rJoYThWLoGM2PQV9vtxaymCmTSMxN6ggWf', 'unclassified'],
+  ['WATCHED_rJrcX6',     'rJrcX6iwrJuZ4ZaWwyHEQVupyVVbGVMwQP', 'unclassified'],
+  ['WATCHED_rJzNqv',     'rJzNqvafEN6mPXykTTWz7f2Xfz5uXHAsRF', 'unclassified'],
+  ['WATCHED_rK67ip',     'rK67ipQVbZ5EUywDa4BDE7bVnkxBiVYXu', 'unclassified'],
+  ['WATCHED_rK9knT',     'rK9knTdMPo2L3vuPwTSiTGCMXhCX8GvLtD', 'unclassified'],
+  ['WATCHED_rKN55t',     'rKN55tLzJ2BrLh8o344cdzvDngYx999uft', 'unclassified'],
+  ['WATCHED_rKPdxE',     'rKPdxEnRc7RCo6UJijf1MGCYiNRCWBbrU2', 'unclassified'],
+  ['WATCHED_rKcbf7',     'rKcbf7hju6wdMMNYuDnFEqK7qjwcnrwbUu', 'unclassified'],
+  ['WATCHED_rL9Gcr',     'rL9GcrQTs2BC47PkDs1Y8dgjBBfwwabEHZ', 'unclassified'],
+  ['WATCHED_rLN8Zj',     'rLN8ZjvSW8e3iEZPGrCXc7j9Aiqd1oQGr3', 'unclassified'],
+  ['WATCHED_rLNmmc',     'rLNmmcNEizWaygypRVTKaWoZG6RrqfsJpi', 'unclassified'],
+  ['WATCHED_rLPu3n',     'rLPu3nirSkpN846YpTSzyetJd3LPAxnk1G', 'unclassified'],
+  ['WATCHED_rLhDWn',     'rLhDWnBFitrn8iW8e5m7bVKqFS5raK1NbP', 'unclassified'],
+  ['WATCHED_rLjD7f',     'rLjD7foqEfqqRS1hvj2AeW9yVEbrWf3xR5', 'unclassified'],
+  ['WATCHED_rLmg7K',     'rLmg7KqVHrT198gyywy1WfdfkUkiPA7Gr7', 'unclassified'],
+  ['WATCHED_rLmyyy',     'rLmyyyCcB75ZW8jUaSuz4mFk9odDkva7bP', 'unclassified'],
+  ['WATCHED_rLnxFJ',     'rLnxFJneCKwJ9tye2xdFdW45JLFrpGkT9m', 'unclassified'],
+  ['WATCHED_rLpvuH',     'rLpvuHZFE46NUyZH5XaMvmYRJZF7aory7t', 'unclassified'],
+  ['WATCHED_rLuQnu',     'rLuQnupL8NQJX9Ywc59cxNrNPHsCHU1XK6', 'unclassified'],
+  ['WATCHED_rM8Cvh',     'rM8Cvh3QrLBFdJSGVWCHSeXMqX7UCQgXir', 'unclassified'],
+  ['WATCHED_rMFNuB',     'rMFNuBwwCdcMg9qDF7qu9XMpSkbuh4Wi3p', 'unclassified'],
+  ['WATCHED_rMP9Ya',     'rMP9YaxwFgLHByCk2TRfJ2P27ST5xnwbFQ', 'unclassified'],
+  ['WATCHED_rMPQ2R',     'rMPQ2RG8KHcQSoTGs5kJpSoPf19qdwt28r', 'unclassified'],
+  ['WATCHED_rMfX38',     'rMfX38RdCCHGRUZ5u97YNJqoW7Pay6hfoe', 'unclassified'],
+  ['WATCHED_rMnubU',     'rMnubUsafxBeX1tsuUdxucthRfDnvjE3rV', 'unclassified'],
+  ['WATCHED_rND7mG',     'rND7mGebsCbcwJ5Xz7zwQQu77K4YGNZsJH', 'unclassified'],
+  ['WATCHED_rNVUcL',     'rNVUcLqNjdxzdE9oTaUmbM3GD8sumnB7sM', 'unclassified'],
+  ['WATCHED_rNcbEe',     'rNcbEeLL4VXnwNWvn6h6UZwevntkj58WC', 'unclassified'],
+  ['WATCHED_rNvA52',     'rNvA52EvnR96pxp4rMEG81cgqUs3sFZ8qt', 'unclassified'],
+  ['WATCHED_rNw5R7',     'rNw5R7KTTM5WaCsvLoAf8CgHALF6xLmHS', 'unclassified'],
+  ['WATCHED_rP2QX4',     'rP2QX4bik1SUfqS5k4Lyw9Q1kwmFQhUyBF', 'unclassified'],
+  ['WATCHED_rP7jPq',     'rP7jPqEBnzj5VmF139KQN7aDcRuKqp8JvE', 'unclassified'],
+  ['WATCHED_rPCpZw',     'rPCpZwPKogNodbjRxGDnefVXu9Q9R4PN4Q', 'unclassified'],
+  ['WATCHED_rPjmhP',     'rPjmhP2WK4mfTZX9Ywoqz3eMPzfWj2vezU', 'unclassified'],
+  ['WATCHED_rPnbJ3',     'rPnbJ3LFU9stjtUCs7yweMKmhHULT4fUE8', 'unclassified'],
+  ['WATCHED_rQKrJK',     'rQKrJKKKpKnpJujtGKnXaCSuZ1bJR9dQvd', 'unclassified'],
+  ['WATCHED_rQQbVS',     'rQQbVSQsvKUgE3omhWokGajp5fa4cbN7C', 'unclassified'],
+  ['WATCHED_rQwvnQ',     'rQwvnQ3ub44ncfd6pDAKWn8QUcAMdWunbY', 'unclassified'],
+  ['WATCHED_rSwGFM',     'rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm', 'unclassified'],
+  ['WATCHED_rU4KSJ',     'rU4KSJiq2jdzwbMagCVRhdS21aEqw9YgM2', 'unclassified'],
+  ['WATCHED_rU7SQT',     'rU7SQTv46KT1zrMNv6YVawZWwAmo4gZLuB', 'unclassified'],
+  ['WATCHED_rUBr37',     'rUBr375TnpyCzFHeUUmG3rskgw33AkXf9M', 'unclassified'],
+  ['WATCHED_rUMjFa',     'rUMjFapeWX8MTpuLhNKU3Eb1n82diiTiQm', 'unclassified'],
+  ['WATCHED_rUYwHa',     'rUYwHaN5QfpwaPjTpFrC9Vde9dSvCKbETe', 'unclassified'],
+  ['WATCHED_rUZV1w',     'rUZV1w9c7DQWQJd8j4TApvdxbxaGHQHLP', 'unclassified'],
+  ['WATCHED_rUq1Qr',     'rUq1Qrz91ehnhCTyoAi4kQTcxh5eSNSWpg', 'unclassified'],
+  ['WATCHED_rUtdme',     'rUtdmeL6LTGdwfKr25foMSSHPVCbsK2qth', 'unclassified'],
+  ['WATCHED_rUzWJk',     'rUzWJkXyEtT8ekSSxkBYPqCvHpngcy6Fks', 'unclassified'],
+  ['WATCHED_ra4Jfz',     'ra4Jfz4Ei1JaDnHyRHq92WU1KZWm8MZbuJ', 'unclassified'],
+  ['WATCHED_ra6ccc',     'ra6cccaZsb4Q5u9irgoaY9xbmYicYEJeBi', 'unclassified'],
+  ['WATCHED_ra9Air',     'ra9AirmDAA32Jhjm4Q2sc8QSYxFynfUg7z', 'unclassified'],
+  ['WATCHED_raHbNi',     'raHbNigTZBS1iNSXLn7Tnbg6WBxenbwpuJ', 'unclassified'],
+  ['WATCHED_raLNLK',     'raLNLKEw4tM5854vvZMTDHXgCbYifXxxr7', 'unclassified'],
+  ['WATCHED_raQwCV',     'raQwCVAJVqjrVm1Nj5SFRcX8i22BhdC9WA', 'unclassified'],
+  ['WATCHED_raV5bX',     'raV5bXp9hNe5G4YFxLDSGHExL3bVyYmwZ9', 'unclassified'],
+  ['WATCHED_rajKGW',     'rajKGWBnMMPMVWFEeA8KJXWbha9YCBQsG2', 'unclassified'],
+  ['WATCHED_rasVv6',     'rasVv6YetWE51KFSmRYtEyXLYAfreB88qF', 'unclassified'],
+  ['WATCHED_rdeNgM',     'rdeNgM32t4HWFawxmMFHvH7JXxECy1JRQ', 'unclassified'],
+  ['WATCHED_refwKK',     'refwKK9QnRfAchRsRrABStHA1wv8Q3kzZ', 'unclassified'],
+  ['WATCHED_rf6AAk',     'rf6AAkcG6Qk1JMP114BVr4pivgM8QH7eTJ', 'unclassified'],
+  ['WATCHED_rfKsmL',     'rfKsmLP6sTfVGDvga6rW6XbmSFUzc3G9f3', 'unclassified'],
+  ['WATCHED_rfrnxm',     'rfrnxmLBiXHj38a2ZUDNzbks3y6yd3wJnV', 'unclassified'],
+  ['WATCHED_rh3eNR',     'rh3eNRnzJfHbkfSVWkrwmV88QdtLp1d37Z', 'unclassified'],
+  ['WATCHED_rh4hJ5',     'rh4hJ5GWbCKtDtWyTx5BP17pox3dbNud8k', 'unclassified'],
+  ['WATCHED_rh95aU',     'rh95aURGn6AtuFT6gaQx4z6JVyVATiuecu', 'unclassified'],
+  ['WATCHED_rhGtj7',     'rhGtj7Sncif8uo4oZgY44TUBU3Yaske6C5', 'unclassified'],
+  ['WATCHED_rhLCW7',     'rhLCW7TN2Rq3rt7CqfTAyKfCevgEvFm1PK', 'unclassified'],
+  ['WATCHED_rhfTic',     'rhfTic22GATFMi31RoCuE3w8svEQAJgC8i', 'unclassified'],
+  ['WATCHED_rn6v3N',     'rn6v3NMLDE2KdHb2t4E23kBuRiGvfDEaq6', 'unclassified'],
+  ['WATCHED_rn9iNB',     'rn9iNBjC5EpZPuRaQHLRzyWSvpupzLfbci', 'unclassified'],
+  ['WATCHED_rnPtKk',     'rnPtKkr288wZHqYH8RXCU5kLZbRZp9CfV5', 'unclassified'],
+  ['WATCHED_rnSjoZ',     'rnSjoZrAyPNtujPgFiei4BRRHHTSFqYaXM', 'unclassified'],
+  ['WATCHED_rnU7RW',     'rnU7RWiJ9ov7M35xDGAbqYPGX5DoPXv4py', 'unclassified'],
+  ['WATCHED_rnjY52',     'rnjY52WP12n1gRUDxm4AMdAJDjDXyH5GAj', 'unclassified'],
+  ['WATCHED_rnqZnv',     'rnqZnvzoJjdg7n1P9pmumJ7FQ5wxNH3gYC', 'unclassified'],
+  ['WATCHED_rp123u',     'rp123ueGwZTCu5ADoFMGHxE7sBUSKiwnBc', 'unclassified'],
+  ['WATCHED_rp2diY',     'rp2diYfVtpbgEMyaoWnuaWgFCAkqCAEg28', 'unclassified'],
+  ['WATCHED_rp53vx',     'rp53vxWXuEe9LL6AHcCtzzAvdtynSL1aVM', 'unclassified'],
+  ['WATCHED_rpLi8z',     'rpLi8zvDzMMnT6b7f9dJGqSvVwFDD1ba7q', 'unclassified'],
+  ['WATCHED_rpTHf3',     'rpTHf31iBoaCATgibT1JPhxhLsadnomPdK', 'unclassified'],
+  ['WATCHED_rpmXiV',     'rpmXiVcATT2GUKbVSrjfxWtWuDQ7rENHn8', 'unclassified'],
+  ['WATCHED_rpxh7h',     'rpxh7h17d8h2pARfKCe17KpzskZkhuZZY1', 'unclassified'],
+  ['WATCHED_rs5icr',     'rs5icrZZHQhkdKwHAU5LvYkPMQ8bF21GSg', 'unclassified'],
+  ['WATCHED_rs96VS',     'rs96VSQTucMVZpFdhTc3B45aD7UEJKZ2Ra', 'unclassified'],
+  ['WATCHED_rsRy14',     'rsRy14FvipgqudiGmptJBhr1RtpsgfzKMM', 'unclassified'],
+  ['WATCHED_rsUeRh',     'rsUeRhbxDuxT1zq5UXcrvgugxKJrKA8dEc', 'unclassified'],
+  ['WATCHED_rsZc3f',     'rsZc3fQCvU9ESJg14ccG5WsinpZk6KHxC3', 'unclassified'],
+  ['WATCHED_rsqfzP',     'rsqfzPg9aC1rEE6WLE7Z95NkciXL9vekdj', 'unclassified'],
+  ['WATCHED_rsuER7',     'rsuER7g87MCaZcmkuiES1LwpWKgCJTP2nE', 'unclassified'],
+  ['WATCHED_rw6d1y',     'rw6d1yD9hNmdkPZENoxwSNUQmksterfcHK', 'unclassified'],
+  ['WATCHED_rwBWAo',     'rwBWAoDdybkxHUixvSUCqdJdz8dQs2vhrm', 'unclassified'],
+  ['WATCHED_rwBkBm',     'rwBkBmv1RbgsWLXhWM8uEoVwY974iWshv4', 'unclassified'],
+  ['WATCHED_rwQusX',     'rwQusXXMjsUn622L3ZEpne7ZegSCF1C9fi', 'unclassified'],
+  ['WATCHED_rwjkSR',     'rwjkSRdi16UD17bzuQ1JQY2oqWuycPz6fx', 'unclassified'],
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)
@@ -480,7 +645,8 @@ const _SW_ROLE_BY_CAT = {
   discovered_whale:           'whale wallet',
   discovered_receiver:        'receiving wallet',
   discovered_unknown_highval: 'high-value wallet',
-  discovered:                 'watched wallet'
+  discovered:                 'watched wallet',
+  unclassified:               'watched wallet'
 };
 // Longest prefix first — WHALE_RECV_ must win over WHALE_.
 const _SW_ROLE_BY_HANDLE = [
@@ -491,6 +657,7 @@ const _SW_ROLE_BY_HANDLE = [
   ['SPLITTER_',    'routing wallet'],
   ['HIGHVAL_',     'high-value wallet'],
   ['DISCOVERED_',  'watched wallet'],
+  ['WATCHED_',     'watched wallet'],
   ['WHALE_',       'whale wallet'],
   ['RIPPLE_',      'escrow wallet']
 ];
@@ -609,6 +776,24 @@ if (typeof window !== 'undefined') {
 
 // ── LOGGING ────────────────────────────────────────────────────
 function log(msg) {
+  // ── THE RUN'S OWN NARRATIVE, KEPT ───────────────────────────────────────
+  //
+  // This used to write to a DOM element and nothing else, so every line the
+  // run said about itself died with the page. The TOTAL DEBUG file — the one
+  // thing an operator actually sends when something is wrong — carried none of
+  // it. A report that failed three times in a row produced three byte-identical
+  // files, none of which contained the sentence that named the cause:
+  // "Evidence index unavailable — direct XRPL acquisition:
+  // DELTA_REPORT_ID_REQUIRED".
+  //
+  // Bounded, because a long run is thousands of lines and the file has to stay
+  // sendable. The most recent lines are the ones that matter when something
+  // stopped.
+  try {
+    if (!Array.isArray(state.runLog)) state.runLog = [];
+    state.runLog.push('[' + new Date().toISOString().slice(11, 19) + '] ' + msg);
+    if (state.runLog.length > 800) state.runLog.splice(0, state.runLog.length - 800);
+  } catch (_) {}
   const el = $('statusFeed'); if (!el) return;
   el.textContent += '\n' + msg;
   el.scrollTop = el.scrollHeight;
@@ -1473,6 +1658,18 @@ async function scanWallets(ws) {
   // proof is stamped with this id, and anything carrying a different one is
   // not evidence about this run.
   state.runId = 'run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  // ── THE REPORT'S IDENTITY, MINTED BEFORE THE RUN RATHER THAN AFTER IT ────
+  //
+  // The seal used to invent this id at the end, which was fine when nothing
+  // needed it earlier. The evidence store does: every acquisition commits a run
+  // manifest under the report's id, and that is how a sealed report is traced
+  // back to the walk that produced it. An id minted after the walk cannot name
+  // the walk.
+  //
+  // So it is minted HERE, once, and buildEvidenceSeal adopts it. Same format,
+  // same seal, same hashes — only the moment of naming moved.
+  state.reportId = 'SW-' + today().replace(/-/g, '') + '-' +
+    Math.random().toString(36).slice(2, 7).toUpperCase();
   state.txScanCoverage = null;
   state.pack = null;
   // Reset run evidence, but respect a server cooldown that has not expired.
@@ -1957,6 +2154,10 @@ function analyzeFlags() {
   // transfer — exclude it so the report can't print an impossible 100B+ move.
   const MAX_PLAUSIBLE_XRP = 100_000_000_000;
   for (const t of state.txs) {
+    // A rejected transaction is evidence, not movement. It stays in state.txs
+    // — coverage and the live feed read it — but it may not become a large
+    // transfer, a flag, or a number in the volume line.
+    if (!txSucceeded(t)) continue;
     if (t.currency === 'XRP' && t.amount >= MAX_PLAUSIBLE_XRP) {
       log('dropped implausible XRP amount (data artifact): ' + fmt(t.amount, 0) + ' ' + (t.hash || ''));
       continue;
@@ -3214,7 +3415,25 @@ const ordinaryDeltaXRP = () => totalDeltaXRP() + escrowDeltaAdjustXRP();
 // Wide-shot activity across the watched wallets (ALL sizes, not just the ≥1M
 // whale moves). Shadow Volume stays the spotlight; these are the full totals.
 // XRP-currency payments only; the >=100B guard excludes partial-payment artifacts.
-const totalTxXRP = () => state.txs.reduce((a, t) => a + (t.currency === 'XRP' && n(t.amount) > 0 && n(t.amount) < 1e11 ? n(t.amount) : 0), 0);
+// ── A TRANSACTION THAT FAILED IS NOT MOVEMENT ─────────────────────────────
+//
+// The ledger records rejections as faithfully as it records payments, and the
+// evidence store keeps both — correctly, because "a wallet tried to move a
+// billion XRP and could not" is a fact worth holding. But the Amount on a
+// failed transaction is the sum it was REFUSED, and a partial payment's Amount
+// is a ceiling rather than a delivery, so counting either as movement prints a
+// number that never happened.
+//
+// Measured on the committed evidence for 2026-09-12: 110 failed transactions
+// out of 52,017 carried 23,000,031,350 of the "XRP moved" total, against
+// 112,462,205 that actually moved. Two tenths of one percent of the rows
+// produced ninety-nine and a half percent of the headline — which is how a
+// report came to claim 216.41B XRP, twice the total supply of the asset.
+//
+// An empty tx_result means a row from a path that never carried the field, and
+// is treated as movement so nothing already working is silently dropped.
+const txSucceeded = t => !t || !t.tx_result || t.tx_result === 'tesSUCCESS';
+const totalTxXRP = () => state.txs.reduce((a, t) => a + (txSucceeded(t) && t.currency === 'XRP' && n(t.amount) > 0 && n(t.amount) < 1e11 ? n(t.amount) : 0), 0);
 const activeWalletCount = () => { const s = {}; state.txs.forEach(t => { if (t.account) s[t.account] = 1; }); return Object.keys(s).length; };
 
 // (New-funded-accounts-per-day now comes directly from XRPScan daily metrics'
@@ -5843,6 +6062,13 @@ function collectDiscoveryCandidates(pack) {
         total_value_xrp: 0,
         max_value_xrp: 0,
         tx_count: 0,
+        // ── WHICH TRANSACTIONS, NOT HOW MANY LOOKS ────────────────────────
+        // Recurrence used to count SCANS, so a candidate seen three mornings
+        // running scored as "recurring across 3 scans" when all three were the
+        // same transaction re-observed. That is scan persistence, not repeated
+        // behaviour, and it was worth +35 of a 175/200 score. The distinct
+        // ledger events are recorded here and the credit is earned from them.
+        qualifying_hashes: new Set(),
         last_seen: null,
         first_seen: null,
         active_last_24h: false,
@@ -5869,6 +6095,9 @@ function collectDiscoveryCandidates(pack) {
       const _implausible = (_v != null && _v >= 100000000000);
       if (fields.reason && !_implausible) rec.reasons.push(fields.reason);
       if (fields.related_watched)     fields.related_watched.forEach(w => rec.related_watched_wallets.add(w));
+      // The ledger event this sighting rests on. An implausible amount is not
+      // evidence of anything, so its hash does not count either.
+      if (fields.hash && !_implausible) rec.qualifying_hashes.add(String(fields.hash));
       if (_v != null && !_implausible) {
         rec.total_value_xrp += _v;
         if (_v > rec.max_value_xrp) rec.max_value_xrp = _v;
@@ -5902,6 +6131,7 @@ function collectDiscoveryCandidates(pack) {
                 (t.from ? _swWho(t.from, t.sender_label, { bare: true }) : (t.sender_label || 'unknown sender')),
         value_xrp: n(t.amount),
         tx_count: 1,
+        hash: t.hash,
         last_seen: t.ts || t.timestamp,
         active_last_24h: true,  // large_transfers are window-scoped
         // Resolved, not raw: this Set is also fed by the related-offer path,
@@ -6120,6 +6350,10 @@ Object.keys(flowMap).forEach(addr => {
   candidates.forEach(rec => {
     rec.sources = Array.from(rec.sources);
     rec.related_watched_wallets = Array.from(rec.related_watched_wallets);
+    // A Set does not survive storage or the wire; the recurrence rule reads
+    // this on candidates loaded back from localStorage, so it leaves here as
+    // an array like everything else.
+    rec.qualifying_hashes = Array.from(rec.qualifying_hashes || []);
     rec.is_already_watched = _isWatchedAddress(rec.address);
     // Detect dust-only
     rec.is_dust_only = rec.total_value_xrp > 0 && rec.total_value_xrp < 1
@@ -6254,6 +6488,12 @@ function runAutoWalletDiscovery(pack) {
       first_seen: firstSeen,
       last_seen: nowISO,
       seen_count: seenCount,
+      // The union across every scan that has seen this candidate. seen_count
+      // still says how many mornings it appeared; THIS says how many distinct
+      // ledger events it appeared on, and only the second earns recurrence.
+      qualifying_hashes: Array.from(new Set(
+        (prev && prev.qualifying_hashes ? prev.qualifying_hashes : [])
+          .concat(Array.from(c.qualifying_hashes || [])))),
       related_watched_wallets: c.related_watched_wallets,
       total_value_xrp: c.total_value_xrp,
       max_value_xrp: c.max_value_xrp,
@@ -6843,6 +7083,17 @@ if (typeof window !== 'undefined') {
 
   // ── 2. classifyCandidateWallet(candidate, pack) ───────────────
   // 12-tier classification per audit spec.
+  // Distinct qualifying ledger events behind a candidate. A candidate stored
+  // before hashes were tracked has none recorded, and gets no recurrence credit
+  // rather than inheriting it from a scan counter — it never earned it on
+  // distinct events, and quietly grandfathering it would keep the old claim
+  // alive under a new name.
+  function _distinctQualifyingTx(c) {
+    const h = c && c.qualifying_hashes;
+    return Array.isArray(h) ? new Set(h).size : (h && typeof h.size === 'number' ? h.size : 0);
+  }
+  if (typeof window !== 'undefined') window._swDistinctQualifyingTx = _distinctQualifyingTx;
+
   function classifyCandidateWallet(c, pack) {
     if (!c) return 'LOW_VALUE_SPAM';
     const sources = c.sources || [];
@@ -6903,7 +7154,11 @@ if (typeof window !== 'undefined') {
     // POSITIVE WEIGHTS (audit-specified)
     if (sources.includes('large_transfer') && maxVal >= 1_000_000)  score += 50;  // destination of large transfer ≥1M XRP
     if (sources.includes('receiver_followthrough'))                  score += 40;  // receiver still holding after next-hop
-    if (seen >= 3)                                                    score += 35;  // repeated across 3+ scans
+    // Recurrence is earned from DISTINCT qualifying transactions, never from
+    // being looked at three times. rBXAyX…hueQ scored 175/200 partly on
+    // "Recurring across 3 scans" with exactly ONE qualifying event in the whole
+    // committed history.
+    if (_distinctQualifyingTx(c) >= 3)                                score += 35;  // 3+ distinct qualifying transactions
     if (sources.includes('exchange_adjacent'))                        score += 30;  // exchange-adjacent flow
     if (sources.includes('related_offer'))                            score += 25;  // related offer candidate
     if (c.repeated_mid_size)                                          score += 25;  // repeated mid-size flow
@@ -7006,7 +7261,16 @@ if (typeof window !== 'undefined') {
     if (c.repeated_mid_size)                        reasons.push('Repeated mid-size flow pattern');
     if ((c.shared_counterparty_count || 0) >= 3)    reasons.push('Common counterparty across ' + c.shared_counterparty_count + ' watched wallets');
     if (c.repeated_dest_tag)                        reasons.push('Repeated destination-tag fingerprint');
-    if ((c.seen_count || 0) >= 3)                   reasons.push('Recurring across ' + c.seen_count + ' scans');
+    const _distinct = _distinctQualifyingTx(c);
+    if (_distinct >= 3) reasons.push('Recurring across ' + _distinct + ' distinct transactions');
+    else if ((c.seen_count || 0) >= 3) {
+      // Said plainly rather than dropped. Three sightings of one transaction is
+      // a fact about the scanner, not about the wallet, and the report should
+      // not be able to imply otherwise.
+      reasons.push('Seen in ' + c.seen_count + ' scans, but on ' +
+        (_distinct || 'no') + ' distinct transaction' + (_distinct === 1 ? '' : 's') +
+        ' — scan persistence, not repeated behaviour');
+    }
     return Array.from(new Set(reasons));
   }
 
@@ -8088,8 +8352,11 @@ if (typeof window !== 'undefined') {
       if (rlBal >= 100_000_000) notes.push('Richlist balance ≥100M XRP — top-tier holder.');
       else if (rlBal >= 10_000_000) notes.push('Richlist balance ≥10M XRP — significant holder.');
     }
-    if (n(c.seen_count) >= 3) {
-      addSignal('pattern_memory', 'Repeated across ' + c.seen_count + ' scans', { seen_count: c.seen_count });
+    const _distinctTx = (typeof window !== 'undefined' && window._swDistinctQualifyingTx)
+      ? window._swDistinctQualifyingTx(c) : 0;
+    if (_distinctTx >= 3) {
+      addSignal('pattern_memory', 'Repeated across ' + _distinctTx + ' distinct transactions',
+        { distinct_qualifying_tx: _distinctTx, seen_count: c.seen_count });
     }
     if (sources.includes('exchange_adjacent')) {
       addSignal('exchange_adjacent', 'Exchange-adjacent flow');
@@ -10563,6 +10830,15 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     walletsChecked: 0,
     txWalletsTotal: 0,
     txWalletsChecked: 0,
+    // The evidence walk is the LONGEST part of a run — measured at 463 seconds
+    // on 2026-09-14 — and until these existed it was the only part with no
+    // number behind it. The screen sat at one percentage for nearly eight
+    // minutes and the operator's reading was "it stopped".
+    evidenceWallets: 0,
+    evidenceTotal:   0,
+    evidenceRequests: 0,
+    evidenceAttempt: 0,
+    evidenceWaitingOn: '',
     newXrplObservations: 0,
     storedTransactionsAnalyzed: 0,
     queueCount:     0,
@@ -10590,6 +10866,12 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     TX_PROGRESS:      function(s) { return 'Transaction evidence: ' + (s.txWalletsChecked||0) + ' of ' +
       (s.txWalletsTotal||s.walletsTotal||0) + ' wallets proved, ' + (s.newXrplObservations||0).toLocaleString() +
       ' new XRPL observations, ' + (s.storedTransactionsAnalyzed||0).toLocaleString() + ' stored transactions loaded.'; },
+    EVIDENCE:         function(s) {
+      var n = s.evidenceWallets || 0, t = s.evidenceTotal || 0;
+      return 'Walking the ledger for evidence' + (t ? ': ' + n + ' of ' + t + ' wallets' : '') +
+        (s.evidenceRequests ? ' \u00b7 ' + s.evidenceRequests + ' XRPL reads' : '') +
+        (s.evidenceAttempt > 1 ? ' \u00b7 attempt ' + s.evidenceAttempt : '') + '.';
+    },
     BALANCE:          function() { return 'Checking balances against local memory.'; },
     FLOW:             function() { return 'Wallet scan is complete. I\u2019m checking large transfers and receiver behavior.'; },
     NEWS:             function() { return 'I\u2019m checking the news lane now.'; },
@@ -10611,6 +10893,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     IDLE:            0,
     INIT:            5,
     LEDGER:          15,
+    EVIDENCE:        14,   // dynamic 5..15 in render — it runs BEFORE the wallet pass
     WALLET_PROGRESS: 45,   // dynamic 15..45 in render
     TX_PROGRESS:     54,   // dynamic 50..58 in render
     BALANCE:         50,
@@ -10632,6 +10915,7 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     IDLE:            'idle',
     INIT:            'listening',
     LEDGER:          'scanning',
+    EVIDENCE:        'scanning',
     WALLET_PROGRESS: 'scanning',
     TX_PROGRESS:     'scanning',
     BALANCE:         'thinking',
@@ -10687,7 +10971,14 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       var wrap   = document.getElementById('xaiMissionProgress');
       if (!stepEl || !pctEl || !fillEl) return;
       var phase = XAI_SCAN_PROGRESS.phase || 'IDLE';
-      stepEl.textContent = phase === 'WALLET_PROGRESS'
+      stepEl.textContent = phase === 'EVIDENCE'
+        ? 'EVIDENCE ' + XAI_SCAN_PROGRESS.evidenceWallets + '/' +
+          (XAI_SCAN_PROGRESS.evidenceTotal || XAI_SCAN_PROGRESS.walletsTotal || '?') +
+          (XAI_SCAN_PROGRESS.evidenceRequests
+            ? ' \u00b7 ' + XAI_SCAN_PROGRESS.evidenceRequests.toLocaleString() + ' READS' : '') +
+          (XAI_SCAN_PROGRESS.evidenceAttempt > 1
+            ? ' \u00b7 TRY ' + XAI_SCAN_PROGRESS.evidenceAttempt : '')
+        : phase === 'WALLET_PROGRESS'
         ? 'WALLETS ' + XAI_SCAN_PROGRESS.walletsChecked + '/' + XAI_SCAN_PROGRESS.walletsTotal
         : phase === 'TX_PROGRESS'
           ? 'TRANSACTIONS ' + XAI_SCAN_PROGRESS.txWalletsChecked + '/' + (XAI_SCAN_PROGRESS.txWalletsTotal||XAI_SCAN_PROGRESS.walletsTotal) +
@@ -10698,6 +10989,12 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       if (typeof pct === 'undefined') pct = 0;
       // ERROR_WAIT: hold previous percent, just style degraded
       if (pct === -1) pct = _lastRenderedPct;
+      // The evidence walk owns 5..15%, the block before the wallet pass. It is
+      // the longest phase of the run, so it must be the one that MOVES.
+      if (phase === 'EVIDENCE' && XAI_SCAN_PROGRESS.evidenceTotal > 0) {
+        var evPct = Math.min(1, XAI_SCAN_PROGRESS.evidenceWallets / XAI_SCAN_PROGRESS.evidenceTotal);
+        pct = Math.round(5 + (evPct * 10));
+      }
       // Wallet progress: scale within wallet block (15..45%)
       if (phase === 'WALLET_PROGRESS' && XAI_SCAN_PROGRESS.walletsTotal > 0) {
         var walletPct = XAI_SCAN_PROGRESS.walletsChecked / XAI_SCAN_PROGRESS.walletsTotal;
@@ -10717,6 +11014,44 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     } catch (_) {}
   }
   if (typeof window !== 'undefined') window.renderXaiMissionUI = _renderMissionUI;
+  // Published by the delta evidence layer as the server streams its progress.
+  // Kept beside updateShadowTxProgress because it is the same kind of thing:
+  // a phase that knows its own numbers reporting them to the one place the
+  // gauges read.
+  if (typeof window !== 'undefined') window.updateShadowEvidenceProgress = function(m) {
+    m = m || {};
+    if (m.total !== undefined) XAI_SCAN_PROGRESS.evidenceTotal = Number(m.total) || 0;
+    if (m.done !== undefined) XAI_SCAN_PROGRESS.evidenceWallets = Number(m.done) || 0;
+    if (m.requests !== undefined) XAI_SCAN_PROGRESS.evidenceRequests = Number(m.requests) || 0;
+    if (m.attempt !== undefined) XAI_SCAN_PROGRESS.evidenceAttempt = Number(m.attempt) || 0;
+    if (m.waiting_on !== undefined) XAI_SCAN_PROGRESS.evidenceWaitingOn = String(m.waiting_on || '');
+    if (m.done_phase !== true) XAI_SCAN_PROGRESS.phase = 'EVIDENCE';
+    // The smoother owns the dial — its 120ms ticker rewrites whatever
+    // _renderMissionUI puts there — so the real number has to be given to IT,
+    // not only painted. Told nothing, it creeps; told the truth, it tracks.
+    try {
+      if (XAI_SCAN_PROGRESS.evidenceTotal > 0 && window.XAI_PROGRESS_SMOOTHER &&
+          typeof window.XAI_PROGRESS_SMOOTHER.setTarget === 'function') {
+        var share = Math.min(1, XAI_SCAN_PROGRESS.evidenceWallets / XAI_SCAN_PROGRESS.evidenceTotal);
+        window.XAI_PROGRESS_SMOOTHER.setTarget(Math.round(5 + share * 10));
+      }
+    } catch (_) {}
+    // And the runtime phase panel, which is a THIRD model of the same run and
+    // was still naming Wallet Snapshot as both completed and running.
+    try {
+      if (window.SW_PHASE_PROGRESS_RUNTIME_20260820 &&
+          typeof window.SW_PHASE_PROGRESS_RUNTIME_20260820.setPhase === 'function') {
+        window.SW_PHASE_PROGRESS_RUNTIME_20260820.setPhase('EVIDENCE_ACQUISITION',
+          XAI_SCAN_PROGRESS.evidenceTotal
+            ? Math.round(100 * XAI_SCAN_PROGRESS.evidenceWallets / XAI_SCAN_PROGRESS.evidenceTotal)
+            : 0,
+          XAI_SCAN_PROGRESS.evidenceWallets + ' of ' + XAI_SCAN_PROGRESS.evidenceTotal +
+            ' wallets walked' + (XAI_SCAN_PROGRESS.evidenceAttempt > 1
+              ? ' \u00b7 attempt ' + XAI_SCAN_PROGRESS.evidenceAttempt : ''));
+      }
+    } catch (_) {}
+    try { _renderMissionUI(); } catch (_) {}
+  };
   if (typeof window !== 'undefined') window.updateShadowTxProgress = function(m) {
     m=m||{};
     XAI_SCAN_PROGRESS.txWalletsTotal=Number(m.target_wallets)||XAI_SCAN_PROGRESS.walletsTotal||0;
@@ -11908,6 +12243,11 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     READY:           2,
     IDLE:            2,
     INIT:            15,
+    // The evidence walk owns the band before the wallet pass. Without an entry
+    // here the lookup below fell through to a ceiling of 100 and the soft creep
+    // ran the dial to 98% — while the run was two minutes into its longest
+    // phase with 234 of 408 wallets walked.
+    EVIDENCE:        16,
     LEDGER:          26,
     WALLET_PROGRESS: 45,
     TX_PROGRESS:     58,
@@ -11947,7 +12287,14 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       try {
         var phase = (window.XAI_SCAN_PROGRESS && window.XAI_SCAN_PROGRESS.phase) || 'IDLE';
         var ceil = PHASE_CEILING[phase];
-        if (typeof ceil === 'undefined') ceil = 100;
+        // An UNKNOWN phase used to default to a ceiling of 100, which let the
+        // soft creep below run the dial to 98% for as long as that phase lasted.
+        // A phase this table has never heard of is exactly the phase whose
+        // duration is unknown, so it gets no creep headroom at all: the dial
+        // holds where it is rather than inventing progress. Adding a phase
+        // elsewhere can no longer silently produce a fake 98%.
+        var known = typeof ceil !== 'undefined';
+        if (!known) ceil = Math.max(this.targetPct, this.visualPct);
         // DONE / FAILED: snap to 100
         if (phase === 'DONE' || phase === 'FAILED') {
           this.targetPct = 100;
@@ -14495,6 +14842,31 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
   //  Patch MORNING_REPORT_FLOAT.copy + download for source modes:
   //  copy = none, download = compact
   // ═══════════════════════════════════════════════════════════
+  // ── THE COPY IS A PUBLICATION, AND PUBLICATIONS HAVE A FIELD LIMIT ────────
+  // Copy is the paste-into-the-post path — it is already a distinct projection
+  // here (sources stripped, sourceMode 'none'), unlike download, which must
+  // stay byte-identical to the canonical text.
+  //
+  // The 4,000-character budget is applied HERE, at the boundary, and not by
+  // wrapping buildMorningStoryText. canonicalMorningStory runs three stages
+  // after the renderer — finalizeReportPresentation, the daily gate and the
+  // NEWS USED block — so a budget enforced inside the render chain bounds
+  // nothing. SW-20260915-R8U2E recorded public_morning_chars_4k: 3900 and
+  // delivered 5,149 characters; the morning's report could not be posted.
+  //
+  // Resolved at call time, not at load time: layer 31 installs after this file.
+  // If it is not present the full text is returned rather than a silent trim —
+  // an over-long copy is visible, a quietly truncated one is not.
+  // Proof: scripts/public-morning-4k.test.js
+  function _publicMorningText(txt, pack) {
+    try {
+      var G = window.SW_PUBLIC_MORNING_4K_20260817;
+      if (G && typeof G.publicText === 'function') return G.publicText(txt, pack);
+    } catch (_) {}
+    return txt;
+  }
+  window._publicMorningText = _publicMorningText;
+
   if (window.MORNING_REPORT_FLOAT) {
     var MRF = window.MORNING_REPORT_FLOAT;
     // Source mode config
@@ -14511,8 +14883,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       // as a fallback), and ALWAYS route through copySafe — which falls back to a
       // textarea+execCommand copy if the async clipboard API is blocked. Previously
       // a blocked clipboard write failed silently with no fallback ("won't copy").
-      var txt = MRF._copyLastReport ||
-                (typeof state !== 'undefined' && state.morningStoryReport) || '';
+      var txt = _publicMorningText(MRF._copyLastReport ||
+                (typeof state !== 'undefined' && state.morningStoryReport) || '');
       try {
         if (typeof copySafe === 'function') { copySafe(txt, 'Morning Report'); return; }
         if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -15773,7 +16145,10 @@ async function sha256(text) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 async function buildEvidenceSeal(p, report, bundle) {
-  const reportId = 'SW-' + today().replace(/-/g, '') + '-' + Math.random().toString(36).slice(2, 7).toUpperCase();
+  // Adopted from the run when there is one. A seal that minted a fresh id here
+  // would name a report the evidence store has never heard of.
+  const reportId = (state && state.reportId) ||
+    ('SW-' + today().replace(/-/g, '') + '-' + Math.random().toString(36).slice(2, 7).toUpperCase());
   const scanId = 'SC-' + Date.now().toString(36).toUpperCase();
   const morningText=(state&&state.morningStoryReport)||'';
   const [pubHash, fullHash, morningHash] = await Promise.all([sha256(report), sha256(bundle), sha256(morningText)]);
@@ -16141,13 +16516,47 @@ function _emptyPatternMemory() {
   return { version: 'v1', snapshots: [], wallets: {}, patterns: {}, updated_at: '' };
 }
 
+// ── THE ENTRIES ALREADY BANKED HAVE TO GO ─────────────────────────────────
+//
+// Pattern memory persists in the operator's browser across runs, so fixing the
+// movement figures does not clear what was recorded before the fix. Every
+// self-directed "repeated large transfer" in the store came from the same
+// defect and describes something that never happened.
+//
+// This removes exactly those — a sender_receiver key whose two addresses are
+// the same — and nothing else. Pattern memory is a derived cache rebuilt from
+// evidence, never evidence itself, so dropping a contaminated entry costs
+// nothing that cannot be re-earned. It says what it removed rather than doing
+// it silently, because quietly rewriting stored state is how a defect becomes
+// folklore.
+function _purgeSelfDirected(memory) {
+  try {
+    const patterns = (memory && memory.patterns) || {};
+    const removed = Object.keys(patterns).filter(k => {
+      const parts = String(k).split(':');
+      return parts[0] === 'sender_receiver' && parts.length >= 3 && parts[1] === parts[2];
+    });
+    if (!removed.length) return memory;
+    removed.forEach(k => { delete patterns[k]; });
+    try {
+      if (typeof log === 'function') {
+        log('Pattern memory: dropped ' + removed.length +
+          ' self-directed transfer pattern(s) — a wallet paying itself is not a ' +
+          'transfer between parties, and these were recorded from failed payments.');
+      }
+    } catch (_) {}
+    try { localStorage.setItem(PATTERN_MEMORY_KEY, JSON.stringify(memory)); } catch (_) {}
+  } catch (_) {}
+  return memory;
+}
+
 // Load from localStorage (or create fresh)
 function getPatternMemory() {
   try {
     const raw = localStorage.getItem(PATTERN_MEMORY_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && parsed.version === 'v1') return parsed;
+      if (parsed && parsed.version === 'v1') return _purgeSelfDirected(parsed);
     }
   } catch (_) {}
   return _emptyPatternMemory();
@@ -16405,7 +16814,16 @@ function updatePatternMemory(pack) {
 
   // 1. Repeated sender → receiver large transfers
   (pack.large_transfers || []).forEach(t => {
-    if (t.from && t.to) {
+    // ── A WALLET PAYING ITSELF IS NOT A TRANSFER BETWEEN PARTIES ─────────
+    // "Repeated large transfer: X → X" asserts a relationship between two
+    // wallets, and there is only one. SW-20260915-R8U2E published three of
+    // these at [HIGH], the largest claiming 308 sightings of one billion XRP
+    // moving from rSwGFM…4Cbm to rSwGFM…4Cbm — failed partial payments whose
+    // Amount is a ceiling and whose balance delta is ten drops of fee.
+    //
+    // The movement totals no longer count those, but this memory had already
+    // banked them, so the pattern outlived the defect that created it.
+    if (t.from && t.to && t.from !== t.to) {
       const key = 'sender_receiver:' + t.from + ':' + t.to;
       const sLabel = _swWho(t.from, t.sender_label);
       const rLabel = _swWho(t.to, t.receiver_label);
@@ -19158,7 +19576,18 @@ function _resolveReportSource(kind) {
     }
     case 'error-log': {
       const t = txt('errorLog');
-      return { text: t, ext: 'txt', ok: !!(t && !/^No errors yet/i.test(t)) };
+      // The errors AND what the run was doing when they happened. Errors alone
+      // were not enough: the failure that stopped three reports never raised
+      // one — it was caught, logged as narrative, and fell back. Section 09 was
+      // empty every time while the answer sat in a DOM element nobody exports.
+      const narrative = Array.isArray(state.runLog) ? state.runLog : [];
+      const parts = [];
+      parts.push(t && !/^No errors yet/i.test(t) ? t.trim() : '[no errors raised this run]');
+      parts.push('');
+      parts.push('=== RUN LOG (' + narrative.length + ' lines' +
+        (narrative.length >= 800 ? ', oldest trimmed' : '') + ') ===');
+      parts.push(narrative.length ? narrative.join('\n') : '[nothing logged this run]');
+      return { text: parts.join('\n'), ext: 'txt', ok: !!(narrative.length || (t && !/^No errors yet/i.test(t))) };
     }
     case 'github-archive': {
       const a=state.githubArchive||{attempted:false,status:'NOT_ATTEMPTED'};
@@ -19381,6 +19810,7 @@ function _buildTotalFile(sections, modeLabel) {
   const divider = '============================================================';
   const reportId = (state.pack && (state.pack.report_id || state.pack.scan_id)) ||
                    (state.seal && state.seal.report_id) ||
+                   state.reportId ||
                    state.lastReportId || 'unknown';
   const generatedAt = new Date().toISOString();
   const lines = [];
@@ -19429,8 +19859,15 @@ function buildShadowWatchTotalFile()   { return _buildTotalFile(_TOTAL_REPORT_SE
 function buildShadowWatchDebugFile()   { return _buildTotalFile(_TOTAL_DEBUG_SECTIONS,  'TOTAL DEBUG FILE'); }
 
 function _makeFilename(tag) {
+  // ── THE RUN HAS A NAME BEFORE IT HAS A PACK ────────────────────────────
+  // state.reportId is minted at scan entry (:1671) and state.pack is nulled on
+  // the very next lines, so during a run the first two sources here are empty
+  // and every mid-run export fell through to 'unknown' — in the header AND in
+  // the filename, which is how two debug files from the same scan arrive named
+  // for nothing. The id existed the whole time; nothing read it.
   const reportId = (state.pack && (state.pack.report_id || state.pack.scan_id)) ||
                    (state.seal && state.seal.report_id) ||
+                   state.reportId ||
                    state.lastReportId || 'unknown';
   const scanDate = new Date().toISOString().slice(0, 10);
   return 'ShadowWatch_' + tag + '_' + reportId + '_' + scanDate + '.txt';
@@ -21496,6 +21933,14 @@ async function run() {
       // canonicalMorningStory so the popup and the file can never disagree
       // about which brief the day has.
       state.morningStoryReport = canonicalMorningStory(p, { rebuild: true });
+      // MEASURE THE PUBLICATION, DO NOT PERFORM IT.
+      // The canonical text is unchanged by this call; only the pack's
+      // public_morning_chars_* fields are written, so TOTAL DEBUG reports how
+      // large the copy will be before anyone presses Copy. SW-20260915-R8U2E
+      // is why: its debug said 3,900 characters for an intermediate render no
+      // surface ever published, while the file handed over was 5,149.
+      if (typeof window._publicMorningText === 'function')
+        window._publicMorningText(state.morningStoryReport, p);
     } catch (e) { elog('v3.24 morning story build', e); }
 
     bundle = buildBundle(p, null);
@@ -23230,9 +23675,13 @@ function installCommandCenterButtons() {
   if (copyBtn) {
     copyBtn.addEventListener('click', () => {
       // v3.23: copy Morning Story if available; fall back to structured report
-      const t = state.morningStoryReport
+      const full = state.morningStoryReport
              || (document.getElementById('mainReport')?.textContent || '');
-      if (!t || /^Run scan first/i.test(t)) { log('No report yet — run a scan.'); return; }
+      if (!full || /^Run scan first/i.test(full)) { log('No report yet — run a scan.'); return; }
+      // Same publication boundary as the drawer's Copy. Both buttons paste into
+      // the same 4,000-character field, so they must agree about what fits.
+      const t = (typeof window._publicMorningText === 'function')
+        ? window._publicMorningText(full) : full;
       try {
         if (typeof copySafe === 'function') copySafe(t, 'Morning Story Report');
         else navigator.clipboard?.writeText(t);
@@ -26053,12 +26502,22 @@ function shadowWatchAutoWalletFinderSmokeTest() {
   check('Large receiver score is reasonably high (≥100)', score1 >= 100);
   check('Dust-only score is heavily penalized (<35)', score2 < 35);
 
-  // 4. Repeated receivers (seen_count >=3) push score higher
-  const oneScanCand = { ...largeCand, seen_count: 1 };
-  const fourScanCand = { ...largeCand, seen_count: 4 };
+  // 4. Recurrence is earned from DISTINCT QUALIFYING TRANSACTIONS, never from
+  //    a scan counter. This previously asserted that seen_count 4 outscored
+  //    seen_count 1 — the rule that gave a live candidate +35 of a 175/200 for
+  //    three scans that had all re-observed the SAME transfer. Both directions
+  //    are asserted now, so the new rule cannot quietly become the old one.
+  const oneScanCand = { ...largeCand, seen_count: 1, qualifying_hashes: ['A'.repeat(64)] };
+  const fourScanCand = { ...largeCand, seen_count: 4, qualifying_hashes: ['A'.repeat(64)] };
+  const threeTxCand = { ...largeCand, seen_count: 4,
+    qualifying_hashes: ['A'.repeat(64), 'B'.repeat(64), 'C'.repeat(64)] };
   const scoreOneScan  = AWF.scoreCandidateWallet(oneScanCand, mockPack);
   const scoreFourScan = AWF.scoreCandidateWallet(fourScanCand, mockPack);
-  check('Repeated across 3+ scans → higher score', scoreFourScan > scoreOneScan);
+  const scoreThreeTx  = AWF.scoreCandidateWallet(threeTxCand, mockPack);
+  check('Four scans of ONE transaction score no higher than one scan of it',
+    scoreFourScan === scoreOneScan);
+  check('Three DISTINCT qualifying transactions → higher score',
+    scoreThreeTx > scoreFourScan);
 
   // 5. Build suggested list — confirms ranking + filtering
   const suggested = AWF.buildSuggestedWatchlistAdditions(mockPack);

@@ -29,9 +29,28 @@ function _trunc(addr){
   if(!addr||addr.length<12) return addr||'unknown';
   return addr.slice(0,6)+'\u2026'+addr.slice(-4);
 }
-function _today(){
-  var d=new Date();
-  return d.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+// ── THE REPORT'S DATE, NOT THE MACHINE'S ──────────────────────────────────
+//
+// This printed the operator's LOCAL calendar date at the moment of rendering,
+// which is two different mistakes wearing one line:
+//
+//   new Date()            the clock when the banner was drawn, not the day the
+//                         report is about
+//   no timeZone: 'UTC'    so a run at 02:20 UTC reads as the previous day for
+//                         anyone west of Greenwich
+//
+// On SW-20260915-IWBGW both bit at once: the banner said "September 14, 2026"
+// while the seal, the structured report, the filename and the archive path all
+// said 2026-09-15. A forensic report that disagrees with its own receipt about
+// what day it is undermines every other number on the page.
+//
+// The pack's date is the report's date. Same source and same formatting as the
+// Daily Report's header, so the two cannot drift apart again.
+function _today(pack){
+  var stamp = pack && pack.date;
+  var d = stamp ? new Date(String(stamp) + 'T00:00:00Z') : new Date();
+  if (isNaN(d)) d = new Date();
+  return d.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric',timeZone:'UTC'});
 }
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -1526,7 +1545,7 @@ function assemblePublicReport(pack){
   var BANNER=((typeof buildBrandedHeader==='function')
                 ? buildBrandedHeader()
                 : '\uD83E\uDE78 \u211C\u1D07\u1D05\u1D04\u1D00\u1D0D\u1D05\u029C\u1D0F\u029C\u1D1B\u1D07\u0280 \uD83E\uDE78\n\uFF33\uFF28\uFF21\uFF24\uFF2F\uFF37 \uFF37\uFF21\uFF34\uFF23\uFF28')
-             + '\n' + _today();
+             + '\n' + _today(pack);
 
   var exec  = _buildExecutiveSummary(interps, pack);
   var wmm   = _buildWhatMatteredMost(interps, pack);
@@ -1891,6 +1910,30 @@ function assertLabelProvenance(report, interpretations){
         allRefs.push(r.label);
     });
   });
+  // ── THE ESCROW REGISTRY IS PROVENANCE, AND WAS BEING IGNORED ────────────
+  //
+  // The report names Ripple every day, in one sentence that is not a wallet
+  // claim at all: "Ripple escrow: 31.70B XRP locked now … registry check 20/20
+  // known Ripple-labeled addresses". That name is backed by
+  // src/shared/ripple-escrow-registry.js — twenty addresses, owner 'Ripple',
+  // sourced from Ripple's published xrp-ledger.toml via XRPSCAN, verified and
+  // committed to source.
+  //
+  // Provenance could previously only come from interpretations[].source_refs,
+  // which are wallet-derived, so on any morning where no Ripple-labelled wallet
+  // happened to appear the sentence became an unprovenanced claim and took the
+  // whole report down with it.
+  //
+  // This is the same standard already applied to the identity registry a few
+  // hundred lines up — "operator-curated and committed to source, so it is
+  // legitimate provenance". Read from the registry itself, so removing the file
+  // removes the provenance with it rather than leaving a hard-coded exemption.
+  _safe(function(){
+    var reg = (typeof window!=='undefined') && window.SW_RIPPLE_ESCROW_REGISTRY;
+    if(reg && _arr(reg.accounts).length){
+      _arr(reg.accounts).forEach(function(a){ if(a&&a.owner) allRefs.push(a.owner); });
+    }
+  }, null);
   for(var i=0;i<exchanges.length;i++){
     var ex=exchanges[i];
     if(scanned.indexOf(ex)>-1){
@@ -1917,8 +1960,23 @@ function assertLabelProvenance(report, interpretations){
 // of what it is. Keeps every finding, every number and every sentence — drops
 // only the identity claim we could not stand behind, which is the one thing that
 // actually had to go.
+// ── A NEUTRAL PHRASE MUST NOT CONTAIN THE NAME IT REPLACES ────────────────
+//
+// 'Ripple' used to map to 'a Ripple escrow wallet'. The replacement carried the
+// very token being removed, so the assertion fired again on the repaired text
+// and no number of attempts could ever satisfy it. SW-20260915-20EV1 logged
+//
+//   Audit repair attempted but still failing: assertLabelProvenance
+//   Audit FAILED (1 failures). assertLabelProvenance: "Ripple" named in report
+//
+// twice, then published the KGMT fallback — a morning with no volume, no
+// attribution and no narrative, because of one word in a lookup table.
+//
+// Every other entry was already neutral: Bitso becomes "an exchange wallet",
+// which contains no "Bitso". These now match that, and the suite asserts the
+// property rather than the spelling, so a future entry cannot reintroduce it.
 var _NEUTRAL_FOR={
-  'Ripple':'a Ripple escrow wallet', 'Ripple Labs':'a Ripple escrow wallet',
+  'Ripple':'a public escrow wallet', 'Ripple Labs':'a public escrow wallet',
   'SBI VC Trade':'an exchange wallet'
 };
 function _repairProvenance(text, failures){
@@ -2038,7 +2096,23 @@ function _kgmtText(pack){
   // like content — say plainly that it could not be generated.
   if(!prayer)    prayer='The prayer could not be generated for this run.';
   if(!scripture) scripture='The scripture could not be generated for this run.';
-  return _KGMT_HEAD+
+  // ── A FALLBACK REPORT IS STILL A REPORT, AND IT NEEDS A DATE ───────────
+  //
+  // _KGMT_HEAD is a module-level constant, so the banner it carries is baked at
+  // parse time and has never held a date. SW-20260915-20EV1 went out with the
+  // brand header and then straight into EXECUTIVE SUMMARY — no day at all.
+  //
+  // This is the same shape as the bug the comment above describes: the prayer
+  // and scripture were once baked into that constant too, and published the
+  // literal string "[auto-rendered]". A report with no date is worse than one
+  // with the wrong date, because nothing on the page says which morning it
+  // describes.
+  //
+  // Same source and same UTC formatting as the main banner, so the fallback and
+  // the full report cannot disagree about what day it is.
+  var dated = _KGMT_HEAD.replace(/(\u2615 COFFEE & CRYPTO[^\n]*\n)/,
+    function (m) { return m + _today(pack) + '\n'; });
+  return dated+
     '\uD83D\uDE4F THE DAILY PRAYER\n'+prayer+'\n\n'+
     '\uD83D\uDCD6 THE DAILY SCRIPTURE\n'+scripture+'\n\n'+
     'SOURCES\n[No public sources available for today\u2019s fallback.]';

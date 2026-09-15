@@ -113,6 +113,10 @@
         var divider = '============================================================';
         var reportId = (typeof state !== 'undefined' && state.pack && (state.pack.report_id || state.pack.scan_id)) ||
                        (typeof state !== 'undefined' && state.seal && state.seal.report_id) ||
+                       // The id minted at scan entry. Without it a mid-run
+                       // export is named 'unknown' while the run it describes
+                       // has had a name since its first ledger read.
+                       (typeof state !== 'undefined' && state.reportId) ||
                        (typeof state !== 'undefined' && state.lastReportId) || 'unknown';
         var generatedAt = new Date().toISOString();
         var lines = [];

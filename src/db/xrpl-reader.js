@@ -1,9 +1,24 @@
 'use strict';
 const WebSocket = require('ws');
 const { randomUUID } = require('crypto');
-const db = require('./connection');
 const coverage = require('./coverage');
-const ENDPOINTS = ['wss://xrplcluster.com', 'wss://xrpl.ws', 'wss://s1.ripple.com', 'wss://s2.ripple.com'];
+const admission = require('./xrpl-admission');
+// Ordered by how they have actually behaved, not alphabetically. Across every
+// live run today: xrpl.ws carried 427 requests with ZERO refusals, s2 carried
+// 319 with one, s1 158 with one, and xrplcluster refused 15 times in 59. The
+// order matters because a run with only one wallet left to walk hands out
+// exactly one lane, and on a fresh process every lane's cost is zero — so the
+// first entry is the one that wallet gets. It should not be the strictest
+// server on the list.
+const ENDPOINTS = ['wss://xrpl.ws', 'wss://s2.ripple.com', 'wss://s1.ripple.com', 'wss://xrplcluster.com'];
+// How much one refusal counts against a lane when choosing where the next
+// wallet goes. Two seconds' worth per refusal: enough that a server refusing
+// repeatedly is steered away from, small enough that one bad moment does not
+// exile an otherwise healthy endpoint for the rest of the run.
+const REFUSAL_PENALTY_MS = 2000;
+// A cooldown longer than this is worth restarting a paged walk elsewhere rather
+// than sitting through. Below it, waiting is cheaper than re-fetching pages.
+const LANE_SWITCH_MS = 3000;
 const validatedHeaders = new Map();
 const idleReaders = [];
 function acquireReader() {
@@ -11,7 +26,8 @@ function acquireReader() {
   clearTimeout(reader.idleTimer);
   reader.deadline=Date.now()+240000;
   reader.stats={requests:0,retries:0,reconnects:0,waits_ms:0,events:[],preferred_endpoint:ENDPOINTS[0],
-    actual_endpoint:reader.sock&&reader.sock.url,transport_epoch:reader.epoch};
+    actual_endpoint:(reader.lanes&&reader.lanes.find(l=>l.sock)||{}).endpoint||null,
+    transport_epoch:reader.epoch};
   return reader;
 }
 function releaseReader(reader) {
@@ -31,11 +47,116 @@ function retryMs(error) {
   const text = String(error.message || '').match(/retry\s+in\s*~?\s*(\d+)\s*ms/i);
   return text ? Number(text[1]) : 60000;
 }
+// ── FOUR ENDPOINTS, FOUR LANES, NOT ONE SOCKET AND THREE SPARES ────────────
+//
+// The endpoint list has been four servers long from the beginning, but only
+// one of them was ever carrying traffic: connect() returned the socket it
+// already had, so every request in a run — twelve hundred of them on a
+// four-day catch-up — went down a single WebSocket to xrplcluster.com. The
+// other three were failover, reached only after the first one died or went
+// silent three times in a row.
+//
+// That made a rate limit far worse than it had to be. A refusal did not move
+// the work sideways; it waited on the same server that had just said no, and
+// because the admission clock was global, the wait applied to every worker.
+// With no retry-after hint the default wait is sixty seconds, so one refusal
+// could stall the entire roster for a minute while three idle servers sat
+// there willing to answer.
+//
+// So a Reader now holds a LANE per endpoint — its own socket, its own epoch,
+// its own clock — and spreads the roster across all four. A lane that refuses
+// cools alone.
+//
+// ── WHY A WALLET STAYS IN ONE LANE ─────────────────────────────────────────
+//
+// account_tx markers are the server's own bookmark into its own data. A marker
+// from one server means nothing to another, so a paged walk must finish where
+// it started. Lanes are therefore assigned PER WALLET, not per request: wallet
+// 1 walks on xrplcluster, wallet 2 on xrpl.ws, and each one's pages stay put.
+// A wallet whose lane fails restarts its walk on another lane rather than
+// carrying a bookmark across, which the per-wallet retry already does.
+class Lane {
+  constructor(endpoint, clock) {
+    this.endpoint = endpoint; this.sock = null; this.epoch = 0;
+    this.clock = clock; this.inFlight = 0; this.requests = 0;
+    // Wallets currently HOLDING this lane, as opposed to requests currently in
+    // it. A wallet holds its lane across the gaps between its pages, and those
+    // gaps are most of a slow walk — so counting only in-flight requests makes
+    // a busy lane look idle and every wallet piles onto the same one.
+    this.assigned = 0;
+    this.retries = 0; this.reconnects = 0; this.refusals = 0; this.retired = false;
+  }
+  // How long before this lane could carry a request, and how loaded it is.
+  // Used to choose between lanes: the one that can answer soonest wins.
+  readyIn() { return this.retired ? Infinity : this.clock.cooldownRemaining(); }
+  load() { return this.assigned * 1000 + this.inFlight; }
+
+  // ── WHY REFUSALS ARE PART OF THE COST, NOT JUST THE COOLDOWN ─────────────
+  //
+  // A cooldown expires. The server that imposed it has not changed its mind.
+  // Ordering lanes by cooldownRemaining alone meant the busiest, strictest
+  // endpoint became eligible again the instant its cooldown lapsed and
+  // promptly collected the next wallet — measured live as 63 requests and 18
+  // refusals on xrplcluster while s1 and s2 took 36 and 32 with ZERO refusals
+  // between them.
+  //
+  // A refusal is evidence about a server that outlives the wait it asked for,
+  // so it carries a lasting penalty here. This is a scheduling heuristic and
+  // mixes milliseconds with counts deliberately: the units do not need to
+  // mean anything, only the ordering does. Nothing here overrides what an
+  // endpoint asked for — a cooling lane is still skipped for its full wait.
+  cost() {
+    if (this.retired) return Infinity;
+    return this.clock.cooldownRemaining() + this.refusals * REFUSAL_PENALTY_MS + this.load();
+  }
+}
+
 class Reader {
   constructor(options = {}) {
-    this.sock = null; this.epoch = 0; this.endpointIndex = 0;
+    this.epoch = 0; this.endpointIndex = 0;
+    // One lane per endpoint. Clocks are per-endpoint and shared across Readers
+    // in this process, so two wallet walks pace against each other on the
+    // server they share — and only on that server. Injectable so the suite can
+    // drive them without real time.
+    this.lanes = ENDPOINTS.map(e => new Lane(e,
+      (options.clockFor && options.clockFor(e)) || options.clock || admission.sharedFor(e)));
     this.deadline = Date.now() + (options.budgetMs || 240000);
     this.stats = { requests: 0, retries: 0, reconnects: 0, waits_ms: 0, events: [], preferred_endpoint: ENDPOINTS[0] };
+  }
+
+  // Pick the lane that can carry a request soonest. Ties go to the least busy,
+  // so four concurrent wallets land on four different servers rather than
+  // queueing behind one.
+  pickLane(exclude) {
+    let best = null;
+    // Rotated, so equal-cost lanes are not all the same lane. Without this the
+    // first entry wins every tie and a run with one wallet always lands on one
+    // server no matter how many are configured.
+    const n = this.lanes.length;
+    const start = this.endpointIndex++ % n;
+    for (let i = 0; i < n; i++) {
+      const lane = this.lanes[(start + i) % n];
+      if (lane.retired || lane === exclude) continue;
+      if (!best || lane.cost() < best.cost()) best = lane;
+    }
+    if (!best) { if (exclude) return null; throw new Error('XRPL_ALL_ENDPOINTS_RETIRED'); }
+    return best;
+  }
+
+  // Connect ONE lane. Unlike the old connect(), this never silently returns a
+  // different server's socket: a lane is its endpoint.
+  async openLane(lane) {
+    if (lane.sock && lane.sock.readyState === WebSocket.OPEN) return lane.sock;
+    const sock = await new Promise((resolve, reject) => {
+      const ws = new WebSocket(lane.endpoint, { handshakeTimeout: 8000 });
+      ws.once('open', () => resolve(ws));
+      ws.on('error', reject);
+    });
+    lane.sock = sock; lane.epoch++; this.epoch++;
+    this.stats.actual_endpoint = lane.endpoint;
+    this.stats.transport_epoch = this.epoch;
+    this.event({ event: 'connected', endpoint: lane.endpoint, epoch: lane.epoch });
+    return sock;
   }
   event(value) {
     if (this.stats.events.length < 100) this.stats.events.push({ at: new Date().toISOString(), ...value });
@@ -47,36 +168,61 @@ class Reader {
     }
     this.stats.waits_ms += ms; await sleep(ms);
   }
+  // Any lane that will open. Used when the caller has no lane of its own —
+  // a single ledger or account_info read, which carries no marker and so has
+  // no reason to care which server answers it.
   async connect() {
-    if (this.sock && this.sock.readyState === WebSocket.OPEN) return this.sock;
-    for (let attempt = 0; attempt < ENDPOINTS.length; attempt++) {
-      const endpoint = ENDPOINTS[this.endpointIndex++ % ENDPOINTS.length];
-      try {
-        const sock = await new Promise((resolve, reject) => {
-          const ws = new WebSocket(endpoint, { handshakeTimeout: 8000 });
-          ws.once('open', () => resolve(ws));
-          ws.on('error', reject);
-        });
-        this.sock = sock; this.epoch++; this.stats.actual_endpoint = endpoint;
-        this.stats.transport_epoch = this.epoch;
-        this.event({ event: 'connected', endpoint, epoch: this.epoch }); return sock;
-      } catch (e) { this.event({ event: 'connect_failed', endpoint, reason: e.message }); }
+    for (let attempt = 0; attempt < this.lanes.length; attempt++) {
+      let lane;
+      try { lane = this.pickLane(); } catch (_) { break; }
+      try { await this.openLane(lane); return lane.sock; }
+      catch (e) {
+        lane.retired = true;
+        this.event({ event: 'connect_failed', endpoint: lane.endpoint, reason: e.message });
+      }
     }
+    // Every lane refused to open. Un-retire them all: a run that cannot reach
+    // any server now may reach one in a moment, and permanently retiring the
+    // whole pool would make the Reader useless for the rest of its life.
+    for (const lane of this.lanes) lane.retired = false;
     throw new Error('XRPL_CONNECTION_UNAVAILABLE');
   }
-  async admission() {
-    const q = db.getExecutor();
-    while (true) {
-      const reserved = (await q(`UPDATE xrpl_admission SET
-        next_at = GREATEST(next_at, cooldown_until, clock_timestamp()) + gap_ms * interval '1 millisecond',
-        updated_at = clock_timestamp() WHERE id=1
-        RETURNING extract(epoch FROM next_at - gap_ms * interval '1 millisecond') * 1000 AS admit_ms`)).rows[0];
-      const ms = Math.max(0, Number(reserved.admit_ms) - Date.now());
-      if (ms) await this.wait(ms);
-      const row = (await q('SELECT extract(epoch FROM cooldown_until)*1000 AS until_ms FROM xrpl_admission WHERE id=1')).rows[0];
-      if (Number(row.until_ms) <= Date.now()) return;
-      await this.wait(Number(row.until_ms) - Date.now());
+
+  // A lane RESERVED for one wallet's paged walk. Held for the whole walk so its
+  // markers stay on the server that issued them — and marked as held the
+  // moment it is handed out, not when its first request goes in flight.
+  //
+  // Without that reservation every concurrent walk sees four idle lanes and
+  // takes the same one. A live measurement caught exactly that: 100 requests
+  // on xrplcluster, 6 on s1, 0 on s2. The lanes existed; nothing was using
+  // them.
+  async lane() {
+    for (let attempt = 0; attempt < this.lanes.length; attempt++) {
+      let chosen;
+      try { chosen = this.pickLane(); } catch (_) { break; }
+      try {
+        await this.openLane(chosen);
+        chosen.assigned++;
+        return chosen;
+      } catch (e) {
+        chosen.retired = true;
+        this.event({ event: 'connect_failed', endpoint: chosen.endpoint, reason: e.message });
+      }
     }
+    for (const l of this.lanes) l.retired = false;
+    throw new Error('XRPL_CONNECTION_UNAVAILABLE');
+  }
+
+  // Hand the lane back. A wallet that never releases its lane makes that
+  // server look permanently busy and pushes every later wallet elsewhere.
+  releaseLane(lane) { if (lane && lane.assigned > 0) lane.assigned--; }
+  // Pacing, from the in-process clock. This used to be three database writes
+  // per request, which meant a database that could not accept writes blocked
+  // every read-only XRPL call before it was sent — and cost about two seconds
+  // of round-trips per request on the way. A rate limiter is not evidence: it
+  // needs no durability and must never be able to take the read path down.
+  async admission(lane) {
+    await lane.clock.admit(this.deadline);
   }
   raw(sock, command) {
     return new Promise((resolve, reject) => {
@@ -104,35 +250,80 @@ class Reader {
       sock.send(JSON.stringify({ ...command, id }));
     });
   }
-  async request(command, expectedEpoch) {
-    if (!['ledger', 'server_info', 'account_tx'].includes(command.command)) throw new Error('XRPL_METHOD_NOT_ALLOWED');
+  // `pin` is the lane a paged walk is bound to. Without one, any lane may
+  // answer — which is correct for a single read and wrong for a marker.
+  async request(command, expectedEpoch, pin) {
+    // Read-only methods, and only these four. account_info joined the list for
+    // the balance cross-check (src/db/balance.js): it reads an AccountRoot at a
+    // pinned ledger and cannot sign, submit or mutate anything.
+    if (!['ledger', 'server_info', 'account_tx', 'account_info'].includes(command.command)) throw new Error('XRPL_METHOD_NOT_ALLOWED');
     for (let attempt = 0; attempt <= 12; attempt++) {
-      await this.admission(); const sock = await this.connect();
-      if (expectedEpoch !== undefined && this.epoch !== expectedEpoch) throw new Error('XRPL_TRANSPORT_CHANGED');
+      const lane = pin || this.pickLane();
+      await this.admission(lane);
+      const sock = await this.openLane(lane);
+      // A pinned walk must not silently continue on a reconnected socket: the
+      // marker it holds belonged to the connection that is gone.
+      if (expectedEpoch !== undefined && (pin ? lane.epoch : this.epoch) !== expectedEpoch) {
+        throw new Error('XRPL_TRANSPORT_CHANGED');
+      }
+      lane.inFlight++;
       try {
-        this.stats.requests++;
-        const result=await this.raw(sock, command);
-        await db.getExecutor()(`UPDATE xrpl_admission SET
-          gap_ms=CASE WHEN success_streak>=31 THEN GREATEST(250,(gap_ms*0.8)::integer) ELSE gap_ms END,
-          success_streak=CASE WHEN success_streak>=31 THEN 0 ELSE success_streak+1 END WHERE id=1`);
+        this.stats.requests++; lane.requests++;
+        const result = await this.raw(sock, command);
+        lane.clock.succeeded();
         return result;
       } catch (e) {
         if (!this.stats.first_failure) this.stats.first_failure = { at: new Date().toISOString(), reason: e.message, endpoint: sock.url };
-        this.event({ event: 'retry', reason: e.message, code: e.code, command: command.command, account: command.account, epoch: this.epoch });
+        this.event({ event: 'retry', reason: e.message, code: e.code, command: command.command, account: command.account, endpoint: lane.endpoint, epoch: lane.epoch });
         if (refusal(e)) {
-          const ms = retryMs(e);
-          this.event({ event: 'cooldown', retry_after_ms: ms, endpoint: sock.url });
-          await db.getExecutor()(`UPDATE xrpl_admission SET cooldown_until=GREATEST(cooldown_until, clock_timestamp()+$1*interval '1 millisecond'),
-            gap_ms=LEAST(5000,GREATEST(1000,gap_ms*2)), success_streak=0,last_reason=$2 WHERE id=1`, [ms, e.message]);
-          await this.wait(ms);
+          // THIS lane cools, not the run. The other three said nothing and
+          // have no reason to be punished for what this one asked for.
+          const ms = lane.clock.refused(retryMs(e), e.message);
+          lane.refusals++;
+          this.event({ event: 'cooldown', retry_after_ms: ms, endpoint: lane.endpoint, gap_ms: lane.clock.gap() });
+          // An unpinned read simply moves to whichever lane is free soonest —
+          // often immediately, on a server that never refused.
+          //
+          // A pinned walk cannot carry its marker to another server, so it used
+          // to sit out the cooldown. That is the right trade for a short wait
+          // and the wrong one for a long one: a wallet needing thirty pages on
+          // a server that refuses every few requests makes no progress at all,
+          // while three idle servers wait. So when the wait is long and another
+          // lane is READY NOW, the walk is abandoned and restarted there. It
+          // loses the pages already fetched, which is the price of a marker
+          // that cannot travel — and cheaper than the wait it replaces.
+          if (pin) {
+            const alternative = this.pickLane(lane);
+            if (ms > LANE_SWITCH_MS && alternative && alternative.readyIn() === 0) {
+              this.event({ event: 'lane_switch', from: lane.endpoint, to: alternative.endpoint,
+                would_have_waited_ms: ms });
+              const swap = new Error('XRPL_LANE_COOLING');
+              swap.laneSwitch = true;
+              throw swap;
+            }
+            await this.wait(ms);
+          }
         } else if (e.closed || (e.silent && sock.silentReads >= 3)) {
-          this.close(); this.stats.reconnects++;
-          if (this.stats.reconnects >= 3) throw new Error('XRPL_TRANSPORT_SILENT');
+          this.closeLane(lane); lane.reconnects++; this.stats.reconnects++;
+          if (lane.reconnects >= 3) {
+            lane.retired = true;
+            this.event({ event: 'lane_retired', endpoint: lane.endpoint, reason: 'silent' });
+            if (this.lanes.every(l => l.retired)) throw new Error('XRPL_TRANSPORT_SILENT');
+            if (pin) throw new Error('XRPL_TRANSPORT_SILENT');
+          }
         } else if (!e.silent) throw e;
-        this.stats.retries++;
-      }
+        this.stats.retries++; lane.retries++;
+      } finally { lane.inFlight--; }
     }
     throw new Error('XRPL_RECOVERY_EXHAUSTED');
+  }
+
+  // What each server actually carried. Reported so a run that felt slow can be
+  // shown to have been slow on ONE endpoint rather than everywhere.
+  laneStats() {
+    return this.lanes.map(l => ({ endpoint: l.endpoint, requests: l.requests, assigned: l.assigned,
+      retries: l.retries, refusals: l.refusals, reconnects: l.reconnects,
+      retired: l.retired, cooldown_ms: Math.round(l.readyIn()) || 0 }));
   }
   async ledger(index) {
     if (Number.isInteger(index) && validatedHeaders.has(index)) return validatedHeaders.get(index);
@@ -144,6 +335,32 @@ class Reader {
     validatedHeaders.set(seq,header);
     if(validatedHeaders.size>2000)validatedHeaders.delete(validatedHeaders.keys().next().value);
     return header;
+  }
+  // The balance of one account AT one ledger. Pinned, never "latest": an
+  // unpinned balance cannot be reconciled against a proven ledger range.
+  //
+  // Returns null rather than throwing when the account cannot be read. A
+  // balance is a CROSS-CHECK on evidence, not evidence; failing a wallet's walk
+  // because a supplementary read was refused would trade the thing that matters
+  // for the thing that confirms it.
+  async balance(address, ledgerIndex, pin) {
+    const index = Number(ledgerIndex);
+    if (!Number.isInteger(index) || index <= 0) throw new Error('BALANCE_LEDGER_UNPINNED');
+    let r;
+    try {
+      // Pinned to the walk's lane when there is one, so a wallet's balance is
+      // read from the same server that answered for its transactions. Not a
+      // marker requirement — a consistency one.
+      r = await this.request({ command: 'account_info', account: address, ledger_index: index, strict: true },
+        pin ? pin.epoch : undefined, pin);
+    } catch (e) {
+      this.event({ event: 'balance_unavailable', account: address, ledger: index, reason: e.message, code: e.code });
+      return null;
+    }
+    if (r.validated !== true || Number(r.ledger_index) !== index) return null;
+    const drops = r.account_data && r.account_data.Balance;
+    if (typeof drops !== 'string' || !/^[0-9]+$/.test(drops)) return null;
+    return { drops, ledger: index };
   }
   async retainedRange(anchor = 0) {
     for(let attempt=0;attempt<4;attempt++){
@@ -169,6 +386,7 @@ class Reader {
     }
     return low;
   }
-  close() { if (this.sock) { this.sock.close(); this.sock = null; } }
+  closeLane(lane) { if (lane.sock) { try { lane.sock.close(); } catch (_) {} lane.sock = null; } }
+  close() { for (const lane of this.lanes) this.closeLane(lane); }
 }
 module.exports = { Reader, acquireReader, releaseReader, refusal, retryMs, rippleMs };

@@ -41,6 +41,8 @@ const SUITES = [
   ['source-relevance',       'source-relevance.test.js',         8209],
   ['in-page-smoke',          'in-page-smoke.test.js',            8210],
   ['morning-story-canonical','morning-story-canonical.test.js',  8211],
+  // A report that cannot be posted was not published. The field holds 4,000.
+  ['public-morning-4k',      'public-morning-4k.test.js',           null],
   ['report-truth-4vf0c',     'report-truth-4vf0c.test.js',       8212],
   ['escrow-not-movement',    'escrow-not-movement.test.js',      8213],
   ['canonical-escrow-model', 'canonical-escrow-model.test.js',   8214],
@@ -50,6 +52,25 @@ const SUITES = [
   ['desktop-navigation',     'desktop-navigation.test.js',       8230],
   ['daily-archive-proof',    'daily-archive-proof.test.js',        null],
   ['github-report-archive',  'github-report-archive.test.js',      null],
+  // The export is what makes deleting the source safe, so what it must never
+  // lose — or silently change — is the test.
+  ['evidence-export',        'evidence-export.test.js',            null],
+  // The checkpoint left Postgres, so the monotonic rule its trigger enforced
+  // lives in these two now.
+  ['evidence-state',         'evidence-state.test.js',             null],
+  ['github-evidence-store',  'github-evidence-store.test.js',      null],
+  // A morning run with no database: GitHub in, XRPL delta, GitHub out.
+  ['delta-report-path',      'delta-report-path.test.js',        8213],
+  ['run-journal',            'run-journal.test.js',              null],
+  ['delta-acquisition',      'delta-acquisition.test.js',          null],
+  // The checkpoint was in the repository all along: a sealed 255/255 report
+  // names the ledger every wallet was proven through.
+  ['seed-from-receipt',      'seed-from-receipt.test.js',          null],
+  // Pacing is a rate limiter, not evidence. It must never be able to take the
+  // read path down with it.
+  ['xrpl-admission',         'xrpl-admission.test.js',             null],
+  // A seal covers a rendering, so the rendering has to survive the import.
+  ['report-archive-import',  'report-archive-import.test.js',      null],
   // Pure decision logic, no browser and no network.
   ['dex-volume-truth',       'dex-volume-truth.test.js',         null],
   ['xrpl-quota',             'xrpl-quota-backpressure.test.js',  8221],

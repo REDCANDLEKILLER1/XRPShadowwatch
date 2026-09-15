@@ -765,6 +765,15 @@
                 account: observer ? observer.address : '',
                 label: observer ? observer.label : '',
                 cat: observer ? observer.cat : '',
+                // ── WHETHER IT HAPPENED AT ALL ──────────────────────────
+                // A transaction that FAILED moved nothing, and its Amount is
+                // the sum it was refused rather than a sum that changed hands.
+                // This field was being dropped here, so nothing downstream
+                // could tell a payment from a rejection — and on 2026-09-12,
+                // 110 failed transactions out of 52,017 carried 23,000,031,350
+                // of the "XRP moved" the report printed, against 112,462,205
+                // that actually moved.
+                tx_result: f.tx_result || '',
                 type: f.type || '', hash: f.hash || '', ledger_index: Number(f.ledger_index) || null,
                 proves_coverage: true, date: f.date || '', from: f.from || '', to: f.to || '',
                 amount: Number.isFinite(amount) ? amount : 0, currency: f.currency || 'XRP',
@@ -789,15 +798,47 @@
           try { if (typeof log === 'function') log('tx_scan_coverage ' + JSON.stringify(cov)); } catch (_) {}
           return out;
         } finally {
-          // On a successful scan the legacy scanner already wrote the new current
-          // snapshot; keep it. If the scan aborted before that point, put the old
-          // snapshot back so this hotfix cannot destroy the operator's baseline.
-          if (!completed) {
-            try {
+          // ── THE BASELINE IS MERGED, NEVER REPLACED ───────────────────────
+          //
+          // The legacy scanner writes the snapshot from
+          // `rows.filter(w => w.status === 'CHECKED')` — only the wallets THIS
+          // run managed to read. Every wallet it did not reach is dropped, and
+          // a run that reads none at all writes `{}`.
+          //
+          // That is not a stale baseline, it is no baseline. The whole point of
+          // the snapshot is to say what a wallet held last time we looked, and
+          // "we could not look today" is not new information about yesterday.
+          // Today the operator's runs logged "BALANCES: stopped after 0/408"
+          // repeatedly; each one erased the lot.
+          //
+          // Restoring only when `completed` is false did not cover it, because
+          // a fail-closed run RETURNS normally — it does not throw. So the
+          // previous readings are merged back underneath whatever this run
+          // wrote: fresh readings win, absent ones keep what they had.
+          try {
+            var before = {};
+            if (previousRaw != null) {
+              try { before = JSON.parse(previousRaw) || {}; } catch (_) { before = {}; }
+            }
+            var after = {};
+            try { after = JSON.parse(localStorage.getItem(SNAPSHOT_KEY) || '{}') || {}; } catch (_) { after = {}; }
+            if (!completed) {
+              // The scan threw. Nothing it wrote can be trusted; put back
+              // exactly what was there, byte for byte.
               if (previousRaw == null) localStorage.removeItem(SNAPSHOT_KEY);
               else localStorage.setItem(SNAPSHOT_KEY, previousRaw);
-            } catch (_) {}
-          }
+            } else {
+              var merged = {}, key;
+              for (key in before) if (Object.prototype.hasOwnProperty.call(before, key)) merged[key] = before[key];
+              for (key in after) if (Object.prototype.hasOwnProperty.call(after, key)) merged[key] = after[key];
+              var kept = Object.keys(merged).length - Object.keys(after).length;
+              localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(merged));
+              if (kept > 0 && typeof log === 'function') {
+                log('Baseline: ' + Object.keys(after).length + ' wallet(s) read this run, ' +
+                  kept + ' kept from the previous baseline rather than dropped.');
+              }
+            }
+          } catch (_) {}
         }
       };
       scanWallets._swTxCompleteness20260819 = true;

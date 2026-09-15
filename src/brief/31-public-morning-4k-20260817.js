@@ -1,5 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    PUBLIC MORNING REPORT 4K GOVERNOR — 2026-08-17
+   Publication boundary — 2026-09-15
 
    Publication-only guard for platforms with a 4,000-character field limit.
    Full TOTAL REPORT / TOTAL DEBUG / evidence data remain untouched.
@@ -10,6 +11,39 @@
    - remove duplicate/internal presentation text before touching evidence;
    - target <= 3,900 characters to leave a small posting margin;
    - never change scanner, scoring, lookback, concurrency or XRPL requests.
+
+   WHERE THIS RUNS, AND WHY IT MOVED
+   ─────────────────────────────────
+   This used to wrap buildMorningStoryText. That is the INNERMOST stage, and
+   canonicalMorningStory (02-core.js:17450) runs three more on top of it:
+
+       fn(p)                            <- governed here
+       finalizeReportPresentation(...)  <- layer 23 re-adds "Under the Surface"
+                                           and "How to Read It", layer 26 the
+                                           escrow story, layer 33 terminology
+       SW_DAILY_GATE.gateDelivery(...)
+       _canonicalNewsUsedBlock(p)       <- re-appends the NEWS USED block that
+                                           govern() had just stripped
+
+   So SW-20260915-R8U2E recorded public_morning_chars_4k: 3900 in its pack and
+   handed the operator a 5,149-character file. Both were true. The artifact was
+   over the limit AND missing sections that had been cut to meet a limit it
+   never met, and the morning's report could not be posted at all.
+
+   A character budget can only be enforced by the LAST stage. So the governor is
+   no longer part of the render chain: govern() is applied at the publication
+   boundary, by the surfaces that hand the finished text to a person
+   (MORNING_REPORT_FLOAT.copy, the Morning Story copy button). The canonical
+   text, the seal's morning_hash, the TOTAL REPORT and the downloaded file keep
+   the complete render — morning-story-canonical.test.js proves the download
+   still equals the canonical text byte for byte.
+
+   Counted in UTF-16 code units, which is what String.length returns. The
+   report's banner is largely astral-plane (𝓛𝓪𝓭𝔂, ＳＨＡＤＯＷ), so this
+   over-counts against a code-point limit rather than under-counting. Erring
+   long is the safe direction and is deliberate.
+
+   Proof: scripts/public-morning-4k.test.js
    ═══════════════════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
@@ -111,53 +145,43 @@
     return out;
   }
 
-  function install() {
-    var fn = null;
-    try { fn = window.buildMorningStoryText || (typeof buildMorningStoryText === 'function' ? buildMorningStoryText : null); } catch (_) {}
-    if (typeof fn !== 'function') return false;
-    if (fn._swPublic4kGovernor20260817) return true;
-
-    var wrapped = function (pack) {
-      var full = fn.apply(this, arguments);
-      var safe = govern(full);
-      try {
-        var p = pack || ((typeof state !== 'undefined' && state && state.pack) ? state.pack : null);
-        if (p) {
-          p.public_morning_chars_full = String(full || '').length;
-          p.public_morning_chars_4k = String(safe || '').length;
-          p.public_morning_4k_compacted = String(full || '').length !== String(safe || '').length;
-        }
-      } catch (_) {}
-      return safe;
-    };
-    wrapped._swPublic4kGovernor20260817 = true;
-    wrapped._swOriginal = fn;
-    wrapped._original = fn._original || fn;
-
-    try { window.buildMorningStoryText = wrapped; } catch (_) {}
-    try { buildMorningStoryText = wrapped; } catch (_) {}
-
-    window.SW_PUBLIC_MORNING_4K_20260817 = {
-      version: VERSION,
-      hard_limit: HARD_LIMIT,
-      target: TARGET,
-      govern: govern,
-      publication_only: true,
-      total_report_untouched: true,
-      total_debug_untouched: true,
-      scanner_untouched: true,
-      scoring_untouched: true,
-      lookback_untouched: true,
-      concurrency_untouched: true
-    };
-    return true;
+  // ── THE PUBLICATION BOUNDARY ──────────────────────────────────────────────
+  // Takes the FINISHED canonical text — after every enrichment stage, the daily
+  // gate and the NEWS USED block — and returns what may be posted. Records what
+  // it did on the pack so TOTAL DEBUG reports the text that was actually handed
+  // over, not an intermediate render that no surface published.
+  function publicText(text, pack) {
+    var full = String(text == null ? '' : text);
+    var safe = govern(full);
+    try {
+      var p = pack || ((typeof state !== 'undefined' && state && state.pack) ? state.pack : null);
+      if (p) {
+        p.public_morning_chars_full = full.length;
+        p.public_morning_chars_4k = safe.length;
+        p.public_morning_4k_compacted = full.length !== safe.length;
+      }
+    } catch (_) {}
+    return safe;
   }
 
-  if (!install()) {
-    var tries = 0;
-    var timer = setInterval(function () {
-      tries++;
-      if (install() || tries >= 40) clearInterval(timer);
-    }, 100);
-  }
+  window.SW_PUBLIC_MORNING_4K_20260817 = {
+    version: VERSION,
+    hard_limit: HARD_LIMIT,
+    target: TARGET,
+    govern: govern,
+    publicText: publicText,
+    // Enforced at the publication boundary, not inside the render chain. A
+    // consumer that needs the complete morning story reads
+    // canonicalMorningStory(); this is only for surfaces bound by a field limit.
+    enforced_at: 'PUBLICATION',
+    publication_only: true,
+    total_report_untouched: true,
+    total_debug_untouched: true,
+    canonical_text_untouched: true,
+    download_untouched: true,
+    scanner_untouched: true,
+    scoring_untouched: true,
+    lookback_untouched: true,
+    concurrency_untouched: true
+  };
 })();
