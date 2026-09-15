@@ -241,7 +241,7 @@ sense.
 Neither is an argument for adding them. Both are an argument for watching what
 they do next, which is what the review queue is for.
 
-## Each commit overwrites a day's provenance — NOT YET FIXED
+## Each commit overwrites a day's provenance — FIXED, merge-on-write
 
 `readReportWindow` reported `unattributed: 37,420 of 37,425` on
 SW-20260915-IWBGW, and the report printed **4 wallets active** where the
@@ -264,11 +264,37 @@ Provenance is the link between a transaction and the watched wallet whose walk
 saw it. Without it the report cannot attribute movement to any wallet, which is
 what every "X absorbed N XRP" line depends on.
 
-The fix is for a commit to MERGE a day's existing shards rather than replace
-them — evidence per day is append-only and should be written that way. That
-makes every commit read the day back before writing, which is a real cost
-against the 300 s function budget that was just tightened, so it is an operator
-decision rather than a quiet change to the hot path.
+A commit now MERGES a day's existing shards rather than replacing them, deduped
+on the identity each record type already carries — an event by hash, a
+provenance row by (hash, address, role), a payload by hash. Only the days this
+run's rows land in are read and rewritten; a reporting window that merely READS
+other days does not touch them.
+
+**Measured against the budget, which is what decided it.** On the live
+2026-09-14 shape — 41,983 events and 138,518 provenance rows:
+
+| | |
+|---|---|
+| reading the day back | ~6 s (the window read already pays this, timed live) |
+| merge + reshard + gzip | 608 ms |
+| ending reserve available | 90 s |
+
+Comfortably inside, so the architecture is settled and immutable per-run shards
+are not needed.
+
+One guard was deliberately narrowed: "acquisition itself never loads a stored
+shard" now reads "the WALK never loads a stored shard", asserted on the source
+before the gate. The principle it protected — the walk is bounded by the
+checkpoint, never by the archive's size — is unchanged. The old wording also
+forbade the commit reading the day it is about to write, which would have made
+this fix untestable rather than catching anything.
+
+**Still to do:** the provenance already lost cannot be recovered by this change.
+It prevents further loss. Whether the lost rows can be rebuilt from retained
+evidence is a separate question — the events survive, so an observer can be
+re-derived for any transaction a watched wallet is a party to, but a walk that
+observed a transaction without being its sender or receiver cannot be
+reconstructed.
 
 ## ASSUMED — believed, not yet observed
 

@@ -481,7 +481,11 @@ async function readDays(days, deps, kind) {
   // them. The participants file is what records WHICH watched wallet's walk saw
   // a transaction, and the report attributes every movement by that — without
   // it every row comes back unattributed.
-  const name = kind === 'participants' ? 'participants' : 'events';
+  // Three kinds share this reader because they share a layout. 'payloads' was
+  // missing, which meant the commit could not read back what a day already held
+  // and so could only overwrite it.
+  const name = kind === 'participants' ? 'participants'
+    : kind === 'payloads' ? 'payloads' : 'events';
   const out = { events: [], files: [], missing: [] };
   for (const day of (days || [])) {
     const base = 'evidence/' + String(day).replace(/-/g, '/');

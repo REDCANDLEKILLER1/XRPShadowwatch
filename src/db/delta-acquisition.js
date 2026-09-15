@@ -242,7 +242,31 @@ async function walkOn(reader, entry, anchor, opts, lane, ask) {
 // Grouped by the day the LEDGER closed, exactly as the export shards are, so an
 // archive assembled from daily runs is indistinguishable from one exported in
 // a single pass. Deterministic: same rows, same bytes, same hashes.
-function buildShards(rows) {
+// ── A COMMIT ADDS TO A DAY; IT DOES NOT REPLACE ONE ───────────────────────
+//
+// This built a day's files from THIS RUN's rows alone, and the commit wrote
+// them by path — so whatever the day already held was overwritten. Events
+// survived by accident, because a busy day spills into events.001/.002 and a
+// one-shard run never overwrites the numbered ones. Participants fit in a
+// single file and were destroyed outright. From the repository's own history
+// of evidence/2026/09/14/participants.ndjson.gz:
+//
+//   138,518 rows -> 102,873 -> 17
+//
+// 102,856 rows of provenance gone, and with them every attribution the report
+// makes: provenance is the link between a transaction and the watched wallet
+// whose walk saw it.
+//
+// The invariant, stated once: ONCE PROVENANCE FOR A TRANSACTION IS COMMITTED,
+// A LATER RUN MUST NOT SILENTLY ERASE IT. So `prior` carries what each affected
+// day already holds and is merged in here, deduped on the identity each record
+// type already has — the same keys the sort orders use, so a merged day is
+// byte-identical whichever run wrote it.
+//
+// Only days receiving new rows appear in byDay, so only those are read and
+// rewritten. A reporting window that merely READS other days does not touch
+// them.
+function buildShards(rows, prior) {
   const byDay = new Map();
   for (const row of rows) {
     const event = X.eventOf({ ...row, close_time: row.close_time_iso });
@@ -268,20 +292,34 @@ function buildShards(rows) {
       shards.push({ path, sha256: X.sha256(packed), rows: piece.records.length });
     }
   };
+  // Prior records first so they are the ones kept on a tie, then this run's.
+  // `keep` is the identity of each record type: an event is its hash, a
+  // provenance row is (hash, address, role) — the same triple the day's sort
+  // order uses — and a payload is its hash.
+  const mergeBy = (keep, previous, fresh) => {
+    const out = [], seen = new Set();
+    for (const record of (previous || []).concat(fresh)) {
+      const id = keep(record);
+      if (seen.has(id)) continue;
+      seen.add(id); out.push(record);
+    }
+    return out;
+  };
+  const eventId = e => String(e.hash);
+  const participantId = p => p.tx_hash + '|' + p.address + '|' + p.role;
+  const payloadId = p => String(p.hash);
+
   for (const day of [...byDay.keys()].sort()) {
     const base = 'evidence/' + X.dayPath(day);
     const bucket = byDay.get(day);
-    emit(bucket.events, X.orderEvents, base + '/events.ndjson');
+    const was = (prior && prior[day]) || {};
+    emit(mergeBy(eventId, was.events, bucket.events), X.orderEvents, base + '/events.ndjson');
     // Deduped per (hash, address, role): the same transaction seen by two
-    // watched wallets contributes both observations, once each.
-    const seen = new Set();
-    const participants = bucket.participants.filter(p => {
-      const key = p.tx_hash + '|' + p.address + '|' + p.role;
-      if (seen.has(key)) return false;
-      seen.add(key); return true;
-    });
-    emit(participants, X.orderParticipants, base + '/participants.ndjson');
-    emit(bucket.payloads, X.orderPayloads, base + '/payloads.ndjson');
+    // watched wallets contributes both observations, once each — and a row
+    // already committed by an earlier run is one of them.
+    emit(mergeBy(participantId, was.participants, bucket.participants),
+      X.orderParticipants, base + '/participants.ndjson');
+    emit(mergeBy(payloadId, was.payloads, bucket.payloads), X.orderPayloads, base + '/payloads.ndjson');
   }
   return { files, shards };
 }
@@ -911,8 +949,44 @@ async function acquire(input, deps) {
   // same silent-gap problem as the one before the first wallet, one level
   // deeper: without these lines the only way to find where a commit spends its
   // time is to guess.
+  // ── WHAT THE AFFECTED DAYS ALREADY HOLD ─────────────────────────────────
+  //
+  // Read before writing, because a commit ADDS to a day rather than replacing
+  // it. Only the days this run's rows actually land in — a reporting window
+  // that merely reads other days does not cause them to be rewritten.
+  //
+  // Measured on the live 2026-09-14: 41,983 events and 138,518 provenance rows
+  // read back in about six seconds, merged and recompressed in six hundred
+  // milliseconds, against a ninety-second ending reserve.
+  const tPrior = Date.now();
+  const touchedDays = [...new Set(committedRows
+    .map(r => X.dayOf(X.eventOf({ ...r, close_time: r.close_time_iso }).close_time))
+    .filter(Boolean))].sort();
+  let priorByDay = {};
+  if (touchedDays.length) {
+    phase('day-merge-read', { days: touchedDays });
+    const [pe, pp, pl] = await Promise.all([
+      Store.readDays(touchedDays, { env: d.env, gh: d.gh, fetch: d.fetch }),
+      Store.readDays(touchedDays, { env: d.env, gh: d.gh, fetch: d.fetch }, 'participants'),
+      Store.readDays(touchedDays, { env: d.env, gh: d.gh, fetch: d.fetch }, 'payloads')
+    ]);
+    const bucket = day => (priorByDay[day] || (priorByDay[day] = { events: [], participants: [], payloads: [] }));
+    for (const e of pe.events) { const day = X.dayOf(e.close_time); if (day) bucket(day).events.push(e); }
+    // A provenance row carries no date of its own; it belongs to the day of the
+    // transaction it names. With one or two days in play, indexing the events
+    // just read is enough to place them.
+    const dayOfHash = new Map();
+    for (const e of pe.events) { const day = X.dayOf(e.close_time); if (day) dayOfHash.set(e.hash, day); }
+    const only = touchedDays.length === 1 ? touchedDays[0] : null;
+    for (const p of pp.events) { const day = dayOfHash.get(p.tx_hash) || only; if (day) bucket(day).participants.push(p); }
+    for (const p of pl.events) { const day = dayOfHash.get(p.hash) || only; if (day) bucket(day).payloads.push(p); }
+    phase('day-merge-read-done', { days: touchedDays.length,
+      events: pe.events.length, participants: pp.events.length, payloads: pl.events.length,
+      took_ms: Date.now() - tPrior });
+  }
+
   const tBuild = Date.now();
-  const built = buildShards(committedRows);
+  const built = buildShards(committedRows, priorByDay);
   phase('shards-built', { files: Object.keys(built.files).length,
     bytes: Object.values(built.files).reduce((n, b) => n + b.length, 0),
     took_ms: Date.now() - tBuild });

@@ -501,8 +501,27 @@ async function main() {
     empty.in_window === 0 && empty.days_without_shards.includes('2026-09-07'), empty.days_without_shards);
 
   const SRC2 = fs.readFileSync(path.join(ROOT, 'src/db/delta-acquisition.js'), 'utf8');
-  check('acquisition itself never loads a stored shard',
-    !/Store\.readDays/.test(SRC2.split('async function acquire')[1].split('// ── The report window')[0]));
+  // ── NARROWED DELIBERATELY, AND SAID SO ──────────────────────────────────
+  //
+  // This read "acquisition itself never loads a stored shard", protecting the
+  // principle that the WALK is bounded by the checkpoint and never by the size
+  // of the archive. That principle is unchanged and is still asserted below.
+  //
+  // What changed is that the COMMIT now reads back the one or two days it is
+  // about to write, so it can merge rather than overwrite them — the defect
+  // that destroyed 102,856 provenance rows from evidence/2026/09/14. The old
+  // wording forbade that too, which would have made the data-loss fix
+  // untestable rather than caught anything.
+  //
+  // So the guard is split at the gate: nothing before it may load a shard.
+  const WALK_PHASE = SRC2.split('async function acquire')[1].split('// 4. The gate')[0];
+  check('the WALK never loads a stored shard — it is bounded by the checkpoint',
+    !/Store\.readDays/.test(WALK_PHASE));
+  const COMMIT_PHASE = SRC2.split('// 4. The gate')[1].split('// ── The report window')[0];
+  check('but the commit reads the days it is about to write, to merge them',
+    /Store\.readDays/.test(COMMIT_PHASE) && /buildShards\(committedRows, priorByDay\)/.test(COMMIT_PHASE));
+  check('and it reads only the days this run\'s rows land in',
+    /touchedDays/.test(COMMIT_PHASE) && !/readDays\(days/.test(COMMIT_PHASE));
   check('freshly walked rows win a tie against a stored copy',
     /for \(const event of stored\.events\) byHash\.set[\s\S]{0,140}?for \(const event of fresh\) byHash\.set/.test(SRC2));
 
@@ -1482,6 +1501,163 @@ async function main() {
   check('but a legacy RECOVERED does not — it needs the flag said outright',
     !/w\.status === 'RECOVERED'/.test(layer45),
     (layer45.match(/.*RECOVERED.*/g) || []).filter(l => !/^\s*\/\//.test(l)).slice(0, 3));
+
+  console.log('\n39. a commit must not erase a day\'s existing provenance');
+  /* ── THE ACCEPTANCE GATE, WRITTEN BEFORE THE FIX ─────────────────────────
+     From the repository's own history of
+     evidence/2026/09/14/participants.ndjson.gz:
+
+       8128749     3,858 rows
+       8d927be   138,518 rows     the backfill
+       ec0fa6a   102,873 rows
+       8ed28e7        17 rows     a small run, and 102,856 rows of provenance
+                                  gone
+
+     buildShards() builds a day's files from THIS RUN's rows and the commit
+     writes them by path, replacing whatever the day held. Events survived by
+     accident — a big day spills into events.001/.002 and a one-shard run never
+     overwrites the numbered ones — but participants fit in a single file and
+     were destroyed outright.
+
+     The invariant: once provenance for a ledger transaction is committed, a
+     later delta run must not silently erase it. Stated as the gate rather than
+     as an implementation: a day already holding ~100k provenance rows, plus a
+     tiny delta of 17 new observations for that same day, must end with ALL the
+     mPrior rows and the new unique ones — and replaying the same 17 must change
+     nothing. */
+  const MDAY = '2026-09-14';
+  const mDayBase = 'evidence/2026/09/14';
+  const mHash = i => String(i).padStart(64, 'a');
+  // ~100k mPrior provenance rows, the scale the live day actually carried.
+  const mPriorParts = [];
+  for (let i = 0; i < 100000; i++) {
+    mPriorParts.push({ tx_hash: mHash(i), address: 'rPrior' + (i % 400), role: 'observed_via' });
+  }
+  const mPriorEvents = [];
+  for (let i = 0; i < 1000; i++) {
+    mPriorEvents.push({ hash: mHash(i), close_time: MDAY + 'T01:00:00.000Z', ledger_index: 100 + i,
+      tx_type: 'Payment', tx_result: 'tesSUCCESS', validated: true, currency: 'XRP' });
+  }
+  // The tiny delta: 17 new observations for the same day.
+  const mFresh = [];
+  for (let i = 0; i < 17; i++) {
+    mFresh.push({ hash: String(i).padStart(64, 'f'), close_time_iso: MDAY + 'T23:00:00.000Z',
+      ledger_index: 900000 + i, tx_type: 'Payment', tx_result: 'tesSUCCESS', validated: true,
+      currency: 'XRP', amount_drops: '1000000', from_account: 'rNew' + i, to_account: 'rDest' + i,
+      observed_via: ['rNew' + i] });
+  }
+  const mPrior = { [MDAY]: { events: mPriorEvents, participants: mPriorParts, payloads: [] } };
+
+  const mRead = (files, base, name) => {
+    const zlib = require('zlib');
+    const out = [];
+    for (const p of Object.keys(files)) {
+      if (p.indexOf(base + '/' + name) !== 0) continue;
+      const text = zlib.gunzipSync(files[p]).toString('utf8');
+      for (const line of text.split('\n')) if (line) out.push(JSON.parse(line));
+    }
+    return out;
+  };
+
+  const mMerged = D.buildShards(mFresh, mPrior);
+  const mOut = mRead(mMerged.files, mDayBase, 'participants');
+  const mKey = p => p.tx_hash + '|' + p.address + '|' + p.role;
+  const mKeys = new Set(mOut.map(mKey));
+  const mMissing = mPriorParts.filter(p => !mKeys.has(mKey(p)));
+  check('every one of the 100,000 prior provenance rows survives the commit',
+    mMissing.length === 0, mMissing.length + ' rows were erased');
+  check('and the new observations are there too',
+    mFresh.every(r => mKeys.has(r.hash + '|' + r.observed_via[0] + '|observed_via')));
+  check('the day now holds prior + new, with nothing duplicated',
+    mOut.length === mKeys.size, { rows: mOut.length, distinct: mKeys.size });
+
+  // Idempotence: replaying the same 17 changes nothing.
+  const mReplayPrior = { [MDAY]: { events: mRead(mMerged.files, mDayBase, 'events'),
+    participants: mOut, payloads: [] } };
+  const mReplay = D.buildShards(mFresh, mReplayPrior);
+  const mReplayParts = mRead(mReplay.files, mDayBase, 'participants');
+  check('replaying the same delta is idempotent',
+    mReplayParts.length === mOut.length, { first: mOut.length, again: mReplayParts.length });
+  check('and the bytes are identical, so the commit is deterministic',
+    Object.keys(mReplay.files).sort().join(',') === Object.keys(mMerged.files).sort().join(',') &&
+    Object.keys(mReplay.files).every(p => mReplay.files[p].equals(mMerged.files[p])));
+
+  // A day the delta does NOT touch is not read and not rewritten.
+  check('only the days receiving new rows are written',
+    Object.keys(mMerged.files).every(p => p.indexOf(mDayBase) === 0),
+    Object.keys(mMerged.files).filter(p => p.indexOf(mDayBase) !== 0));
+
+  console.log('\n40. two real runs against one store, which is what destroyed the live day');
+  /* The gate above proves buildShards MERGES when it is given prior records.
+     It does not prove acquire() ever fetches them — disabling the read entirely
+     left that gate green, which is the same "the test does the work" failure
+     this project keeps finding.
+
+     So this drives the real acquire() twice against one store, lands rows on
+     the SAME day both times, and then reads the committed participants file
+     back out of the fake repository. That is the exact shape of the live
+     defect: 138,518 provenance rows followed by a small run, and 17 left. */
+  const zlib2 = require('zlib');
+  const sameDayClose = (ledger) => ({ ledger, amount: '1000000000',
+    before: '20000000000000', after: '20001000000000' });
+  const ghTwo = fakeGithub(seeded(ANCHOR - 1000));
+  // Balances must reconcile with the movement, or the run is refused as
+  // contradicted — which is the cross-check doing its job, not a fixture to
+  // argue with. Each walked wallet ends one transaction richer.
+  const peerOne = fakePeer({ balances: {
+      rAlice: '20001000000000', rBob: '20001000000000', rCarol: '20000000000000' },
+    transactions: {
+      rAlice: [sameDayClose(ANCHOR - 900)], rBob: [sameDayClose(ANCHOR - 890)], rCarol: [] } });
+  const runOne = await D.acquire({ report_id: 'SW-20260914-MERG1', scan_id: 'idx-m1' },
+    { env: ENV, gh: ghTwo.gh, reader: peerOne.reader, concurrency: 2 });
+  check('the first run commits', runOne.committed === true, runOne.reason);
+
+  const partsPath = [...ghTwo.files().keys()].filter(k => /participants\.ndjson\.gz$/.test(k));
+  const readParts = () => {
+    const rows = [];
+    for (const k of [...ghTwo.files().keys()].filter(x => /participants\.ndjson\.gz$/.test(x))) {
+      const text = zlib2.gunzipSync(ghTwo.files().get(k)).toString('utf8');
+      for (const line of text.split('\n')) if (line) rows.push(JSON.parse(line));
+    }
+    return rows;
+  };
+  const afterOne = readParts();
+  check('and it wrote provenance for what it walked',
+    partsPath.length > 0 && afterOne.length > 0, { files: partsPath.length, rows: afterOne.length });
+  const firstKeys = new Set(afterOne.map(p => p.tx_hash + '|' + p.address + '|' + p.role));
+
+  // A SECOND run, later the same day, walking a different transaction.
+  const peerTwo = fakePeer({ balances: {
+    rAlice: '20001000000000', rBob: '20001000000000', rCarol: '20001000000000' },
+    transactions: { rAlice: [], rBob: [], rCarol: [sameDayClose(ANCHOR + 10)] } });
+  peerTwo.reader.ledger = async () => ({ ledger: ANCHOR + 500, close_ms: Date.UTC(2026, 8, 11, 12, 0, 0) });
+  const runTwo = await D.acquire({ report_id: 'SW-20260914-MERG2', scan_id: 'idx-m2' },
+    { env: ENV, gh: ghTwo.gh, reader: peerTwo.reader, concurrency: 2 });
+  check('the second run commits too', runTwo.committed === true, runTwo.reason);
+
+  const afterTwo = readParts();
+  const secondKeys = new Set(afterTwo.map(p => p.tx_hash + '|' + p.address + '|' + p.role));
+  const erased = [...firstKeys].filter(k => !secondKeys.has(k));
+  check('NOTHING the first run committed was erased by the second',
+    erased.length === 0, erased.length + ' provenance rows destroyed: ' + erased.slice(0, 3).join(' , '));
+  check('and the second run\'s own provenance is there as well',
+    secondKeys.size > firstKeys.size, { before: firstKeys.size, after: secondKeys.size });
+  check('with no duplicates',
+    afterTwo.length === secondKeys.size, { rows: afterTwo.length, distinct: secondKeys.size });
+  // Events were never the visible casualty — they survived by shard-numbering
+  // accident — but they must be merged for the same reason.
+  const readEvents = () => {
+    const rows = [];
+    for (const k of [...ghTwo.files().keys()].filter(x => /\/events(\.\d+)?\.ndjson\.gz$/.test(x))) {
+      const text = zlib2.gunzipSync(ghTwo.files().get(k)).toString('utf8');
+      for (const line of text.split('\n')) if (line) rows.push(JSON.parse(line));
+    }
+    return rows;
+  };
+  const evHashes = new Set(readEvents().map(e => e.hash));
+  check('and the first run\'s events survive the second commit too',
+    [...new Set(afterOne.map(p => p.tx_hash))].every(h => evHashes.has(h)),
+    'an event committed by the first run is missing after the second');
 
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA ACQUISITION CHECKS PASS'));
   process.exit(fail ? 1 : 0);
