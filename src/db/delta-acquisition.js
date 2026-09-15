@@ -1024,6 +1024,80 @@ async function acquire(input, deps) {
     rows: committedRows, wallets, freshness, ...committed };
 }
 
+// ── REPAIRING WHAT CAN BE PROVEN, AND NOTHING ELSE ────────────────────────
+//
+// A commit used to overwrite a day's provenance instead of merging it, and
+// 102,856 rows were destroyed before that was fixed. Some of what was lost is
+// recoverable: where a surviving event shows a watched wallet as sender or
+// receiver, that wallet demonstrably saw the transaction, and a provenance row
+// can be rebuilt from the event alone.
+//
+// The rest cannot. A walk that returned a transaction WITHOUT the wallet being
+// a party to it leaves no trace in the event, and there is no way to tell which
+// of four hundred wallets saw it. Those are left unattributed, because an
+// invented observer is worse than a missing one — the report would attribute
+// movement to a wallet on no evidence at all.
+//
+// Everything rebuilt here is DERIVED_VIA, never OBSERVED_VIA. The distinction
+// lives in the role rather than in a flag, so a consumer cannot lose it by not
+// knowing to look. And nothing already committed is altered: this ADDS rows,
+// and the day is marked PARTIAL_RECONSTRUCTED so no reader can mistake a
+// repaired day for one whose observations survived.
+function reconstructProvenance(input) {
+  const i = input || {};
+  const events = i.events || [];
+  const roster = new Set(i.roster || []);
+  const existing = i.existing || [];
+
+  const out = [], seen = new Set();
+  const add = (tx_hash, address, role) => {
+    const id = tx_hash + '|' + address + '|' + role;
+    if (seen.has(id)) return false;
+    seen.add(id); out.push({ tx_hash, address, role }); return true;
+  };
+  // What survived comes first and comes through untouched, including its role.
+  let observedRows = 0;
+  for (const p of existing) {
+    if (!p || !p.tx_hash || !p.address || !p.role) continue;
+    if (add(p.tx_hash, p.address, p.role) && p.role === T.ROLE.OBSERVED_VIA) observedRows++;
+  }
+
+  let derivedRows = 0, withoutProvenance = 0;
+  const attributed = new Set(existing.filter(p => p && (p.role === T.ROLE.OBSERVED_VIA ||
+    p.role === T.ROLE.DERIVED_VIA)).map(p => p.tx_hash));
+  for (const e of events) {
+    if (!e || !e.hash) continue;
+    // Only the two roles the EVENT can prove. A submitter is the signer, which
+    // is not the same as a party to the movement, and is deliberately not used
+    // here: this repair claims only what the surviving row demonstrates.
+    const parties = [e.from_account, e.to_account].filter(a => a && roster.has(a));
+    let gained = false;
+    for (const address of parties) {
+      if (add(e.hash, address, T.ROLE.DERIVED_VIA)) { derivedRows++; gained = true; }
+      else gained = true;
+    }
+    if (parties.length) attributed.add(e.hash);
+    if (!attributed.has(e.hash)) withoutProvenance++;
+    void gained;
+  }
+
+  return {
+    participants: out,
+    coverage: {
+      day: i.day || null,
+      // Never 'COMPLETE'. A repaired day is partial by construction: the rows
+      // that could not be derived are gone for good.
+      status: 'PARTIAL_RECONSTRUCTED',
+      observed_rows: observedRows,
+      derived_rows: derivedRows,
+      events: events.length,
+      events_without_provenance: withoutProvenance,
+      reconstructed_at: i.now || null,
+      note: 'derived_via rows are inferred from the surviving event, not records of a walk'
+    }
+  };
+}
+
 // ── The report window: what we already own, plus the edge just walked ──────
 //
 // The delta a daily run fetches IS the window when the run is daily. It stops
@@ -1074,7 +1148,20 @@ async function readReportWindow(input, deps) {
   };
   // The role constant, not a string literal — the writer and the reader must
   // not be able to drift apart on the one field this join depends on.
-  for (const p of seen.events) { if (p && p.role === T.ROLE.OBSERVED_VIA) note(p.tx_hash, p.address); }
+  // Both roles attribute a transaction, and they are counted separately because
+  // they are not the same claim: OBSERVED_VIA records that a wallet's walk
+  // returned the row, DERIVED_VIA infers from the surviving event that the
+  // wallet must have seen it. The report has to be able to tell them apart.
+  const derivedOnly = new Set(), observedHashes = new Set();
+  for (const p of seen.events) {
+    if (!p) continue;
+    if (p.role === T.ROLE.OBSERVED_VIA) { note(p.tx_hash, p.address); observedHashes.add(p.tx_hash); }
+    else if (p.role === T.ROLE.DERIVED_VIA) { note(p.tx_hash, p.address); derivedOnly.add(p.tx_hash); }
+  }
+  // A transaction with even one surviving observation is attributed on the
+  // strength of that, whatever else was rebuilt alongside it. Done after the
+  // loop so the answer does not depend on the order rows happen to appear in.
+  for (const h of observedHashes) derivedOnly.delete(h);
   // This run's own rows already know their observers; they are not in any shard
   // yet because the commit that writes them may not have happened.
   for (const r of (input.rows || [])) {
@@ -1092,7 +1179,15 @@ async function readReportWindow(input, deps) {
   return { events, days, shards_read: stored.files.concat(seen.files),
     days_without_shards: stored.missing,
     from_stored: stored.events.length, from_this_run: fresh.length, in_window: events.length,
-    unattributed: events.filter(e => !e.observed_via.length).length };
+    unattributed: events.filter(e => !e.observed_via.length).length,
+    // ── HOW MUCH OF THE ATTRIBUTION IS INFERRED ───────────────────────────
+    // A window whose attribution rests on reconstructed rows is weaker than one
+    // whose provenance survived, and the report must be able to say so rather
+    // than presenting both as the same fact.
+    attributed_derived_only: events.filter(e => derivedOnly.has(e.hash)).length,
+    provenance: events.some(e => derivedOnly.has(e.hash))
+      ? 'PARTIAL_RECONSTRUCTED' : 'OBSERVED' };
 }
 
-module.exports = { acquire, walkWallet, buildShards, readReportWindow, groupByCause, PAGE_LIMIT };
+module.exports = { acquire, walkWallet, buildShards, readReportWindow, reconstructProvenance,
+  groupByCause, PAGE_LIMIT };

@@ -91,7 +91,11 @@ function stubbed(body) {
           window: { from: new Date(Number(body.window_start_ms)).toISOString(),
             to: new Date(Number(body.window_end_ms)).toISOString(),
             days: ['2026-09-13', '2026-09-14'], in_window: 3,
-            from_stored: 2, from_this_run: 1, days_without_shards: [], unattributed: 0 } }
+            from_stored: 2, from_this_run: 1, days_without_shards: [], unattributed: 0,
+            // A repaired window, when the report asks for one.
+            ...(/DERIV/.test(String(body.report_id || ''))
+              ? { attributed_derived_only: 2, provenance: 'PARTIAL_RECONSTRUCTED' }
+              : { attributed_derived_only: 0, provenance: 'OBSERVED' }) } }
       : { events: null, window: { error: 'REPORT_WINDOW_NOT_REQUESTED' } })
   };
 }
@@ -1051,6 +1055,44 @@ async function main() {
     collected.found === true, collected);
   check('and records the distinct transactions behind it',
     collected.distinct === 2, collected);
+
+  console.log('\n18. a repaired window says so, in the report');
+  /* Reconstruction gives back attribution that was destroyed, but a derived
+     row is a weaker claim than an observed one and the operator must not learn
+     the difference from a commit message. */
+  const disclosed = await page.evaluate(async () => {
+    var lines = [];
+    var realLog = window.log;
+    window.log = function (t) { lines.push(String(t)); if (realLog) realLog.apply(this, arguments); };
+    state.reportId = 'SW-20260915-DERIV';
+    var r = await window.SW_EVIDENCE_INDEX.begin(
+      { startMs: Date.UTC(2026, 8, 13), endMs: Date.UTC(2026, 8, 14, 12) }, []);
+    var m = window.SW_EVIDENCE_INDEX.metrics();
+    window.log = realLog;
+    return { said: lines.filter(function (l) { return /PROVENANCE PARTIALLY RECONSTRUCTED/.test(l); }),
+      provenance: m.provenance, derived: m.attributed_derived_only, accounts: r.accounts.length };
+  });
+  check('the run still completes on a repaired window',
+    disclosed.accounts === 2, disclosed.accounts);
+  check('and it says plainly that attribution is inferred',
+    disclosed.said.length === 1 && /2 of 3 events/.test(disclosed.said[0]), disclosed.said);
+  check('the status reaches metrics, so the debug export carries it too',
+    disclosed.provenance === 'PARTIAL_RECONSTRUCTED' && disclosed.derived === 2, disclosed);
+  // And a fully observed window must not cry wolf.
+  const quietWin = await page.evaluate(async () => {
+    var lines = [];
+    var realLog = window.log;
+    window.log = function (t) { lines.push(String(t)); if (realLog) realLog.apply(this, arguments); };
+    state.reportId = 'SW-20260915-CLEAN';
+    await window.SW_EVIDENCE_INDEX.begin(
+      { startMs: Date.UTC(2026, 8, 13), endMs: Date.UTC(2026, 8, 14, 12) }, []);
+    var m = window.SW_EVIDENCE_INDEX.metrics();
+    window.log = realLog;
+    return { said: lines.filter(function (l) { return /PARTIALLY RECONSTRUCTED/.test(l); }).length,
+      provenance: m.provenance };
+  });
+  check('a fully observed window says nothing about reconstruction',
+    quietWin.said === 0 && quietWin.provenance === 'OBSERVED', quietWin);
 
   await browser.close();
   srv.close();

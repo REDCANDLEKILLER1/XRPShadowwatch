@@ -303,12 +303,32 @@ checkpoint, never by the archive's size — is unchanged. The old wording also
 forbade the commit reading the day it is about to write, which would have made
 this fix untestable rather than catching anything.
 
-**Still to do:** the provenance already lost cannot be recovered by this change.
-It prevents further loss. Whether the lost rows can be rebuilt from retained
-evidence is a separate question — the events survive, so an observer can be
-re-derived for any transaction a watched wallet is a party to, but a walk that
-observed a transaction without being its sender or receiver cannot be
-reconstructed.
+**Repair, under an explicit constraint.** `reconstructProvenance()` rebuilds a
+provenance row only where a surviving event itself proves a watched wallet was
+sender or receiver. Everything it writes is `derived_via`, never
+`observed_via` — a separate ROLE rather than a flag, because a flag can be
+dropped by any consumer that does not know to look for it, and a reconstructed
+row reading as an observation is precisely the false certainty this repair
+exists to avoid.
+
+| | |
+|---|---|
+| derivable | the event names a watched wallet as sender or receiver |
+| not derivable | a walk that saw a transaction without being a party to it — gone, and left unattributed |
+| never | an observer invented for a transaction that proves none |
+
+A repaired day is marked `PARTIAL_RECONSTRUCTED` and never `COMPLETE`. The
+window counts `attributed_derived_only` separately from observed attribution and
+carries a `provenance` status through to the browser, where the run log says it
+in as many words:
+
+    Evidence: PROVENANCE PARTIALLY RECONSTRUCTED — 2 of 3 events are attributed
+    from the surviving transaction rather than from a recorded walk. Wallet
+    attribution in this report is weaker than usual.
+
+A fully observed window is not labelled partial, so the warning means something
+when it appears. Nothing already committed is altered: reconstruction ADDS
+rows.
 
 ## ASSUMED — believed, not yet observed
 

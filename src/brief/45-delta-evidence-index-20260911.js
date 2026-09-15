@@ -345,6 +345,17 @@
                     : ' · discard ' + (result.resumed.discard_status || 'attempted')));
               }
             }
+            // ── SAY IT OUT LOUD WHEN ATTRIBUTION IS INFERRED ───────────
+            // A window attributed on reconstructed rows is a weaker claim than
+            // one whose provenance survived. It is still usable — that is the
+            // point of repairing it — but the operator must not learn the
+            // difference from a commit message.
+            if (result.window && result.window.provenance === 'PARTIAL_RECONSTRUCTED') {
+              log('Evidence: PROVENANCE PARTIALLY RECONSTRUCTED — ' +
+                result.window.attributed_derived_only + ' of ' + result.window.in_window +
+                ' events are attributed from the surviving transaction rather than from a ' +
+                'recorded walk. Wallet attribution in this report is weaker than usual.');
+            }
             if (result.window && result.window.error) {
               log('Evidence: REPORT WINDOW UNAVAILABLE — ' + result.window.error +
                 '. The report cannot be assembled from this run alone.');
@@ -367,6 +378,10 @@
         requests: run.xrpl_requests, rows_fetched: run.transactions, errors: (run.failures || []),
         stored_transactions_loaded: (run.window && run.window.from_stored) || 0,
         report_window: run.window || null,
+        // Surfaced in metrics so the coverage block and TOTAL_DEBUG carry it,
+        // not only the live log.
+        provenance: (run.window && run.window.provenance) || null,
+        attributed_derived_only: (run.window && run.window.attributed_derived_only) || 0,
         balance_contradictions: run.balance_contradictions,
         balance_contradiction_addresses: run.balance_contradiction_addresses || [],
         checkpoint_advanced: !!run.committed, freshness: run.freshness };

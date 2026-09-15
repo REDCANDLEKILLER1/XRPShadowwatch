@@ -92,7 +92,13 @@ async function attachWindow(body, result, input) {
         days: assembled.days, in_window: assembled.in_window,
         from_stored: assembled.from_stored, from_this_run: assembled.from_this_run,
         days_without_shards: assembled.days_without_shards,
-        unattributed: assembled.unattributed };
+        unattributed: assembled.unattributed,
+        // Carried to the browser because the report's coverage line has to be
+        // able to say that some of its attribution is inferred from surviving
+        // events rather than recorded from a walk. A number the server keeps to
+        // itself cannot make the report more honest.
+        attributed_derived_only: assembled.attributed_derived_only,
+        provenance: assembled.provenance };
     } catch (e) {
       // The window could not be assembled. Say so rather than quietly handing
       // back this run's delta as though it were the day.

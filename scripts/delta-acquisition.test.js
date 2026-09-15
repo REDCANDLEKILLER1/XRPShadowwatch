@@ -1659,6 +1659,129 @@ async function main() {
     [...new Set(afterOne.map(p => p.tx_hash))].every(h => evHashes.has(h)),
     'an event committed by the first run is missing after the second');
 
+  console.log('\n41. reconstructed provenance is DERIVED, and can never pass as OBSERVED');
+  /* ── THE OPERATOR'S CONSTRAINT, WRITTEN AS THE GATE ──────────────────────
+     102,856 provenance rows were destroyed before merge-on-write stopped the
+     bleeding. Some of what was lost is recoverable: where a surviving event
+     shows a watched wallet as sender or receiver, that wallet demonstrably saw
+     the transaction. The rest is NOT recoverable — a walk that observed a
+     transaction without being a party to it leaves no trace in the event.
+
+     The authorised design, and the line that matters most: a reconstructed row
+     must never be equivalent to an observed one. Enforced in the DATA, by a
+     distinct role, rather than by a convention someone can forget.
+
+       derive only where the event itself proves it
+       mark it derived_via, never observed_via
+       mark the day PARTIAL_RECONSTRUCTED, never complete
+       manufacture nothing where the observer cannot be proven
+       leave the original evidence untouched */
+  const RDAY = '2026-09-13';
+  const watched = ['rAlice', 'rBob', 'rCarol'];
+  const rEvents = [
+    // rAlice is the sender — provable, so derivable.
+    { hash: 'A'.repeat(64), close_time: RDAY + 'T01:00:00.000Z', tx_type: 'Payment',
+      tx_result: 'tesSUCCESS', validated: true, from_account: 'rAlice', to_account: 'rStranger' },
+    // rBob is the receiver — provable, so derivable.
+    { hash: 'B'.repeat(64), close_time: RDAY + 'T02:00:00.000Z', tx_type: 'Payment',
+      tx_result: 'tesSUCCESS', validated: true, from_account: 'rStranger', to_account: 'rBob' },
+    // NEITHER party is watched. Some watched wallet's walk may well have
+    // returned this, but the event cannot prove which — so nothing may be
+    // invented for it.
+    { hash: 'C'.repeat(64), close_time: RDAY + 'T03:00:00.000Z', tx_type: 'Payment',
+      tx_result: 'tesSUCCESS', validated: true, from_account: 'rStranger', to_account: 'rOther' },
+    // Same shape as C, but with no surviving observation either. This is the
+    // row that is simply LOST: nothing derivable, nothing left over, and it
+    // must be counted as still unattributed rather than quietly rounded away.
+    { hash: 'D'.repeat(64), close_time: RDAY + 'T04:00:00.000Z', tx_type: 'Payment',
+      tx_result: 'tesSUCCESS', validated: true, from_account: 'rStranger', to_account: 'rOther' }
+  ];
+  // One genuine observation that survived the loss. It must come through
+  // untouched and must still read as OBSERVED.
+  const survivor = { tx_hash: 'C'.repeat(64), address: 'rCarol', role: 'observed_via' };
+
+  const rebuilt = D.reconstructProvenance({ events: rEvents, roster: watched,
+    existing: [survivor], day: RDAY });
+
+  const roleOf = (hash, addr) => (rebuilt.participants || [])
+    .filter(p => p.tx_hash === hash && p.address === addr).map(p => p.role);
+  check('a watched SENDER is derivable from the surviving event',
+    roleOf('A'.repeat(64), 'rAlice').join() === 'derived_via',
+    roleOf('A'.repeat(64), 'rAlice'));
+  check('a watched RECEIVER is derivable too',
+    roleOf('B'.repeat(64), 'rBob').join() === 'derived_via',
+    roleOf('B'.repeat(64), 'rBob'));
+  check('NOTHING is manufactured where the event cannot prove an observer',
+    (rebuilt.participants || []).filter(p => p.tx_hash === 'C'.repeat(64) && p.role === 'derived_via').length === 0,
+    'an observer was invented for a transaction that proves none');
+  check('no reconstructed row is ever labelled observed_via',
+    (rebuilt.participants || []).filter(p => p.role === 'observed_via')
+      .every(p => p.tx_hash === survivor.tx_hash && p.address === survivor.address),
+    'a derived row was passed off as an observation');
+  check('the surviving observation comes through untouched',
+    (rebuilt.participants || []).some(p => p.tx_hash === survivor.tx_hash &&
+      p.address === survivor.address && p.role === 'observed_via'));
+  check('the day is marked partial, never complete',
+    rebuilt.coverage && rebuilt.coverage.status === 'PARTIAL_RECONSTRUCTED', rebuilt.coverage);
+  check('and it counts the two kinds separately, because they are not the same claim',
+    rebuilt.coverage.observed_rows === 1 && rebuilt.coverage.derived_rows === 2, rebuilt.coverage);
+  check('a transaction with a SURVIVING observation still counts as attributed',
+    (rebuilt.participants || []).some(p => p.tx_hash === 'C'.repeat(64) && p.role === 'observed_via'));
+  check('but one with neither a derivable party nor a survivor stays unattributed',
+    rebuilt.coverage.events_without_provenance === 1, rebuilt.coverage);
+  check('and nothing at all was written for it',
+    (rebuilt.participants || []).filter(p => p.tx_hash === 'D'.repeat(64)).length === 0,
+    'a row was invented for the one transaction that proves nothing');
+  // Idempotence: running it again adds nothing.
+  const again = D.reconstructProvenance({ events: rEvents, roster: watched,
+    existing: rebuilt.participants, day: RDAY });
+  check('reconstruction is idempotent',
+    again.participants.length === rebuilt.participants.length,
+    { first: rebuilt.participants.length, again: again.participants.length });
+
+  console.log('\n42. the window tells the report which attribution is inferred');
+  /* A window attributed on reconstructed rows is weaker than one whose
+     provenance survived, and the report must be able to say so instead of
+     presenting both as the same fact. */
+  const ghProv = fakeGithub(seeded(ANCHOR - 1000));
+  const pDay = '2026-09-11';
+  const evOf = (h, from, to) => ({ hash: h, ledger_index: ANCHOR - 100,
+    close_time: pDay + 'T04:00:00.000Z', tx_type: 'Payment', tx_result: 'tesSUCCESS',
+    validated: true, from_account: from, to_account: to, currency: 'XRP', amount_drops: '1000000' });
+  const put = (path, records) => ghProv.files().set(path,
+    zlib.gzipSync(Buffer.from(records.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8')));
+  put('evidence/2026/09/11/events.ndjson.gz', [
+    evOf('1'.repeat(64), 'rAlice', 'rStranger'),
+    evOf('2'.repeat(64), 'rBob', 'rStranger')
+  ]);
+  put('evidence/2026/09/11/participants.ndjson.gz', [
+    { tx_hash: '1'.repeat(64), address: 'rAlice', role: 'observed_via' },
+    { tx_hash: '2'.repeat(64), address: 'rBob', role: 'derived_via' }
+  ]);
+  const provWin = await D.readReportWindow({
+    window_start_ms: Date.parse(pDay + 'T00:00:00.000Z'),
+    window_end_ms: Date.parse(pDay + 'T23:59:59.000Z'), rows: []
+  }, { env: ENV, gh: ghProv.gh });
+  check('both roles attribute their transaction',
+    provWin.unattributed === 0, provWin.unattributed);
+  check('but the inferred one is counted separately',
+    provWin.attributed_derived_only === 1, provWin.attributed_derived_only);
+  check('and the window declares its provenance partial',
+    provWin.provenance === 'PARTIAL_RECONSTRUCTED', provWin.provenance);
+  // A window with only genuine observations must NOT be labelled partial.
+  const ghClean = fakeGithub(seeded(ANCHOR - 1000));
+  const putC = (path, records) => ghClean.files().set(path,
+    zlib.gzipSync(Buffer.from(records.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8')));
+  putC('evidence/2026/09/11/events.ndjson.gz', [evOf('1'.repeat(64), 'rAlice', 'rStranger')]);
+  putC('evidence/2026/09/11/participants.ndjson.gz', [
+    { tx_hash: '1'.repeat(64), address: 'rAlice', role: 'observed_via' }]);
+  const cleanWin = await D.readReportWindow({
+    window_start_ms: Date.parse(pDay + 'T00:00:00.000Z'),
+    window_end_ms: Date.parse(pDay + 'T23:59:59.000Z'), rows: []
+  }, { env: ENV, gh: ghClean.gh });
+  check('a fully observed window is not labelled partial',
+    cleanWin.provenance === 'OBSERVED' && cleanWin.attributed_derived_only === 0, cleanWin.provenance);
+
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA ACQUISITION CHECKS PASS'));
   process.exit(fail ? 1 : 0);
 }
