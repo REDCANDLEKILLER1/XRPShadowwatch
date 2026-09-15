@@ -701,17 +701,44 @@
         // inherited the PREVIOUS run's proof — status COMPLETE, the previous
         // run's anchor — and was counted for today's claim. That is a COMPLETE
         // assertion about a wallet nobody read this morning.
-        try { for (var _k in proofByAccount) delete proofByAccount[_k]; } catch (_) {}
+        // CLEAR THE TABLE THAT EXISTS, NOT THE NAME THAT DOES NOT.
+        //
+        // This read a bare `proofByAccount`, which is declared inside
+        // installCompleteAccountTxPagination — a SIBLING of this function. The
+        // ReferenceError went straight into the empty catch, so the reset the
+        // comment above describes never cleared anything and a wallet CHECKED
+        // but not walked this run could still inherit the previous run's
+        // COMPLETE proof. The table is published on the function object nine
+        // lines below, and that is the one to clear.
+        try {
+          var _pt = (typeof accountTxWindowDepth === 'function' && accountTxWindowDepth._proofByAccount) || null;
+          if (_pt) { for (var _k in _pt) delete _pt[_k]; }
+        } catch (e) { try { if (typeof elog === 'function') elog('proof table reset', e); } catch (_) {} }
         var previous = readPreviousSnapshot();
-        var previousRaw = null;
         var completed = false;
+        // Read, never written. The merge in `finally` still matters: the
+        // scanner writes only the wallets it read, so without it a wallet
+        // absent from this run would be dropped from the baseline entirely.
+        var previousRaw = null;
         try { previousRaw = localStorage.getItem(SNAPSHOT_KEY); } catch (_) {}
 
-        // The legacy selector treats a wallet with no prior snapshot as a Phase-2
-        // target. Temporarily present an empty snapshot so EVERY wallet that
-        // successfully clears account_info enters Phase 2. We restore the real
-        // prior balances onto state.wallets before any downstream analysis runs.
-        try { localStorage.setItem(SNAPSHOT_KEY, '{}'); } catch (_) {}
+        // ASK FOR EVERY WALLET; DO NOT EDIT THE EVIDENCE TO GET IT.
+        //
+        // The legacy selector treats a wallet with no prior snapshot as a
+        // Phase-2 target, and this used to write '{}' over the persistent
+        // balance baseline to make every wallet look new — holding the real one
+        // in a page variable and restoring it in `finally`.
+        //
+        // For the length of a scan the only durable copy of the baseline was an
+        // empty object. On SW-20260915-D49XL that window was twelve minutes,
+        // spanning an app switch, a socket death and a 60s quota pause. A
+        // reload, a crash or an OS kill anywhere in it leaves the device with
+        // no prior balances at all — which is the recurring "no prior balances
+        // on this device" report.
+        //
+        // Selection is a scan input, so it is passed as one. The committed
+        // baseline is not written until real readings replace it.
+        try { state._proveEveryCheckedWallet = true; } catch (_) {}
 
         try {
           var out = await original.apply(this, arguments);
@@ -839,6 +866,10 @@
               }
             }
           } catch (_) {}
+          // The request belongs to this run only. Leaving it set would make the
+          // next scan's selection depend on the last one's — the same class of
+          // defect as steering through stored evidence, one layer up.
+          try { state._proveEveryCheckedWallet = false; } catch (_) {}
         }
       };
       scanWallets._swTxCompleteness20260819 = true;

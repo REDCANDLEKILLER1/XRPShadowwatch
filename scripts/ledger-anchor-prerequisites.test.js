@@ -656,8 +656,25 @@ console.log('\n3. the wiring is real, not just the decision layer');
         !/try \{ req = RA\.boundRequest\(req, runAnchor\); \} catch/.test(S17));
   check('the walker starts UNPROVEN, so an undecided path cannot inherit a claim',
         /var status = 'UNPROVEN'/.test(S17), 'status still initialises optimistically');
-  check('proofs are cleared at the start of every run',
-        /for \(var _k in proofByAccount\) delete proofByAccount\[_k\]/.test(S17));
+  // THIS CHECK USED TO ASSERT THE DEFECT.
+  //
+  // It matched the literal text `for (var _k in proofByAccount) delete
+  // proofByAccount[_k]`, which sits in installEveryCheckedWalletPhase2 — a
+  // SIBLING of the function where proofByAccount is declared. That line threw
+  // ReferenceError into an empty catch and cleared nothing, so this check was
+  // green for exactly as long as the reset was broken, and went red the moment
+  // it was repaired. A source guard that pins a string pins whatever string is
+  // there, defect included.
+  //
+  // It now names the table that exists. The behaviour — run A proves a wallet,
+  // run B must not inherit it — is driven for real in
+  // scripts/scan-state-ownership.test.js.
+  check('proofs are cleared at the start of every run, from the table that exists',
+        /accountTxWindowDepth\._proofByAccount\) \|\| null/.test(S17) &&
+        /for \(var _k in _pt\) delete _pt\[_k\]/.test(S17),
+        'the reset must clear accountTxWindowDepth._proofByAccount');
+  check('and the reset no longer swallows its own failure',
+        !/delete proofByAccount\[_k\]; \} catch \(_\) \{\}/.test(S17));
   check('the report calls the SHARED predicate rather than re-deriving it',
         /COVR\.coverageProven\(/.test(S17), 'layer 17 re-derives the rule');
   check('the transport epoch is READ, not merely written',

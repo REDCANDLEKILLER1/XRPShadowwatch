@@ -2035,7 +2035,14 @@ async function scanWallets(ws) {
       const balanceChanged = row.prev_balance_xrp !== null && Math.abs(row.delta_xrp || 0) > 0;
       const firstScan = row.prev_balance_xrp === null;
       const isActive = grp === 'exchange' || grp === 'ripple_corp';
-      row._needsTx = firstScan || balanceChanged || isActive;
+      // SELECTION IS AN INPUT, NOT SOMETHING READ OUT OF EDITED EVIDENCE.
+      //
+      // Layer 17 needs every CHECKED wallet in Phase 2. It used to get that by
+      // writing '{}' over the persistent balance baseline so `firstScan` came
+      // out true for everyone — which left the device with no durable baseline
+      // for the length of the scan. It now asks, here.
+      const proveEvery = (typeof state !== 'undefined' && state._proveEveryCheckedWallet === true);
+      row._needsTx = firstScan || balanceChanged || isActive || proveEvery;
       row.status = 'CHECKED';
     } catch (e) {
       row.status = 'FAILED'; row.error = e.message;
