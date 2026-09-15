@@ -2154,6 +2154,10 @@ function analyzeFlags() {
   // transfer — exclude it so the report can't print an impossible 100B+ move.
   const MAX_PLAUSIBLE_XRP = 100_000_000_000;
   for (const t of state.txs) {
+    // A rejected transaction is evidence, not movement. It stays in state.txs
+    // — coverage and the live feed read it — but it may not become a large
+    // transfer, a flag, or a number in the volume line.
+    if (!txSucceeded(t)) continue;
     if (t.currency === 'XRP' && t.amount >= MAX_PLAUSIBLE_XRP) {
       log('dropped implausible XRP amount (data artifact): ' + fmt(t.amount, 0) + ' ' + (t.hash || ''));
       continue;
@@ -3411,7 +3415,25 @@ const ordinaryDeltaXRP = () => totalDeltaXRP() + escrowDeltaAdjustXRP();
 // Wide-shot activity across the watched wallets (ALL sizes, not just the ≥1M
 // whale moves). Shadow Volume stays the spotlight; these are the full totals.
 // XRP-currency payments only; the >=100B guard excludes partial-payment artifacts.
-const totalTxXRP = () => state.txs.reduce((a, t) => a + (t.currency === 'XRP' && n(t.amount) > 0 && n(t.amount) < 1e11 ? n(t.amount) : 0), 0);
+// ── A TRANSACTION THAT FAILED IS NOT MOVEMENT ─────────────────────────────
+//
+// The ledger records rejections as faithfully as it records payments, and the
+// evidence store keeps both — correctly, because "a wallet tried to move a
+// billion XRP and could not" is a fact worth holding. But the Amount on a
+// failed transaction is the sum it was REFUSED, and a partial payment's Amount
+// is a ceiling rather than a delivery, so counting either as movement prints a
+// number that never happened.
+//
+// Measured on the committed evidence for 2026-09-12: 110 failed transactions
+// out of 52,017 carried 23,000,031,350 of the "XRP moved" total, against
+// 112,462,205 that actually moved. Two tenths of one percent of the rows
+// produced ninety-nine and a half percent of the headline — which is how a
+// report came to claim 216.41B XRP, twice the total supply of the asset.
+//
+// An empty tx_result means a row from a path that never carried the field, and
+// is treated as movement so nothing already working is silently dropped.
+const txSucceeded = t => !t || !t.tx_result || t.tx_result === 'tesSUCCESS';
+const totalTxXRP = () => state.txs.reduce((a, t) => a + (txSucceeded(t) && t.currency === 'XRP' && n(t.amount) > 0 && n(t.amount) < 1e11 ? n(t.amount) : 0), 0);
 const activeWalletCount = () => { const s = {}; state.txs.forEach(t => { if (t.account) s[t.account] = 1; }); return Object.keys(s).length; };
 
 // (New-funded-accounts-per-day now comes directly from XRPScan daily metrics'

@@ -765,6 +765,15 @@
                 account: observer ? observer.address : '',
                 label: observer ? observer.label : '',
                 cat: observer ? observer.cat : '',
+                // ── WHETHER IT HAPPENED AT ALL ──────────────────────────
+                // A transaction that FAILED moved nothing, and its Amount is
+                // the sum it was refused rather than a sum that changed hands.
+                // This field was being dropped here, so nothing downstream
+                // could tell a payment from a rejection — and on 2026-09-12,
+                // 110 failed transactions out of 52,017 carried 23,000,031,350
+                // of the "XRP moved" the report printed, against 112,462,205
+                // that actually moved.
+                tx_result: f.tx_result || '',
                 type: f.type || '', hash: f.hash || '', ledger_index: Number(f.ledger_index) || null,
                 proves_coverage: true, date: f.date || '', from: f.from || '', to: f.to || '',
                 amount: Number.isFinite(amount) ? amount : 0, currency: f.currency || 'XRP',

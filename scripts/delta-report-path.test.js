@@ -863,6 +863,79 @@ async function main() {
   check('a sealed pack still takes precedence over the minted id',
     /SW-20260915-SEALD/.test(naming.sealedHeader), naming.sealedHeader);
 
+  console.log('\n15. a failed transaction moved nothing');
+  /* ── THE REPORT CLAIMED TWICE THE SUPPLY OF XRP ──────────────────────────
+     SW-20260915-IWBGW printed "216.41B XRP moved". Total XRP supply is ~100B.
+
+     From the committed evidence, not from the report: all 216 of the 237
+     "large transfers" whose sender equals their receiver are tecPATH_DRY —
+     failed. Each carries amount_drops 1000000000000000 (a partial payment's
+     CEILING, 1B XRP) and a balance delta of 10 drops, which is the fee. They
+     contributed 216,000,000,000 of the 216,270,288,189 headline: 99.88%.
+
+     The true figure for that window is ~270M XRP, which is the order of
+     magnitude the pre-migration path reported (236.05M on 2026-09-08).
+
+     tx_result was carried by layer 45 and dropped by layer 17's mapping, so no
+     consumer could tell a payment from a rejection. */
+  const failed = await page.evaluate(() => {
+    var keep = state.txs;
+    // One real failure, taken from the evidence: hash, result and amount as
+    // committed. Plus one ordinary payment to prove the filter is not a mute.
+    state.txs = [
+      { account: 'rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm', label: 'WATCHED_rSwGFM', cat: 'x',
+        type: 'Payment', tx_result: 'tecPATH_DRY',
+        hash: '77D2673F853001C7DE41D1F208E258EFAF6A462839DD20CBD91AD7C1A1D682B4',
+        date: '2026-09-12T20:32:12.000Z',
+        from: 'rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm', to: 'rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm',
+        amount: 1000000000, currency: 'XRP' },
+      { account: 'rAlice', label: 'A', cat: 'x', type: 'Payment', tx_result: 'tesSUCCESS',
+        hash: 'B'.repeat(64), date: '2026-09-12T20:33:00.000Z',
+        from: 'rAlice', to: 'rBob', amount: 2000000, currency: 'XRP' },
+      // No tx_result at all: a row from a path that never carried the field.
+      // It must still count, or a working report would go silent.
+      { account: 'rCarol', label: 'C', cat: 'x', type: 'Payment',
+        hash: 'C'.repeat(64), date: '2026-09-12T20:34:00.000Z',
+        from: 'rCarol', to: 'rDave', amount: 3000000, currency: 'XRP' }
+    ];
+    var out = { total: totalTxXRP() };
+    analyzeFlags();
+    out.large = (state.large || []).length;
+    out.largeHashes = (state.large || []).map(function (t) { return t.hash.slice(0, 8); });
+    out.shadow = shadowVolumeXRP();
+    state.txs = keep;
+    return out;
+  });
+  check('the failed billion is not counted as XRP moved',
+    failed.total === 5000000, failed.total);
+  // Both surviving rows clear the 1M threshold; the failed one does not appear.
+  check('and it does not become a large transfer',
+    failed.large === 2 && failed.largeHashes.indexOf('77D2673F') < 0, failed.largeHashes);
+  check('so shadow volume reflects what actually moved',
+    failed.shadow === 5000000, failed.shadow);
+  check('a row with no tx_result at all still counts',
+    failed.total === 5000000, failed.total);
+
+  // ── THE FIELD HAS TO SURVIVE THE WHOLE CHAIN ────────────────────────────
+  //
+  // The check above sets state.txs by hand, so it cannot see layer 17 dropping
+  // tx_result on the way in — and because an absent result is treated as
+  // success (so no working path goes silent), dropping it would restore the
+  // defect in total silence. Both ends of the carry are therefore checked:
+  // layer 45 really emits it, and layer 17 really passes it on.
+  const carried = await page.evaluate(async () => {
+    var rows = await window.SW_EVIDENCE_INDEX.readRun();
+    return { n: rows.length, withResult: rows.filter(function (r) { return !!r.tx_result; }).length,
+      sample: rows[0] && rows[0].tx_result };
+  });
+  check('layer 45 carries tx_result out of the window',
+    carried.n > 0 && carried.withResult === carried.n && carried.sample === 'tesSUCCESS', carried);
+  const L17SRC = fs.readFileSync(path.join(ROOT, 'src/brief/17-report-scan-tuning-20260816.js'), 'utf8')
+    .split('\n').map(l => l.replace(/^\s*\/\/.*$/, '')).join('\n');
+  check('and layer 17 passes it into the rows the report analyses',
+    /tx_result:\s*f\.tx_result/.test(L17SRC),
+    'layer 17 drops tx_result — every row would read as successful');
+
   await browser.close();
   srv.close();
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail)

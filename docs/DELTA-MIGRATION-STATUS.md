@@ -177,6 +177,39 @@ the record of a morning that did not finish. What may be CLAIMED is the seal's
 business. A run that never committed is a different matter, and the report-id
 check is what catches that.
 
+## The report claimed twice the supply of XRP — 2026-09-15
+
+`SW-20260915-IWBGW` printed **216.41B XRP moved**. Total XRP supply is ~100B.
+
+Read out of the committed evidence, not out of the report: all **216** of the
+237 "large transfers" whose sender equals their receiver are `tecPATH_DRY` —
+every one FAILED. Each carries `amount_drops` 1000000000000000, which is a
+partial payment's CEILING of 1B XRP, and a balance delta of **10 drops**: the
+fee. They contributed 216,000,000,000 of the 216,270,288,189 headline — 99.88%.
+
+The true figure for that window is ~270M XRP, the order of magnitude the
+pre-migration path reported (236.05M on 2026-09-08).
+
+| | 2026-09-08 (Neon) | 2026-09-15 (delta) |
+|---|---|---|
+| transactions | 36,494 | 37,425 |
+| XRP moved | 236.05M | **216.41B** |
+| wallets active | 111 | **4** |
+
+`tx_result` was carried by layer 45 and **dropped by layer 17's mapping**, so
+nothing downstream could tell a payment from a rejection. The store was right
+to keep failed transactions — "a wallet tried to move a billion and could not"
+is a fact worth holding — but the report may not count them as movement.
+
+Measured on the 2026-09-12 shard: 110 failed transactions out of 52,017 carry
+23,000,031,350 of the "moved" total against 112,462,205 that actually moved.
+Successful partial payments are immaterial: 33 XRP in total.
+
+**Still open from the same run:** `unattributed: 37,420 of 37,425`. Almost no
+event in the window carries an observer, which is what makes "wallets active"
+read 4 instead of 111. The server reports that number precisely so it can be
+noticed, and nothing was reading it. Not yet diagnosed.
+
 ## ASSUMED — believed, not yet observed
 
 Everything here is a claim I have NOT earned. Do not repeat any of it as fact.
