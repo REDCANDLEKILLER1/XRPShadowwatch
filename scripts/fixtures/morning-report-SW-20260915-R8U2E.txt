@@ -1,0 +1,80 @@
+🩸 ℜᴇᴅᴄᴀɴᴅʟᴇᴋɪʟʟᴇR 🩸
+ＳＨＡＤＯＷ ＷＡＴＣＨ
+✨ 𝐹𝑒𝑎𝑡𝑢𝑟𝑖𝑛𝑔 ✨
+𝓛𝓪𝓭𝔂 𝓚'𝓼
+🄴🅇🄲🄴🄻🄻🄴🄽🅃!
+𝖂𝖍𝖎𝖑𝖊 𝖄𝖔𝖚 𝖂ᴇʀᴇ 𝕾𝖑𝖊𝖊𝔭𝖎𝖓𝖌
+𝗫𝗥𝗣𝗟  𝕌ℙ𝔻𝔸𝕋𝔼 ✨✨ on
+☕ COFFEE & CRYPTO with 𝐒𝐓ΟΝΕ
+September 15, 2026
+
+Executive Summary
+─────────────────
+121.36M XRP moved across 29 large transfers in the window. Binance ×14 and Bitso and +1 more absorbed 84.65M XRP this scan. The standout individual anomaly was 5M XRP moved from a watched routing wallet to Binance in the scanned window. These classifications describe observed movement only; they do not prove intent.
+
+What Mattered Most
+──────────────────
+The move that earned a second look: Binance ×14 and Bitso and +1 more absorbed 84.65M XRP this scan, and Ripple Price Forecast: XRP slips as liquidity improves, ETF inflows return. Down here the Ledger leads and the chart just follows along.
+
+Evidence
+────────
+Receipts first, opinions never: 5M XRP moved from a watched routing wallet to Binance in the scanned window. A second transfer of 4.61M XRP reached a tracked receiving wallet. The largest single move, 10.11M XRP, was internal to Binance. On the discovery pile I have 8 flagged candidates — 2 found this scan, 0 recommended for review, separate from the 408 wallets on the permanent watch list — every one flagged on behavior, not identity; behavioral evidence only, and nobody gets a badge for free. And out in the daylight world, relevant headline: Ripple Price Forecast: XRP slips as liquidity improves, ETF inflows return. The Ledger has no press office and no reason to lie.
+
+
+Escrow Watch
+────────────
+Ripple escrow: 31.70B XRP locked now across 100 active validated-ledger escrow objects · registry check 20/20 known Ripple-labeled addresses.
+No Ripple escrow events are present in the acquired record for the last 36h; this alone does not prove an event-free window.
+No other XRPL escrow events are present in the acquired record for the last 36h; this is not a complete XRPL escrow sweep.
+Ripple and non-Ripple escrow are separate. Active escrow objects are ledger objects, not owner wallets. Scope is escrow observed by this scan, not every escrow on the XRPL.
+
+Under the Surface
+─────────────────
+Here’s the part the ≥1M whale counter can miss. Shadow Volume is the big-move spotlight: 121.36M XRP in 29 individual moves of at least 1M. Another 92.93M XRP moved in 365 payments from 100K to under 1M. 83.11M XRP across 316 of those payments matched 50 repeat-route, fan-in, or fan-out patterns. That is a signal to trace, not proof somebody was hiding funds.
+
+How to Read It
+──────────────
+New here? Shadow Volume shows the obvious ≥1M moves. Mid-size Flow catches 100K–<1M moves. Clustered Flow asks whether those smaller high-value payments keep using common routes. Net watched flow tells whether the tracked wallet board gained or lost XRP versus its prior snapshot.
+
+What To Watch Next
+──────────────────
+• Watch the absorbing wallets — are they stacking it, or handing it back out?
+• Check whether the largest recipient in this window makes another move.
+• Keep tracing the chains we’ve already opened; they tend to extend another hop.
+
+Verdict
+───────
+My call this morning: a middling night — logged and watched. (38/100). The flags that lit up: large transfer count, shadow volume, dust/tag flags. What looks like nothing tonight is usually the first page of something. Not financial advice. XRP-only forensic watch.
+
+I’m XRPMan, and I tell on the banks.
+
+LEDGER DIAGNOSTICS
+──────────────────
+• XRP price: ~$1.4328 (24h firm)
+• Market volume (exchanges, 24h): $3.25B
+• Native XRPL DEX reported volume (third-party aggregator, 24h): ~$9M
+• XRPL EVM: $32.4K TVL
+• RLUSD on XRPL (issuer obligations): 1B tokens
+• New funded XRPL accounts (2026-09-14): +2,808
+• Watched wallets: 408
+• Watched activity (all sizes, LAST 24H): 39221 transactions · 263.24M XRP moved · 155 wallets active
+• Shadow volume (whale moves ≥1M, LAST 24H): 121.36M XRP · 29 transfers
+
+🙏 THE DAILY PRAYER
+───────────────────
+Lord, protect this community from anyone who would use our work to hurt someone. Including us.
+
+📖 THE DAILY SCRIPTURE
+──────────────────────
+Psalm 24:1 (KJV)
+“The earth is the Lord’s, and the fulness thereof; the world, and they that dwell therein.”
+
+Sources
+───────
+[1] Ripple Price Forecast: XRP slips as liquidity improves, ETF inflows return — https://news.google.com/rss/articles/CBMigwFBVV95cUxOYVZEUm5GTW1ENVBsNkVWbHcycFJtcGlscHY2T190c0l5cFVVNURvQjRZVTJTd3pEZzBpVW9lV1VpY1BHNVZNRS0xNGxKWVpWR1lPd0ZYbEhIc2NZRlB4OExUVlJjeUpabzlzZnZCQmtLbzB3SmpMeVQyS3BUZHRNeTBzMA?oc=5
+[2] Google News — CLARITY Act Could Fail Today — Analysts Still Target $80K Bitcoin, $3K Ethereum and $4 XRP
+    https://news.google.com/rss/articles/CBMinAFBVV95cUxNVnFNbjZSWU5FbHh0aFhvWkhxUXpwaVlYeFM5Wlh6WFA1ZjJyR0lyd1Y5UzdJanBsNjdOemdhWWI1VTc1Nks1UVlLTEluNkZXZjZGM29KY3kyQTBtTGZPend3bGZ0aGhKNERiYnBXQW9LVm5GT2JzcTB4Q2d6YzB4RkhNbXpKeVFSQUM0dVhxeDZRRnNzenhHMFhYeUE?oc=5
+
+NEWS USED:
+[1] google_news@self — CLARITY Act Could Fail Today — Analysts Still Target $80K Bitcoin, $3K Ethereum and $4 XRP
+[2] google_news@self — Ripple Price Forecast: XRP slips as liquidity improves, ETF inflows return

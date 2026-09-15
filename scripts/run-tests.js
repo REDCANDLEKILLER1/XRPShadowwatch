@@ -41,6 +41,8 @@ const SUITES = [
   ['source-relevance',       'source-relevance.test.js',         8209],
   ['in-page-smoke',          'in-page-smoke.test.js',            8210],
   ['morning-story-canonical','morning-story-canonical.test.js',  8211],
+  // A report that cannot be posted was not published. The field holds 4,000.
+  ['public-morning-4k',      'public-morning-4k.test.js',           null],
   ['report-truth-4vf0c',     'report-truth-4vf0c.test.js',       8212],
   ['escrow-not-movement',    'escrow-not-movement.test.js',      8213],
   ['canonical-escrow-model', 'canonical-escrow-model.test.js',   8214],

@@ -14842,6 +14842,31 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
   //  Patch MORNING_REPORT_FLOAT.copy + download for source modes:
   //  copy = none, download = compact
   // ═══════════════════════════════════════════════════════════
+  // ── THE COPY IS A PUBLICATION, AND PUBLICATIONS HAVE A FIELD LIMIT ────────
+  // Copy is the paste-into-the-post path — it is already a distinct projection
+  // here (sources stripped, sourceMode 'none'), unlike download, which must
+  // stay byte-identical to the canonical text.
+  //
+  // The 4,000-character budget is applied HERE, at the boundary, and not by
+  // wrapping buildMorningStoryText. canonicalMorningStory runs three stages
+  // after the renderer — finalizeReportPresentation, the daily gate and the
+  // NEWS USED block — so a budget enforced inside the render chain bounds
+  // nothing. SW-20260915-R8U2E recorded public_morning_chars_4k: 3900 and
+  // delivered 5,149 characters; the morning's report could not be posted.
+  //
+  // Resolved at call time, not at load time: layer 31 installs after this file.
+  // If it is not present the full text is returned rather than a silent trim —
+  // an over-long copy is visible, a quietly truncated one is not.
+  // Proof: scripts/public-morning-4k.test.js
+  function _publicMorningText(txt, pack) {
+    try {
+      var G = window.SW_PUBLIC_MORNING_4K_20260817;
+      if (G && typeof G.publicText === 'function') return G.publicText(txt, pack);
+    } catch (_) {}
+    return txt;
+  }
+  window._publicMorningText = _publicMorningText;
+
   if (window.MORNING_REPORT_FLOAT) {
     var MRF = window.MORNING_REPORT_FLOAT;
     // Source mode config
@@ -14858,8 +14883,8 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
       // as a fallback), and ALWAYS route through copySafe — which falls back to a
       // textarea+execCommand copy if the async clipboard API is blocked. Previously
       // a blocked clipboard write failed silently with no fallback ("won't copy").
-      var txt = MRF._copyLastReport ||
-                (typeof state !== 'undefined' && state.morningStoryReport) || '';
+      var txt = _publicMorningText(MRF._copyLastReport ||
+                (typeof state !== 'undefined' && state.morningStoryReport) || '');
       try {
         if (typeof copySafe === 'function') { copySafe(txt, 'Morning Report'); return; }
         if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -21908,6 +21933,14 @@ async function run() {
       // canonicalMorningStory so the popup and the file can never disagree
       // about which brief the day has.
       state.morningStoryReport = canonicalMorningStory(p, { rebuild: true });
+      // MEASURE THE PUBLICATION, DO NOT PERFORM IT.
+      // The canonical text is unchanged by this call; only the pack's
+      // public_morning_chars_* fields are written, so TOTAL DEBUG reports how
+      // large the copy will be before anyone presses Copy. SW-20260915-R8U2E
+      // is why: its debug said 3,900 characters for an intermediate render no
+      // surface ever published, while the file handed over was 5,149.
+      if (typeof window._publicMorningText === 'function')
+        window._publicMorningText(state.morningStoryReport, p);
     } catch (e) { elog('v3.24 morning story build', e); }
 
     bundle = buildBundle(p, null);
@@ -23642,9 +23675,13 @@ function installCommandCenterButtons() {
   if (copyBtn) {
     copyBtn.addEventListener('click', () => {
       // v3.23: copy Morning Story if available; fall back to structured report
-      const t = state.morningStoryReport
+      const full = state.morningStoryReport
              || (document.getElementById('mainReport')?.textContent || '');
-      if (!t || /^Run scan first/i.test(t)) { log('No report yet — run a scan.'); return; }
+      if (!full || /^Run scan first/i.test(full)) { log('No report yet — run a scan.'); return; }
+      // Same publication boundary as the drawer's Copy. Both buttons paste into
+      // the same 4,000-character field, so they must agree about what fits.
+      const t = (typeof window._publicMorningText === 'function')
+        ? window._publicMorningText(full) : full;
       try {
         if (typeof copySafe === 'function') copySafe(t, 'Morning Story Report');
         else navigator.clipboard?.writeText(t);
