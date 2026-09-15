@@ -806,7 +806,81 @@ function elog(label, err) {
   if (el.textContent === 'No errors yet.') el.textContent = '';
   el.textContent += m + '\n';
 }
-function resetLog() { const el = $('statusFeed'); if (el) el.textContent = ''; }
+function resetLog() { const el = $('statusFeed'); if (el) el.textContent = ''; _logTickAt = {}; }
+
+// ── A PHASE THAT SAYS NOTHING IS INDISTINGUISHABLE FROM A PHASE THAT HUNG ────
+//
+// SW-20260915-TBUCI took 17m11s and its run log was silent for 13m26s of that —
+// 78% of the run — in four stretches, the longest 6m09s:
+//
+//   15:00:34 → 15:06:43   6m09s   the Phase 1 balance pass, 408 wallets
+//   15:06:51 → 15:07:58   1m07s   escrow backfill
+//   15:08:16 → 15:10:37   2m21s   offers
+//   15:10:37 → 15:14:26   3m49s   offers, continued
+//
+// The cockpit's LIVE SCAN LOG panel was not the problem. It already holds the
+// prime row-1 slot and already repaints on every live tick — it had nothing to
+// repaint, because these loops update the gauge and never say a word. An
+// operator watching a correct, working scan cannot tell it from a hung one, and
+// gives up.
+//
+// Throttled, because a 408-wallet loop must not write 408 lines into a log the
+// operator has to read: one line per phase per interval. Returns whether it
+// spoke, so a caller can tell the difference between throttled and emitted.
+var _logTickAt = {};
+function logTick(key, msg, minGapMs) {
+  try {
+    var gap = (minGapMs === undefined || minGapMs === null) ? 10000 : Number(minGapMs);
+    var now = Date.now();
+    var last = _logTickAt[key];
+    if (last !== undefined && (now - last) < gap) return false;
+    _logTickAt[key] = now;
+    log(msg);
+    return true;
+  } catch (_) { return false; }
+}
+
+// MEASURE THE SILENCE, DO NOT ASSUME IT IS GONE.
+//
+// The defect above was invisible for as long as nobody counted. Reading the
+// gaps out of the run the run itself recorded turns "it felt frozen" into a
+// number that ships in every TOTAL DEBUG, so a phase that goes quiet again is
+// caught by looking rather than by a user giving up.
+//
+// Lines are the '[HH:MM:SS] text' shape log() writes. A line without that stamp
+// carries no time and is skipped rather than guessed at; a clock that goes
+// backwards (midnight, or a stamp we cannot parse) contributes no gap.
+function runLogSilence(lines) {
+  var out = { lines: 0, max_gap_ms: 0, max_gap_after: null, max_gap_before: null, gaps_over_30s: 0 };
+  try {
+    var arr = Array.isArray(lines) ? lines : [];
+    var prevMs = null, prevLine = null;
+    for (var i = 0; i < arr.length; i++) {
+      var raw = String(arr[i] == null ? '' : arr[i]);
+      var m = /^\[(\d{2}):(\d{2}):(\d{2})\]/.exec(raw);
+      if (!m) continue;
+      out.lines++;
+      var ms = (Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])) * 1000;
+      if (prevMs !== null) {
+        var gap = ms - prevMs;
+        if (gap >= 0) {
+          if (gap >= 30000) out.gaps_over_30s++;
+          if (gap > out.max_gap_ms) {
+            out.max_gap_ms = gap;
+            out.max_gap_after = prevLine;
+            out.max_gap_before = raw;
+          }
+        }
+      }
+      prevMs = ms; prevLine = raw;
+    }
+  } catch (_) {}
+  return out;
+}
+if (typeof window !== 'undefined') {
+  window.logTick = logTick;
+  window.runLogSilence = runLogSilence;
+}
 // v3.12: SMOOTH PERCENT COUNTER
 // ── v3.22 HUD ARC PROGRESS ──────────────────────────────────────
 // shadowSay drives the SVG arc fill + phase bar in addition to the
@@ -1819,6 +1893,10 @@ async function scanWallets(ws) {
     const chunk = rows.slice(i, i + SCAN_PARALLEL);
     await Promise.all(chunk.map(balanceOne));
     phase1Done = i + chunk.length;
+    // The 6m09s silence. The gauge moved; the log did not, so a working scan
+    // and a hung one looked identical for six minutes.
+    logTick('balances', 'Balances: ' + phase1Done + ' / ' + rows.length + ' wallets read' +
+      (state._balanceFailLogged ? ' · ' + rows.filter(r => r.status === 'FAILED').length + ' failed' : ''));
     // Smooth progress: 32→55% over Phase 1
     shadowProgress(32, 55, phase1Done / rows.length);
     state.wallets = rows.slice();      // mid-scan render
@@ -4340,11 +4418,18 @@ async function escrowBackfill(ws) {
   const byHash = {};
   loadEscrowHistory().forEach(e => { if (e && e.hash) byHash[e.hash] = e; });
   escrowFromTxs(byHash);
-  for (const addr of escrowWallets()) {
+  // The 1m07s silence. One account_tx per escrow wallet, serially, saying
+  // nothing until the whole sweep was done.
+  const _escrowAddrs = escrowWallets();
+  let _escrowDone = 0;
+  for (const addr of _escrowAddrs) {
     try {
       const res = await xrpl(ws, { command: 'account_tx', account: addr, ledger_index_min: -1, ledger_index_max: -1, limit: 40, forward: false });
       for (const item of (res.transactions || [])) { const e = parseEscrowItem(item); if (e && e.hash && !byHash[e.hash]) byHash[e.hash] = e; }
     } catch (e) { log('escrow backfill miss: ' + addr.slice(0, 8) + ' (' + e.message + ')'); }
+    _escrowDone++;
+    logTick('escrow-backfill', 'Escrow backfill: ' + _escrowDone + ' / ' + _escrowAddrs.length +
+      ' wallets read · ' + Object.keys(byHash).length + ' event(s) so far');
   }
   const all = Object.values(byHash).sort((a, b) => (b.ts || 0) - (a.ts || 0));
   state.escrow = all;
@@ -20173,6 +20258,11 @@ async function scanOffers(ws) {
     }
     scanned += chunk.length;
     totalOffers += counts.reduce((s, x) => s + x, 0);
+    // The 3m49s silence. This loop only spoke when it STOPPED — link down, or
+    // finished — so the longest quiet stretch of the run was a sweep that was
+    // working perfectly the whole time.
+    logTick('offers', 'Offers: ' + scanned + ' / ' + wallets.length + ' wallets swept · ' +
+      totalOffers + ' active so far');
   }
   log('OFFERS total: ' + totalOffers + ' active across ' + wallets.length + ' wallets');
 }
@@ -21987,6 +22077,18 @@ async function run() {
     renderBlackbox();
 
     shadowSay('Scan complete. Report ready.', 'READY', 100);
+    // Measured BEFORE the completion line, so the last gap counted is the one a
+    // waiting operator actually sat through, not the moment it ended. Lands on
+    // the pack, so every TOTAL DEBUG carries it and a phase that goes quiet
+    // again is found by reading a number rather than by someone giving up.
+    try {
+      const _silence = runLogSilence(state.runLog);
+      p.run_log_silence = _silence;
+      if (_silence.max_gap_ms >= 30000)
+        log('Longest silent stretch this run: ' + Math.round(_silence.max_gap_ms / 1000) + 's' +
+            (_silence.gaps_over_30s > 1 ? ' (' + _silence.gaps_over_30s + ' stretches over 30s)' : '') +
+            ' — after "' + String(_silence.max_gap_after || '').slice(11, 80) + '"');
+    } catch (_) {}
     log('✓ Scan complete. Copy or download the public report manually.');
     // Responsive dashboard v1: refresh instruments/feed/network from sealed state.
     try { if (typeof window.renderDashboardV1 === 'function') window.renderDashboardV1(); } catch (_) {}
