@@ -936,6 +936,38 @@ async function main() {
     /tx_result:\s*f\.tx_result/.test(L17SRC),
     'layer 17 drops tx_result — every row would read as successful');
 
+  console.log('\n16. the report and its receipt agree about what day it is');
+  /* SW-20260915-IWBGW: the Morning Story banner said "September 14, 2026"
+     while the seal, the structured report, the filename and the archive path
+     all said 2026-09-15. Two faults in one line — the render clock instead of
+     the report's date, and local time instead of UTC — which both bite at once
+     on a run just after midnight UTC. */
+  // Driven through the real public builder, because _today is private to the
+  // pipeline's IIFE — and the banner is what the operator actually reads.
+  const dated = await page.evaluate(() => {
+    var line = function (text) {
+      return String(text || '').split('\n')
+        .map(function (l) { return l.trim(); })
+        .filter(function (l) { return /^[A-Z][a-z]+ \d{1,2}, \d{4}$/.test(l); })[0] || null;
+    };
+    var base = { date: '2026-09-15', report_id: 'SW-20260915-IWBGW', scan_id: 'SC-X',
+      large_transfers: [], txs: [], wallets: [] };
+    var out = {};
+    out.fromPack = line(window.buildMorningStoryText(base));
+    out.otherDay = line(window.buildMorningStoryText(
+      Object.assign({}, base, { date: '2026-03-02' })));
+    return out;
+  });
+  check('the banner prints the date the report is FOR',
+    dated.fromPack === 'September 15, 2026', dated.fromPack);
+  check('and follows the pack rather than the machine clock',
+    dated.otherDay === 'March 2, 2026', dated.otherDay);
+  // The Daily Report header already did this correctly; the two must not drift.
+  const PIPE = fs.readFileSync(path.join(ROOT, 'src/brief/10-pipeline.js'), 'utf8');
+  check('the banner formats its date in UTC, like the Daily Report header',
+    /timeZone:'UTC'/.test(PIPE),
+    'the pipeline banner would drift by timezone again');
+
   await browser.close();
   srv.close();
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail)

@@ -29,9 +29,28 @@ function _trunc(addr){
   if(!addr||addr.length<12) return addr||'unknown';
   return addr.slice(0,6)+'\u2026'+addr.slice(-4);
 }
-function _today(){
-  var d=new Date();
-  return d.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+// ── THE REPORT'S DATE, NOT THE MACHINE'S ──────────────────────────────────
+//
+// This printed the operator's LOCAL calendar date at the moment of rendering,
+// which is two different mistakes wearing one line:
+//
+//   new Date()            the clock when the banner was drawn, not the day the
+//                         report is about
+//   no timeZone: 'UTC'    so a run at 02:20 UTC reads as the previous day for
+//                         anyone west of Greenwich
+//
+// On SW-20260915-IWBGW both bit at once: the banner said "September 14, 2026"
+// while the seal, the structured report, the filename and the archive path all
+// said 2026-09-15. A forensic report that disagrees with its own receipt about
+// what day it is undermines every other number on the page.
+//
+// The pack's date is the report's date. Same source and same formatting as the
+// Daily Report's header, so the two cannot drift apart again.
+function _today(pack){
+  var stamp = pack && pack.date;
+  var d = stamp ? new Date(String(stamp) + 'T00:00:00Z') : new Date();
+  if (isNaN(d)) d = new Date();
+  return d.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric',timeZone:'UTC'});
 }
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -1526,7 +1545,7 @@ function assemblePublicReport(pack){
   var BANNER=((typeof buildBrandedHeader==='function')
                 ? buildBrandedHeader()
                 : '\uD83E\uDE78 \u211C\u1D07\u1D05\u1D04\u1D00\u1D0D\u1D05\u029C\u1D0F\u029C\u1D1B\u1D07\u0280 \uD83E\uDE78\n\uFF33\uFF28\uFF21\uFF24\uFF2F\uFF37 \uFF37\uFF21\uFF34\uFF23\uFF28')
-             + '\n' + _today();
+             + '\n' + _today(pack);
 
   var exec  = _buildExecutiveSummary(interps, pack);
   var wmm   = _buildWhatMatteredMost(interps, pack);
