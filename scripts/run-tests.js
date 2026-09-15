@@ -45,6 +45,8 @@ const SUITES = [
   ['public-morning-4k',      'public-morning-4k.test.js',           null],
   // A working scan that says nothing is indistinguishable from a hung one.
   ['scan-liveness',          'scan-liveness.test.js',              null],
+  // A timeout is not a refusal, and recovery has to fit inside one run.
+  ['xrpl-admission-recovery','xrpl-admission-recovery.test.js',    null],
   ['report-truth-4vf0c',     'report-truth-4vf0c.test.js',       8212],
   ['escrow-not-movement',    'escrow-not-movement.test.js',      8213],
   ['canonical-escrow-model', 'canonical-escrow-model.test.js',   8214],

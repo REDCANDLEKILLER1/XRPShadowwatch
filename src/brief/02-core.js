@@ -1501,6 +1501,69 @@ async function _ensureSock(ws) {
 // All main-scan RPCs share admission, including pagination and later offer
 // passes. Only a successful response resolves the caller's current read.
 const _xrplTraffic = { active: 0, limit: 8, gap: 25, next: 0, queue: [], timer: null, successes: 0 };
+
+// ── MEASURE THE READS BEFORE ARGUING ABOUT THEM ─────────────────────────────
+//
+// SW-20260915-TBUCI spent 6m10s reading 408 balances with zero throttling and
+// the same 870 requests as a run that finished in six minutes total. The export
+// gave one number per PHASE and nothing per REQUEST, so the 20x was unarguable
+// in both directions — long-tail latency, lost concurrency and a server refusing
+// load all look identical from a phase total.
+//
+// This is measurement only: it changes no decision, it just makes the next
+// argument one about numbers. Samples are capped per command so a 40k-request
+// run cannot grow the export without bound.
+const XRPL_LAT_CAP = 500;
+const _xrplLatency = {};
+function _xrplNoteLatency(command, ms, outcome) {
+  try {
+    const k = String(command || '?');
+    const e = _xrplLatency[k] || (_xrplLatency[k] = { n: 0, fail: 0, sum: 0, min: null, max: null, s: [] });
+    if (outcome === 'fail') { e.fail++; return; }
+    e.n++; e.sum += ms;
+    if (e.min === null || ms < e.min) e.min = ms;
+    if (e.max === null || ms > e.max) e.max = ms;
+    if (e.s.length < XRPL_LAT_CAP) e.s.push(ms);
+    else e.s[Math.floor(Math.random() * XRPL_LAT_CAP)] = ms;   // reservoir
+  } catch (_) {}
+}
+// Admission pressure, recorded as it happens. `limit_min` is the whole point:
+// a run that spent its life at concurrency 1 reads very differently from one
+// that held 8, and until now neither left a trace.
+const _xrplAdmission = { limit_min: 8, limit_max: 8, gap_max: 25,
+                         backoffs_quota: 0, backoffs_transport: 0,
+                         quota_waits: 0, quota_wait_ms: 0 };
+function _xrplNoteAdmission() {
+  try {
+    _xrplAdmission.limit_min = Math.min(_xrplAdmission.limit_min, _xrplTraffic.limit);
+    _xrplAdmission.limit_max = Math.max(_xrplAdmission.limit_max, _xrplTraffic.limit);
+    _xrplAdmission.gap_max   = Math.max(_xrplAdmission.gap_max, _xrplTraffic.gap);
+  } catch (_) {}
+}
+function xrplReadProfile() {
+  const pct = (sorted, p) => sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))] : null;
+  const out = { commands: {}, admission: Object.assign({}, _xrplAdmission) };
+  // The flat 60-second stalls. _quotaWait already counts them for its own cap;
+  // read those rather than keeping a second tally that could disagree.
+  try {
+    out.admission.quota_waits = n(state._quotaWaits);
+    out.admission.quota_wait_ms = n(state._quotaWaitedMs);
+  } catch (_) {}
+  try {
+    Object.keys(_xrplLatency).forEach(k => {
+      const e = _xrplLatency[k];
+      const s = e.s.slice().sort((a, b) => a - b);
+      out.commands[k] = { requests: e.n, failures: e.fail,
+        min_ms: e.min, p50_ms: pct(s, 0.50), p95_ms: pct(s, 0.95), max_ms: e.max,
+        mean_ms: e.n ? Math.round(e.sum / e.n) : null, sampled: s.length };
+    });
+  } catch (_) {}
+  return out;
+}
+if (typeof window !== 'undefined') {
+  window.xrplReadProfile = xrplReadProfile;
+  window._xrplNoteLatency = _xrplNoteLatency;
+}
 function _xrplPump() {
   if (_xrplTraffic.timer || !_xrplTraffic.queue.length || _xrplTraffic.active >= _xrplTraffic.limit) return;
   const delay = Math.max(0, _xrplTraffic.next - Date.now());
@@ -1523,10 +1586,56 @@ function _xrplRecoveryNote(event) {
   if (event && r.events.length < 100) r.events.push(Object.assign({ at: new Date().toISOString() }, event));
   return r;
 }
-function _xrplBackoff() {
-  _xrplTraffic.limit = Math.max(1, Math.floor(_xrplTraffic.limit / 2));
-  _xrplTraffic.gap = Math.min(1000, Math.max(100, _xrplTraffic.gap * 2));
+// ── A TIMEOUT IS NOT A REFUSAL, AND THE DIFFERENCE COSTS MINUTES ────────────
+//
+// One backoff served both causes: halve the concurrency, double the gap. That
+// is the right answer when the SERVER says "2000 units per 10s, wait 60s" — it
+// named a quota and we respect it. It is the wrong answer for a socket going
+// quiet, which is one endpoint failing, not the cluster refusing load; the
+// socket is rotated a few lines below, and destroying concurrency on top of
+// that punishes the healthy replacement for the dead one's silence.
+//
+// Measured on SW-20260915-D49XL. At 18:35:47 xrplcluster timed out and was
+// retired; five recovered reads followed. Six backoffs, so:
+//
+//     limit  8 → 4 → 2 → 1        gap  25 → 100 → 200 → 400 → 800 → 1000ms
+//
+// and the balance pass went from 0.90 s/wallet to 2.71 s/wallet — three times
+// slower — on a node that was answering fine.
+//
+// Recovery could not undo it either: a slot came back only after 64 CONSECUTIVE
+// successes, and `successes` resets to zero on every backoff. Climbing 1 → 8
+// needed ~448 clean reads in a run that makes about 870 in total, so in
+// practice a single timeout storm set the concurrency for the rest of the run.
+//
+// Quota backoff is unchanged — that one is the server's instruction. Transport
+// backoff now steps down by one and keeps a floor of 2, and a slot is credited
+// back after 12 clean reads, which a 408-wallet pass can actually reach.
+const XRPL_LIMIT_MAX = 8;
+const XRPL_LIMIT_FLOOR_TRANSPORT = 2;
+const XRPL_GAP_MIN = 25;
+const XRPL_GAP_MAX = 1000;
+const XRPL_RECOVER_AFTER = 12;
+function _xrplBackoff(kind) {
+  if (kind === 'transport') {
+    _xrplAdmission.backoffs_transport++;
+    _xrplTraffic.limit = Math.max(XRPL_LIMIT_FLOOR_TRANSPORT, _xrplTraffic.limit - 1);
+    _xrplTraffic.gap = Math.min(XRPL_GAP_MAX, Math.max(50, Math.round(_xrplTraffic.gap * 1.5)));
+  } else {
+    // The server named a cooldown. Take it seriously, exactly as before.
+    _xrplAdmission.backoffs_quota++;
+    _xrplTraffic.limit = Math.max(1, Math.floor(_xrplTraffic.limit / 2));
+    _xrplTraffic.gap = Math.min(XRPL_GAP_MAX, Math.max(100, _xrplTraffic.gap * 2));
+  }
   _xrplTraffic.successes = 0;
+  _xrplNoteAdmission();
+}
+function _xrplCredit() {
+  if (++_xrplTraffic.successes < XRPL_RECOVER_AFTER) return;
+  _xrplTraffic.successes = 0;
+  _xrplTraffic.limit = Math.min(XRPL_LIMIT_MAX, _xrplTraffic.limit + 1);
+  _xrplTraffic.gap = Math.max(XRPL_GAP_MIN, Math.round(_xrplTraffic.gap * 0.75));
+  _xrplNoteAdmission();
 }
 async function _xrplRotate(sock, reason) {
   // One replacement for a failed socket even when eight callers observed it.
@@ -1570,13 +1679,13 @@ async function xrpl(ws, cmd) {
         throw changed;
       }
       stats.requests++;
-      const result = await _xrplRequest(sock, cmd);
+      const _t0 = Date.now();
+      let result;
+      try { result = await _xrplRequest(sock, cmd); }
+      catch (re) { _xrplNoteLatency(cmd.command, 0, 'fail'); throw re; }
+      _xrplNoteLatency(cmd.command, Date.now() - _t0);
       if (retries) { stats.recovered++; log('XRPL recovered ' + cmd.command + ' ' + (cmd.account || '') + ' after ' + retries + ' retry(s)'); }
-      if (++_xrplTraffic.successes >= 64) {
-        _xrplTraffic.successes = 0;
-        _xrplTraffic.limit = Math.min(8, _xrplTraffic.limit + 1);
-        _xrplTraffic.gap = Math.max(25, Math.round(_xrplTraffic.gap * 0.9));
-      }
+      _xrplCredit();
       return result;
     } catch (e) {
       const quota = _isQuotaError(e);
@@ -1588,7 +1697,9 @@ async function xrpl(ws, cmd) {
         throw new Error('XRPL_RECOVERY_EXHAUSTED: ' + e.message);
       }
       stats.retries++;
-      _xrplBackoff();
+      // The `quota` flag is already computed above from the server's own reply,
+      // so the cause is known here and no longer has to be guessed at.
+      _xrplBackoff(quota ? 'quota' : 'transport');
       _xrplRecoveryNote({ event: 'retry', endpoint: sock && sock.url, epoch: n(state._transportEpoch), command: cmd.command, account: cmd.account, code: e.code || null, reason: e.message });
       if (quota) {
         _noteQuota(e, cmd.command);
@@ -22081,6 +22192,23 @@ async function run() {
     // waiting operator actually sat through, not the moment it ended. Lands on
     // the pack, so every TOTAL DEBUG carries it and a phase that goes quiet
     // again is found by reading a number rather than by someone giving up.
+    // What the reads actually cost, per command and per admission decision.
+    // A phase total cannot tell long-tail latency from a server refusing load;
+    // these can, and they ride in every TOTAL DEBUG from here on.
+    try {
+      p.xrpl_read_profile = xrplReadProfile();
+      const _a = p.xrpl_read_profile.admission || {};
+      const _ai = (p.xrpl_read_profile.commands || {}).account_info;
+      if (_ai && _ai.requests)
+        log('XRPL reads: account_info p50 ' + _ai.p50_ms + 'ms · p95 ' + _ai.p95_ms +
+            'ms · max ' + _ai.max_ms + 'ms over ' + _ai.requests + ' reads');
+      if (_a.limit_min < 8 || n(_a.quota_waits))
+        log('XRPL admission: concurrency fell to ' + _a.limit_min + ' of 8 · gap peaked at ' +
+            _a.gap_max + 'ms · ' + n(_a.backoffs_quota) + ' quota / ' + n(_a.backoffs_transport) +
+            ' transport backoff(s)' + (n(_a.quota_waits)
+              ? ' · ' + _a.quota_waits + ' quota wait(s) costing ' + Math.round(n(_a.quota_wait_ms) / 1000) + 's'
+              : ''));
+    } catch (_) {}
     try {
       const _silence = runLogSilence(state.runLog);
       p.run_log_silence = _silence;
