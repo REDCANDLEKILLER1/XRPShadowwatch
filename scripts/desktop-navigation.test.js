@@ -64,6 +64,32 @@ async function main(){
     assert.equal(await page.locator('#swGauges').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),2,'phone coverage counters have readable separate columns');
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+1));
     console.log('PASS phone navigation and viewport width are preserved');
+    // ── THE PANEL YOU WATCH HAS TO BE ON THE SCREEN YOU ARE LOOKING AT ──────
+    // On a phone every row of #swDashMain stacks, so the desktop "prime row-1
+    // slot" put LIVE SCAN LOG at y=1013 on a 915px screen — below the fold,
+    // under MARKET & NETWORK, LIVE SCAN INSTRUMENTS and the status strip.
+    // Through a 17-minute scan the operator saw a bar creeping at the top and
+    // never saw the one panel that says what is happening.
+    //
+    // Measured, not eyeballed: the log's top must be inside the first screen
+    // and it must come before the three panels that are only glanced at.
+    const phone=await page.evaluate(()=>{
+      const box=sel=>{const e=document.querySelector(sel);if(!e)return null;
+        const r=e.getBoundingClientRect();return {top:Math.round(r.top+window.scrollY),h:Math.round(r.height)};};
+      const g=document.querySelector('.sw-gauge svg');
+      return {vh:window.innerHeight,log:box('#swLogPanel'),market:box('#swMarketPanel'),
+              instr:box('#swInstruments'),strip:box('.sw-statusstrip'),
+              gauge:g?Math.round(g.getBoundingClientRect().width):null};
+    });
+    assert.ok(phone.log&&phone.market&&phone.instr&&phone.strip,'the phone panels exist to be ordered');
+    assert.ok(phone.log.h>120,'the log is tall enough to read: '+phone.log.h);
+    assert.ok(phone.log.top+120<phone.vh,
+      'LIVE SCAN LOG starts within the first screen (top '+phone.log.top+' of '+phone.vh+')');
+    assert.ok(phone.log.top<phone.market.top,'the log comes before MARKET & NETWORK');
+    assert.ok(phone.log.top<phone.instr.top,'the log comes before LIVE SCAN INSTRUMENTS');
+    assert.ok(phone.log.top<phone.strip.top,'the log comes before the status strip');
+    assert.ok(phone.gauge&&phone.gauge<=92,'phone gauges stay small enough to leave room: '+phone.gauge);
+    console.log('PASS the live scan log is above the fold on a phone (top '+phone.log.top+' of '+phone.vh+')');
     await page.setViewportSize({width:1440,height:900});
     await page.goto('http://127.0.0.1:'+port+'/');
     await page.getByRole('button',{name:'Hold thumb to activate Shadow Watch'}).click();

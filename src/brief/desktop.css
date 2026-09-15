@@ -88,6 +88,44 @@
 @media (min-width:1350px) { .sw-dash-v1 .sw-mktrow { grid-template-columns:repeat(6,minmax(0,1fr)); } }
 @media (max-width:900px) {
   /* Both coverage counters need their own readable space on a phone. */
-  .sw-dash-v1 .sw-reactor-gauges .sw-gaugerow { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .sw-dash-v1 .sw-reactor-gauges .sw-gaugerow { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
   .sw-dash-v1 .sw-reactor-gauges .sw-gauge-val { font-size:16px; }
+
+  /* ── THE LOG IS WHAT YOU WATCH, SO PUT IT WHERE YOU LOOK ──────────────────
+     On a phone every row of #swDashMain stacks, so the desktop "prime row-1
+     slot" is not a prime slot at all. Measured at 412x915 before this rule:
+
+         reactor            top   61   h 489
+         MARKET & NETWORK   top  558
+         LIVE SCAN INSTR.   top  712
+         status strip       top  918
+         LIVE SCAN LOG      top 1013   <- below a 915px fold, every time
+         activity feed      top 1211
+
+     So through a 17-minute scan the operator saw a bar creeping at the top and
+     never once saw the panel that says what is actually happening. Three
+     panels that are glanced at were sitting on top of the one panel that
+     changes second by second.
+
+     ORDERED, NOT MOVED. The DOM order is the desktop layout and stays exactly
+     as it is — #swDashMain is a grid, so `order` restacks the phone view only.
+     Every id, every listener and every render path is untouched. */
+  .sw-dash-v1 #swDashMain > .sw-row-reactor { order:1; }
+  .sw-dash-v1 #swDashMain > #swLogPanel     { order:2; }
+  .sw-dash-v1 #swDashMain > #swMarketPanel  { order:3; }
+  .sw-dash-v1 #swDashMain > #swInstruments  { order:4; }
+  .sw-dash-v1 #swDashMain > .sw-statusstrip { order:5; }
+  .sw-dash-v1 #swDashMain > .sw-row-cols    { order:6; }
+
+  /* The gauges buy the space. They are instruments worth keeping — nothing is
+     removed — but at 112px of arc each, two rows of them were pushing the log
+     off the screen on their own. Loaded after the inline sheet, so this is the
+     last word on the size. */
+  .sw-dash-v1 .sw-reactor-gauges .sw-gauge svg { max-width:86px; }
+  .sw-dash-v1 .sw-reactor-gauges .sw-gauge-cap { font-size:7px; letter-spacing:.06em; }
+  .sw-dash-v1 .sw-reactor-gauges .sw-gauge-sub { font-size:6.5px; line-height:1.3; }
+  .sw-dash-v1 .sw-reactor { gap:8px; }
+
+  /* Now that it is above the fold it is worth reading — a few more lines. */
+  .sw-dash-v1 .sw-logpanel-top { min-height:210px; max-height:250px; }
 }
