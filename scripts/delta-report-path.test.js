@@ -832,6 +832,37 @@ async function main() {
     sub.completed.indexOf(sub.running) < 0,
     { running: sub.running, completed: sub.completed });
 
+  console.log('\n14. a mid-run export knows which run it came from');
+  /* Two debug files arrived today named
+       ShadowWatch_TOTAL_DEBUG_unknown_2026-09-15.txt
+     from a run that had been called SW-20260915-9T93S since its first ledger
+     read. Every resolver read state.pack, state.seal and state.lastReportId —
+     and pack is nulled at scan entry on the line after reportId is minted, so
+     mid-run all three were empty and the export named itself after nothing.
+
+     The same shape as the begin() defect: the value was there, and the code
+     looked everywhere except at it. */
+  const naming = await page.evaluate(() => {
+    state.pack = null; state.seal = null; state.lastReportId = null;
+    state.reportId = 'SW-20260915-MIDRN';
+    var out = {};
+    out.header = (buildShadowWatchDebugFile() || '').split('\n')
+      .find(function (l) { return l.indexOf('Report ID:') === 0; }) || '';
+    out.filename = _makeFilename('TOTAL_DEBUG');
+    // And a SEALED pack still wins, so nothing about a finished run changes.
+    state.pack = { report_id: 'SW-20260915-SEALD' };
+    out.sealedHeader = (buildShadowWatchDebugFile() || '').split('\n')
+      .find(function (l) { return l.indexOf('Report ID:') === 0; }) || '';
+    return out;
+  });
+  check('the header carries the run id rather than "unknown"',
+    /SW-20260915-MIDRN/.test(naming.header), naming.header);
+  check('and so does the filename',
+    /SW-20260915-MIDRN/.test(naming.filename) && !/unknown/.test(naming.filename),
+    naming.filename);
+  check('a sealed pack still takes precedence over the minted id',
+    /SW-20260915-SEALD/.test(naming.sealedHeader), naming.sealedHeader);
+
   await browser.close();
   srv.close();
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail)

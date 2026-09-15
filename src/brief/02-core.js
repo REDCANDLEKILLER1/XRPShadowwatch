@@ -19672,6 +19672,7 @@ function _buildTotalFile(sections, modeLabel) {
   const divider = '============================================================';
   const reportId = (state.pack && (state.pack.report_id || state.pack.scan_id)) ||
                    (state.seal && state.seal.report_id) ||
+                   state.reportId ||
                    state.lastReportId || 'unknown';
   const generatedAt = new Date().toISOString();
   const lines = [];
@@ -19720,8 +19721,15 @@ function buildShadowWatchTotalFile()   { return _buildTotalFile(_TOTAL_REPORT_SE
 function buildShadowWatchDebugFile()   { return _buildTotalFile(_TOTAL_DEBUG_SECTIONS,  'TOTAL DEBUG FILE'); }
 
 function _makeFilename(tag) {
+  // ── THE RUN HAS A NAME BEFORE IT HAS A PACK ────────────────────────────
+  // state.reportId is minted at scan entry (:1671) and state.pack is nulled on
+  // the very next lines, so during a run the first two sources here are empty
+  // and every mid-run export fell through to 'unknown' — in the header AND in
+  // the filename, which is how two debug files from the same scan arrive named
+  // for nothing. The id existed the whole time; nothing read it.
   const reportId = (state.pack && (state.pack.report_id || state.pack.scan_id)) ||
                    (state.seal && state.seal.report_id) ||
+                   state.reportId ||
                    state.lastReportId || 'unknown';
   const scanDate = new Date().toISOString().slice(0, 10);
   return 'ShadowWatch_' + tag + '_' + reportId + '_' + scanDate + '.txt';
