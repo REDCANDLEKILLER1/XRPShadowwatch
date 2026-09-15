@@ -2096,7 +2096,23 @@ function _kgmtText(pack){
   // like content — say plainly that it could not be generated.
   if(!prayer)    prayer='The prayer could not be generated for this run.';
   if(!scripture) scripture='The scripture could not be generated for this run.';
-  return _KGMT_HEAD+
+  // ── A FALLBACK REPORT IS STILL A REPORT, AND IT NEEDS A DATE ───────────
+  //
+  // _KGMT_HEAD is a module-level constant, so the banner it carries is baked at
+  // parse time and has never held a date. SW-20260915-20EV1 went out with the
+  // brand header and then straight into EXECUTIVE SUMMARY — no day at all.
+  //
+  // This is the same shape as the bug the comment above describes: the prayer
+  // and scripture were once baked into that constant too, and published the
+  // literal string "[auto-rendered]". A report with no date is worse than one
+  // with the wrong date, because nothing on the page says which morning it
+  // describes.
+  //
+  // Same source and same UTC formatting as the main banner, so the fallback and
+  // the full report cannot disagree about what day it is.
+  var dated = _KGMT_HEAD.replace(/(\u2615 COFFEE & CRYPTO[^\n]*\n)/,
+    function (m) { return m + _today(pack) + '\n'; });
+  return dated+
     '\uD83D\uDE4F THE DAILY PRAYER\n'+prayer+'\n\n'+
     '\uD83D\uDCD6 THE DAILY SCRIPTURE\n'+scripture+'\n\n'+
     'SOURCES\n[No public sources available for today\u2019s fallback.]';

@@ -1153,6 +1153,35 @@ async function main() {
     selfDefeating.length === 0,
     selfDefeating.map(n => n.entity + ' -> ' + n.neutral));
 
+  console.log('\n20. the fallback report carries a date too');
+  /* SW-20260915-20EV1 fell back to KGMT and went out with the brand header
+     followed immediately by EXECUTIVE SUMMARY — no date anywhere on the page.
+     _KGMT_HEAD is a module-level constant, so its banner was baked at parse
+     time and never had one. Same shape as the bug the file already documents
+     for the fallback's prayer and scripture, which once published the literal
+     string "[auto-rendered]". */
+  const fallbackDate = await page.evaluate(() => {
+    var P = window.PUBLIC_REPORT_PIPELINE_V1;
+    if (!P || !P.kgmtText) return { unavailable: true };
+    var text = P.kgmtText({ date: '2026-09-15' });
+    var other = P.kgmtText({ date: '2026-03-02' });
+    var dateLine = function (t) {
+      return String(t).split('\n').map(function (l) { return l.trim(); })
+        .filter(function (l) { return /^[A-Z][a-z]+ \d{1,2}, \d{4}$/.test(l); })[0] || null;
+    };
+    return { first: dateLine(text), second: dateLine(other),
+      beforeSummary: String(text).indexOf('September 15, 2026') <
+                     String(text).indexOf('EXECUTIVE SUMMARY') };
+  });
+  if (!fallbackDate.unavailable) {
+    check('the audit-blocked fallback prints the report\'s date',
+      fallbackDate.first === 'September 15, 2026', fallbackDate.first);
+    check('and follows the pack, like the full report does',
+      fallbackDate.second === 'March 2, 2026', fallbackDate.second);
+    check('placed in the banner, above the summary',
+      fallbackDate.beforeSummary === true, fallbackDate.beforeSummary);
+  }
+
   await browser.close();
   srv.close();
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail)
