@@ -7,5 +7,14 @@
     "anchor": 107002665,
     "transactions": null,
     "report_hash": "7715c4cd1eace71d28b0375bc926d95357595f5ad1b829ed7aea638170dd9a0a"
+  },
+  {
+    "report_id": "SW-20260915-TBUCI",
+    "scan_id": "SC-MU2TCUOL",
+    "generated_at": "2026-09-15T14:58:30.000Z",
+    "coverage_complete": true,
+    "anchor": 107004448,
+    "transactions": null,
+    "report_hash": "d021ec6ceb3c9699a8cb1d64d74a2cf96ed46c16e27e3d2b6a415122da5e1cb8"
   }
 ]

@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20260915-TBUCI",
+  "generated_at": "2026-09-15T14:58:30.000Z",
+  "coverage_complete": true,
+  "target_wallets": 408,
+  "transaction_windows_proved": 408,
+  "validated_anchor_ledger": 107004448,
+  "transactions_in_window": null,
+  "new_observations": null,
+  "xrpl_requests": null,
+  "report_hash": "d021ec6ceb3c9699a8cb1d64d74a2cf96ed46c16e27e3d2b6a415122da5e1cb8"
+}
