@@ -968,6 +968,90 @@ async function main() {
     /timeZone:'UTC'/.test(PIPE),
     'the pipeline banner would drift by timezone again');
 
+  console.log('\n17. recurrence is earned from transactions, not from being looked at');
+  /* Both live CRITICAL_ADD_REVIEW candidates scored partly on "Recurring
+     across 3 scans". Checked against 255,914 transactions over the seven
+     committed days, each had exactly ONE qualifying event in its whole
+     history — three scans had re-observed the same transfer.
+
+     That is scan persistence, not repeated behaviour, and it was worth +35 of
+     a 175/200 score. */
+  const recur = await page.evaluate(() => {
+    // The real scorer, through the module's public surface.
+    var score = (window.AUTO_WALLET_FINDER && window.AUTO_WALLET_FINDER.scoreCandidateWallet) || null;
+    var base = { address: 'rCand', sources: ['large_transfer'], max_value_xrp: 1200000,
+      total_value_xrp: 1200000, tx_count: 1, seen_count: 3 };
+    var out = {};
+    // Three scans, ONE transaction: the live shape.
+    var persistent = Object.assign({}, base, { qualifying_hashes: ['A'.repeat(64)] });
+    // Three scans, THREE transactions: genuinely recurring.
+    var repeating = Object.assign({}, base, { qualifying_hashes:
+      ['A'.repeat(64), 'B'.repeat(64), 'C'.repeat(64)] });
+    out.distinctPersistent = window._swDistinctQualifyingTx(persistent);
+    out.distinctRepeating = window._swDistinctQualifyingTx(repeating);
+    if (score) { out.scorePersistent = score(persistent); out.scoreRepeating = score(repeating); }
+    return out;
+  });
+  check('one transaction seen three times counts as one',
+    recur.distinctPersistent === 1, recur.distinctPersistent);
+  check('three distinct transactions count as three',
+    recur.distinctRepeating === 3, recur.distinctRepeating);
+  check('the real scorer was reachable, so this was actually measured',
+    recur.scorePersistent !== undefined, 'AUTO_WALLET_FINDER.scoreCandidateWallet not exposed');
+  check('and the recurrence credit separates them by exactly its weight',
+    recur.scoreRepeating - recur.scorePersistent === 35,
+    { persistent: recur.scorePersistent, repeating: recur.scoreRepeating });
+  // Asserted on the shipped source, because the defect was a scan counter
+  // standing in for ledger evidence.
+  const CORE2 = fs.readFileSync(path.join(ROOT, 'src/brief/02-core.js'), 'utf8')
+    .split('\n').map(l => l.replace(/^\s*\/\/.*$/, '')).join('\n');
+  check('no score is awarded on a bare scan count any more',
+    !/if \(seen >= 3\)\s+score \+= 35/.test(CORE2));
+  check('the credit is gated on distinct qualifying transactions',
+    /_distinctQualifyingTx\(c\) >= 3\)\s+score \+= 35/.test(CORE2));
+
+  // ── AND THE HASHES HAVE TO ACTUALLY BE COLLECTED ────────────────────────
+  //
+  // The checks above hand qualifying_hashes straight to the scorer, so they
+  // pass even if nothing ever populates it — removing the collection line left
+  // them all green. This drives the REAL collector over a pack of large
+  // transfers, which is where a candidate's evidence comes from.
+  const collected = await page.evaluate(() => {
+    // collectDiscoveryCandidates is the function that actually walks a pack and
+    // aggregates candidates. AUTO_WALLET_FINDER.collectCandidatesFromPack wraps
+    // it and returns the persisted INBOX, which needs a whole scan behind it —
+    // so the wrapper would have tested the inbox, not the collection.
+    if (typeof collectDiscoveryCandidates !== 'function') return { unavailable: true };
+    // Real addresses, because the collector validates them: the live candidate
+    // and a sender taken from the committed evidence.
+    var TO = 'rBXAyXMwp2WVPg13nKxUz8iCVn5RjihueQ';
+    var FROM = 'rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm';
+    var mk = (hash, amount) => ({ hash: hash, to: TO, from: FROM,
+      sender_label: 'whale', amount: amount, ts: '2026-09-14T10:00:00.000Z' });
+    var pack = { large_transfers: [
+      mk('D'.repeat(64), 2000000),
+      mk('E'.repeat(64), 3000000),
+      // The same transaction again — a re-observation must not add evidence.
+      mk('D'.repeat(64), 2000000)
+    ] };
+    var out, err = null;
+    try { out = collectDiscoveryCandidates(pack) || []; }
+    catch (e) { err = String(e && e.message || e); out = []; }
+    var hit = out.filter(function (c) { return c.address === TO; })[0];
+    if (!hit) return { found: false, n: out.length, err: err,
+      validTo: (typeof _isValidDiscoveryAddress === 'function') ? _isValidDiscoveryAddress(TO) : 'n/a',
+      validFrom: (typeof _isValidDiscoveryAddress === 'function') ? _isValidDiscoveryAddress(FROM) : 'n/a',
+      watchedTo: (typeof KNOWN !== 'undefined') ? !!KNOWN[TO] : 'n/a',
+      addrs: out.slice(0, 3).map(function (c) { return c.address; }) };
+    var h = hit.qualifying_hashes;
+    return { found: true, distinct: window._swDistinctQualifyingTx(hit),
+      raw: Array.isArray(h) ? h.length : (h && h.size) || 0 };
+  });
+  check('the collector reaches a candidate from a pack of large transfers',
+    collected.found === true, collected);
+  check('and records the distinct transactions behind it',
+    collected.distinct === 2, collected);
+
   await browser.close();
   srv.close();
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail)

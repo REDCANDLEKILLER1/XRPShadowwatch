@@ -6062,6 +6062,13 @@ function collectDiscoveryCandidates(pack) {
         total_value_xrp: 0,
         max_value_xrp: 0,
         tx_count: 0,
+        // ── WHICH TRANSACTIONS, NOT HOW MANY LOOKS ────────────────────────
+        // Recurrence used to count SCANS, so a candidate seen three mornings
+        // running scored as "recurring across 3 scans" when all three were the
+        // same transaction re-observed. That is scan persistence, not repeated
+        // behaviour, and it was worth +35 of a 175/200 score. The distinct
+        // ledger events are recorded here and the credit is earned from them.
+        qualifying_hashes: new Set(),
         last_seen: null,
         first_seen: null,
         active_last_24h: false,
@@ -6088,6 +6095,9 @@ function collectDiscoveryCandidates(pack) {
       const _implausible = (_v != null && _v >= 100000000000);
       if (fields.reason && !_implausible) rec.reasons.push(fields.reason);
       if (fields.related_watched)     fields.related_watched.forEach(w => rec.related_watched_wallets.add(w));
+      // The ledger event this sighting rests on. An implausible amount is not
+      // evidence of anything, so its hash does not count either.
+      if (fields.hash && !_implausible) rec.qualifying_hashes.add(String(fields.hash));
       if (_v != null && !_implausible) {
         rec.total_value_xrp += _v;
         if (_v > rec.max_value_xrp) rec.max_value_xrp = _v;
@@ -6121,6 +6131,7 @@ function collectDiscoveryCandidates(pack) {
                 (t.from ? _swWho(t.from, t.sender_label, { bare: true }) : (t.sender_label || 'unknown sender')),
         value_xrp: n(t.amount),
         tx_count: 1,
+        hash: t.hash,
         last_seen: t.ts || t.timestamp,
         active_last_24h: true,  // large_transfers are window-scoped
         // Resolved, not raw: this Set is also fed by the related-offer path,
@@ -6339,6 +6350,10 @@ Object.keys(flowMap).forEach(addr => {
   candidates.forEach(rec => {
     rec.sources = Array.from(rec.sources);
     rec.related_watched_wallets = Array.from(rec.related_watched_wallets);
+    // A Set does not survive storage or the wire; the recurrence rule reads
+    // this on candidates loaded back from localStorage, so it leaves here as
+    // an array like everything else.
+    rec.qualifying_hashes = Array.from(rec.qualifying_hashes || []);
     rec.is_already_watched = _isWatchedAddress(rec.address);
     // Detect dust-only
     rec.is_dust_only = rec.total_value_xrp > 0 && rec.total_value_xrp < 1
@@ -6473,6 +6488,12 @@ function runAutoWalletDiscovery(pack) {
       first_seen: firstSeen,
       last_seen: nowISO,
       seen_count: seenCount,
+      // The union across every scan that has seen this candidate. seen_count
+      // still says how many mornings it appeared; THIS says how many distinct
+      // ledger events it appeared on, and only the second earns recurrence.
+      qualifying_hashes: Array.from(new Set(
+        (prev && prev.qualifying_hashes ? prev.qualifying_hashes : [])
+          .concat(Array.from(c.qualifying_hashes || [])))),
       related_watched_wallets: c.related_watched_wallets,
       total_value_xrp: c.total_value_xrp,
       max_value_xrp: c.max_value_xrp,
@@ -7062,6 +7083,17 @@ if (typeof window !== 'undefined') {
 
   // ── 2. classifyCandidateWallet(candidate, pack) ───────────────
   // 12-tier classification per audit spec.
+  // Distinct qualifying ledger events behind a candidate. A candidate stored
+  // before hashes were tracked has none recorded, and gets no recurrence credit
+  // rather than inheriting it from a scan counter — it never earned it on
+  // distinct events, and quietly grandfathering it would keep the old claim
+  // alive under a new name.
+  function _distinctQualifyingTx(c) {
+    const h = c && c.qualifying_hashes;
+    return Array.isArray(h) ? new Set(h).size : (h && typeof h.size === 'number' ? h.size : 0);
+  }
+  if (typeof window !== 'undefined') window._swDistinctQualifyingTx = _distinctQualifyingTx;
+
   function classifyCandidateWallet(c, pack) {
     if (!c) return 'LOW_VALUE_SPAM';
     const sources = c.sources || [];
@@ -7122,7 +7154,11 @@ if (typeof window !== 'undefined') {
     // POSITIVE WEIGHTS (audit-specified)
     if (sources.includes('large_transfer') && maxVal >= 1_000_000)  score += 50;  // destination of large transfer ≥1M XRP
     if (sources.includes('receiver_followthrough'))                  score += 40;  // receiver still holding after next-hop
-    if (seen >= 3)                                                    score += 35;  // repeated across 3+ scans
+    // Recurrence is earned from DISTINCT qualifying transactions, never from
+    // being looked at three times. rBXAyX…hueQ scored 175/200 partly on
+    // "Recurring across 3 scans" with exactly ONE qualifying event in the whole
+    // committed history.
+    if (_distinctQualifyingTx(c) >= 3)                                score += 35;  // 3+ distinct qualifying transactions
     if (sources.includes('exchange_adjacent'))                        score += 30;  // exchange-adjacent flow
     if (sources.includes('related_offer'))                            score += 25;  // related offer candidate
     if (c.repeated_mid_size)                                          score += 25;  // repeated mid-size flow
@@ -7225,7 +7261,16 @@ if (typeof window !== 'undefined') {
     if (c.repeated_mid_size)                        reasons.push('Repeated mid-size flow pattern');
     if ((c.shared_counterparty_count || 0) >= 3)    reasons.push('Common counterparty across ' + c.shared_counterparty_count + ' watched wallets');
     if (c.repeated_dest_tag)                        reasons.push('Repeated destination-tag fingerprint');
-    if ((c.seen_count || 0) >= 3)                   reasons.push('Recurring across ' + c.seen_count + ' scans');
+    const _distinct = _distinctQualifyingTx(c);
+    if (_distinct >= 3) reasons.push('Recurring across ' + _distinct + ' distinct transactions');
+    else if ((c.seen_count || 0) >= 3) {
+      // Said plainly rather than dropped. Three sightings of one transaction is
+      // a fact about the scanner, not about the wallet, and the report should
+      // not be able to imply otherwise.
+      reasons.push('Seen in ' + c.seen_count + ' scans, but on ' +
+        (_distinct || 'no') + ' distinct transaction' + (_distinct === 1 ? '' : 's') +
+        ' — scan persistence, not repeated behaviour');
+    }
     return Array.from(new Set(reasons));
   }
 
@@ -8307,8 +8352,11 @@ if (typeof window !== 'undefined') {
       if (rlBal >= 100_000_000) notes.push('Richlist balance ≥100M XRP — top-tier holder.');
       else if (rlBal >= 10_000_000) notes.push('Richlist balance ≥10M XRP — significant holder.');
     }
-    if (n(c.seen_count) >= 3) {
-      addSignal('pattern_memory', 'Repeated across ' + c.seen_count + ' scans', { seen_count: c.seen_count });
+    const _distinctTx = (typeof window !== 'undefined' && window._swDistinctQualifyingTx)
+      ? window._swDistinctQualifyingTx(c) : 0;
+    if (_distinctTx >= 3) {
+      addSignal('pattern_memory', 'Repeated across ' + _distinctTx + ' distinct transactions',
+        { distinct_qualifying_tx: _distinctTx, seen_count: c.seen_count });
     }
     if (sources.includes('exchange_adjacent')) {
       addSignal('exchange_adjacent', 'Exchange-adjacent flow');
@@ -26374,12 +26422,22 @@ function shadowWatchAutoWalletFinderSmokeTest() {
   check('Large receiver score is reasonably high (≥100)', score1 >= 100);
   check('Dust-only score is heavily penalized (<35)', score2 < 35);
 
-  // 4. Repeated receivers (seen_count >=3) push score higher
-  const oneScanCand = { ...largeCand, seen_count: 1 };
-  const fourScanCand = { ...largeCand, seen_count: 4 };
+  // 4. Recurrence is earned from DISTINCT QUALIFYING TRANSACTIONS, never from
+  //    a scan counter. This previously asserted that seen_count 4 outscored
+  //    seen_count 1 — the rule that gave a live candidate +35 of a 175/200 for
+  //    three scans that had all re-observed the SAME transfer. Both directions
+  //    are asserted now, so the new rule cannot quietly become the old one.
+  const oneScanCand = { ...largeCand, seen_count: 1, qualifying_hashes: ['A'.repeat(64)] };
+  const fourScanCand = { ...largeCand, seen_count: 4, qualifying_hashes: ['A'.repeat(64)] };
+  const threeTxCand = { ...largeCand, seen_count: 4,
+    qualifying_hashes: ['A'.repeat(64), 'B'.repeat(64), 'C'.repeat(64)] };
   const scoreOneScan  = AWF.scoreCandidateWallet(oneScanCand, mockPack);
   const scoreFourScan = AWF.scoreCandidateWallet(fourScanCand, mockPack);
-  check('Repeated across 3+ scans → higher score', scoreFourScan > scoreOneScan);
+  const scoreThreeTx  = AWF.scoreCandidateWallet(threeTxCand, mockPack);
+  check('Four scans of ONE transaction score no higher than one scan of it',
+    scoreFourScan === scoreOneScan);
+  check('Three DISTINCT qualifying transactions → higher score',
+    scoreThreeTx > scoreFourScan);
 
   // 5. Build suggested list — confirms ranking + filtering
   const suggested = AWF.buildSuggestedWatchlistAdditions(mockPack);

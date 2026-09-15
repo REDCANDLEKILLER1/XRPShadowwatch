@@ -241,6 +241,20 @@ sense.
 Neither is an argument for adding them. Both are an argument for watching what
 they do next, which is what the review queue is for.
 
+**Fixed:** recurrence is now earned from DISTINCT QUALIFYING TRANSACTIONS, not
+from a scan counter. `seen_count >= 3` was worth **+35** of a 175/200 score, and
+both candidates collected it on one transaction re-observed three times. A
+candidate now records the hashes behind it and the credit is gated on that set;
+where scans outnumber transactions the reason line says so in as many words
+rather than going quiet:
+
+    Seen in 3 scans, but on 1 distinct transaction — scan persistence,
+    not repeated behaviour
+
+Candidates stored before hashes were tracked have none recorded and get no
+recurrence credit. They never earned it on distinct events, and grandfathering
+it would keep the old claim alive under a new name.
+
 ## Each commit overwrites a day's provenance — FIXED, merge-on-write
 
 `readReportWindow` reported `unattributed: 37,420 of 37,425` on
