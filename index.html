@@ -33,29 +33,6 @@
     <link rel="apple-touch-icon" href="src/assets/icon-180.png">
 </head>
 <body>
-<!-- ── UNDER CONSTRUCTION ────────────────────────────────────────────────
-     Shadow Watch's acquisition is being moved off its old database, and this
-     build still points at the one that is full. A report run here cannot
-     complete, and a report that cannot complete must not be mistaken for a
-     quiet ledger. Said plainly and at the top, because people were running it
-     and asking why nothing came back.
-     pointer-events:none is load-bearing: this is a role="status" notice with
-     nothing clickable in it, and a sticky element that swallows clicks sits on
-     top of the navigation. It broke the desktop-navigation suite on every PR,
-     because pull-request CI runs against a MERGE of the branch into main — so
-     a banner that only lives here still reaches every branch's checks.
-     Remove this block when the delta build lands on main. ──────────────── -->
-<div id="swUnderConstruction" role="status" style="position:sticky;top:0;z-index:99999;
-     background:#2b1414;border-bottom:2px solid #ff6b6b;color:#ffd9d9;
-     font:600 14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-     padding:12px 16px;text-align:center;pointer-events:none">
-  ⚠️ <strong>SHADOW WATCH IS UNDER CONSTRUCTION</strong> — this build cannot complete a scan.
-  Its evidence store is being rebuilt, so any run here will stop partway and seal nothing.
-  <span style="display:block;opacity:.85;font-weight:400;margin-top:4px">
-    No report produced here is usable. Nothing is wrong with the ledger — the reader is being replaced.
-  </span>
-</div>
- 
 
     <!-- VIDEO SPLASH SCREEN -->
     <div id="splash-screen">
