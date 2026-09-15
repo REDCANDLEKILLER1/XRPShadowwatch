@@ -1094,6 +1094,65 @@ async function main() {
   check('a fully observed window says nothing about reconstruction',
     quietWin.said === 0 && quietWin.provenance === 'OBSERVED', quietWin);
 
+  console.log('\n19. the provenance repair must be able to succeed');
+  /* ── SW-20260915-20EV1 PUBLISHED NOTHING ─────────────────────────────────
+     [PIPELINE-V1] Audit repair attempted but still failing: assertLabelProvenance
+     [PIPELINE-V1] Audit FAILED (1 failures). assertLabelProvenance:
+       "Ripple" named in report but no operator_reviewed/richlist_seed
+       provenance found.
+
+     …twice, then the whole morning report fell back to KGMT and went out with
+     no volume, no attribution and no narrative.
+
+     The repair substitutes a neutral phrase for an unprovenanced name. Every
+     other entity gets a genuinely neutral one — Bitso becomes "an exchange
+     wallet" — but Ripple became "a Ripple escrow wallet", which CONTAINS the
+     token being removed. So the assertion fires again on the repaired text,
+     and no number of attempts can ever satisfy it. A repair that cannot
+     succeed is not a repair. */
+  const repaired = await page.evaluate(() => {
+    var P = window.PUBLIC_REPORT_PIPELINE_V1;
+    if (!P || !P.audit) return { unavailable: true };
+    // The escrow sentence the report carries every single day.
+    var text = [
+      '\u2615 COFFEE & CRYPTO with STONE', '',
+      'Escrow Watch', 'Ripple escrow: 31.70B XRP locked now across 100 objects.',
+      'Ripple and non-Ripple escrow are separate.', '',
+      '\uD83D\uDE4F THE DAILY PRAYER', 'Lord, keep us honest.',
+      '\uD83D\uDCD6 THE DAILY SCRIPTURE', 'Psalm 24:1', '',
+      'Not financial advice.', "I'm XRPMan, and I tell on the banks."
+    ].join('\n');
+    var names = function (r) { return (r.failures || []).map(function (f) { return f.assertion; }); };
+    var withRegistry = names(P.audit(text, [], [], true));
+    // And the same text with the registry absent. The guard must still fire —
+    // this is provenance being READ, not the check being switched off.
+    var saved = window.SW_RIPPLE_ESCROW_REGISTRY;
+    try { delete window.SW_RIPPLE_ESCROW_REGISTRY; } catch (_) {}
+    var withoutRegistry = names(P.audit(text, [], [], true));
+    try { window.SW_RIPPLE_ESCROW_REGISTRY = saved; } catch (_) {}
+    return { withRegistry: withRegistry, withoutRegistry: withoutRegistry,
+      registryLoaded: !!saved };
+  });
+  if (!repaired.unavailable) {
+    check('the curated escrow registry is loaded on the page',
+      repaired.registryLoaded === true, repaired.registryLoaded);
+    check('with it, naming Ripple in the escrow sentence is provenanced',
+      repaired.withRegistry.indexOf('assertLabelProvenance') < 0, repaired.withRegistry);
+    check('without it, the guard still fires — provenance is read, not waived',
+      repaired.withoutRegistry.indexOf('assertLabelProvenance') > -1, repaired.withoutRegistry);
+  }
+  // The defect, stated directly against the substitution table: a neutral
+  // phrase must not contain the token it replaces, or the repair re-creates
+  // the violation it was called to fix.
+  const PIPE2 = fs.readFileSync(path.join(ROOT, 'src/brief/10-pipeline.js'), 'utf8');
+  const neutrals = [...PIPE2.matchAll(/'([^']+)'\s*:\s*'(a[^']*wallet[^']*)'/g)]
+    .map(m => ({ entity: m[1], neutral: m[2] }));
+  const selfDefeating = neutrals.filter(n =>
+    n.neutral.toLowerCase().indexOf(n.entity.toLowerCase()) > -1);
+  check('no neutral replacement contains the name it is replacing',
+    selfDefeating.length === 0,
+    selfDefeating.map(n => n.entity + ' -> ' + n.neutral));
+
   await browser.close();
   srv.close();
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail)

@@ -330,6 +330,40 @@ A fully observed window is not labelled partial, so the warning means something
 when it appears. Nothing already committed is altered: reconstruction ADDS
 rows.
 
+## One word in a lookup table cost a whole morning report
+
+`SW-20260915-20EV1` published the KGMT fallback — no volume, no attribution, no
+narrative — because of this:
+
+    [PIPELINE-V1] Audit repair attempted but still failing: assertLabelProvenance
+    [PIPELINE-V1] Audit FAILED (1 failures). assertLabelProvenance: "Ripple"
+      named in report but no operator_reviewed/richlist_seed provenance found.
+
+Twice, then it gave up. Two separate defects behind it.
+
+**The repair could never succeed.** `_NEUTRAL_FOR` swaps an unprovenanced name
+for a neutral description. Every entry was genuinely neutral — `Bitso` becomes
+"an exchange wallet" — except `'Ripple':'a Ripple escrow wallet'`, whose
+replacement CONTAINS the token being removed. The assertion fired again on the
+repaired text, forever. A repair that cannot succeed is not a repair. The suite
+now asserts the property (no neutral may contain the name it replaces) rather
+than the spelling, so a future entry cannot reintroduce it.
+
+**The escrow registry was provenance, and was being ignored.** The report names
+Ripple every day in one sentence that is not a wallet claim: "Ripple escrow:
+31.70B XRP locked now … registry check 20/20 known Ripple-labeled addresses".
+That name is backed by `src/shared/ripple-escrow-registry.js` — twenty
+addresses, `owner: 'Ripple'`, from Ripple's published `xrp-ledger.toml` via
+XRPSCAN, verified and committed to source. But provenance could only come from
+`interpretations[].source_refs`, which are wallet-derived, so on a morning where
+no Ripple-labelled wallet happened to appear the daily boilerplate became an
+unprovenanced claim and took the report down with it.
+
+That is why it was intermittent. It is now read from the registry — the same
+standard already applied to the identity registry a few hundred lines up — and
+the guard still fires when the registry is absent, so this is provenance being
+READ rather than a hard-coded exemption.
+
 ## ASSUMED — believed, not yet observed
 
 Everything here is a claim I have NOT earned. Do not repeat any of it as fact.

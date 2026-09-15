@@ -1910,6 +1910,30 @@ function assertLabelProvenance(report, interpretations){
         allRefs.push(r.label);
     });
   });
+  // ── THE ESCROW REGISTRY IS PROVENANCE, AND WAS BEING IGNORED ────────────
+  //
+  // The report names Ripple every day, in one sentence that is not a wallet
+  // claim at all: "Ripple escrow: 31.70B XRP locked now … registry check 20/20
+  // known Ripple-labeled addresses". That name is backed by
+  // src/shared/ripple-escrow-registry.js — twenty addresses, owner 'Ripple',
+  // sourced from Ripple's published xrp-ledger.toml via XRPSCAN, verified and
+  // committed to source.
+  //
+  // Provenance could previously only come from interpretations[].source_refs,
+  // which are wallet-derived, so on any morning where no Ripple-labelled wallet
+  // happened to appear the sentence became an unprovenanced claim and took the
+  // whole report down with it.
+  //
+  // This is the same standard already applied to the identity registry a few
+  // hundred lines up — "operator-curated and committed to source, so it is
+  // legitimate provenance". Read from the registry itself, so removing the file
+  // removes the provenance with it rather than leaving a hard-coded exemption.
+  _safe(function(){
+    var reg = (typeof window!=='undefined') && window.SW_RIPPLE_ESCROW_REGISTRY;
+    if(reg && _arr(reg.accounts).length){
+      _arr(reg.accounts).forEach(function(a){ if(a&&a.owner) allRefs.push(a.owner); });
+    }
+  }, null);
   for(var i=0;i<exchanges.length;i++){
     var ex=exchanges[i];
     if(scanned.indexOf(ex)>-1){
@@ -1936,8 +1960,23 @@ function assertLabelProvenance(report, interpretations){
 // of what it is. Keeps every finding, every number and every sentence — drops
 // only the identity claim we could not stand behind, which is the one thing that
 // actually had to go.
+// ── A NEUTRAL PHRASE MUST NOT CONTAIN THE NAME IT REPLACES ────────────────
+//
+// 'Ripple' used to map to 'a Ripple escrow wallet'. The replacement carried the
+// very token being removed, so the assertion fired again on the repaired text
+// and no number of attempts could ever satisfy it. SW-20260915-20EV1 logged
+//
+//   Audit repair attempted but still failing: assertLabelProvenance
+//   Audit FAILED (1 failures). assertLabelProvenance: "Ripple" named in report
+//
+// twice, then published the KGMT fallback — a morning with no volume, no
+// attribution and no narrative, because of one word in a lookup table.
+//
+// Every other entry was already neutral: Bitso becomes "an exchange wallet",
+// which contains no "Bitso". These now match that, and the suite asserts the
+// property rather than the spelling, so a future entry cannot reintroduce it.
 var _NEUTRAL_FOR={
-  'Ripple':'a Ripple escrow wallet', 'Ripple Labs':'a Ripple escrow wallet',
+  'Ripple':'a public escrow wallet', 'Ripple Labs':'a public escrow wallet',
   'SBI VC Trade':'an exchange wallet'
 };
 function _repairProvenance(text, failures){
