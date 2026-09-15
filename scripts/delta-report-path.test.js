@@ -775,6 +775,63 @@ async function main() {
   check('an unregistered phase holds its number rather than creeping to 98',
     unknown <= 8, unknown);
 
+  console.log('\n13. the phase sub-percentage under the main bar');
+  /* ── FROM THE PHONE, TWICE ───────────────────────────────────────────────
+     CURRENT PHASE                                    0%
+     Wallet Snapshot · Reading watched wallets…
+     Completed: ✓ Initialization · ✓ Wallet Snapshot
+     Running:   → Wallet Snapshot
+
+     Three things wrong in four lines. The sub-percentage sat at 0% for the
+     whole run; the same phase was listed as completed AND running; and the
+     bar under it never moved. */
+  const sub = await page.evaluate(() => {
+    var R = window.SW_PHASE_PROGRESS_RUNTIME_20260820;
+    var out = {};
+    var pctText = function () {
+      var el = document.getElementById('swPhaseRuntimePct');
+      return el ? (el.textContent || '').trim() : null;
+    };
+    // Through shadowSay, because that is what marks the run active — and the
+    // fraction bridge only counts during an active scan. Driving setPhase
+    // directly would have skipped the very state the bridge depends on.
+    window.shadowSay('Starting…', 'INIT');
+    R.setPhase('WALLET_SNAPSHOT', null, 'reading');
+    out.noCounter = pctText();
+
+    // A real fraction arrives for the running phase.
+    window.shadowProgress(32, 55, 0.5);
+    out.withFraction = pctText();
+
+    // …and then shadowSay fires, as it does constantly during a scan. This is
+    // what used to wipe it back to 0%.
+    window.shadowSay('Reading watched wallets…', 'BALANCES');
+    out.afterSay = pctText();
+
+    // A fraction during a phase that is NOT one of the two hard-coded ones.
+    R.setPhase('NEXT_HOP_TRACING', null, 'following');
+    window.shadowProgress(56, 78, 0.25);
+    out.otherPhase = pctText();
+
+    // Re-entering a phase must take it back out of the completed list.
+    R.setPhase('WALLET_SNAPSHOT', null, 'again');
+    var st = R.getState();
+    out.completed = st.completed.slice();
+    out.running = st.phase;
+    return out;
+  });
+  check('a phase with no counter behind it shows a dash, not a bogus 0%',
+    sub.noCounter === '—', sub.noCounter);
+  check('a reported fraction reaches the sub-percentage',
+    sub.withFraction === '50%', sub.withFraction);
+  check('and a later shadowSay does not wipe it back to zero',
+    sub.afterSay === '50%', sub.afterSay);
+  check('a fraction counts for whatever phase is running, not two hard-coded ones',
+    sub.otherPhase === '25%', sub.otherPhase);
+  check('a running phase is not also listed as completed',
+    sub.completed.indexOf(sub.running) < 0,
+    { running: sub.running, completed: sub.completed });
+
   await browser.close();
   srv.close();
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail)
