@@ -241,6 +241,35 @@ sense.
 Neither is an argument for adding them. Both are an argument for watching what
 they do next, which is what the review queue is for.
 
+## Each commit overwrites a day's provenance — NOT YET FIXED
+
+`readReportWindow` reported `unattributed: 37,420 of 37,425` on
+SW-20260915-IWBGW, and the report printed **4 wallets active** where the
+pre-migration path printed 111. The join is not broken; it is starved.
+
+`buildShards()` builds a day's files from THIS RUN's rows and `commitRun`
+writes them by path, replacing whatever that day already held. Events survive
+by accident — a big day spills into `events.001`/`.002`, and a small run that
+produces one shard never overwrites the numbered ones. Participants fit in a
+single file, so a later run destroys the earlier provenance outright.
+
+From the repository's own history of `evidence/2026/09/14/participants.ndjson.gz`:
+
+    8128749   3,858 rows
+    8d927be 138,518 rows      the backfill
+    ec0fa6a 102,873 rows
+    8ed28e7      17 rows      a small run, and 102,856 rows of provenance gone
+
+Provenance is the link between a transaction and the watched wallet whose walk
+saw it. Without it the report cannot attribute movement to any wallet, which is
+what every "X absorbed N XRP" line depends on.
+
+The fix is for a commit to MERGE a day's existing shards rather than replace
+them — evidence per day is append-only and should be written that way. That
+makes every commit read the day back before writing, which is a real cost
+against the 300 s function budget that was just tightened, so it is an operator
+decision rather than a quiet change to the hot path.
+
 ## ASSUMED — believed, not yet observed
 
 Everything here is a claim I have NOT earned. Do not repeat any of it as fact.
