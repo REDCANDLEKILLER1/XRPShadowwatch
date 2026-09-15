@@ -231,6 +231,33 @@ async function main(){
     {env,fetch:gh.fetch,archiveFacts}),/INVALID_EVIDENCE_SCAN_ID/);
   console.log('PASS an unsealed report, a stale run and a nonsense identity are all refused');
 
+  // ── A MISSING SECRET MUST NAME ITSELF ───────────────────────────────────
+  // Two runs failed with a bare "GITHUB_ARCHIVE_NOT_CONFIGURED", which names
+  // neither the setting nor the environment — and the obvious guess is wrong,
+  // because the evidence token IS present and is for a different repository.
+  let cfgErr=null;
+  try{ A.archiveTarget({VERCEL_ENV:'preview',SHADOWWATCH_EVIDENCE_TOKEN:'present'}); }
+  catch(e){ cfgErr=e; }
+  assert.ok(cfgErr,'a missing archive token must throw');
+  assert.match(cfgErr.message,/SHADOWWATCH_GITHUB_ARCHIVE_TOKEN/);
+  assert.match(cfgErr.message,/preview/);
+  assert.match(cfgErr.message,/REDCANDLEKILLER1\/XRPShadowwatch/);
+  assert.match(cfgErr.message,/not a substitute/);
+  assert.equal(cfgErr.missingEnv,'SHADOWWATCH_GITHUB_ARCHIVE_TOKEN');
+  // And it must never carry a token VALUE: this string reaches debug exports
+  // that get pasted into chats.
+  let leakErr=null;
+  try{ A.archiveTarget({VERCEL_ENV:'preview',SHADOWWATCH_EVIDENCE_TOKEN:'ghp_SECRETVALUE123'}); }
+  catch(e){ leakErr=e; }
+  assert.ok(!/ghp_SECRETVALUE123/.test(leakErr.message),'the error must not quote a secret');
+  // The evidence token is NOT accepted as a stand-in — that would widen what it
+  // can write to.
+  let stillRefused=null;
+  try{ A.archiveTarget({SHADOWWATCH_EVIDENCE_TOKEN:'present'}); }
+  catch(e){ stillRefused=e; }
+  assert.ok(stillRefused,'the evidence token must not satisfy the archive');
+  console.log('PASS a missing archive secret names itself, its environment and its repository');
+
   console.log('ALL GITHUB REPORT ARCHIVE CHECKS PASS');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

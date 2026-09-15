@@ -210,6 +210,37 @@ event in the window carries an observer, which is what makes "wallets active"
 read 4 instead of 111. The server reports that number precisely so it can be
 noticed, and nothing was reading it. Not yet diagnosed.
 
+## The two Auto Discovery candidates, checked against the evidence
+
+Read out of 255,914 unique transactions across the seven committed days, rather
+than out of the candidates' own scores:
+
+| | `rBXAyX…hueQ` (175/200) | `rMVuea…GnSL` (160/200) |
+|---|---|---|
+| transactions, ever | 2 | 2 |
+| the ≥1M receipt | 1,128,785.95 XRP, 09-14, tesSUCCESS | 1,261,100.00 XRP, 09-14, tesSUCCESS |
+| other activity | **OUT 1,719,200 XRP on 09-13** | IN 73,100 XRP on 09-10 |
+| outbound since | — | none |
+
+Both receipts are real, succeeded, and match the exported amounts exactly. That
+part of the evidence holds.
+
+What does NOT hold as stated: both are scored partly on "Recurring across 3
+scans", and each has **one** qualifying event in the whole committed history.
+Three scans saw the same transaction — it is a repeated OBSERVATION, not
+repeated behaviour, which is the distinction that decides whether a wallet has
+earned a place on the roster.
+
+And `rBXAyX…hueQ` is labelled RECEIVER_STILL_HOLDING_SIZE while having sent
+1.72M XRP out the day before it received 1.13M. It is holding that particular
+receipt; it is not a passive accumulator.
+
+`rMVuea…GnSL` has no outbound transaction at all and is holding in the plain
+sense.
+
+Neither is an argument for adding them. Both are an argument for watching what
+they do next, which is what the review queue is for.
+
 ## ASSUMED — believed, not yet observed
 
 Everything here is a claim I have NOT earned. Do not repeat any of it as fact.

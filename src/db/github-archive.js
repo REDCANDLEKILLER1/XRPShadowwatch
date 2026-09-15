@@ -248,7 +248,33 @@ function archiveReadTarget(env){
 // the export cannot be pointed somewhere the report archive would not go.
 function archiveTarget(env){
   const token=env.SHADOWWATCH_GITHUB_ARCHIVE_TOKEN;
-  if(!token)throw new Error('GITHUB_ARCHIVE_NOT_CONFIGURED');
+  if(!token){
+    // ── SAY WHICH VARIABLE, IN WHICH ENVIRONMENT ──────────────────────────
+    //
+    // "GITHUB_ARCHIVE_NOT_CONFIGURED" was true and useless: it named neither
+    // the setting that is missing nor the environment it is missing from, and
+    // the obvious guess is wrong. The evidence token IS present — the delta
+    // path could not run without it — so the natural reading is that the
+    // archive is broken, when in fact a DIFFERENT secret for a DIFFERENT
+    // repository has never been set here:
+    //
+    //   evidence  SHADOWWATCH_EVIDENCE_TOKEN        ...-XRPShadowwatch-evidence
+    //   archive   SHADOWWATCH_GITHUB_ARCHIVE_TOKEN  REDCANDLEKILLER1/XRPShadowwatch
+    //
+    // They are separate repositories, so one token does not imply the other,
+    // and the evidence token is deliberately NOT accepted as a substitute —
+    // that would widen what it can write to.
+    //
+    // Names only. No value, no prefix, no length: an error string reaches logs
+    // and debug exports that get pasted into chats.
+    const e=new Error('GITHUB_ARCHIVE_NOT_CONFIGURED: set SHADOWWATCH_GITHUB_ARCHIVE_TOKEN'+
+      ' for the '+(env.VERCEL_ENV||'current')+' environment — it writes '+REPO+
+      ' on branch '+BRANCH+', which is a different repository from the evidence store'+
+      (env.SHADOWWATCH_EVIDENCE_TOKEN?' (SHADOWWATCH_EVIDENCE_TOKEN is set, and is not a substitute)':''));
+    e.missingEnv='SHADOWWATCH_GITHUB_ARCHIVE_TOKEN';
+    e.environment=env.VERCEL_ENV||null;
+    throw e;
+  }
   const repo=env.SHADOWWATCH_GITHUB_ARCHIVE_REPOSITORY||REPO;
   const branch=env.SHADOWWATCH_GITHUB_ARCHIVE_BRANCH||BRANCH;
   if(repo!==REPO||branch!==BRANCH)throw new Error('GITHUB_ARCHIVE_TARGET_REFUSED');
