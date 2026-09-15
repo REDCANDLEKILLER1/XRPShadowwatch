@@ -1139,11 +1139,18 @@ function _buildEvidence(interps, pack){
       if(AWF&&typeof AWF.buildSuggestedWatchlistAdditions==='function'){
         var list=AWF.buildSuggestedWatchlistAdditions(pack||{})||[];
         var sp=(typeof _discoverySplit==='function')?_discoverySplit(list):null;
-        var pool=(sp&&sp.known)?sp.fresh:list;
+        // WITHOUT A RUN IDENTITY THERE IS NO FOUND-THIS-SCAN NUMBER TO SAY.
+        // This used to fall back to the whole list, so a reload with a restored
+        // inbox put the entire standing queue on air as this morning's finds.
+        // The queue total is still true and still said; the attribution is
+        // simply withheld rather than guessed.
+        var evaluated=!!(sp&&sp.evaluated);
+        var pool=evaluated?sp.fresh:[];
         disc={
           queue:list.length,
-          fresh:(sp&&sp.known)?sp.fresh.length:list.length,
-          carried:(sp&&sp.known)?sp.carried.length:0,
+          evaluated:evaluated,
+          fresh:evaluated?sp.fresh.length:null,
+          carried:evaluated?sp.carried.length:null,
           recommended:pool.filter(function(c){
             return c&&(c.action_tier==='CRITICAL_ADD_REVIEW'||c.action_tier==='RECOMMEND_FOR_WATCH');
           }).length
@@ -1194,9 +1201,14 @@ function _buildEvidence(interps, pack){
       // When the canonical split is available, say which of the queue came from
       // THIS scan — the number a listener actually wants — instead of a single
       // cumulative figure that silently grows every run.
-      var breakdown=(disc&&(disc.fresh||disc.recommended))
-        ? (' — '+disc.fresh+' found this scan, '+disc.recommended+' recommended for review')
-        : '';
+      // Three outcomes, and "not evaluated" is said out loud rather than
+      // rendered as a zero or dropped silently — a listener hearing nothing
+      // assumes the scan found nothing, which is a claim we cannot make.
+      var breakdown=(disc&&disc.evaluated===false)
+        ? ' — this queue is not attributed to the current scan'
+        : ((disc&&(disc.fresh||disc.recommended))
+            ? (' — '+disc.fresh+' found this scan, '+disc.recommended+' recommended for review')
+            : '');
       parts.push(netLead+fresh.length+' flagged candidate'+(fresh.length===1?'':'s')+
                  breakdown+watchedClause+netTail);
     }

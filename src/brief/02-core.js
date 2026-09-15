@@ -6742,6 +6742,14 @@ function runAutoWalletDiscovery(pack) {
       reasons: c.reasons.slice(0, 6),
       first_seen: firstSeen,
       last_seen: nowISO,
+      // THE RUN THAT OBSERVED IT, not the clock it was observed at. Only
+      // candidates this pass actually scored from this run's evidence reach
+      // here, so carrying the id is what makes "found this scan" checkable
+      // after a reload — and what keeps a 24-August record historical.
+      last_seen_run: (typeof _discoveryRunId === 'function') ? _discoveryRunId() : null,
+      // How much qualifying evidence THIS run contributed, kept separate from
+      // the union below so a sighting can be inspected rather than trusted.
+      qualifying_hashes_this_run: Array.from(new Set(Array.from(c.qualifying_hashes || []))),
       seen_count: seenCount,
       // The union across every scan that has seen this candidate. seen_count
       // still says how many mornings it appeared; THIS says how many distinct
@@ -6809,17 +6817,55 @@ function runAutoWalletDiscovery(pack) {
 function _discoveryRunStamp() {
   return (typeof state !== 'undefined' && state.discoveryLastRunISO) || null;
 }
-function _discoverySeenThisRun(c) {
-  const stamp = _discoveryRunStamp();
-  if (!stamp) return true;                       // cannot tell — do not under-report
-  return !!c && c.last_seen === stamp;
+// ── A WALL CLOCK IS NOT A RUN IDENTITY, AND ABSENT IS NOT CURRENT ───────────
+//
+// The rule above used to be "no stamp means we cannot tell, so treat the whole
+// inbox as current — never silently report zero". That is fail-OPEN, and the
+// stamp it depends on (state.discoveryLastRunISO) lives only in memory. Reload
+// the page with a restored inbox and there is no stamp, so every candidate ever
+// queued was republished as a finding of the current scan.
+//
+// SW-20260915-D49XL exported exactly that: scan_id null, found_this_scan 11,
+// carried_over 0, and one of those "current" candidates carrying a first_seen
+// AND last_seen of 24 August. Nothing was fabricated — real historical records
+// were presented as today's findings because nothing could say otherwise.
+//
+// Under-reporting is the safer failure for a number read aloud, and it is not
+// even the failure here: a count that cannot be attributed is reported as NOT
+// EVALUATED, which is a different claim from zero.
+//
+// Attribution now hangs off the run's own identity, not the clock, and it is
+// per candidate: the candidate must carry the identity of the run that
+// observed it. An active run does not make the inbox current.
+function _discoveryRunId() {
+  try {
+    if (typeof state === 'undefined' || !state) return null;
+    const fromIndex = state.indexRun && state.indexRun.scan_id;
+    if (fromIndex) return String(fromIndex);
+    if (state.reportId) return String(state.reportId);
+    const sealed = state.seal && (state.seal.scan_id || state.seal.report_id);
+    if (sealed) return String(sealed);
+  } catch (_) {}
+  return null;
 }
+function _discoverySeenThisRun(c) {
+  const runId = _discoveryRunId();
+  if (!runId) return false;                      // no run identity — nothing is current
+  if (!c) return false;
+  // Bound to THIS run by the pass that observed it. A candidate the current
+  // pass never scored keeps whatever run last saw it, so it stays historical.
+  return String(c.last_seen_run || '') === runId;
+}
+// Three outcomes, not two. `evaluated:false` means the question could not be
+// asked — no run identity — and is deliberately distinct from a run that asked
+// and found nothing new, which is `evaluated:true` with an empty `fresh`.
 function _discoverySplit(list) {
   const all = Array.isArray(list) ? list : [];
-  const stamp = _discoveryRunStamp();
-  if (!stamp) return { fresh: all, carried: [], known: false };
+  const runId = _discoveryRunId();
+  if (!runId) return { fresh: [], carried: all, known: false, evaluated: false, run_id: null };
   const fresh = all.filter(_discoverySeenThisRun);
-  return { fresh, carried: all.filter(c => !_discoverySeenThisRun(c)), known: true };
+  return { fresh, carried: all.filter(c => !_discoverySeenThisRun(c)),
+           known: true, evaluated: true, run_id: runId };
 }
 // Single source of truth for every "new / discovered this scan" readout in the
 // UI. Three surfaces previously rendered state.discoveryInbox.length under a
@@ -6833,10 +6879,14 @@ function _discoverySplit(list) {
 // with a restored inbox the tile read 33 when nothing at all was new.
 function _swFreshDiscoveryCount() {
   try {
-    if (!_discoveryRunStamp()) return null;
     const inbox = (typeof state !== 'undefined' && Array.isArray(state.discoveryInbox))
                   ? state.discoveryInbox : [];
-    return _discoverySplit(inbox).fresh.length;
+    const split = _discoverySplit(inbox);
+    // NULL means "cannot say", which every caller already renders as a dash.
+    // It gated on the wall-clock stamp; the run identity is the thing that
+    // actually decides whether the question can be answered.
+    if (!split.evaluated) return null;
+    return split.fresh.length;
   } catch (_) { return null; }
 }
 
@@ -7657,9 +7707,15 @@ if (typeof window !== 'undefined') {
           // Was this candidate actually observed in the current scan, or is it
           // an inbox leftover from an earlier one still awaiting review? Consumers
           // must not treat the exported list as "what this scan found".
+          // Was this candidate observed by the CURRENT run? Passing only
+          // last_seen here asked a question about the clock; the run identity
+          // is what answers it, and without one the answer is no.
           seen_this_scan:     (typeof _discoverySeenThisRun === 'function')
-                                ? _discoverySeenThisRun({ last_seen: c.last_seen || c.last_seen_at || null })
-                                : true,
+                                ? _discoverySeenThisRun(c)
+                                : false,
+          last_seen_run:      c.last_seen_run || null,
+          qualifying_hashes_this_run: Array.isArray(c.qualifying_hashes_this_run)
+                                ? c.qualifying_hashes_this_run.length : 0,
           seen_count:         c.seen_count || 1,
           total_value_xrp:    +c.total_value_xrp || 0,
           max_value_xrp:      +c.max_value_xrp || 0,
@@ -7734,8 +7790,16 @@ if (typeof window !== 'undefined') {
     lines.push('SUGGESTED WATCHLIST ADDITIONS');
     lines.push('Generated: ' + now);
     lines.push('Scan: ' + scanId);
-    const _split = (typeof _discoverySplit === 'function') ? _discoverySplit(list) : { fresh: list, carried: [], known: false };
-    lines.push('Found in this scan: ' + _split.fresh.length);
+    const _split = (typeof _discoverySplit === 'function') ? _discoverySplit(list)
+                 : { fresh: [], carried: list, known: false, evaluated: false };
+    // The TXT, the JSON and the spoken sentence all read this one split, so a
+    // run with no identity withholds the number on all three rather than
+    // publishing a zero on one and eleven on another.
+    lines.push('Found in this scan: ' + (_split.evaluated ? _split.fresh.length : 'NOT EVALUATED'));
+    if (!_split.evaluated) {
+      lines.push('  (no current run identity — the queue below is historical and is');
+      lines.push('   NOT attributed to this scan)');
+    }
     if (_split.carried.length) {
       lines.push('Carried over from earlier scans (not seen this scan): ' + _split.carried.length);
     }
@@ -7843,8 +7907,13 @@ if (typeof window !== 'undefined') {
       // total_candidates is the whole standing review queue, which is CUMULATIVE
       // across scans — it is not "what this scan found". found_this_scan is.
       total_candidates: list.length,
-      found_this_scan: _fresh.length,
-      carried_over_from_earlier_scans: _carried.length,
+      // NULL, not 0, when the run has no identity to attribute against. Zero is
+      // a measurement — "this run found nothing new" — and saying it when the
+      // question could not be asked is the same lie as saying eleven.
+      found_this_scan: _sp.evaluated ? _fresh.length : null,
+      carried_over_from_earlier_scans: _sp.evaluated ? _carried.length : null,
+      discovery_attribution: _sp.evaluated ? 'ATTRIBUTED_TO_RUN' : 'NOT_EVALUATED',
+      discovery_run_id: _sp.run_id || null,
       total_exported: top.length,
       tier_counts: {
         critical_add_review:  list.filter(c => c.action_tier === 'CRITICAL_ADD_REVIEW').length,
