@@ -80,104 +80,146 @@ check('and it runs before the wrapper reads any state',
 check('the reset is not hidden behind an empty catch that swallows its own bug',
       !/try \{ for \(var _k in proofByAccount\) delete proofByAccount\[_k\]; \} catch \(_\) \{\}/.test(L17));
 
-// The behaviour the ticket asks for: run A proves a wallet, run B does not,
-// and A's proof must not survive as B's. Driven through the real wrapper.
-console.log('\n   run A proves a wallet; run B must not inherit it');
+
+// ── THE HARNESS HOLDS THE SCAN OPEN ─────────────────────────────────────────
+// An earlier version of this file started the wrapper with
+// `wrapped().then(()=>{}).catch(()=>{})` and asserted immediately, so a check
+// labelled "after the scan" was reading the same instant as the in-flight one
+// and any rejection was swallowed. Every lifecycle below is awaited, and the
+// inner scanner is held on a gate so "during" and "after" are genuinely
+// different moments.
+const vm = require('vm');
+const KEY = 'shadowwatch_snapshot_v30';
+
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((a, b) => { resolve = a; reject = b; });
+  return { promise, resolve, reject };
+}
+
 function driveLayer17() {
   const store = {};
+  const seen = { tableAtInnerStart: null, innerCalls: 0 };
   const ctx = {
-    console,
-    Object, Array, JSON, Math, Date, Number, String, Boolean, RegExp, Error, Promise, isNaN, parseInt, parseFloat,
-    setTimeout: (f) => { try { f(); } catch (_) {} return 0; },
-    clearTimeout: () => {},
-    setInterval: () => 0, clearInterval: () => {},
+    console, Object, Array, JSON, Math, Date, Number, String, Boolean, RegExp,
+    Error, Promise, isNaN, parseInt, parseFloat,
+    setTimeout: f => { try { f(); } catch (_) {} return 0; },
+    clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {},
     localStorage: {
       getItem: k => (k in store ? store[k] : null),
       setItem: (k, v) => { store[k] = String(v); },
       removeItem: k => { delete store[k]; }
     },
-    // Enough DOM for the tail of the file, which appends loader scripts.
     document: { createElement: () => ({ setAttribute() {} }), body: { appendChild() {} },
                 addEventListener() {}, readyState: 'complete', getElementById: () => null },
     state: { wallets: [], indexRun: null, effectiveWindow: null },
     log: () => {}, elog: () => {},
     accountTxWindowDepth: async function () { return []; },
-    scanWallets: async function () { return []; },
     pageDepthFor: function () { return 1; },
     WATCHLIST: [], KNOWN: {}, n: v => Number(v) || 0
   };
-  ctx.window = ctx;
-  ctx.globalThis = ctx;
-  const vm = require('vm');
+  // The scanner layer 17 wraps. It reports what it saw of the proof table at
+  // the moment it began — after the wrapper's reset, before anything else —
+  // and writes ONLY the wallets it read, exactly as the legacy scanner does.
+  ctx.scanWallets = async function () {
+    seen.innerCalls++;
+    const table = ctx.accountTxWindowDepth._proofByAccount || {};
+    seen.tableAtInnerStart = Object.keys(table).length;
+    if (ctx.__gate) await ctx.__gate.promise;
+    ctx.state.wallets = [{ address: 'rAAA', status: 'CHECKED', balance_xrp: 111 }];
+    store[KEY] = JSON.stringify({ rAAA: { balance_xrp: 111 } });   // rBBB not read
+    return ctx.state.wallets;
+  };
+  ctx.window = ctx; ctx.globalThis = ctx;
   vm.createContext(ctx);
   vm.runInContext(L17, ctx, { filename: '17-report-scan-tuning.js' });
-  return { ctx, store };
+  return { ctx, store, seen };
 }
 
-let drive = null;
-try { drive = driveLayer17(); } catch (e) { console.log('     (harness error: ' + e.message + ')'); }
-check('layer 17 loaded and wrapped the scanner',
-      !!drive && typeof drive.ctx.scanWallets === 'function' &&
-      drive.ctx.scanWallets._swTxCompleteness20260819 === true,
-      drive && !!drive.ctx.scanWallets._swTxCompleteness20260819);
-check('the proof table is reachable where the reset must look',
-      !!drive && !!drive.ctx.accountTxWindowDepth._proofByAccount);
+const BASELINE = JSON.stringify({ rAAA: { balance_xrp: 100 }, rBBB: { balance_xrp: 200 } });
 
-if (drive) {
-  const table = drive.ctx.accountTxWindowDepth._proofByAccount;
-  // Run A leaves a proof behind.
-  table['rWALLET_PROVED_IN_RUN_A'] = { status: 'COMPLETE', source: 'RUN_A', run_id: 'A' };
-  check('run A left a proof in the table', Object.keys(table).length === 1);
-  // Run B starts.
-  let duringB = null;
-  drive.ctx.scanWallets.constructor === Function;
-  const origInner = drive.ctx.scanWallets;
-  return2(origInner);
-  function return2(fn) {
-    // Capture the table contents as the wrapped scanner begins its run.
-    const inner = drive.ctx.accountTxWindowDepth._proofByAccount;
-    fn().then(() => {}).catch(() => {});
-    duringB = Object.keys(inner).length;
+(async () => {
+
+  // ══ 4. A SCAN THAT IS GENUINELY IN FLIGHT ══════════════════════════════════
+  console.log('\n4. while the scan is actually running');
+  {
+    const d = driveLayer17();
+    d.store[KEY] = BASELINE;
+    d.ctx.__gate = deferred();
+    const running = d.ctx.scanWallets();          // started, deliberately not awaited yet
+    await Promise.resolve();                       // let it reach the gate
+    check('the inner scanner really is in flight', d.seen.innerCalls === 1, d.seen.innerCalls);
+    check('the committed baseline is untouched mid-scan', d.store[KEY] === BASELINE, d.store[KEY]);
+    check('every wallet is still named in it',
+          Object.keys(JSON.parse(d.store[KEY] || '{}')).length === 2);
+    check('the selection request is set while the scan runs',
+          d.ctx.state._proveEveryCheckedWallet === true);
+
+    // ── now let it finish, and await it ──
+    d.ctx.__gate.resolve();
+    await running;
+    const after = JSON.parse(d.store[KEY] || '{}');
+    check('after completion, the fresh reading wins', after.rAAA && after.rAAA.balance_xrp === 111, after.rAAA);
+    check('after completion, the unread wallet keeps its prior baseline',
+          after.rBBB && after.rBBB.balance_xrp === 200, after.rBBB);
+    check('no wallet was dropped from the baseline', Object.keys(after).length === 2, Object.keys(after));
+    check('the selection request is cleared when the run ends',
+          d.ctx.state._proveEveryCheckedWallet === false, d.ctx.state._proveEveryCheckedWallet);
   }
-  check('run B cleared the previous run\'s proof before doing anything',
-        duringB === 0, { remaining: duringB });
-  check('and the table object itself was not replaced out from under its writer',
-        drive.ctx.accountTxWindowDepth._proofByAccount === table);
-}
 
-// ══ 2. THE COMMITTED BASELINE IS NEVER OVERWRITTEN TO STEER A SELECTOR ═══════
-console.log('\n2. the saved balance baseline is left alone during a scan');
-check('nothing writes an empty object over the snapshot',
-      !/localStorage\.setItem\(SNAPSHOT_KEY, '\{\}'\)/.test(L17),
-      (/localStorage\.setItem\(SNAPSHOT_KEY[^\n]*/.exec(L17) || [])[0]);
-check('Phase-2 selection is requested explicitly instead',
-      /_proveEveryCheckedWallet/.test(L17), 'layer 17 sets the flag');
-check('the core selector honours that request',
-      /_proveEveryCheckedWallet/.test(CORE) &&
-      /row\._needsTx = firstScan \|\| balanceChanged \|\| isActive \|\| /.test(CORE),
-      (/row\._needsTx = [^\n]*/.exec(CORE) || [])[0]);
+  // ══ 5. A SCAN THAT FAILS ═══════════════════════════════════════════════════
+  // The window a reload or an OS kill lands in is also the window a throw lands
+  // in. Nothing it wrote can be trusted, so the baseline goes back byte for byte.
+  console.log('\n5. when the scan throws');
+  {
+    const d = driveLayer17();
+    d.store[KEY] = BASELINE;
+    d.ctx.__gate = deferred();
+    const running = d.ctx.scanWallets();
+    await Promise.resolve();
+    check('the baseline is intact before the failure', d.store[KEY] === BASELINE);
+    d.ctx.__gate.reject(new Error('XRPL link down'));
+    let threw = null;
+    try { await running; } catch (e) { threw = e; }
+    check('the failure reaches the caller rather than being swallowed',
+          threw && /XRPL link down/.test(threw.message), threw && threw.message);
+    check('the baseline is restored byte for byte', d.store[KEY] === BASELINE, d.store[KEY]);
+    check('the selection request is cleared on the failure path too',
+          d.ctx.state._proveEveryCheckedWallet === false, d.ctx.state._proveEveryCheckedWallet);
+  }
 
-if (drive) {
-  const KEY = 'shadowwatch_snapshot_v30';
-  const BASELINE = JSON.stringify({ rAAA: { balance_xrp: 100 }, rBBB: { balance_xrp: 200 } });
-  drive.store[KEY] = BASELINE;
-  let seenDuringScan = null;
-  drive.ctx.scanWallets._swTxCompleteness20260819 && (function () {
-    // Re-wrap the inner scanner so we can observe storage mid-scan, which is
-    // exactly the window a reload or an OS kill lands in.
-    const wrapped = drive.ctx.scanWallets;
-    wrapped().then(() => {}).catch(() => {});
-    seenDuringScan = drive.store[KEY];
-  })();
-  check('the committed baseline survives the whole in-flight scan',
-        seenDuringScan === BASELINE, { during: seenDuringScan });
-  check('it is still there after the scan', drive.store[KEY] === BASELINE, drive.store[KEY]);
-}
+  // ══ 6. TWO RUNS, IN SEQUENCE ═══════════════════════════════════════════════
+  // The ticket's own acceptance test: run A proves a wallet, run B does not,
+  // and A's proof must not survive as B's.
+  console.log('\n6. run A proves a wallet; run B must not inherit it');
+  {
+    const d = driveLayer17();
+    d.store[KEY] = BASELINE;
+    await d.ctx.scanWallets();                                     // run A, awaited
+    const table = d.ctx.accountTxWindowDepth._proofByAccount;
+    table['rPROVED_IN_A'] = { status: 'COMPLETE', source: 'RUN_A', run_id: 'A' };
+    check('run A left a proof behind', Object.keys(table).length === 1, Object.keys(table));
 
-console.log('\n3. the request is scan input, not stored evidence (source guard)');
-check('the flag is cleared when the scan ends', /_proveEveryCheckedWallet = false/.test(L17));
-check('the flag lives on run state, not in localStorage',
-      !/localStorage[^\n]*_proveEveryCheckedWallet/.test(L17));
+    await d.ctx.scanWallets();                                     // run B, awaited
+    check('run B began with an empty proof table',
+          d.seen.tableAtInnerStart === 0, { atInnerStart: d.seen.tableAtInnerStart });
+    check('A’s proof is gone, not merely shadowed',
+          !d.ctx.accountTxWindowDepth._proofByAccount['rPROVED_IN_A']);
+    check('the table object was not swapped out from under its writer',
+          d.ctx.accountTxWindowDepth._proofByAccount === table);
+    check('both runs really ran', d.seen.innerCalls === 2, d.seen.innerCalls);
+  }
 
-console.log('\n' + (fail === 0 ? 'ALL ' + pass + ' CHECKS PASS' : pass + ' pass, ' + fail + ' FAIL'));
-process.exit(fail === 0 ? 0 : 1);
+  console.log('\n7. the request is scan input, not stored evidence (source guard)');
+  check('the flag is cleared when the scan ends', /_proveEveryCheckedWallet = false/.test(L17));
+  check('the flag lives on run state, not in localStorage',
+        !/localStorage[^\n]*_proveEveryCheckedWallet/.test(L17));
+
+  console.log('\n' + (fail === 0 ? 'ALL ' + pass + ' CHECKS PASS' : pass + ' pass, ' + fail + ' FAIL'));
+  process.exit(fail === 0 ? 0 : 1);
+
+})().catch(e => {
+  // An unexpected rejection is a failure, not a silent pass.
+  console.error('\nHARNESS ERROR: ' + (e && e.stack || e));
+  process.exit(1);
+});
