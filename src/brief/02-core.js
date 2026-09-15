@@ -1532,7 +1532,12 @@ function _xrplNoteLatency(command, ms, outcome) {
 // that held 8, and until now neither left a trace.
 const _xrplAdmission = { limit_min: 8, limit_max: 8, gap_max: 25,
                          backoffs_quota: 0, backoffs_transport: 0,
-                         quota_waits: 0, quota_wait_ms: 0 };
+                         quota_waits: 0, quota_wait_ms: 0,
+                         // Backgrounding, recorded so a silent hole is never
+                         // anonymous again. D49XL lost 20m23s in the offer
+                         // sweep and the export said nothing about it at all.
+                         hidden_ms: 0, hidden_spans: 0, hidden_longest_ms: 0,
+                         stalls_on_return: 0 };
 function _xrplNoteAdmission() {
   try {
     _xrplAdmission.limit_min = Math.min(_xrplAdmission.limit_min, _xrplTraffic.limit);
@@ -1711,12 +1716,59 @@ async function xrpl(ws, cmd) {
     } finally { release(); }
   }
 }
+// ── A BACKGROUNDED PAGE HAS NO WORKING CLOCK ────────────────────────────────
+//
+// SW-20260915-D49XL lost 20m23s in the offer sweep: 120/408 at 18:49:43, then
+// nothing at all until 19:10:06, when the socket was found dead, reconnected,
+// and the scan carried on at 128/408.
+//
+// Two things have to be true at once for that, and both were:
+//
+//   1. The only deadline on a read is setTimeout(..., 15000) below. Chrome on
+//      Android throttles background timers to about once a minute and can
+//      freeze them outright after a few minutes hidden, so the 15-second
+//      guarantee is not one. While the page is hidden the request has no
+//      deadline at all.
+//
+//   2. The visibility handler that exists for exactly this case begins
+//      `if (_sockOpen(state._sock)) return;`. A backgrounded mobile socket
+//      usually goes HALF-OPEN — readyState still OPEN, nothing will ever
+//      arrive — so the handler saw a healthy socket and did nothing. The same
+//      run shows the other case at 18:38:25, where the socket was detectably
+//      closed, the handler fired, and the gap was seconds rather than minutes.
+//
+// So the in-flight reads are tracked here, by wall clock, and checked on the
+// way back to the foreground — where a real clock exists again. Nothing waits
+// on a timer to notice that time has passed.
+const _xrplInFlight = new Set();
+function _xrplSweepStalled(reason, maxAgeMs) {
+  let stalled = 0;
+  try {
+    const now = Date.now();
+    _xrplInFlight.forEach(r => {
+      if (now - r.t0 < maxAgeMs) return;
+      stalled++;
+      const e = new Error('timeout ' + r.command + ' (' + reason + ')');
+      e.code = 'XRPL_STALLED';
+      try { r.fail(e); } catch (_) {}
+    });
+  } catch (_) {}
+  return stalled;
+}
+if (typeof window !== 'undefined') {
+  window._xrplSweepStalled = _xrplSweepStalled;
+  window._xrplInFlight = _xrplInFlight;
+}
 function _xrplRequest(sock, cmd) {
   return new Promise((res, rej) => {
     const id = Math.random().toString(36).slice(2);
     let settled = false;
+    const track = { t0: Date.now(), command: cmd.command, fail: null };
+    track.fail = err => { try { sock._swTimeouts = n(sock._swTimeouts) + 1; } catch (_) {} done(rej, err); };
+    _xrplInFlight.add(track);
     function done(fn, arg) {
       if (settled) return; settled = true;
+      _xrplInFlight.delete(track);
       clearTimeout(timer);
       try { sock.removeEventListener('message', onMsg); } catch (_) {}
       try { sock.removeEventListener('close', onClose); } catch (_) {}
@@ -22202,6 +22254,10 @@ async function run() {
       if (_ai && _ai.requests)
         log('XRPL reads: account_info p50 ' + _ai.p50_ms + 'ms · p95 ' + _ai.p95_ms +
             'ms · max ' + _ai.max_ms + 'ms over ' + _ai.requests + ' reads');
+      if (n(_a.hidden_spans))
+        log('Screen was off for ' + Math.round(n(_a.hidden_ms) / 1000) + 's across ' +
+            _a.hidden_spans + ' span(s), longest ' + Math.round(n(_a.hidden_longest_ms) / 1000) +
+            's · ' + n(_a.stalls_on_return) + ' read(s) had to be failed on return');
       if (_a.limit_min < 8 || n(_a.quota_waits))
         log('XRPL admission: concurrency fell to ' + _a.limit_min + ' of 8 · gap peaked at ' +
             _a.gap_max + 'ms · ' + n(_a.backoffs_quota) + ' quota / ' + n(_a.backoffs_transport) +
@@ -32971,9 +33027,42 @@ document.addEventListener('DOMContentLoaded', () => {
   // sending every request into a dead socket. Rather than wait for the next
   // request to discover that, reconnect the moment the screen is visible again.
   // _ensureSock shares one attempt, so this races safely with any in-flight call.
+  // A HALF-OPEN SOCKET IS THE CASE THAT COSTS TWENTY MINUTES, NOT THE DEAD ONE.
+  //
+  // This used to return early whenever the socket still reported OPEN, which is
+  // exactly the state a backgrounded mobile socket leaves behind: readyState
+  // OPEN, nothing will ever arrive. D49XL shows both halves — at 18:38:25 the
+  // socket was detectably closed, this fired, and the scan lost seconds; at
+  // 18:49:43 it was half-open, this returned, and the offer sweep lost 20m23s
+  // waiting on a setTimeout the browser had frozen.
+  //
+  // Coming back to the foreground is the one moment a real clock is available,
+  // so the age of every in-flight read is checked HERE rather than trusted to a
+  // timer that was not running. Reads older than the RPC deadline are failed
+  // with a named error, which the existing retry path already knows how to
+  // handle — it rotates the socket and re-issues the read.
   document.addEventListener('visibilitychange', function () {
-    if (document.hidden || !state.scanning) return;
-    if (_sockOpen(state._sock)) return;
+    if (document.hidden) {
+      try { state._hiddenAt = Date.now(); } catch (_) {}
+      return;
+    }
+    var hiddenMs = 0;
+    try {
+      if (state._hiddenAt) { hiddenMs = Date.now() - state._hiddenAt; state._hiddenAt = 0; }
+      _xrplAdmission.hidden_ms = n(_xrplAdmission.hidden_ms) + hiddenMs;
+      if (hiddenMs > 0) _xrplAdmission.hidden_spans = n(_xrplAdmission.hidden_spans) + 1;
+      if (hiddenMs > n(_xrplAdmission.hidden_longest_ms)) _xrplAdmission.hidden_longest_ms = hiddenMs;
+    } catch (_) {}
+    if (!state.scanning) return;
+    var deadline = Number(window.SW_XRPL_RPC_TIMEOUT_MS);
+    if (!Number.isFinite(deadline) || deadline <= 0) deadline = 15000;
+    var stalled = _xrplSweepStalled('stalled while the screen was off', deadline);
+    if (stalled) {
+      _xrplAdmission.stalls_on_return = n(_xrplAdmission.stalls_on_return) + stalled;
+      log('Screen returned after ' + Math.round(hiddenMs / 1000) + 's — ' + stalled +
+          ' read(s) had been waiting on a frozen clock. Failing them so the scan retries.');
+    }
+    if (_sockOpen(state._sock) && !stalled) return;
     log('Screen returned with the XRPL link down — reconnecting…');
     _ensureSock(null).then(function (sock) {
       if (!sock) log('Reconnect failed. Press RUN SHADOW WATCH to start a fresh scan.');

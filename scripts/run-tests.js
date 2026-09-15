@@ -47,6 +47,8 @@ const SUITES = [
   ['scan-liveness',          'scan-liveness.test.js',              null],
   // A timeout is not a refusal, and recovery has to fit inside one run.
   ['xrpl-admission-recovery','xrpl-admission-recovery.test.js',    null],
+  // A backgrounded page has no working clock, so nothing may wait on a timer.
+  ['xrpl-background-stall',  'xrpl-background-stall.test.js',      null],
   ['report-truth-4vf0c',     'report-truth-4vf0c.test.js',       8212],
   ['escrow-not-movement',    'escrow-not-movement.test.js',      8213],
   ['canonical-escrow-model', 'canonical-escrow-model.test.js',   8214],
