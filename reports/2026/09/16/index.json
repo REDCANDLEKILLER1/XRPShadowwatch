@@ -1,0 +1,11 @@
+[
+  {
+    "report_id": "SW-20260916-SK5R3",
+    "scan_id": "SC-MU3GYRZ0",
+    "generated_at": "2026-09-16T02:13:00.000Z",
+    "coverage_complete": true,
+    "anchor": 107014892,
+    "transactions": null,
+    "report_hash": "32fd6a6bde73a314e801e20ae57cef28e02a387dcef8a3841bc0d95294daa4d7"
+  }
+]
