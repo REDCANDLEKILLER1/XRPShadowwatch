@@ -38,16 +38,16 @@ const check = (name, ok, detail) => {
 
 // The ten, with the category each was promoted under.
 const PROMOTED = [
-  ['rDrtNsGeAoUWa6Hu12yGBPtLRMESRoyS5W', 'discovered_whale',            'WHALE_RECV_rDrtNs'],
-  ['rKHfQYcL4hZ5PkdbQ6B2tLP59xrP6Gfn9J', 'discovered_receiver',         'EXOUT_RECV_rKHfQY'],
-  ['rPBhF2Dsw168RSDFcdSGpSdm3da6XjCZBG', 'discovered_receiver',         'EXOUT_RECV_rPBhF2'],
-  ['rLXUCgmbukkQvFSpftKDTd5Ep6Zr8mG6qt', 'next_hop_splitter',           'SPLITTER_rLXUCg'],
-  ['rM8GeqeC8QzsEJcnTMZsag8wwKvJE1tuEf', 'discovered_unknown_highval',  'HIGHVAL_rM8Geq'],
-  ['r3n7DWJVDAoPofr6NGAfaov3nquyTVM8gP', 'discovered_receiver',         'LARGE_RECV_r3n7DW'],
-  ['rDKsbvy9uaNpPtvVFraJyNGfjvTw8xivgK', 'discovered_receiver',         'LARGE_RECV_rDKsbv'],
-  ['rwQjUdbuPaSVYvcA5a3izRCGuGkywyMWjk', 'discovered_receiver',         'LARGE_RECV_rwQjUd'],
-  ['rNKXCKKx3y6RkTkart277iMHxfgndrg99z', 'discovered_receiver',         'LARGE_RECV_rNKXCK'],
-  ['rGpaXxcBQFCkELhqnHbrascpPDdxSbNqxA', 'discovered_receiver',         'LARGE_RECV_rGpaXx']
+  ['rDrtNsGeAoUWa6Hu12yGBPtLRMESRoyS5W', 'discovered_whale',            'ACTIVATION_HUB_19K'],
+  ['rKHfQYcL4hZ5PkdbQ6B2tLP59xrP6Gfn9J', 'discovered_receiver',         'REDP7_CLUSTER_A'],
+  ['rPBhF2Dsw168RSDFcdSGpSdm3da6XjCZBG', 'discovered_receiver',         'REDP7_CLUSTER_B'],
+  ['rLXUCgmbukkQvFSpftKDTd5Ep6Zr8mG6qt', 'next_hop_splitter',           'FUNDED_STANDALONE_R3QNB'],
+  ['rM8GeqeC8QzsEJcnTMZsag8wwKvJE1tuEf', 'discovered_unknown_highval',  'COINCHECK_ORIGIN_2017'],
+  ['r3n7DWJVDAoPofr6NGAfaov3nquyTVM8gP', 'discovered_receiver',         'MULTISIG_ACTIVATION_HUB_5K'],
+  ['rDKsbvy9uaNpPtvVFraJyNGfjvTw8xivgK', 'discovered_receiver',         'UNION_CHAIN_PROVISIONING'],
+  ['rwQjUdbuPaSVYvcA5a3izRCGuGkywyMWjk', 'discovered_receiver',         'REDP7_CLUSTER_C'],
+  ['rNKXCKKx3y6RkTkart277iMHxfgndrg99z', 'discovered_receiver',         'WHALE_ACTIVATOR_512'],
+  ['rGpaXxcBQFCkELhqnHbrascpPDdxSbNqxA', 'discovered_receiver',         'RLUSD_FLOW_MULTISIG']
 ];
 
 console.log('ROSTER PROMOTION — SW-20260916-SK5R3, 408 → 418\n');
@@ -135,8 +135,8 @@ const union = byAddr.get('rDKsbvy9uaNpPtvVFraJyNGfjvTw8xivgK');
 check('the XRPScan name is recorded in the evidence', /Union Chain/.test(block));
 check('it is marked as a registry claim, not ownership proof',
       /NOT ownership proof/.test(block));
-check('and the label stays behavioural', union && union.label === 'LARGE_RECV_rDKsbv',
-      union && union.label);
+check('the label names the FUNCTION, and the entity only where it is confirmed',
+      union && union.label === 'UNION_CHAIN_PROVISIONING', union && union.label);
 
 // ══ 4d. THE SHARED FUNDER ════════════════════════════════════════════════════
 // Three of the ten lead back to one parent. That account was ALREADY on the
@@ -155,6 +155,49 @@ check('it keeps a neutral label rather than naming an operator',
       (byAddr.get(FUNDER) || {}).label);
 check('and says plainly that the shape does not identify an owner',
       /does not say whose/.test(CORE));
+
+// ══ 4e. EVERY LABEL SAYS WHAT IT KNOWS, AND WITHHOLDS WHAT IT DOES NOT ═══════
+// The labels name a FUNCTION — activation hub, cluster member, RLUSD flow —
+// because function is what the ledger proves. Ownership is stated as unknown
+// in the entry rather than implied by a name.
+console.log('\n4e. attribution strength is stated, never implied');
+const STRENGTH = /OWNER UNKNOWN|OWNERSHIP UNVERIFIED|CONFIRMED ENTITY/;
+PROMOTED.forEach(([addr, , label]) => {
+  const line = block.split('\n').find(l => l.indexOf(addr) > -1) || '';
+  check(label + ' states how strong its attribution is', STRENGTH.test(line), line.slice(0, 110));
+});
+check('nine of the ten withhold ownership explicitly',
+      PROMOTED.filter(([a]) => /OWNER UNKNOWN|OWNERSHIP UNVERIFIED/
+        .test(block.split('\n').find(l => l.indexOf(a) > -1) || '')).length === 9,
+      PROMOTED.filter(([a]) => /OWNER UNKNOWN|OWNERSHIP UNVERIFIED/
+        .test(block.split('\n').find(l => l.indexOf(a) > -1) || '')).length);
+check('exactly one claims a confirmed entity',
+      (block.match(/CONFIRMED ENTITY/g) || []).length === 1);
+
+// The one label carrying an exchange name rests on a single registry, and the
+// other registry disagrees. A label that names a company must say so.
+console.log('\n4f. a contested registry label says it is contested');
+const coincheck = block.split('\n').find(l => l.indexOf('rM8Geq') > -1) || '';
+check('COINCHECK_ORIGIN_2017 records that XRPScan carries no such label',
+      /XRPScan carries NO label/.test(coincheck), coincheck.slice(0, 120));
+check('and that the claim is the funding origin, not present ownership',
+      /never present ownership/.test(coincheck));
+check('Union Chain records that HitBTC funding is not HitBTC ownership',
+      /does NOT make it a HitBTC wallet/.test(block));
+
+// Activation counts reframe these wallets: a hub that activated ~19,700
+// accounts is infrastructure, not a holder. Recorded so nobody reads a
+// provisioning wallet as accumulation.
+console.log('\n4g. activation counts are recorded where they exist');
+[['rDrtNs', '19,700'], ['rDKsbv', '88,100'], ['r3n7DW', '5,000'], ['rNKXCK', '512'], ['rPBhF2', '31']]
+  .forEach(([who, count]) => {
+    const line = block.split('\n').find(l => l.indexOf(who) > -1) || '';
+    check(who + ' records ~' + count + ' activations', line.indexOf(count) > -1, line.slice(-90));
+  });
+check('the largest hub is marked as a provisioning wallet, not a holder',
+      /provisioning hub, not a holder/.test(block));
+check('the one wallet that is NOT a hub says so',
+      /has NOT acted as an activation hub/.test(block));
 
 // ══ 5. THIS WAS A REVIEW, AND AUTO-PROMOTION IS STILL OFF ════════════════════
 // The roster growing must never be read as the safety contract loosening.
