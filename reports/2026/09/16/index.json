@@ -1,5 +1,14 @@
 [
   {
+    "report_id": "SW-20260916-2591Z",
+    "scan_id": "SC-MU3I3LYM",
+    "generated_at": "2026-09-16T02:42:21.000Z",
+    "coverage_complete": true,
+    "anchor": 107015350,
+    "transactions": null,
+    "report_hash": "86f8434a9820e43af078ed41e36b10278e461944f4e3aa304e5997a3733ee6d4"
+  },
+  {
     "report_id": "SW-20260916-SK5R3",
     "scan_id": "SC-MU3GYRZ0",
     "generated_at": "2026-09-16T02:13:00.000Z",
