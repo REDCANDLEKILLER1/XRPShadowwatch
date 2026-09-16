@@ -499,6 +499,26 @@ const WATCHLIST = [
   ['WATCHED_rwBkBm',     'rwBkBmv1RbgsWLXhWM8uEoVwY974iWshv4', 'unclassified'],
   ['WATCHED_rwQusX',     'rwQusXXMjsUn622L3ZEpne7ZegSCF1C9fi', 'unclassified'],
   ['WATCHED_rwjkSR',     'rwjkSRdi16UD17bzuQ1JQY2oqWuycPz6fx', 'unclassified'],
+  // ── v3.32: the roster reaches 418 — SW-20260916-SK5R3 review ─────────────
+  // The ten candidates the operator reviewed and approved from that scan's
+  // discovery queue. Every figure below was read off the ledger by that run
+  // and is repeated here so a later reader can check the promotion rather
+  // than trust it. Behavioral evidence only: these say what a wallet DID.
+  // None of them names an owner, and none is a claim about identity.
+  //
+  // Three earned an ADD tier on their own evidence; the other seven the
+  // operator took on the same review. Recorded plainly: seven were still
+  // MONITOR/REVIEW at promotion, and four had been seen in only one scan.
+  ['WHALE_RECV_rDrtNs',  'rDrtNsGeAoUWa6Hu12yGBPtLRMESRoyS5W', 'discovered_whale'],            // exchange-adjacent · 9.63M XRP over 311 tx, max single 7.90M · richlist #763 (3,960,918) · MEXC/Coinbase/Gate.io/bitbank adjacent · RECEIVER_STILL_HOLDING_SIZE · seen 2 scans · score 175/200 CRITICAL_ADD_REVIEW
+  ['EXOUT_RECV_rKHfQY',  'rKHfQYcL4hZ5PkdbQ6B2tLP59xrP6Gfn9J', 'discovered_receiver'],         // exchange-adjacent · 1.06M XRP over 67 tx from high-value wallet rYmTPY…ESMV · RECEIVER_STILL_HOLDING_SIZE · no richlist reading · seen 2 scans · score 140/200 RECOMMEND_FOR_WATCH
+  ['EXOUT_RECV_rPBhF2',  'rPBhF2Dsw168RSDFcdSGpSdm3da6XjCZBG', 'discovered_receiver'],         // exchange-adjacent · 1.24M XRP over 42 tx from high-value wallet rYmTPY…ESMV · RECEIVER_STILL_HOLDING_SIZE · no richlist reading · seen 1 scan · score 140/200 RECOMMEND_FOR_WATCH
+  ['SPLITTER_rLXUCg',    'rLXUCgmbukkQvFSpftKDTd5Ep6Zr8mG6qt', 'next_hop_splitter'],           // routing-node · 3.13M XRP from watched wallet rHm6iv…q1fB · NEXT_HOP_FORWARDING_DETECTED [HIGH], forwarded onward · no richlist reading · seen 2 scans · score 90/200 REVIEW
+  ['HIGHVAL_rM8Geq',     'rM8GeqeC8QzsEJcnTMZsag8wwKvJE1tuEf', 'discovered_unknown_highval'],  // exchange-adjacent · 1.50M XRP over 6 tx to bitbank · richlist #983 (2,750,347) · balance not read that scan · seen 2 scans · score 85/200 REVIEW
+  ['LARGE_RECV_r3n7DW',  'r3n7DWJVDAoPofr6NGAfaov3nquyTVM8gP', 'discovered_receiver'],         // exchange-adjacent · 5.76M XRP over 316 tx, max single 2.30M · MEXC/bitbank/BITPoint/Kraken adjacent · repeated mid-size flow · no richlist reading · seen 2 scans · score 50/200 MONITOR
+  ['LARGE_RECV_rDKsbv',  'rDKsbvy9uaNpPtvVFraJyNGfjvTw8xivgK', 'discovered_receiver'],         // exchange-adjacent · 3.61M XRP over 35 tx, max single 1.80M · bitbank/Coinbase outbound · repeated mid-size flow · no richlist reading · seen 2 scans · score 50/200 MONITOR
+  ['LARGE_RECV_rwQjUd',  'rwQjUdbuPaSVYvcA5a3izRCGuGkywyMWjk', 'discovered_receiver'],         // exchange-adjacent · 1.09M XRP over 115 tx · Gate.io outbound · related to high-value wallet rNxp4h…N7AV · no richlist reading · seen 1 scan · score 50/200 MONITOR
+  ['LARGE_RECV_rNKXCK',  'rNKXCKKx3y6RkTkart277iMHxfgndrg99z', 'discovered_receiver'],         // watch-net · 1.32M XRP over 38 tx · related to high-value wallet rYmTPY…ESMV and watched wallet r3GNZ9…KxUh · richlist #456 (14,314,197) · seen 1 scan · score 50/200 MONITOR
+  ['LARGE_RECV_rGpaXx',  'rGpaXxcBQFCkELhqnHbrascpPDdxSbNqxA', 'discovered_receiver'],         // exchange-adjacent · 4.00M XRP in a single transfer from Gemini · no richlist reading · seen 2 scans · score 50/200 MONITOR
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)
