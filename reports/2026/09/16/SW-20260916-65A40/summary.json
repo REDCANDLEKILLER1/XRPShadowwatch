@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20260916-65A40",
+  "generated_at": "2026-09-16T12:58:31.000Z",
+  "coverage_complete": true,
+  "target_wallets": 418,
+  "transaction_windows_proved": 418,
+  "validated_anchor_ledger": 107024938,
+  "transactions_in_window": null,
+  "new_observations": null,
+  "xrpl_requests": null,
+  "report_hash": "afd614721d19b08300e5754eb4521179cab233545f8da2a6545e3c4cb0bb4223"
+}
