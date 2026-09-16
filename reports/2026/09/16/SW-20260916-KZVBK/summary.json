@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20260916-KZVBK",
+  "generated_at": "2026-09-16T12:35:52.000Z",
+  "coverage_complete": true,
+  "target_wallets": 418,
+  "transaction_windows_proved": 418,
+  "validated_anchor_ledger": 107024587,
+  "transactions_in_window": null,
+  "new_observations": null,
+  "xrpl_requests": null,
+  "report_hash": "754f0da00b414357a9ccc090bbe4974bd375c8bdb0ee491a98c850a1f891ca9a"
+}

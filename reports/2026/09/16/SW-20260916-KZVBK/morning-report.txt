@@ -1,0 +1,84 @@
+🩸 ℜᴇᴅᴄᴀɴᴅʟᴇᴋɪʟʟᴇR 🩸
+ＳＨＡＤＯＷ ＷＡＴＣＨ
+✨ 𝐹𝑒𝑎𝑡𝑢𝑟𝑖𝑛𝑔 ✨
+𝓛𝓪𝓭𝔂 𝓚'𝓼
+🄴🅇🄲🄴🄻🄻🄴🄽🅃!
+𝖂𝖍𝖎𝖑𝖊 𝖄𝖔𝖚 𝖂ᴇʀᴇ 𝕾𝖑𝖊𝖊𝔭𝖎𝖓𝖌
+𝗫𝗥𝗣𝗟  𝕌ℙ𝔻𝔸𝕋𝔼 ✨✨ on
+☕ COFFEE & CRYPTO with 𝐒𝐓ΟΝΕ
+September 16, 2026
+
+Executive Summary
+─────────────────
+303.76M XRP moved across 114 large transfers in the window. Binance ×20 and Kraken ×6 and +6 more absorbed 112.83M XRP this scan. The standout individual anomaly was 25M XRP moved from a Ripple-associated wallet to a large XRP holder in the scanned window. These classifications describe observed movement only; they do not prove intent.
+
+What Mattered Most
+──────────────────
+What the chart won’t tell you: Binance ×20 and Kraken ×6 and +6 more absorbed 112.83M XRP this scan, and why is XRP falling after the CLARITY Act vote?. Watch that thread; it usually unspools into something bigger.
+
+Evidence
+────────
+Let’s go to the tape. 25M XRP moved from a Ripple-associated wallet to a large XRP holder in the scanned window. A second transfer of 15M XRP reached an unidentified wallet. The discovery queue is holding 12 flagged candidates — 12 found this scan, 3 recommended for review, separate from the 408 wallets on the permanent watch list — queued on behavior alone. Behavioral evidence only, so not one of them is named until the receipts say so. And where the news lives, published news context: Why is XRP falling after the CLARITY Act vote? · XRP Price Crashes 9% as CLARITY Act Dies: How Low Can XRP Go? · CLARITY Act Plan B? Ripple Says Failure Changes Nothing as XRP Crashes—CFTC’s Next Move in Focus. Nobody subpoenas the Ledger. It just answers.
+
+
+Escrow Watch
+────────────
+Ripple escrow: 31.70B XRP locked now across 100 active validated-ledger escrow objects · registry check 20/20 known Ripple-labeled addresses.
+No Ripple escrow events are present in the acquired record for the last 36h; this alone does not prove an event-free window.
+Other XRPL escrow, last 36h: 1 new lock totalling 10.00M XRP · 1 release totalling 1 XRP, across 2 owner wallets.
+• Flare Core Vault: 1 lock 10.00M XRP
+• rGZKb2…tne9: 1 release 1 XRP
+Ripple and non-Ripple escrow are separate. Active escrow objects are ledger objects, not owner wallets. Scope is escrow observed by this scan, not every escrow on the XRPL.
+
+Under the Surface
+─────────────────
+Here’s the part the ≥1M whale counter can miss. Shadow Volume is the big-move spotlight: 303.76M XRP in 114 individual moves of at least 1M. Another 250.60M XRP moved in 946 payments from 100K to under 1M. 237.59M XRP across 896 of those payments matched 114 repeat-route, fan-in, or fan-out patterns. That is a signal to trace, not proof somebody was hiding funds.
+
+How to Read It
+──────────────
+New here? Shadow Volume shows the obvious ≥1M moves. Mid-size Flow catches 100K–<1M moves. Clustered Flow asks whether those smaller high-value payments keep using common routes. Net watched flow tells whether the tracked wallet board gained or lost XRP versus its prior snapshot.
+
+What To Watch Next
+──────────────────
+• Watch the absorbing wallets — are they stacking it, or handing it back out?
+• Check whether the largest recipient in this window makes another move.
+• If a dormant giant wakes up, I’ll flag it before the chart does.
+
+Verdict
+───────
+My call this morning: an unsettled night — I’m leaning in on it. (60/100). What tipped me off: large transfer count, shadow volume, receiver forwarding. A whale can hide its name, but never its footprints. Not financial advice. XRP-only forensic watch.
+
+I’m XRPMan, and I tell on the banks.
+
+LEDGER DIAGNOSTICS
+──────────────────
+• XRP price: ~$1.2801 (24h soft)
+• Market volume (exchanges, 24h): $4.29B
+• Native XRPL DEX observed volume (top 200-token index, 24h): ~$15M (~11.81M XRP, ledger-derived estimate)
+• XRPL EVM: $29.9K TVL
+• RLUSD on XRPL (issuer obligations): 1B tokens
+• New funded XRPL accounts (2026-09-15): +3,485
+• Watched wallets: 408
+• Watched activity (all sizes, LAST 24H): 83352 transactions · 709.71M XRP moved · 191 wallets active
+• Shadow volume (whale moves ≥1M, LAST 24H): 303.76M XRP · 114 transfers
+
+🙏 THE DAILY PRAYER
+───────────────────
+Father, make us slow to conclude and quick to check. The Ledger keeps; our patience is the only thing in short supply.
+
+📖 THE DAILY SCRIPTURE
+──────────────────────
+Habakkuk 2:3 (KJV)
+“For the vision is yet for an appointed time, but at the end it shall speak, and not lie.”
+
+Sources
+───────
+[1] Why is XRP falling after the CLARITY Act vote? — https://news.google.com/rss/articles/CBMi0wFBVV95cUxObWtOMzhYRmZGTTdsdXlrLXg2S1ExeVVaYXJJV3pqU2hOT0x3TEgyenZROG5NZHFLRDRaSWhsMDlFN0NHemR4NmdCZjBGQXpTS1NGYjNzVlg0Zm9PV01lRWZXZy00UHotNzFGaHAyRnhYWS1XZ25ldThGQkhZMkl3TkotV1pNWi1YR2ZIY2gycXBqemtJdTNrWGhhSV9rNjNLTUM2RjRkNlBtc2R0ZnlHV3dGZ1UyaFA2b05iUmZGU1U3VmF3bVRrX1JfX2prZFQ1R1NN?oc=5
+[2] XRP Price Crashes 9% as CLARITY Act Dies: How Low Can XRP Go? — https://news.google.com/rss/articles/CBMibkFVX3lxTE1vdERqRTNuS010UVRQSW5vdjRud0o0ZHBYS1FGdDVtMkJQQ2JzOEhjZDFmWEx5WGVqOUtIQl9pTHZVeS0wSE1fWVBLVFltYnl0ZVF0cHBvbkM5QWVLem5XdVpDX1FjblNzd1lGZjFR?oc=5
+[3] CLARITY Act Plan B? Ripple Says Failure Changes Nothing as XRP Crashes—CFTC’s Ne — https://news.google.com/rss/articles/CBMilwFBVV95cUxNMVZJbVRLNmpVTTBYOHJaZnZmeXZpdk9LRWxaSy1rakYwRm42LXFHdGVrVXJmNEl3VXMzOGNyZHQ5OWR4c0I5eUplLTFRblhjQ2tVeXRocGtCdnF1d1BsNEVMOWQ1UmVVbkg1ZWhTSi1WVXAtcVdtVWh1YVFUZUM4OVQtaEhzaHZWTFhBbFNyWFQ4aUthcHBN?oc=5
+
+
+NEWS USED:
+[1] google_news@self — Why is XRP falling after the CLARITY Act vote?
+[2] google_news@self — XRP Price Crashes 9% as CLARITY Act Dies: How Low Can XRP Go?
+[3] google_news@self — CLARITY Act Plan B? Ripple Says Failure Changes Nothing as XRP Crashes—CFTC’s Next Move in Focus
