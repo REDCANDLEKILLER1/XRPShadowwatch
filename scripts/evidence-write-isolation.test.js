@@ -160,6 +160,25 @@ const writers = [
   check('no writer was left on the read path',
         writeFns.every(n => /writeTarget\(/.test(body(n))));
 
+  // ══ 6. THE DISCREPANCY IS SAID WHERE SOMEONE IS LOOKING ═══════════════════
+  // The state deliberately keeps proving a wallet the roster no longer lists,
+  // so 91/418 beside 90/408 is correct behaviour, not a bug. But on 2026-09-16
+  // the operator had no way to know that: the server reported it as
+  // watched_not_in_roster, which reached the debug JSON and nowhere else.
+  console.log('\n6. a roster/checkpoint gap is explained in the run log (source guard)');
+  const L45 = fs.readFileSync(path.join(ROOT, 'src/brief/45-delta-evidence-index-20260911.js'), 'utf8');
+  const ACQ = fs.readFileSync(path.join(ROOT, 'src/db/delta-acquisition.js'), 'utf8');
+  check('the server still reports the gap', /watched_not_in_roster: rosterAbsent/.test(ACQ));
+  check('the browser now reads it', /result\.watched_not_in_roster/.test(L45));
+  check('and logs it only when there IS a gap', /if \(absent\.length\) \{/.test(L45));
+  check('the line says the wallets are still walked and counted',
+        /still walked and counted/.test(L45));
+  check('it names the first few rather than dumping all of them',
+        /absent\.slice\(0, 3\)/.test(L45) && /and ' \+ \(absent\.length - 3\) \+ ' more/.test(L45));
+  check('the state still refuses to drop a wallet the roster omits',
+        /is NOT dropped/.test(ACQ) && /does not infer a decision from a list it was handed/.test(ACQ),
+        'that behaviour is deliberate and must stay');
+
   console.log('\n' + (fail === 0 ? 'ALL ' + pass + ' CHECKS PASS' : pass + ' pass, ' + fail + ' FAIL'));
   process.exit(fail === 0 ? 0 : 1);
 })().catch(e => { console.error('HARNESS ERROR: ' + (e && e.stack || e)); process.exit(1); });
