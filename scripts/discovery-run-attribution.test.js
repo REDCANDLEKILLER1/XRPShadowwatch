@@ -150,6 +150,29 @@ check('and it says so out loud instead of going quiet',
       /this queue is not attributed to the current scan/.test(PIPE));
 check('the tile withholds too', /if \(!split\.evaluated\) return null;/.test(CORE));
 
+// ══ 5b. A CORRECT ZERO IS AN ANSWER ══════════════════════════════════════════
+// SW-20260916-WH9AZ published "0 recommended for review" in the Morning Story
+// and the JSON, and "2 recommended for review" in the structured report, from
+// one run — because the summary guarded its legacy fallback with
+// `if (!recommended)`, which cannot tell a canonical zero from no answer.
+console.log('\n5b. a canonical zero is not mistaken for no answer');
+const summarySrc = (function () {
+  const at = CORE.indexOf('function buildDiscoverySummaryLines()');
+  return at < 0 ? '' : CORE.slice(at, at + 2600);
+})();
+check('the summary function was located', summarySrc.length > 0);
+check('the counter starts as null, not zero',
+      /let recommended = null;/.test(summarySrc),
+      (/let recommended = [^\n;]*/.exec(summarySrc) || [])[0]);
+check('the legacy fallback fires only when nothing answered',
+      /if \(recommended === null\) \{/.test(summarySrc));
+check('a falsy zero can no longer trigger it',
+      !/if \(!recommended\) \{/.test(summarySrc));
+// The tier rule the canonical count uses is the same one the JSON reports, so
+// zero REVIEW/MONITOR candidates must read as zero on both.
+check('the canonical count uses the same tiers the JSON counts',
+      /c\.action_tier === 'CRITICAL_ADD_REVIEW' \|\| c\.action_tier === 'RECOMMEND_FOR_WATCH'/.test(summarySrc));
+
 console.log('\n6. the pass stamps the run that observed the candidate');
 check('candidates carry the observing run id', /last_seen_run: \(typeof _discoveryRunId === 'function'\)/.test(CORE));
 check('this run’s qualifying evidence is recorded separately from the union',

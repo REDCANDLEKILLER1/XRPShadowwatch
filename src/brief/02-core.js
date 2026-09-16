@@ -6899,7 +6899,13 @@ function buildDiscoverySummaryLines() {
   // Falls back to legacy review_status counting if module is absent.
   let total = _discoverySplit(inbox).fresh.length;
   let carriedOver = _discoverySplit(inbox).carried.length;
-  let recommended = 0;
+  // NULL means the canonical counter has not run, which is not the same as it
+  // running and returning zero. `if (!recommended)` could not tell those apart,
+  // so a correct zero fell through to a legacy rule counting a different thing:
+  // SW-20260916-WH9AZ published "0 recommended for review" in the Morning Story
+  // and the JSON, and "2 recommended for review" in the structured report, from
+  // one run. Same document, two numbers.
+  let recommended = null;
   let topLine = '';
   if (typeof window.AUTO_WALLET_FINDER !== 'undefined') {
     try {
@@ -6923,7 +6929,8 @@ function buildDiscoverySummaryLines() {
       // fall back to legacy counting below
     }
   }
-  if (!recommended) {
+  // Only when the canonical path never produced an answer.
+  if (recommended === null) {
     recommended = inbox.filter(r => _discoverySeenThisRun(r) &&
       (r.review_status === 'RECOMMENDED' || r.recommended_action === 'RECOMMEND_FOR_WATCH')).length;
   }
