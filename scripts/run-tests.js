@@ -67,6 +67,8 @@ const SUITES = [
   // lives in these two now.
   ['evidence-state',         'evidence-state.test.js',             null],
   ['github-evidence-store',  'github-evidence-store.test.js',      null],
+  // One evidence store, every deployment. A preview may read it, never write.
+  ['evidence-write-isolation','evidence-write-isolation.test.js',  null],
   // A morning run with no database: GitHub in, XRPL delta, GitHub out.
   ['delta-report-path',      'delta-report-path.test.js',        8213],
   ['run-journal',            'run-journal.test.js',              null],

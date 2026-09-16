@@ -69,6 +69,10 @@ const runPath = reportId => 'evidence/runs/' + String(reportId) + '.json';
 // checkpoint live in their own private store so the code repo's history stays
 // small and the two can carry different access.
 function target(env) { return A.evidenceTarget(env || process.env); }
+// Writers go through this instead. Same resolution, plus the refusal that keeps
+// a branch preview out of production's checkpoint — see evidenceWriteTarget in
+// src/db/github-archive.js for what happened on 2026-09-16 without it.
+function writeTarget(env) { return A.evidenceWriteTarget(env || process.env); }
 
 // Read one file from the branch at a given ref. Returns null for 404 — an
 // absent state is a real answer (nothing has been committed yet), not an error.
@@ -181,7 +185,7 @@ async function readJournalRows(journal, deps) {
 // the other has since removed.
 async function appendJournal(journal, segment, deps) {
   const d = deps || {};
-  const { token, repo, branch } = target(d.env);
+  const { token, repo, branch } = writeTarget(d.env);
   const gh = d.gh || A.client(token, repo, d.fetch || fetch);
   const zlib = require('zlib');
   const packed = zlib.gzipSync(Buffer.from(
@@ -306,7 +310,7 @@ async function missingJournalShards(journal, deps) {
 // run has since started its own, that one is not ours to delete.
 async function clearJournal(journal, deps) {
   const d = deps || {};
-  const { token, repo, branch } = target(d.env);
+  const { token, repo, branch } = writeTarget(d.env);
   const gh = d.gh || A.client(token, repo, d.fetch || fetch);
   const ref = await A.archiveRef(gh, branch);
   const text = await readFile(gh, branch, JOURNAL_PATH, ref.object.sha);
@@ -348,7 +352,7 @@ async function clearJournal(journal, deps) {
 // checkpoint with an older view.
 async function commitRun(input, deps) {
   const d = deps || {};
-  const { token, repo, branch } = target(d.env);
+  const { token, repo, branch } = writeTarget(d.env);
   const gh = d.gh || A.client(token, repo, d.fetch || fetch);
   const run = input || {};
   if (!run.report_id) throw new Error('RUN_REPORT_ID_REQUIRED');
@@ -439,7 +443,7 @@ async function commitRun(input, deps) {
 // Refuses to overwrite an existing chain: genesis happens exactly once.
 async function seedGenesis(input, deps) {
   const d = deps || {};
-  const { token, repo, branch } = target(d.env);
+  const { token, repo, branch } = writeTarget(d.env);
   const gh = d.gh || A.client(token, repo, d.fetch || fetch);
   const ref = await A.archiveRef(gh, branch);
   const existing = await readFile(gh, branch, STATE_PATH, ref.object.sha);

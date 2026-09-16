@@ -229,6 +229,53 @@ function evidenceTarget(env){
   return {token,repo,branch};
 }
 
+// ── A PREVIEW MAY READ THE EVIDENCE STORE; IT MUST NOT WRITE IT ─────────────
+//
+// There is ONE evidence store. evidenceTarget above pins one repository and one
+// branch for every deployment, and a preview carries the same token, so a
+// preview run writes the very checkpoint production reads. localStorage is
+// per-origin, which makes a preview FEEL sandboxed; the evidence store is not,
+// and nothing said so.
+//
+// 2026-09-16, and this is the whole reason the guard exists. A preview of the
+// 418-wallet roster (PR #78) ran and wrote its runs into the shared checkpoint.
+// Production, whose roster is 408, then read a state carrying 418 wallets and
+// planned against it:
+//
+//     Evidence: state · 418 wallets
+//     Evidence: anchor 107024587 · 91/418 proved · RUN_INCOMPLETE
+//     SCAN: 408 wallets
+//     tx_scan_coverage {"target_wallets":408,"complete_wallets":90, ...}
+//
+// One morning, one run, two denominators — and an operator told to test a
+// roster change on a preview had no way to know it would land in production's
+// evidence.
+//
+// READS STAY OPEN, deliberately. A preview that cannot read the checkpoint
+// cannot produce a report, and producing a report is the only reason to deploy
+// one. Only the four writers are gated.
+//
+// VERCEL_ENV is 'production' | 'preview' | 'development' on Vercel and absent
+// everywhere else. Absent means this is not a Vercel deployment at all — a
+// local operator script or the test suite — and those keep their write access,
+// because scripts/db-export-evidence.js and scripts/github-publish-export.js
+// are how the store gets seeded in the first place. The token check runs first,
+// so a missing secret still reports itself rather than hiding behind this.
+function evidenceWriteTarget(env){
+  const e=env||process.env;
+  const t=evidenceTarget(e);
+  const where=e.VERCEL_ENV;
+  if(where&&where!=='production'){
+    const err=new Error('EVIDENCE_WRITE_REFUSED_NON_PRODUCTION: a '+where+
+      ' deployment may read the evidence store but must not write it — the'+
+      ' checkpoint is shared with production');
+    err.environment=where;
+    err.evidenceWriteRefused=true;
+    throw err;
+  }
+  return t;
+}
+
 // READING the sealed receipts. Same pinned repository and branch as
 // archiveTarget, but either token is accepted: a fine-grained token that can
 // see both repositories is the normal setup, and requiring the archive
@@ -367,6 +414,6 @@ async function archiveReport(raw,deps={}){
   throw new Error('GITHUB_ARCHIVE_RETRY_EXHAUSTED');
 }
 
-module.exports={archiveReport,validate,sha,client,commitFiles,archiveRef,archiveTarget,archiveReadTarget,evidenceTarget,
+module.exports={archiveReport,validate,sha,client,commitFiles,archiveRef,archiveTarget,archiveReadTarget,evidenceTarget,evidenceWriteTarget,
   archiveFactsFromEvidence,IDX_RUN,GH_RUN,
   BRANCH,REPO,EVIDENCE_BRANCH,EVIDENCE_REPO,MAX_REPORT_BYTES};
