@@ -389,6 +389,16 @@ const WATCHLIST = [
   ['WATCHED_rEQjQm',     'rEQjQmKnSwdwcePyAdNWbm4VoSNvbodsti', 'unclassified'],
   ['WATCHED_rEYCB6',     'rEYCB6oPE5BpbAWiYP4cxAQyUsAStmYmUj', 'unclassified'],
   ['WATCHED_rEd1wQ',     'rEd1wQqeKPqHbaHVfGCHgH2SeXsSkrEi6K', 'unclassified'],
+  // FUNDER OF THREE WALLETS SW-20260916-SK5R3 FLAGGED INDEPENDENTLY.
+  // Added here by hand from the operator's manifest, before any of that. The
+  // ledger origin read on 2026-09-16 says it is the parent of rKHfQY…fn9J
+  // (2025-11-28 09:53:50), rwQjUd…MWjk (09:55:20) and rPBhF2…CZBG (09:55:40) —
+  // three siblings created inside 110 seconds, each flagged on its own
+  // behaviour months later. Created 2025-11-27 21:08:20 from an initial 1.2
+  // XRP; holds 1,040,240 XRP now; ownerCount 0; no published name. Itself
+  // funded by rKZuCjyo…z2r6 (created 2025-11-27 18:53:41, holds 209,477), a
+  // provisioning cascade about fifteen hours deep. That shape is a funding
+  // structure. It does not say whose, and the label stays neutral because of it.
   ['WATCHED_rEdP7w',     'rEdP7wDoHo6LW9nertpTbxgtF6uFkyS7b5', 'unclassified'],
   ['WATCHED_rEhWot',     'rEhWotAnEhRKecPtq4w5jC9ukXzoZYQ4xT', 'unclassified'],
   ['WATCHED_rEoePA',     'rEoePAacBgKHAZUyscGfABJrTib8i5pMNm', 'unclassified'],
@@ -509,16 +519,35 @@ const WATCHLIST = [
   // Three earned an ADD tier on their own evidence; the other seven the
   // operator took on the same review. Recorded plainly: seven were still
   // MONITOR/REVIEW at promotion, and four had been seen in only one scan.
-  ['WHALE_RECV_rDrtNs',  'rDrtNsGeAoUWa6Hu12yGBPtLRMESRoyS5W', 'discovered_whale'],            // exchange-adjacent · 9.63M XRP over 311 tx, max single 7.90M · richlist #763 (3,960,918) · MEXC/Coinbase/Gate.io/bitbank adjacent · RECEIVER_STILL_HOLDING_SIZE · seen 2 scans · score 175/200 CRITICAL_ADD_REVIEW
-  ['EXOUT_RECV_rKHfQY',  'rKHfQYcL4hZ5PkdbQ6B2tLP59xrP6Gfn9J', 'discovered_receiver'],         // exchange-adjacent · 1.06M XRP over 67 tx from high-value wallet rYmTPY…ESMV · RECEIVER_STILL_HOLDING_SIZE · no richlist reading · seen 2 scans · score 140/200 RECOMMEND_FOR_WATCH
-  ['EXOUT_RECV_rPBhF2',  'rPBhF2Dsw168RSDFcdSGpSdm3da6XjCZBG', 'discovered_receiver'],         // exchange-adjacent · 1.24M XRP over 42 tx from high-value wallet rYmTPY…ESMV · RECEIVER_STILL_HOLDING_SIZE · no richlist reading · seen 1 scan · score 140/200 RECOMMEND_FOR_WATCH
-  ['SPLITTER_rLXUCg',    'rLXUCgmbukkQvFSpftKDTd5Ep6Zr8mG6qt', 'next_hop_splitter'],           // routing-node · 3.13M XRP from watched wallet rHm6iv…q1fB · NEXT_HOP_FORWARDING_DETECTED [HIGH], forwarded onward · no richlist reading · seen 2 scans · score 90/200 REVIEW
-  ['HIGHVAL_rM8Geq',     'rM8GeqeC8QzsEJcnTMZsag8wwKvJE1tuEf', 'discovered_unknown_highval'],  // exchange-adjacent · 1.50M XRP over 6 tx to bitbank · richlist #983 (2,750,347) · balance not read that scan · seen 2 scans · score 85/200 REVIEW
-  ['LARGE_RECV_r3n7DW',  'r3n7DWJVDAoPofr6NGAfaov3nquyTVM8gP', 'discovered_receiver'],         // exchange-adjacent · 5.76M XRP over 316 tx, max single 2.30M · MEXC/bitbank/BITPoint/Kraken adjacent · repeated mid-size flow · no richlist reading · seen 2 scans · score 50/200 MONITOR
-  ['LARGE_RECV_rDKsbv',  'rDKsbvy9uaNpPtvVFraJyNGfjvTw8xivgK', 'discovered_receiver'],         // exchange-adjacent · 3.61M XRP over 35 tx, max single 1.80M · bitbank/Coinbase outbound · repeated mid-size flow · no richlist reading · seen 2 scans · score 50/200 MONITOR
-  ['LARGE_RECV_rwQjUd',  'rwQjUdbuPaSVYvcA5a3izRCGuGkywyMWjk', 'discovered_receiver'],         // exchange-adjacent · 1.09M XRP over 115 tx · Gate.io outbound · related to high-value wallet rNxp4h…N7AV · no richlist reading · seen 1 scan · score 50/200 MONITOR
-  ['LARGE_RECV_rNKXCK',  'rNKXCKKx3y6RkTkart277iMHxfgndrg99z', 'discovered_receiver'],         // watch-net · 1.32M XRP over 38 tx · related to high-value wallet rYmTPY…ESMV and watched wallet r3GNZ9…KxUh · richlist #456 (14,314,197) · seen 1 scan · score 50/200 MONITOR
-  ['LARGE_RECV_rGpaXx',  'rGpaXxcBQFCkELhqnHbrascpPDdxSbNqxA', 'discovered_receiver'],         // exchange-adjacent · 4.00M XRP in a single transfer from Gemini · no richlist reading · seen 2 scans · score 50/200 MONITOR
+  ['WHALE_RECV_rDrtNs',  'rDrtNsGeAoUWa6Hu12yGBPtLRMESRoyS5W', 'discovered_whale'],            // exchange-adjacent · 9.63M XRP over 311 tx, max single 7.90M · richlist #763 (3,960,918) · MEXC/Coinbase/Gate.io/bitbank adjacent · RECEIVER_STILL_HOLDING_SIZE · seen 2 scans · score 175/200 CRITICAL_ADD_REVIEW · funded by rM6iFmRj…4aYy 2024-07-26 · no published name
+  ['EXOUT_RECV_rKHfQY',  'rKHfQYcL4hZ5PkdbQ6B2tLP59xrP6Gfn9J', 'discovered_receiver'],         // exchange-adjacent · 1.06M XRP over 67 tx from high-value wallet rYmTPY…ESMV · RECEIVER_STILL_HOLDING_SIZE · no richlist reading · seen 2 scans · score 140/200 RECOMMEND_FOR_WATCH · funded by rEdP7wDo…yS7b5 2025-11-28 09:53:50 · no published name
+  ['EXOUT_RECV_rPBhF2',  'rPBhF2Dsw168RSDFcdSGpSdm3da6XjCZBG', 'discovered_receiver'],         // exchange-adjacent · 1.24M XRP over 42 tx from high-value wallet rYmTPY…ESMV · RECEIVER_STILL_HOLDING_SIZE · no richlist reading · seen 1 scan · score 140/200 RECOMMEND_FOR_WATCH · funded by rEdP7wDo…yS7b5 2025-11-28 09:55:40 · no published name
+  ['SPLITTER_rLXUCg',    'rLXUCgmbukkQvFSpftKDTd5Ep6Zr8mG6qt', 'next_hop_splitter'],           // routing-node · 3.13M XRP from watched wallet rHm6iv…q1fB · NEXT_HOP_FORWARDING_DETECTED [HIGH], forwarded onward · no richlist reading · seen 2 scans · score 90/200 REVIEW · funded by r3qnbXdQ…GutU 2025-07-30 · no published name
+  ['HIGHVAL_rM8Geq',     'rM8GeqeC8QzsEJcnTMZsag8wwKvJE1tuEf', 'discovered_unknown_highval'],  // exchange-adjacent · 1.50M XRP over 6 tx to bitbank · richlist #983 (2,750,347) · balance not read that scan · seen 2 scans · score 85/200 REVIEW · funded by rpNqAwVK…QgPU 2017-11-05 · no published name
+  ['LARGE_RECV_r3n7DW',  'r3n7DWJVDAoPofr6NGAfaov3nquyTVM8gP', 'discovered_receiver'],         // exchange-adjacent · 5.76M XRP over 316 tx, max single 2.30M · MEXC/bitbank/BITPoint/Kraken adjacent · repeated mid-size flow · no richlist reading · seen 2 scans · score 50/200 MONITOR · funded by r457a3ZD…z9AZ 2020-12-11 · no published name
+  ['LARGE_RECV_rDKsbv',  'rDKsbvy9uaNpPtvVFraJyNGfjvTw8xivgK', 'discovered_receiver'],         // exchange-adjacent · 3.61M XRP over 35 tx, max single 1.80M · bitbank/Coinbase outbound · repeated mid-size flow · no richlist reading · seen 2 scans · score 50/200 MONITOR · funded by HitBTC 2022-01-16 · XRPScan verified name "Union Chain" (unionchain.ai) — a registry claim, NOT ownership proof, and not used as the label
+  ['LARGE_RECV_rwQjUd',  'rwQjUdbuPaSVYvcA5a3izRCGuGkywyMWjk', 'discovered_receiver'],         // exchange-adjacent · 1.09M XRP over 115 tx · Gate.io outbound · related to high-value wallet rNxp4h…N7AV · no richlist reading · seen 1 scan · score 50/200 MONITOR · funded by rEdP7wDo…yS7b5 2025-11-28 09:55:20 · no published name
+  ['LARGE_RECV_rNKXCK',  'rNKXCKKx3y6RkTkart277iMHxfgndrg99z', 'discovered_receiver'],         // watch-net · 1.32M XRP over 38 tx · related to high-value wallet rYmTPY…ESMV and watched wallet r3GNZ9…KxUh · richlist #456 (14,314,197) · seen 1 scan · score 50/200 MONITOR · funded by rHfD7LQe…xfyL 2024-02-02 · no published name · holds 17.78M now, above its richlist reading
+  ['LARGE_RECV_rGpaXx',  'rGpaXxcBQFCkELhqnHbrascpPDdxSbNqxA', 'discovered_receiver'],         // exchange-adjacent · 4.00M XRP in a single transfer from Gemini · no richlist reading · seen 2 scans · score 50/200 MONITOR · funded by rB6sWzxi…om2o 2024-10-10 · no published name · holds 182 XRP now — the 4.00M passed through
+  // ── THE SHARED FUNDER ───────────────────────────────────────────────────
+  // Not from the discovery queue. Found by reading the ledger origin of the ten
+  // above, where three turned out to share a parent and to have been created
+  // within 110 SECONDS of each other:
+  //     rKHfQY…fn9J  2025-11-28 09:53:50
+  //     rwQjUd…MWjk  2025-11-28 09:55:20
+  //     rPBhF2…CZBG  2025-11-28 09:55:40
+  // The scan had already flagged all three independently, on behaviour. The
+  // shared parent is confirmation from a different direction, and it is the
+  // kind of link a discovery score cannot produce because the funding
+  // transaction is outside every reporting window.
+  //
+  // A provisioning cascade about fifteen hours deep ends here. That shape is a
+  // funding structure; it does not say whose, and nothing below claims it does.
+  // It is ALREADY on this roster, added by hand from the operator's manifest as
+  // WATCHED_rEdP7w (see above). Nothing is added here; the entry it already has
+  // now carries what the ledger says about it. Two independent routes — a
+  // manual flag months ago, and three behavioural hits whose funding all leads
+  // back to it — arriving at the same address is the finding.
 ].map(x => ({ label: x[0], address: x[1], cat: x[2] }));
 
 // v3.4: merge user-added discovery wallets (from previous sessions)

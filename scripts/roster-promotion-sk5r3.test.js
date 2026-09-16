@@ -115,6 +115,47 @@ PROMOTED.forEach(([addr, , label]) => {
         /richlist #\d+|no richlist reading|balance not read/.test(line), line.slice(-70));
 });
 
+// ══ 4b. THE LEDGER ORIGIN TRAVELS TOO ════════════════════════════════════════
+// Funding parent and inception are the part nobody self-declares, and they are
+// painful to reconstruct later — the funding transaction sits outside every
+// reporting window this app uses.
+console.log('\n4b. each entry records where the wallet came from');
+PROMOTED.forEach(([addr, , label]) => {
+  const line = block.split('\n').find(l => l.indexOf(addr) > -1) || '';
+  check(label + ' records its funding parent and creation date',
+        /funded by \S+ \d{4}-\d{2}-\d{2}/.test(line), line.slice(-80));
+  check('  ' + label + ' states whether a published name exists',
+        /no published name|XRPScan verified name/.test(line), line.slice(-80));
+});
+
+// The one wallet with a third-party name must NOT be labelled with it: a
+// registry entry is a claim, and this project does not put claims in labels.
+console.log('\n4c. a third-party name is recorded, never used as the label');
+const union = byAddr.get('rDKsbvy9uaNpPtvVFraJyNGfjvTw8xivgK');
+check('the XRPScan name is recorded in the evidence', /Union Chain/.test(block));
+check('it is marked as a registry claim, not ownership proof',
+      /NOT ownership proof/.test(block));
+check('and the label stays behavioural', union && union.label === 'LARGE_RECV_rDKsbv',
+      union && union.label);
+
+// ══ 4d. THE SHARED FUNDER ════════════════════════════════════════════════════
+// Three of the ten lead back to one parent. That account was ALREADY on the
+// roster from the operator's manifest, so this records the link rather than
+// adding a row — and the suite must prove no second row was created.
+console.log('\n4d. the shared funder is recorded, not duplicated');
+const FUNDER = 'rEdP7wDoHo6LW9nertpTbxgtF6uFkyS7b5';
+check('the funder is on the roster exactly once',
+      roster.filter(w => w.address === FUNDER).length === 1,
+      roster.filter(w => w.address === FUNDER).length);
+check('its entry names the three wallets it funded',
+      new RegExp('parent of rKHfQY[\\s\\S]{0,200}rwQjUd[\\s\\S]{0,200}rPBhF2|rKHfQY[\\s\\S]{0,300}rwQjUd[\\s\\S]{0,300}rPBhF2').test(CORE));
+check('it records the 110-second creation window', /110 seconds/.test(CORE));
+check('it keeps a neutral label rather than naming an operator',
+      (byAddr.get(FUNDER) || {}).label === 'WATCHED_rEdP7w',
+      (byAddr.get(FUNDER) || {}).label);
+check('and says plainly that the shape does not identify an owner',
+      /does not say whose/.test(CORE));
+
 // ══ 5. THIS WAS A REVIEW, AND AUTO-PROMOTION IS STILL OFF ════════════════════
 // The roster growing must never be read as the safety contract loosening.
 console.log('\n5. promotion by review did not turn auto-promotion on');
