@@ -1414,7 +1414,9 @@ function _buildLedgerDiagnostics(pack){
   var sv=_num(p.shadow_volume_xrp), lt=_arr(p.large_transfers).length||_num(p.large_transfers_count);
   if(sv>0) L.push('\u2022 Shadow volume (whale moves \u22651M'+winSuffix+'): '+_xrpFmt(sv)+' XRP'+(lt>0?(' \u00b7 '+lt+' transfer'+(lt===1?'':'s')):''));
   var nd=_num(p.total_balance_delta_xrp!=null?p.total_balance_delta_xrp:p.balance_delta);
-  if(Math.abs(nd)>=100000) L.push('\u2022 Net watched flow: '+(nd>0?'+':'\u2212')+_xrpFmt(Math.abs(nd))+' XRP '+(nd>0?'inward':'outward'));
+  // Magnitude positive, direction in words — '\u22123.11M XRP outward' says out
+  // twice and negates it once. See netFlowPhrase in 02-core.
+  if(Math.abs(nd)>=100000) L.push('\u2022 Net watched flow: '+_xrpFmt(Math.abs(nd))+' XRP '+(nd>0?'inward':'outward'));
   if(!L.length) return 'The rails were quiet \u2014 no market or ledger metrics crossed the wire this scan.';
   return L.join('\n');
 }

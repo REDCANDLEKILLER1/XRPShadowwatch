@@ -618,6 +618,26 @@ function fmt(v, d = 2) {
   return v.toFixed(d);
 }
 function usd(v) { v = n(v); return v ? '$' + fmt(v, 0) : '—'; }
+// ── A NEGATIVE IS A DIRECTION, NOT A BALANCE ────────────────
+// An XRPL account cannot hold less than zero — the reserve floor makes it
+// impossible — so a minus sign beside the word "balance" is not a reading, and
+// on 16 Sep it was read aloud on air as if it were one.
+//
+// The measurement was never in doubt: 3.11M XRP left the watched wallets and
+// every surface agreed. The wording did not. "Net outflow of -3.11M XRP" states
+// the direction twice and negates it once, so taken literally it is an INFLOW
+// — which is how a correct scan ends up sounding like volume went missing.
+//
+// One rule, one place: MAGNITUDE POSITIVE, DIRECTION IN WORDS. A sign and a
+// direction word never carry the same fact, and a flat run has no sign at all
+// because there is nothing to point.
+function netFlowPhrase(v, opts) {
+  const o = opts || {};
+  const d = n(v);
+  if (Math.abs(d) < 1) return o.flat || 'flat (0 XRP)';
+  return fmt(Math.abs(d), o.decimals === undefined ? 0 : o.decimals) + ' XRP ' +
+         (d < 0 ? (o.out || 'outward') : (o.in || 'inward'));
+}
 function pct(v) { const d = n(v); return (d >= 0 ? '+' : '') + d.toFixed(2) + '%'; }
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
@@ -4495,7 +4515,7 @@ FORENSIC SNAPSHOT
 Wallets scored: ${p.wallets_checked}/${p.watchlist_total}
 Transactions in scan window${txWinSuffix}: ${p.tx_24h_count}
 Shadow volume (>1M transfers): ${p.shadow_volume_xrp > 0 ? fmt(p.shadow_volume_xrp, 0) + ' XRP' : 'NONE FLAGGED'}
-Net watchlist balance delta: ${p.total_balance_delta_xrp > 0 ? '+' : ''}${fmt(p.total_balance_delta_xrp, 0)} XRP
+Net watchlist flow: ${netFlowPhrase(p.total_balance_delta_xrp)}
 Large transfers flagged: ${(p.large_transfers || []).length}
 Next-hop receivers scanned: ${(p.receiver_followthrough || []).length}
 
@@ -16039,10 +16059,10 @@ function anomalySection(buckets, p, netDelta) {
   const conclusion = bridgeQuiet
     ? 'That points to custody/exchange reshuffling more than sidechain exit traffic.'
     : 'Bridge flow plus wallet rotation suggests cross-rail rebalancing.';
-  const netStr = (netDelta > 0 ? '+' : '') + fmt(netDelta, 0);
+  const netStr = netFlowPhrase(netDelta);
   return [
     `• Event: ${event}`,
-    `• Evidence: Watchlist delta came in at ${netStr} XRP. ${movers.join(', ')}. ${conclusion}`
+    `• Evidence: Watchlist flow came in at ${netStr}. ${movers.join(', ')}. ${conclusion}`
   ];
 }
 
@@ -16242,9 +16262,12 @@ function _intelActions(p) {
     '). Confirm that was intended.'));
 
   try {
-    (window.SW_HVT_HISTORY ? SW_HVT_HISTORY.alerts() : []).slice(0, 2).forEach(a => out.push(
+    // An unknown ratio is not 0%. Rounding it to one states a total drain the
+    // history never observed — say nothing rather than say that.
+    (window.SW_HVT_HISTORY ? SW_HVT_HISTORY.alerts() : []).filter(a => a && a.ratio != null)
+      .slice(0, 2).forEach(a => out.push(
       _swWho(a.address, (KNOWN[a.address] || {}).label, { bare: true }) + ' is holding ' +
-      (a.ratio != null ? Math.round(a.ratio * 100) : 0) + '% of what it once held. Establish where the rest went.'));
+      Math.round(a.ratio * 100) + '% of what it once held. Establish where the rest went.'));
   } catch (_) {}
 
   if ((state.frags || []).some(f => f.severity === 'FRAG_SUSPECT'))
@@ -16334,8 +16357,10 @@ function buildIntelBrief(p) {
     (_db.none
       ? 'Net flow not measurable this run — no previous balances stored on this device. ' +
         n(p.wallets_checked) + ' wallets read, window ' + tw.label + '.'
-      : 'Net ' + (n(p.total_balance_delta_xrp) < 0 ? 'outflow' : 'inflow') + ' of ' +
-        (p.total_balance_delta_xrp > 0 ? '+' : '') + fmt(p.total_balance_delta_xrp, 0) + ' XRP across ' +
+      : (Math.abs(n(p.total_balance_delta_xrp)) < 1
+          ? 'Net flow was flat across '
+          : 'Net ' + (n(p.total_balance_delta_xrp) < 0 ? 'outflow' : 'inflow') + ' of ' +
+            fmt(Math.abs(n(p.total_balance_delta_xrp)), 0) + ' XRP across ') +
         n(p.wallets_checked) + ' watched wallets, window ' + tw.label + '.' +
         (_db.partial ? ' ' + _db.line : '')),
     lt + ' transfer' + (lt === 1 ? '' : 's') + ' above threshold. Shadow volume: ' +
@@ -17940,7 +17965,7 @@ function buildLedgerNarrativeParagraph(pack) {
     lines.push('Across ' + _wc + ' watched wallets the net position came out flat this window — money changed hands, but the board ended roughly where it started.');
   } else {
     lines.push('Net flow across ' + _wc + ' watched wallets: ' +
-      (i.netDelta >= 0 ? '+' : '') + fmt(i.netDelta, 0) + ' XRP.');
+      netFlowPhrase(i.netDelta) + '.');
   }
   if (i.shadowVol > 0) {
     lines.push('Shadow volume: ' + fmt(i.shadowVol, 0) + ' XRP across ' + i.largeTxs.length + ' flagged transfer' + (i.largeTxs.length === 1 ? '' : 's') + '.');
@@ -18254,6 +18279,7 @@ if (typeof window !== 'undefined') {
   window.getMorningStoryNarrativeInputs = getMorningStoryNarrativeInputs;
   window.chooseMorningStoryLead  = chooseMorningStoryLead;
   window.buildLedgerNarrativeParagraph   = buildLedgerNarrativeParagraph;
+  window.netFlowPhrase                   = netFlowPhrase;
   window.buildPatternNarrativeParagraph  = buildPatternNarrativeParagraph;
   window.buildNewsNarrativeParagraph     = buildNewsNarrativeParagraph;
   window.buildDiscoveryNarrativeParagraph= buildDiscoveryNarrativeParagraph;
@@ -19445,7 +19471,9 @@ function renderHudFromPack(p) {
   const wPct = total > 0 ? chk / total * 100 : 0;
   setBar('hudWalletBar', wPct, wPct > 80 ? 'ok' : wPct > 40 ? 'warn' : 'bad');
   const d = n(p.total_balance_delta_xrp);
-  setText('hudNetDelta', d ? (d > 0 ? '+' : '') + fmt(d, 0) + ' XRP' : '0 XRP');
+  // The badge right above this already says INFLOW or OUTFLOW. A sign here
+  // would state the direction twice — see netFlowPhrase.
+  setText('hudNetDelta', d ? fmt(Math.abs(d), 0) + ' XRP' : '0 XRP');
   setText('hudDeltaBadge', d > 0 ? 'INFLOW' : d < 0 ? 'OUTFLOW' : 'FLAT');
   setBar('hudDeltaBar', Math.min(100, Math.abs(d) / 100000));
   const lc = (p.large_transfers || []).length;
@@ -23439,7 +23467,8 @@ function _swRenderInstruments(p, SP, scanning) {
       var col = d > 0 ? 'var(--sw-green)' : (d < 0 ? 'var(--sw-gold)' : 'var(--sw-text-muted)');
       var head = _swEl('div', { 'class':'sw-nf-head' }, '<span class="sw-nf-ttl">Net Watched Flow</span>');
       var val = _swEl('span', { 'class':'sw-nf-val' }); val.style.color = col;
-      val.textContent = (d > 0 ? '+' : '') + _swCompact(d) + ' XRP';
+      // The direction element beside it carries the sign in words.
+      val.textContent = _swCompact(Math.abs(d)) + ' XRP';
       var dir = _swEl('span', { 'class':'sw-nf-dir' }); dir.textContent = d < 0 ? 'OUTFLOW' : (d > 0 ? 'INFLOW' : 'FLAT');
       var right = _swEl('span', {}); right.appendChild(val); right.appendChild(document.createTextNode(' ')); right.appendChild(dir);
       head.appendChild(right); box.appendChild(head);

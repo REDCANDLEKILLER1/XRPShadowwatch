@@ -89,7 +89,10 @@ const SUITES = [
   ['first-scan-baseline',    'first-scan-baseline-truth.test.js', 8224],
   // Integration: the anchor, the row's ledger_index and the capped window,
   // driven through a fake XRPL server rather than a fake decision layer.
-  ['ledger-anchor',          'ledger-anchor-prerequisites.test.js', null]
+  ['ledger-anchor',          'ledger-anchor-prerequisites.test.js', null],
+  // An XRPL account cannot hold less than zero, so a minus beside the word
+  // "balance" is a wording bug — and it was read aloud as a reading.
+  ['negative-flow-wording',  'negative-flow-wording.test.js',     8231]
 ];
 
 const only = (() => {

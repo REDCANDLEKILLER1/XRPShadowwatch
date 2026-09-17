@@ -59,8 +59,10 @@
     var out = cleanText(text);
     var db = baseline(pack);
     if (!db.none) return out;
-    out = out.replace(/Net watchlist balance delta:\s*[^\n]+/g,
-      'Net watchlist balance delta: NOT MEASURABLE — no prior balance baseline on this device');
+    // Both spellings: the label was "balance delta" until the 16 Sep wording fix,
+    // and an archived report re-rendered here still carries the old one.
+    out = out.replace(/Net watchlist (?:balance delta|flow):\s*[^\n]+/g,
+      'Net watchlist flow: NOT MEASURABLE — no prior balance baseline on this device');
     out = out.replace(/NET_WATCHLIST_DELTA_XRP=[^\n]+/g,
       'NET_WATCHLIST_DELTA_XRP=NOT_MEASURABLE');
     out = out.replace(/Price is soft, but wallet deltas are not dead\. The next tell is whether inflows continue or reverse into exchange-side sell pressure\./g,
