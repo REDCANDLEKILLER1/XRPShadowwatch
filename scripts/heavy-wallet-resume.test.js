@@ -54,6 +54,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 function pagedPeer(options) {
   const opts = options || {};
   const asked = [];
+  const reads = {};
   const txs = opts.transactions || {};
   const perPage = opts.perPage || 1;
   const pageMs = opts.pageMs || 0;
@@ -102,9 +103,15 @@ function pagedPeer(options) {
       // the ledger it reached, and a leg reconciled against the wrong previous
       // balance must contradict rather than pass.
       const at = Number.isInteger(Number(ledgerIndex)) ? Number(ledgerIndex) : live;
-      // Optionally wrong by a constant from some ledger on — so a leg that
-      // crosses the lie contradicts, and a leg entirely inside it reconciles.
-      const lie = (opts.lieFromLedger && at >= opts.lieFromLedger) ? 5000000n : 0n;
+      // The ledger lies about ONE wallet, by a constant, from its first pinned
+      // read onward. Keyed on the read rather than on a ledger so it does not
+      // depend on how many pages fit in a budget on a loaded machine: the first
+      // leg always starts from the truthful checkpoint and ends inside the lie
+      // (contradicts); every later leg starts and ends inside it (reconciles).
+      // Other wallets are never lied to, so a refusal can only be this one's.
+      if (opts.lieFor === address) { reads[address] = (reads[address] || 0) + 1; }
+      const lie = (opts.lieFor === address) ? 5000000n : 0n;
+      if (opts.failPinnedBelow && at < opts.failPinnedBelow) throw new Error('INJECTED_BALANCE_READ_FAILURE');
       return { drops: String(BigInt(balanceAt(txs, address, at)) + lie), ledger: at };
     }
   };
@@ -191,8 +198,8 @@ async function main() {
   const txs = { rAlice: [], rBob: [], rZedHot: heavy(HEAVY) };
 
   const gh = fakeGithub(seededStore(WALLETS, ANCHOR - 1000));
-  const p1 = pagedPeer({ transactions: txs, perPage: 1, pageMs: 25 });
-  p1.reader.deadline = Date.now() + 450;                 // enough for ~14 pages of 40
+  const p1 = pagedPeer({ transactions: txs, perPage: 1, pageMs: 40 });
+  p1.reader.deadline = Date.now() + 700;                 // enough for ~14 pages of 40 at 40 ms each
   const out1 = await D.acquire({ report_id: 'SW-20260918-HVY01' },
     { env: ENV, gh: gh.gh, reader: p1.reader, concurrency: 1, startReserveMs: 0 });
   const hot1 = p1.asked.filter(c => c.command === 'account_tx' && c.account === 'rZedHot');
@@ -216,8 +223,8 @@ async function main() {
     hotRecord1 && { reconciliation: hotRecord1.reconciliation, balance_ledger: hotRecord1.entry && hotRecord1.entry.balance_ledger });
 
   // Run 2: same store, same slow pages, same budget.
-  const p2 = pagedPeer({ transactions: txs, perPage: 1, pageMs: 25 });
-  p2.reader.deadline = Date.now() + 450;
+  const p2 = pagedPeer({ transactions: txs, perPage: 1, pageMs: 40 });
+  p2.reader.deadline = Date.now() + 700;
   const out2 = await D.acquire({ report_id: 'SW-20260918-HVY02' },
     { env: ENV, gh: gh.gh, reader: p2.reader, concurrency: 1, startReserveMs: 0 });
   check('run 2 adopts the journal', out2.resumed && out2.resumed.adopted === true, out2.resumed);
@@ -239,16 +246,21 @@ async function main() {
   // must converge, not loop.
   let outN = out2, runs = 2;
   while (outN.committed !== true && runs < 6) {
-    const pN = pagedPeer({ transactions: txs, perPage: 1, pageMs: 25 });
-    pN.reader.deadline = Date.now() + 450;
+    const pN = pagedPeer({ transactions: txs, perPage: 1, pageMs: 40 });
+    pN.reader.deadline = Date.now() + 700;
     outN = await D.acquire({ report_id: 'SW-20260918-HVY0' + (++runs) },
       { env: ENV, gh: gh.gh, reader: pN.reader, concurrency: 1, startReserveMs: 0 });
   }
   check('the run eventually completes and commits (' + runs + ' runs)', outN.committed === true, { runs, reason: outN.reason });
   check('with every wallet proven at the anchor',
     outN.committed === true && outN.complete_wallets === WALLETS.length, outN.complete_wallets);
-  check('and the heavy wallet reconciled end to end across its legs — no contradiction manufactured by the split',
-    outN.committed === true && outN.balance_contradictions === 0, outN.balance_contradiction_addresses);
+  // Not merely "no contradiction": a leg reconciled against the wrong previous
+  // balance does not contradict, it STANDS DOWN (EDGE_LEAVES_GAP) — and a
+  // check that only forbids contradiction passes on a wallet nothing verified.
+  const hotFinal = outN.wallets && outN.wallets.find(w => w.address === 'rZedHot');
+  check('and the heavy wallet RECONCILED end to end across its legs — every leg joined the last',
+    outN.committed === true && outN.balance_contradictions === 0 &&
+    !!hotFinal && hotFinal.reconciliation === 'RECONCILED', hotFinal && { reconciliation: hotFinal.reconciliation });
 
   // ══ 2. A FRESH RUN WALKS THE KNOWN-HEAVY WALLET FIRST ═══════════════════
   console.log('\n2. on a fresh anchor the wallet known to be busy is walked first, not last');
@@ -270,8 +282,8 @@ async function main() {
     last_observed_tx_ledger: w.address === 'rZedHot' ? ANCHOR - 1000 : ANCHOR - 900000 }));
   files2[Store.STATE_PATH] = State.serialize(State.seal(st2));
   const gh2 = fakeGithub(files2);
-  const q1 = pagedPeer({ transactions: txs2, perPage: 1, pageMs: 25 });
-  q1.reader.deadline = Date.now() + 450;
+  const q1 = pagedPeer({ transactions: txs2, perPage: 1, pageMs: 40 });
+  q1.reader.deadline = Date.now() + 700;
   await D.acquire({ report_id: 'SW-20260918-ORD01' }, { env: ENV, gh: gh2.gh, reader: q1.reader, concurrency: 1, startReserveMs: 0 });
   const order = q1.asked.filter(c => c.command === 'account_tx').map(c => c.account);
   check('the busy wallet is the FIRST walked on a fresh run',
@@ -282,14 +294,14 @@ async function main() {
   const W3 = ['rAlice', 'rBob', 'rZedHot'];
   const txs3 = { rAlice: [], rBob: [], rZedHot: heavy(HEAVY) };
   const gh3 = fakeGithub(seededStore(W3, ANCHOR - 1000));
-  const r1 = pagedPeer({ transactions: txs3, perPage: 1, pageMs: 25, liveLedger: ANCHOR });
-  r1.reader.deadline = Date.now() + 450;
+  const r1 = pagedPeer({ transactions: txs3, perPage: 1, pageMs: 40, liveLedger: ANCHOR });
+  r1.reader.deadline = Date.now() + 700;
   const o1 = await D.acquire({ report_id: 'SW-20260917-OLD01' }, { env: ENV, gh: gh3.gh, reader: r1.reader, concurrency: 1, startReserveMs: 0 });
   check('day one leaves a journal anchored at day one', o1.committed === false && readJournal(gh3) && readJournal(gh3).anchor_ledger === ANCHOR);
   // Day two: the live ledger is ~25 hours further on (XRPL closes one every ~3.7 s).
   const DAY = Math.round(25 * 3600 / 3.7);
-  const r2 = pagedPeer({ transactions: txs3, perPage: 1, pageMs: 25, liveLedger: ANCHOR + DAY });
-  r2.reader.deadline = Date.now() + 450;
+  const r2 = pagedPeer({ transactions: txs3, perPage: 1, pageMs: 40, liveLedger: ANCHOR + DAY });
+  r2.reader.deadline = Date.now() + 700;
   const o2 = await D.acquire({ report_id: 'SW-20260918-NEW02' }, { env: ENV, gh: gh3.gh, reader: r2.reader, concurrency: 1, startReserveMs: 0 });
   check('day two walks to TODAY\'s ledger, not yesterday\'s',
     o2.anchor_ledger === ANCHOR + DAY, { got: o2.anchor_ledger, yesterday: ANCHOR, today: ANCHOR + DAY });
@@ -299,19 +311,20 @@ async function main() {
 
   // ══ 4. A CONTRADICTION ON A BANKED LEG STILL BLOCKS THE COMMIT ══════════
   console.log('\n4. a leg that contradicted when it was banked is a contradiction for the wallet, whatever the last leg says');
-  /* The ledger's balance is wrong by 5 XRP from just after the walk begins.
-     The FIRST leg crosses that line — it starts from the truthful checkpoint
-     balance and ends inside the lie — so it contradicts when it is banked.
+  /* The ledger's balance for the heavy wallet is wrong by 5 XRP from its first
+     pinned read onward. The FIRST leg starts from the truthful checkpoint
+     balance and ends inside the lie, so it contradicts when it is banked.
      Every later leg starts and ends inside the lie, so on its own it
      reconciles perfectly. If the run only looked at the final leg it would
-     commit a wallet whose evidence it has already seen does not add up. */
+     commit a wallet whose evidence it has already seen does not add up. The
+     light wallets are never lied to, so the refusal can only be this one's. */
   const W4 = ['rAlice', 'rBob', 'rZedHot'];
   const txs4 = { rAlice: [], rBob: [], rZedHot: heavy(HEAVY) };
   const gh4 = fakeGithub(seededStore(W4, ANCHOR - 1000));
   let out4 = null, runs4 = 0;
   do {
-    const p4 = pagedPeer({ transactions: txs4, perPage: 1, pageMs: 25, lieFromLedger: ANCHOR - 899 });
-    p4.reader.deadline = Date.now() + 450;
+    const p4 = pagedPeer({ transactions: txs4, perPage: 1, pageMs: 40, lieFor: 'rZedHot' });
+    p4.reader.deadline = Date.now() + 700;
     out4 = await D.acquire({ report_id: 'SW-20260918-LIE0' + (++runs4) },
       { env: ENV, gh: gh4.gh, reader: p4.reader, concurrency: 1, startReserveMs: 0 });
   } while (out4.reason === 'RUN_INCOMPLETE' && runs4 < 6);
@@ -324,6 +337,26 @@ async function main() {
   check('and the run REFUSED to commit — a leg that did not add up is not cured by a later leg that does',
     out4.committed === false && out4.reason === 'RUN_CONTRADICTED' &&
     out4.balance_contradiction_addresses.includes('rZedHot'), { reason: out4.reason, addresses: out4.balance_contradiction_addresses });
+  check('and it was THIS wallet alone — the light wallets reconciled truthfully',
+    JSON.stringify(out4.balance_contradiction_addresses) === JSON.stringify(['rZedHot']), out4.balance_contradiction_addresses);
+
+  // ══ 5. A LEG WHOSE PINNED BALANCE CANNOT BE READ IS HELD, NOT BANKED ═══
+  console.log('\n5. when the pinned balance cannot be read, the leg waits rather than being banked unverified');
+  const W5 = ['rAlice', 'rBob', 'rZedHot'];
+  const txs5 = { rAlice: [], rBob: [], rZedHot: heavy(HEAVY) };
+  const gh5 = fakeGithub(seededStore(W5, ANCHOR - 1000));
+  // Every pinned read BELOW the anchor fails; the anchor itself answers.
+  const p5 = pagedPeer({ transactions: txs5, perPage: 1, pageMs: 40, failPinnedBelow: ANCHOR });
+  p5.reader.deadline = Date.now() + 700;
+  const out5 = await D.acquire({ report_id: 'SW-20260918-NOBAL1' },
+    { env: ENV, gh: gh5.gh, reader: p5.reader, concurrency: 1, startReserveMs: 0 });
+  const j5 = readJournal(gh5);
+  check('the heavy wallet was cut off as before',
+    out5.wallets.find(w => w.address === 'rZedHot').status === 'ABANDONED');
+  check('but NOTHING was banked for it — an unverified leg is not evidence',
+    !!j5 && !j5.wallets.some(w => w.address === 'rZedHot'), j5 && j5.wallets.map(w => w.address));
+  check('the light wallets, whose anchor read succeeded, were journalled',
+    !!j5 && ['rAlice', 'rBob'].every(a => j5.wallets.some(w => w.address === a)));
 
   console.log('\n' + (fail === 0 ? 'ALL ' + pass + ' CHECKS PASS' : pass + ' pass, ' + fail + ' FAIL'));
   process.exit(fail === 0 ? 0 : 1);
