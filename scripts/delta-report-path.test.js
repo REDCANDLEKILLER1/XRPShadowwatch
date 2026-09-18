@@ -214,8 +214,21 @@ async function main() {
      page that could never work. It does not touch it now. */
   const CORE = fs.readFileSync(path.join(ROOT, 'src/brief/02-core.js'), 'utf8');
   const mintedAt = CORE.indexOf("state.reportId = 'SW-'");
-  const beginAt = CORE.indexOf('SW_EVIDENCE_INDEX.begin(');
+  // Scoped to scanWallets, and matching EITHER entry point. The acquisition call
+  // moved into beginEvidenceIndexResilient() when the revocable fallback was
+  // given a name, so the literal SW_EVIDENCE_INDEX.begin( is no longer in
+  // scanWallets at all — and that helper is DEFINED above the mint, so an
+  // unscoped search now finds a begin() that precedes it and reads the order
+  // backwards. Where the helper is defined says nothing about when it is called.
+  const scanAt = CORE.indexOf('async function scanWallets');
+  const scanRegion = scanAt > -1 ? CORE.slice(scanAt) : '';
+  const beginRel = scanRegion.search(/(?:SW_EVIDENCE_INDEX\.begin\(|beginEvidenceIndexResilient\()/);
+  const beginAt = beginRel > -1 ? scanAt + beginRel : -1;
   check('the page mints the report id somewhere', mintedAt > -1);
+  // Without this, a renamed entry point makes beginAt -1 and the order check
+  // below passes on an absence.
+  check('the scan has an acquisition call to order the mint against', beginAt > -1,
+    { scanAt: scanAt, beginRel: beginRel });
   check('and does it BEFORE the evidence index is asked to begin',
     mintedAt > -1 && beginAt > -1 && mintedAt < beginAt, { mintedAt, beginAt });
   check('the seal adopts that id rather than minting a second one',
