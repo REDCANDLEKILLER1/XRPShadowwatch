@@ -243,6 +243,92 @@ const check = (name, ok, detail) => {
       o.lateFailCalls = calls;
     } catch (e) { o.errs.push('lateFail: ' + e.message); }
 
+    // ══ 3d. THE SCREEN GOES AWAY MID-REQUEST ═══════════════════════════════
+    // The real sequence. Nobody starts a report with the screen off: the run
+    // began at 12:53 with the screen ON and it went away around 12:55, with a
+    // request already in flight. Every case above starts hidden, which makes
+    // the visibilitychange listener inside post() redundant — remove it and
+    // they all still pass.
+    //
+    // Here the request starts visible, so sawHidden begins FALSE and the idle
+    // clock is already armed. Only the listener can notice the transition, stop
+    // the clock, and remember it happened.
+    try {
+      calls = 0; mode = 'hang'; inflight = null; setHidden(false);
+      let ended = null;
+      const p = IDX.begin(WIN, ['rTEST']).then(v => (ended = { ok: true }), e => (ended = { ok: false, e: String(e && e.message) }));
+      await settle(1000);                        // in flight, screen on
+      setHidden(true);                           // pocket
+      await settle(55000);                       // well past IDLE_LIMIT_MS
+      o.midFlightAborted = !!(inflight && inflight.signal && inflight.signal.aborted);
+      o.midFlightEnded = ended;
+
+      setHidden(false);                          // screen back
+      await settle(200);
+      mode = 'ok';
+      if (inflight && inflight.reject) inflight.reject(new TypeError('Failed to fetch'));
+      await Promise.race([p, settle(15000)]);
+      o.midFlightRecovered = ended !== null && ended.ok === true;
+    } catch (e) { o.errs.push('midFlight: ' + e.message); }
+
+    // ══ 3e. THE BUDGET MUST BE OBSERVABLE ══════════════════════════════════
+    // Case 3c asserts the run recovers after a late failure — but it recovers
+    // whether or not the failure was forgiven, because two strikes remain to
+    // absorb it. So it passed with sawHidden deleted. Here the late failure is
+    // followed by EXACTLY two more transport failures: forgiven, that is 0+2
+    // strikes and the third call succeeds; charged, it is 1+2 and the run dies.
+    try {
+      calls = 0; mode = 'hang'; inflight = null; setHidden(true);
+      let ended = null;
+      let failsLeft = 2;
+      window.fetch = function (url, init) {
+        if (String(url).indexOf('/api/delta') === -1) return realFetch.apply(this, arguments);
+        calls++;
+        if (calls === 1) return new Promise(function (_r, rej) { inflight = { signal: init && init.signal, reject: rej }; });
+        if (failsLeft-- > 0) return Promise.reject(new TypeError('Failed to fetch'));
+        const body = JSON.stringify(Object.assign({ t: 'done' }, GOOD)) + '\n';
+        return Promise.resolve(new Response(body, { status: 200, headers: { 'Content-Type': 'application/x-ndjson' } }));
+      };
+      const p = IDX.begin(WIN, ['rTEST']).then(v => (ended = { ok: true }), e => (ended = { ok: false, e: String(e && e.message) }));
+      await settle(1200);
+      setHidden(false);                          // screen back BEFORE the failure lands
+      await settle(200);
+      if (inflight && inflight.reject) inflight.reject(new TypeError('Failed to fetch'));
+      await Promise.race([p, settle(20000)]);
+      o.budgetSurvived = ended !== null && ended.ok === true;
+      o.budgetOutcome = ended;
+      window.fetch = fakeFetch;
+    } catch (e) { o.errs.push('budget: ' + e.message); window.fetch = fakeFetch; }
+
+    // ══ 3f. PICKED UP AND PUT DOWN AGAIN ═══════════════════════════════════
+    // A scan takes minutes; glancing at the phone three times is ordinary. Each
+    // glance produces one hidden hold. If holds and strikes share a counter the
+    // third glance exhausts the budget and the run dies — on a server that was
+    // never asked a question it could fail.
+    try {
+      calls = 0; setHidden(true);
+      let cycles = 0;
+      window.fetch = function (url, init) {
+        if (String(url).indexOf('/api/delta') === -1) return realFetch.apply(this, arguments);
+        calls++;
+        if (cycles < 3) {
+          cycles++;
+          setHidden(true);                       // down it goes again
+          return Promise.reject(new TypeError('Failed to fetch'));
+        }
+        const body = JSON.stringify(Object.assign({ t: 'done' }, GOOD)) + '\n';
+        return Promise.resolve(new Response(body, { status: 200, headers: { 'Content-Type': 'application/x-ndjson' } }));
+      };
+      const p = IDX.begin(WIN, ['rTEST']).then(v => ({ ok: true }), e => ({ ok: false, e: String(e && e.message) }));
+      const tick = setInterval(() => setHidden(false), 700);   // picked up again
+      const got = await Promise.race([p, settle(25000).then(() => ({ ok: false, e: 'TIMED_OUT' }))]);
+      clearInterval(tick);
+      o.cyclesSurvived = got.ok === true;
+      o.cyclesOutcome = got;
+      o.cyclesCount = cycles;
+      window.fetch = fakeFetch; setHidden(false);
+    } catch (e) { o.errs.push('cycles: ' + e.message); window.fetch = fakeFetch; }
+
     // ══ 4. THE WAIT ITSELF ═════════════════════════════════════════════════
     // Everything above rests on whenVisible(). It has to resolve true when the
     // screen comes back AND give up on its own cap — an unattended phone must
@@ -259,27 +345,48 @@ const check = (name, ok, detail) => {
       o.waitCapReturnedFalse = await IDX.whenVisible(1000) === false;
       setHidden(false);
       o.waitWhenVisibleIsInstant = await IDX.whenVisible(30000) === true;
+      o.predicatesExported = typeof IDX.isHidden === 'function' && typeof IDX.whenVisible === 'function';
     } catch (e) { o.errs.push('whenVisible: ' + e.message); }
 
     try { window.fetch = realFetch; setHidden(false); } catch (_) {}
 
-    // ══ 5. THE SCAN ASKS AGAIN BEFORE IT COMMITS ═══════════════════════════
-    // Read from the BYTES THE BROWSER LOADED, not from String(scanWallets):
-    // layer 17 reassigns scanWallets, so the live binding is a wrapper and
-    // stringifying it inspects the wrong function entirely.
-    //
-    // Order is the whole defect. The old code logged the fallback and entered
-    // it in the same breath, with no wait in between.
+    // ══ 5. GIVING UP IS REVOCABLE — DRIVEN, NOT READ ═══════════════════════
+    // The previous version of this section read the source for a whenVisible
+    // call and asserted it appeared before the fallback log. Replacing that
+    // call with `if (false)` left the text in place, so the check stayed green
+    // against a dead code path. It verified the line existed, not that it ran.
+    // This drives the real function instead.
     try {
-      const src = await realFetch('/src/brief/02-core.js', { cache: 'no-store' }).then(r => r.text());
-      const at = src.indexOf('async function scanWallets');
-      const region = at > -1 ? src.slice(at, at + 20000) : '';
-      const wait   = region.indexOf('whenVisible');
-      const commit = region.indexOf('Evidence index unavailable');
-      o.foundScanWallets = at > -1;
-      o.scanWaitsBeforeCommitting = wait > -1 && commit > -1 && wait < commit;
-      o.scanRetriesBegin = /SERVER_VERIFIED_INDEX_RETRY/.test(region);
-    } catch (e) { o.errs.push('scanWallets: ' + e.message); }
+      const R = window.beginEvidenceIndexResilient;
+      o.hasResilient = typeof R === 'function';
+      const realBegin = IDX.begin;
+      let beginCalls = 0;
+      try {
+        // Hidden, first ask fails, screen returns, second ask succeeds.
+        IDX.begin = function () {
+          beginCalls++;
+          if (beginCalls === 1) return Promise.reject(new Error('Failed to fetch'));
+          return Promise.resolve({ scan_id: 'idx-2', anchor_ledger: 107069739,
+            anchor_close_ms: 1, accounts: ['rTEST'], roster_hash: 'h' });
+        };
+        setHidden(true);
+        const p = R(WIN, ['rTEST']);
+        setTimeout(() => setHidden(false), 600);
+        const got = await Promise.race([p.then(v => ({ ok: true, v: v }), e => ({ ok: false, e: String(e && e.message) })),
+                                        settle(10000).then(() => ({ ok: false, e: 'TIMED_OUT' }))]);
+        o.resilientRecovered = got.ok === true && got.v && got.v.scan_id === 'idx-2';
+        o.resilientBeginCalls = beginCalls;
+
+        // VISIBLE: it must NOT ask twice. A healthy page that gets a real
+        // failure should fall through, not double every failed acquisition.
+        beginCalls = 0; setHidden(false);
+        IDX.begin = function () { beginCalls++; return Promise.reject(new Error('Failed to fetch')); };
+        const got2 = await Promise.race([R(WIN, ['rTEST']).then(v => ({ ok: true }), e => ({ ok: false, e: String(e && e.message) })),
+                                         settle(10000).then(() => ({ ok: false, e: 'TIMED_OUT' }))]);
+        o.visibleNoSecondAsk = got2.ok === false && got2.e === 'Failed to fetch' && beginCalls === 1;
+        o.visibleAskCount = beginCalls;
+      } finally { IDX.begin = realBegin; setHidden(false); }
+    } catch (e) { o.errs.push('resilient: ' + e.message); }
 
     return o;
   });
@@ -324,14 +431,16 @@ const check = (name, ok, detail) => {
   check('a visible page never waits at all',
     r.waitWhenVisibleIsInstant === true);
   check('both predicates are exported for the scan to use',
-    typeof r.waitReturnedTrue === 'boolean' && r.scanWaitsBeforeCommitting !== undefined);
+    r.predicatesExported === true);
 
   // ── 5. ORDER ───────────────────────────────────────────────────────────────
-  check('the scan function was located in the loaded source', r.foundScanWallets === true);
-  check('the scan waits for the screen BEFORE committing to the slow path',
-    r.scanWaitsBeforeCommitting === true);
-  check('and asks the evidence index a second time',
-    r.scanRetriesBegin === true);
+  check('the revocable-fallback step exists as its own function', r.hasResilient === true);
+  check('a hidden failure waits for the screen and asks again',
+    r.resilientRecovered === true, r);
+  check('and that is exactly two asks, not a loop',
+    r.resilientBeginCalls === 2, r.resilientBeginCalls);
+  check('a visible failure falls through without a second ask',
+    r.visibleNoSecondAsk === true, r.visibleAskCount);
 
   // ── 3b/3c. THE TWO CASES THAT ACTUALLY HAPPENED ────────────────────────────
   check('a live request is NOT aborted while the screen is off',
@@ -344,6 +453,20 @@ const check = (name, ok, detail) => {
     r.lateFailRecovered === true, r.lateFailOutcome);
   check('and it did not burn the budget doing so',
     typeof r.lateFailCalls === 'number' && r.lateFailCalls <= 3, r.lateFailCalls);
+
+  // ── 3d/3e/3f. THE GAPS THE SABOTAGE PASS EXPOSED ───────────────────────────
+  check('a request that starts VISIBLE survives the screen going away',
+    r.midFlightAborted === false, r.midFlightAborted);
+  check('and is still open after the idle limit',
+    r.midFlightEnded === null, r.midFlightEnded);
+  check('and completes when the screen returns',
+    r.midFlightRecovered === true, r.midFlightEnded);
+  check('a forgiven late failure leaves the FULL budget for real failures',
+    r.budgetSurvived === true, r.budgetOutcome);
+  check('three hide/show cycles do not exhaust the budget',
+    r.cyclesSurvived === true, r.cyclesOutcome);
+  check('and all three cycles actually happened',
+    r.cyclesCount === 3, r.cyclesCount);
 
   check('no page errors', errs.length === 0, errs.slice(0, 3));
 
