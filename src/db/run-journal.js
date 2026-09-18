@@ -79,7 +79,13 @@ function canonical(journal) {
     wallets: (j.wallets || []).slice().sort((a, b) =>
       String(a.address) < String(b.address) ? -1 : (String(a.address) > String(b.address) ? 1 : 0)),
     row_shards: (j.row_shards || []).slice().sort((a, b) =>
-      String(a.path) < String(b.path) ? -1 : (String(a.path) > String(b.path) ? 1 : 0))
+      String(a.path) < String(b.path) ? -1 : (String(a.path) > String(b.path) ? 1 : 0)),
+    // Present ONLY when a re-anchor has happened. Adding the key unconditionally
+    // would change the digest of every journal already on the branch — and the
+    // live one holds 415 walked wallets that a DIGEST_MISMATCH would discard.
+    ...((j.reanchored && j.reanchored.length) ? { reanchored: j.reanchored.map(r => ({
+      from_ledger: _int(r.from_ledger), from_close: _s(r.from_close),
+      to_ledger: _int(r.to_ledger), to_close: _s(r.to_close), by: _s(r.by) })) } : {})
   };
 }
 function digest(journal) { return sha256(JSON.stringify(canonical(journal))); }
@@ -124,26 +130,71 @@ function begin(input) {
 // Append one segment of finished work. Refuses anything that would let a
 // journal disagree with itself.
 function record(journal, segment) {
-  const j = journal, s = segment || {};
+  let j = journal; const s = segment || {};
   const reject = reason => { const e = new Error(reason); e.journalRefused = true; throw e; };
   if (!j || !j.journal_sha256) reject('JOURNAL_MISSING');
   if (digest(j) !== j.journal_sha256) reject('JOURNAL_DIGEST_MISMATCH');
 
-  const known = new Set((j.wallets || []).map(w => w.address));
-  const added = (s.wallets || []).map(walletRecord);
-  for (const w of added) {
+  // ── A JOURNAL MAY MOVE ITS ANCHOR FORWARD, NEVER BACK ─────────────────────
+  // SW-20260917-PRG8S sat at 415 of 418 for a day, and its anchor sat with it:
+  // every resume finished against 17 Sep 13:00 and the report window was
+  // capped a day short. Re-anchoring keeps the work — every wallet already
+  // recorded becomes partial progress toward the new anchor — and records
+  // that it happened, so a reader can see the journal's anchor was chosen
+  // twice and by whom.
+  if (s.reanchor) {
+    const to = _int(s.reanchor.anchor_ledger);
+    if (to === null || to <= _int(j.anchor_ledger)) reject('JOURNAL_REANCHOR_NOT_AHEAD');
+    j = { ...j,
+      anchor_ledger: to, anchor_close: _s(s.reanchor.anchor_close),
+      reanchored: (j.reanchored || []).concat([{
+        from_ledger: _int(j.anchor_ledger), from_close: _s(j.anchor_close),
+        to_ledger: to, to_close: _s(s.reanchor.anchor_close), by: _s(s.reanchor.by) }]) };
+  }
+  const anchor = _int(j.anchor_ledger);
+
+  // ── A WALLET MAY BE RECORDED SHORT OF THE ANCHOR, AND EXTENDED LATER ──────
+  // proven_through === anchor is a finished wallet. proven_through < anchor is
+  // PARTIAL: the ledgers up to it were fully read, reconciled against a balance
+  // pinned at that ledger, and written down — so a wallet that could not fit
+  // in one budget picks up where it stopped instead of at page one. A partial
+  // record may be replaced by one that reaches further; a finished one may not
+  // be touched. Past the anchor is still refused: that is a walk against a
+  // different instant.
+  const byAddress = new Map((j.wallets || []).map(w => [w.address, w]));
+  const wallets = (j.wallets || []).slice();
+  const added = [];
+  for (const raw of (s.wallets || [])) {
+    const w = walletRecord(raw);
     if (!w.address) reject('JOURNAL_WALLET_ADDRESS_MISSING');
-    // Recording a wallet twice would double its rows into the run and make the
-    // journal's own count disagree with the evidence behind it.
-    if (known.has(w.address)) reject('JOURNAL_WALLET_ALREADY_RECORDED: ' + w.address);
-    // A wallet may only enter the journal proven to the journal's own anchor.
-    // Anything else is a wallet walked against a different instant.
-    if (w.proven_through !== _int(j.anchor_ledger)) {
+    if (w.proven_through === null || w.proven_through > anchor) {
       reject('JOURNAL_WALLET_WRONG_ANCHOR: ' + w.address + ' proven through ' +
-        w.proven_through + ' against anchor ' + j.anchor_ledger);
+        w.proven_through + ' against anchor ' + anchor);
     }
     if (!w.entry || w.entry.address !== w.address) reject('JOURNAL_WALLET_ENTRY_MISSING: ' + w.address);
-    known.add(w.address);
+    const existing = byAddress.get(w.address);
+    if (existing) {
+      // Recording a finished wallet twice would double its rows into the run.
+      if (_int(existing.proven_through) >= anchor) reject('JOURNAL_WALLET_ALREADY_RECORDED: ' + w.address);
+      if (w.proven_through <= _int(existing.proven_through)) {
+        reject('JOURNAL_WALLET_NOT_ADVANCED: ' + w.address + ' at ' + existing.proven_through +
+          ', offered ' + w.proven_through);
+      }
+      const merged = walletRecord({
+        address: w.address,
+        proven_from: existing.proven_from === null ? w.proven_from
+          : (w.proven_from === null ? existing.proven_from : Math.min(existing.proven_from, w.proven_from)),
+        proven_through: w.proven_through,
+        rows: (Number(existing.rows) || 0) + (Number(w.rows) || 0),
+        // A contradiction on any leg is a contradiction for the wallet.
+        reconciliation: existing.reconciliation === 'CONTRADICTION' ? 'CONTRADICTION' : w.reconciliation,
+        entry: w.entry });
+      wallets[wallets.findIndex(x => x.address === w.address)] = merged;
+      byAddress.set(w.address, merged);
+      added.push(merged);
+    } else {
+      wallets.push(w); byAddress.set(w.address, w); added.push(w);
+    }
   }
   // A shard path now carries its own content hash, so the same path means the
   // same bytes. Recording it twice would make the journal claim rows it holds
@@ -167,9 +218,15 @@ function record(journal, segment) {
   return seal({
     ...j,
     segments: Number(j.segments || 0) + 1,
-    wallets: (j.wallets || []).concat(added),
+    wallets,
     row_shards: (j.row_shards || []).concat(shards)
   });
+}
+
+// Move the anchor forward with no new work. The wallets keep their
+// proven_through and so become partial toward the new anchor.
+function reanchor(journal, to) {
+  return record(journal, { wallets: [], row_shards: [], reanchor: to });
 }
 
 // May this journal be resumed from, given the checkpoint as it stands NOW?
@@ -195,7 +252,10 @@ function usable(journal, state) {
       }
     }
     for (const w of (j.wallets || [])) {
-      if (_int(w.proven_through) !== _int(j.anchor_ledger)) {
+      // At the anchor is finished; short of it is partial and resumable; past
+      // it was walked against some other instant and cannot be trusted here.
+      const pt = _int(w.proven_through);
+      if (pt === null || pt > _int(j.anchor_ledger)) {
         problems.push('WALLET_WRONG_ANCHOR:' + w.address);
       }
       if (!w.entry || w.entry.address !== w.address) problems.push('WALLET_ENTRY_MISSING:' + w.address);
@@ -204,8 +264,18 @@ function usable(journal, state) {
   return { ok: problems.length === 0, problems };
 }
 
+// Finished wallets — the ones a resumed run skips. A partial record is not
+// done; it is where that wallet's walk resumes.
 function doneAddresses(journal) {
-  return new Set(((journal && journal.wallets) || []).map(w => w.address));
+  const anchor = _int(journal && journal.anchor_ledger);
+  return new Set(((journal && journal.wallets) || [])
+    .filter(w => _int(w.proven_through) === anchor).map(w => w.address));
+}
+function partialRecords(journal) {
+  const anchor = _int(journal && journal.anchor_ledger);
+  return new Map(((journal && journal.wallets) || [])
+    .filter(w => _int(w.proven_through) !== null && _int(w.proven_through) < anchor)
+    .map(w => [w.address, w]));
 }
 
 // Every file the journal owns, so a completed run can remove all of it in the
@@ -215,5 +285,5 @@ function ownedPaths(journal, journalPath) {
   return [journalPath].concat(((journal && journal.row_shards) || []).map(s => s.path));
 }
 
-module.exports = { SCHEMA, sha256, canonical, digest, seal, serialize, walletRecord,
+module.exports = { SCHEMA, sha256, canonical, digest, seal, serialize, walletRecord, reanchor, partialRecords,
   begin, record, usable, doneAddresses, ownedPaths };

@@ -95,7 +95,10 @@ const SUITES = [
   ['negative-flow-wording',  'negative-flow-wording.test.js',     8231],
   // A backgrounded tab kills the fetch and throttles the timers. Neither is
   // the server refusing, so neither may spend the retry budget.
-  ['hidden-page-retry',      'hidden-page-retry.test.js',         8232]
+  ['hidden-page-retry',      'hidden-page-retry.test.js',         8232],
+  // A wallet that cannot finish in one budget banks what it read and resumes
+  // there; a journal a day behind the ledger re-anchors. Pure node, no port.
+  ['heavy-wallet-resume',    'heavy-wallet-resume.test.js',       null]
 ];
 
 const only = (() => {

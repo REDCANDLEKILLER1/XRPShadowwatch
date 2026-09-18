@@ -74,9 +74,27 @@ console.log('\n3. what record() refuses');
 check('a wallet recorded twice is refused — it would double its rows into the run',
   /JOURNAL_WALLET_ALREADY_RECORDED: rAlice/.test(
     refusal(() => J.record(ONE, { wallets: [wallet('rAlice')], row_shards: [] }))));
-check('a wallet proven to some other anchor is refused',
-  /JOURNAL_WALLET_WRONG_ANCHOR/.test(
-    refusal(() => J.record(BASE, { wallets: [wallet('rZed', { proven_through: ANCHOR - 5 })], row_shards: [] }))));
+// RULE CHANGE, 2026-09-18. Short of the anchor used to be refused. It is now a
+// PARTIAL record: the ledgers up to proven_through were fully read and banked,
+// and the wallet resumes there. SW-20260917-PRG8S sat three wallets short for
+// a day because a cut-off walk was thrown away every time; this is the fix.
+const PARTIAL = J.record(BASE, { wallets: [wallet('rZed', { proven_through: ANCHOR - 5 })], row_shards: [] });
+check('a wallet proven SHORT of the anchor is recorded as partial, not refused',
+  PARTIAL.wallets.some(w => w.address === 'rZed' && w.proven_through === ANCHOR - 5));
+check('and a partial wallet is NOT a done one — a resume walks it again from where it stopped',
+  !J.doneAddresses(PARTIAL).has('rZed') && J.partialRecords(PARTIAL).get('rZed').proven_through === ANCHOR - 5);
+const EXTENDED = J.record(PARTIAL, { wallets: [wallet('rZed', { proven_from: ANCHOR - 4, proven_through: ANCHOR, rows: 3 })], row_shards: [] });
+check('a partial wallet may be extended to the anchor, and the record accumulates',
+  J.doneAddresses(EXTENDED).has('rZed') &&
+  EXTENDED.wallets.find(w => w.address === 'rZed').rows === PARTIAL.wallets.find(w => w.address === 'rZed').rows + 3 &&
+  EXTENDED.wallets.find(w => w.address === 'rZed').proven_from === PARTIAL.wallets.find(w => w.address === 'rZed').proven_from,
+  EXTENDED.wallets.find(w => w.address === 'rZed'));
+check('but never shortened',
+  /JOURNAL_WALLET_NOT_ADVANCED/.test(refusal(() => J.record(PARTIAL,
+    { wallets: [wallet('rZed', { proven_through: ANCHOR - 10 })], row_shards: [] }))));
+check('and a FINISHED wallet still cannot be recorded again',
+  /JOURNAL_WALLET_ALREADY_RECORDED/.test(refusal(() => J.record(EXTENDED,
+    { wallets: [wallet('rZed', { proven_through: ANCHOR })], row_shards: [] }))));
 check('a wallet proven PAST the anchor is refused too',
   /JOURNAL_WALLET_WRONG_ANCHOR/.test(
     refusal(() => J.record(BASE, { wallets: [wallet('rZed', { proven_through: ANCHOR + 5 })], row_shards: [] }))));
@@ -124,10 +142,23 @@ check('and one whose anchor is behind it',
     .problems.includes('ANCHOR_NO_LONGER_AHEAD'));
 // Re-sealed by hand, so the digest is valid again — the per-wallet anchor check
 // is what is left, and it has to hold on its own.
-check('a re-sealed journal with a wallet on the wrong anchor is still refused',
+check('a re-sealed journal with a wallet PAST the anchor is still refused',
   J.usable(J.seal({ ...TWO, wallets: TWO.wallets.map((w, i) =>
-    i ? w : { ...w, proven_through: ANCHOR - 400 }) }), STATE)
+    i ? w : { ...w, proven_through: ANCHOR + 400 }) }), STATE)
     .problems.some(p => p.startsWith('WALLET_WRONG_ANCHOR:')));
+check('while one with a wallet SHORT of the anchor is usable — that wallet is partial',
+  J.usable(J.seal({ ...TWO, wallets: TWO.wallets.map((w, i) =>
+    i ? w : { ...w, proven_through: ANCHOR - 400 }) }), STATE).ok);
+// Re-anchoring: forward only, recorded, and every wallet becomes partial.
+const MOVED = J.reanchor(TWO, { anchor_ledger: ANCHOR + 5000, anchor_close: '2026-09-18T14:00:00.000Z', by: 'SW-20260918-NEW01' });
+check('a journal can move its anchor forward', MOVED.anchor_ledger === ANCHOR + 5000 && J.usable(MOVED, STATE).ok);
+check('and says so', MOVED.reanchored.length === 1 && MOVED.reanchored[0].from_ledger === ANCHOR && MOVED.reanchored[0].by === 'SW-20260918-NEW01');
+check('after which every wallet it held is partial toward the new anchor',
+  J.doneAddresses(MOVED).size === 0 && J.partialRecords(MOVED).size === TWO.wallets.length);
+check('but never backward',
+  /JOURNAL_REANCHOR_NOT_AHEAD/.test(refusal(() => J.reanchor(TWO, { anchor_ledger: ANCHOR - 1, anchor_close: null, by: 'x' }))));
+check('a journal that was never re-anchored hashes exactly as before — the live one must not be discarded',
+  !('reanchored' in J.canonical(TWO)) && J.digest(TWO) === TWO.journal_sha256);
 check('and one with a wallet whose state entry was stripped',
   J.usable(J.seal({ ...TWO, wallets: TWO.wallets.map((w, i) =>
     i ? w : { ...w, entry: null }) }), STATE)

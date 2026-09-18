@@ -119,6 +119,22 @@ const JOURNAL_INTERVAL_MS = 30000;
 // lost. Stopping cleanly converts that into a flush and a resume.
 const START_RESERVE_MS = 25000;
 
+// ── A JOURNAL THAT FELL A DAY BEHIND THE LEDGER RE-ANCHORS ─────────────────
+//
+// A resumed run finishes against the anchor the interrupted one pinned — that
+// is right for a run cut off an hour ago. It is wrong for one cut off
+// yesterday: SW-20260917-PRG8S was resumed on the 18th against 17 Sep 13:00,
+// so the window was capped 92,249 seconds short and a sealed report would
+// have been about the wrong day. Past this age the run takes the live anchor
+// and keeps every journalled wallet as partial progress toward it.
+//
+// Twelve hours, because the line is "the same day or not". A retry six hours
+// after a crash still finishes the morning it interrupted — that is the
+// property test 19 of the acquisition suite pins, and it is right. A retry the
+// next day would be finishing yesterday, and nobody asked for yesterday.
+const STALE_JOURNAL_MS = 12 * 3600 * 1000;
+const STALE_JOURNAL_LEDGERS = 12000;  // ~12 h at one ledger every ~3.7 s
+
 // Level 6, not 9. Measured on a representative shard: level 9 took 43 ms and
 // level 6 took 19 ms, for output 0.1% larger. Level 9 was buying nothing and
 // charging more than twice the CPU for it, on a path that gzips tens of
@@ -198,6 +214,16 @@ async function walkOn(reader, entry, anchor, opts, lane, ask) {
     // indistinguishable from a hang. Reported per page so a slow wallet reads
     // as slow rather than as stuck.
     if (typeof opts.onPage === 'function') opts.onPage({ address, pages, rows: rows.length, more: !!marker });
+    // What is SAFE to bank so far: every ledger strictly below the last row's.
+    // A page boundary can split a ledger, so that ledger is withheld and
+    // re-read on resume; forward order makes everything below it complete.
+    if (marker && rows.length && typeof opts.onProgress === 'function') {
+      const through = rows[rows.length - 1].ledger_index - 1;
+      if (through >= from) {
+        opts.onProgress({ address, from, through, pages, cold: !!edge.cold,
+          rows: rows.filter(r => r.ledger_index <= through) });
+      }
+    }
   } while (marker);
 
   const merged = T.mergeSightings(rows);
@@ -436,9 +462,32 @@ async function acquire(input, deps) {
     anchor = { ledger: Number(journal.anchor_ledger), close_ms: null,
       close_iso: journal.anchor_close || null };
     resumed = { adopted: true, report_id: journal.report_id, segments: journal.segments,
-      wallets_already_walked: journal.wallets.length,
+      wallets_already_walked: Journal.doneAddresses(journal).size,
+      wallets_partial: Journal.partialRecords(journal).size,
       rows_awaiting_load: (journal.row_shards || []).reduce((n, sh) => n + (Number(sh.rows) || 0), 0),
       anchor_ledger: anchor.ledger, started_at: journal.started_at };
+    const journalCloseMs = journal.anchor_close ? Date.parse(journal.anchor_close) : NaN;
+    const behindMs = (Number.isFinite(header.close_ms) && Number.isFinite(journalCloseMs))
+      ? header.close_ms - journalCloseMs : null;
+    const behindLedgers = Number(header.ledger) - Number(journal.anchor_ledger);
+    // Either signal is enough. A server that reported a stale close time, or a
+    // journal that never recorded one, must not be able to keep an old anchor
+    // pinned by making the other signal unreadable.
+    const staleJournal = (behindMs !== null && behindMs > STALE_JOURNAL_MS) ||
+      behindLedgers > STALE_JOURNAL_LEDGERS;
+    if (staleJournal) {
+      const liveClose = new Date(header.close_ms).toISOString();
+      journal = Journal.reanchor(journal, { anchor_ledger: header.ledger, anchor_close: liveClose, by: run.report_id });
+      anchor = { ledger: header.ledger, close_ms: header.close_ms, close_iso: liveClose };
+      resumed.reanchored = { from_ledger: Number(journalRead.journal.anchor_ledger),
+        from_close: journalRead.journal.anchor_close || null,
+        to_ledger: header.ledger, to_close: liveClose,
+        behind_ms: behindMs, behind_ledgers: behindLedgers };
+      // Nothing is finished against the NEW anchor; everything banked is partial.
+      resumed.wallets_already_walked = 0;
+      resumed.wallets_partial = journal.wallets.length;
+      resumed.anchor_ledger = anchor.ledger;
+    }
     phase('journal', resumed);
   }
 
@@ -508,13 +557,44 @@ async function acquire(input, deps) {
   // Wallets a previous attempt already finished. Their evidence is recovered
   // from the journal rather than re-fetched: the rows were validated when they
   // were walked and the file they came from was hash-checked on the way in.
-  const alreadyWalked = journal ? journal.wallets.slice() : [];
+  const alreadyWalked = journal
+    ? journal.wallets.filter(w => Number(w.proven_through) === anchor.ledger) : [];
   const walkedSet = new Set(alreadyWalked.map(w => w.address));
-  const entries = roster.filter(e => !walkedSet.has(e.address));
+  // Partial progress from an earlier attempt. The wallet resumes one past the
+  // ledger it banked through, carrying the balance that bank was reconciled
+  // to, so this leg's reconciliation joins the previous one instead of
+  // comparing the old checkpoint against half the rows.
+  const partials = journal ? Journal.partialRecords(journal) : new Map();
+  const partialContradicted = new Set();
+  const entries = roster.filter(e => !walkedSet.has(e.address)).map(e => {
+    const p = partials.get(e.address);
+    if (!p) return e;
+    if (p.reconciliation === B.STATUS.CONTRADICTION) partialContradicted.add(e.address);
+    const banked = p.entry || {};
+    return State.walletEntry({ ...e,
+      last_proven_ledger: p.proven_through, last_proven_close: null,
+      last_observed_tx_ledger: banked.last_observed_tx_ledger !== undefined ? banked.last_observed_tx_ledger : e.last_observed_tx_ledger,
+      last_observed_tx_hash: banked.last_observed_tx_hash !== undefined ? banked.last_observed_tx_hash : e.last_observed_tx_hash,
+      balance_drops: banked.balance_drops, balance_ledger: banked.balance_ledger,
+      admitted_at_ledger: banked.admitted_at_ledger !== undefined ? banked.admitted_at_ledger : e.admitted_at_ledger,
+      history_from_ledger: banked.history_from_ledger !== undefined ? banked.history_from_ledger : e.history_from_ledger });
+  });
+  // ── HEAVIEST FIRST ─────────────────────────────────────────────────────
+  // The walk was alphabetical, and rw… sorts last: COINBASE_HOT and
+  // BITHUMB_HOT started after four hundred light wallets had spent the budget,
+  // every morning. A wallet that was cut off last time goes first, and among
+  // the rest the ones that moved most recently — the checkpoint already
+  // records that — go before the ones that never move.
+  const isPartial = e => partials.has(e.address) ? 1 : 0;
+  const recency = e => Number(e.last_observed_tx_ledger) || 0;
+  entries.sort((a, b) => (isPartial(b) - isPartial(a)) || (recency(b) - recency(a)) ||
+    (String(a.address) < String(b.address) ? -1 : (String(a.address) > String(b.address) ? 1 : 0)));
   phase('plan', { wallets: roster.length, to_walk: entries.length,
-    recovered: alreadyWalked.length, proven: state.wallets.length,
+    recovered: alreadyWalked.length, resuming_partial: partials.size,
+    proven: state.wallets.length,
     admitting: admitted.length, awaiting: deferred.length,
-    cold_from_ledger: admitted.length ? coldFrom : null });
+    cold_from_ledger: admitted.length ? coldFrom : null,
+    reanchored: !!(resumed && resumed.reanchored) });
   // Said out loud, because "it stopped starting wallets with a minute left"
   // looks like a bug until you know the minute was spoken for.
   if (journal && journal.row_shards && journal.row_shards.length) {
@@ -550,17 +630,64 @@ async function acquire(input, deps) {
   const flushEvery = Math.max(1, Math.min(Number(d.journalEvery) || DEFAULT_JOURNAL_EVERY, 200));
   const flushed = new Set();
   let flushing = Promise.resolve(), journalError = null, reported = 0;
+  // ── PARTIAL PROGRESS, PER WALLET ─────────────────────────────────────────
+  // progress[i] is the newest page-by-page state of an in-flight walk; the
+  // banked* arrays are what has actually been written down and reconciled.
+  const progress = new Array(entries.length);
+  const bankedThrough = new Array(entries.length);
+  const bankedBalance = new Array(entries.length);
+  const bankedRowCount = new Array(entries.length).fill(0);
+  const bankedContradiction = new Array(entries.length).fill(false);
+  entries.forEach((e, i) => { if (partialContradicted.has(e.address)) bankedContradiction[i] = true; });
 
-  const writeSegment = async batch => {
-    const wallets = batch.map(r => Journal.walletRecord({
+  const writeSegment = async (batch, partialBatch) => {
+    const wallets = batch.map(({ i, r }) => Journal.walletRecord({
       address: r.address, proven_from: r.proof.from_ledger, proven_through: r.proof.through_ledger,
-      rows: r.rows.length, reconciliation: r.reconciliation && r.reconciliation.status,
+      // Only what is not already in a partial shard from THIS run.
+      rows: r.rows.filter(row => bankedThrough[i] === undefined || row.ledger_index > bankedThrough[i]).length,
+      reconciliation: r.reconciliation && r.reconciliation.status,
       entry: r.next_entry }));
+    const rows = batch.flatMap(({ i, r }) =>
+      r.rows.filter(row => bankedThrough[i] === undefined || row.ledger_index > bankedThrough[i]));
+    // A partial leg is banked only once it is RECONCILED against a balance
+    // pinned at the ledger it reaches. Without that, the next run would compare
+    // the old checkpoint balance against half the rows and manufacture a
+    // contradiction. If the balance cannot be read now, the leg waits.
+    const landed = [];
+    for (const { i, p } of (partialBatch || [])) {
+      const prevThrough = bankedThrough[i] !== undefined ? bankedThrough[i] : p.from - 1;
+      const legRows = p.rows.filter(row => row.ledger_index > prevThrough);
+      let observed = null;
+      try { observed = await reader.balance(p.address, p.through, null); } catch (_) { observed = null; }
+      if (!observed || Number(observed.ledger) !== p.through) continue;
+      const previous = bankedBalance[i] || { drops: p.entry && p.entry.balance_drops, ledger: p.entry && p.entry.balance_ledger };
+      const rec = B.reconcile({ address: p.address, rows: legRows,
+        edge: { from_ledger: prevThrough + 1, through_ledger: p.through }, previous, current: observed });
+      const last = legRows.length ? legRows[legRows.length - 1] : null;
+      const entry = State.walletEntry({ ...(p.entry || {}), address: p.address,
+        last_proven_ledger: p.through, last_proven_close: null,
+        last_observed_tx_ledger: last ? last.ledger_index : (p.entry && p.entry.last_observed_tx_ledger),
+        last_observed_tx_hash: last ? last.hash : (p.entry && p.entry.last_observed_tx_hash),
+        balance_drops: observed.drops, balance_ledger: observed.ledger,
+        reconciliation: rec.status,
+        admitted_at_ledger: p.cold ? anchor.ledger : (p.entry && p.entry.admitted_at_ledger),
+        history_from_ledger: p.cold ? p.from : (p.entry && p.entry.history_from_ledger) });
+      wallets.push(Journal.walletRecord({ address: p.address, proven_from: prevThrough + 1,
+        proven_through: p.through, rows: legRows.length, reconciliation: rec.status, entry }));
+      for (const row of legRows) rows.push(row);
+      landed.push({ i, through: p.through, balance: observed, rows: legRows.length,
+        contradicted: B.contradicted(rec) });
+    }
+    if (!wallets.length && !rows.length) return;
     const written = await Store.appendJournal(journal,
-      { wallets, rows: batch.flatMap(r => r.rows) }, { env: d.env, gh: d.gh, fetch: d.fetch });
+      { wallets, rows }, { env: d.env, gh: d.gh, fetch: d.fetch });
     journal = written.journal; journalWritten = true;
-    phase('journal-flush', { segment: journal.segments, wallets_recorded: journal.wallet_count,
-      commit_sha: written.commit_sha });
+    for (const l of landed) {
+      bankedThrough[l.i] = l.through; bankedBalance[l.i] = l.balance;
+      bankedRowCount[l.i] += l.rows; if (l.contradicted) bankedContradiction[l.i] = true;
+    }
+    phase('journal-flush', { segment: journal.segments, wallets_recorded: Journal.doneAddresses(journal).size,
+      partial_recorded: Journal.partialRecords(journal).size, commit_sha: written.commit_sha });
   };
 
   let lastFlushAt = Date.now();
@@ -571,10 +698,21 @@ async function acquire(input, deps) {
       if (r && r.status === 'COMPLETE' && !flushed.has(i)) batch.push({ i, r });
     }
     const overdue = Date.now() - lastFlushAt >= JOURNAL_INTERVAL_MS;
-    if (!batch.length || (!force && !overdue && batch.length < flushEvery)) return;
+    // Partial legs go out with a forced or overdue flush, never on the count:
+    // each costs a pinned balance read, and a walk that will finish inside the
+    // next few seconds should not pay it.
+    const partialBatch = [];
+    if (force || overdue) {
+      for (let i = 0; i < entries.length; i++) {
+        const p = progress[i];
+        if (!p || (results[i] && results[i].status === 'COMPLETE')) continue;
+        if (p.through > (bankedThrough[i] !== undefined ? bankedThrough[i] : -1)) partialBatch.push({ i, p });
+      }
+    }
+    if ((!batch.length && !partialBatch.length) || (!force && !overdue && batch.length < flushEvery)) return;
     lastFlushAt = Date.now();
     for (const b of batch) flushed.add(b.i);
-    flushing = flushing.then(() => writeSegment(batch.map(b => b.r))).catch(e => {
+    flushing = flushing.then(() => writeSegment(batch, partialBatch)).catch(e => {
       // A journal that cannot be written is a lost optimisation, never a lost
       // run: the walk continues and the whole-run gate is untouched. The
       // wallets are unmarked so a later flush can try again — record() refuses
@@ -633,7 +771,14 @@ async function acquire(input, deps) {
         try {
           const walked = await walkWallet(reader, entry, anchor,
             { scanId: run.scan_id, rosterHash: state.state_sha256, coldFrom,
-              onPage: d.onPage });
+              onPage: d.onPage,
+              onProgress: p => { progress[index] = { ...p, entry }; } });
+          // A contradiction on a banked leg — this run's or an earlier one's —
+          // is a contradiction for the wallet, whatever the final leg says.
+          if (bankedContradiction[index] && walked.status === 'COMPLETE') {
+            walked.reconciliation = { ...(walked.reconciliation || {}),
+              status: B.STATUS.CONTRADICTION, reason: 'PARTIAL_LEG_CONTRADICTED' };
+          }
           results[index] = { ...walked, attempts: attempt, earlier_failures: tried };
           break;
         } catch (e) {
@@ -768,6 +913,9 @@ async function acquire(input, deps) {
     // is journalled as nothing, but it is not the same fact as one never begun.
     wallets_abandoned: abandoned.length,
     abandoned: abandoned.slice(),
+    partial: entries.map((e, i) => ({ i, e })).filter(({ i }) => bankedThrough[i] !== undefined &&
+      !(results[i] && results[i].status === 'COMPLETE'))
+      .map(({ i, e }) => ({ address: e.address, proven_through: bankedThrough[i], rows: bankedRowCount[i] })),
     // Grouped by CAUSE, not one entry per wallet. A hundred wallets sharing
     // one reason is one fact about the run, and listing it a hundred times
     // made the result three times its useful size — the same addresses already
@@ -802,6 +950,14 @@ async function acquire(input, deps) {
     attempts: (r && r.attempts) || 0,
     error: (r && r.error) || null
   })));
+  // A cut-off wallet with banked progress says so and says how far.
+  for (const w of wallets) {
+    const i = entries.findIndex(e => e.address === w.address);
+    if (i < 0 || bankedThrough[i] === undefined || w.proven) continue;
+    w.partial_through = bankedThrough[i];
+    w.rows_banked = bankedRowCount[i];
+    if (w.status === 'ABANDONED' || w.status === 'NOT_ATTEMPTED') w.error = 'WALK_INCOMPLETE_RESUMABLE';
+  }
   // The projection and the count must describe the same run. If they ever
   // disagree the report is about to be told a different number than the
   // checkpoint gate used, which is the defect this block exists to end.
@@ -822,6 +978,9 @@ async function acquire(input, deps) {
     failed_wallets: failed.length,
     not_attempted_wallets: results.filter(r => r && r.status === 'NOT_ATTEMPTED').length,
     abandoned_wallets: abandoned.length,
+    // Started, cut off, and written down as far as it got. Not proven — it is
+    // where that wallet resumes.
+    partial_wallets: bankedThrough.filter((t, i) => t !== undefined && !(results[i] && results[i].status === 'COMPLETE')).length,
     balance_contradictions: contradicted.length,
     balance_contradiction_addresses: contradicted.map(r => r.address).sort(),
     balance_reconciled: complete.filter(r => r.reconciliation && r.reconciliation.status === B.STATUS.RECONCILED).length,
@@ -850,7 +1009,9 @@ async function acquire(input, deps) {
   // round trip to GitHub for a file that dies moments later.
   const saveWork = async () => {
     await maybeFlush(true); await flushing;
-    return { journal_segments: journal.segments, journal_wallets: journal.wallet_count,
+    return { journal_segments: journal.segments,
+      journal_wallets: Journal.doneAddresses(journal).size,
+      journal_partial_wallets: Journal.partialRecords(journal).size,
       journal_error: journalError };
   };
   // ── A RECOVERED WALLET IS PROVEN ONLY WHERE ITS ROWS ARE ────────────────

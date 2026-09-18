@@ -243,19 +243,29 @@ async function appendJournal(journal, segment, deps) {
     // Wallets this segment carries that the base already has were recorded by
     // someone else; recording them again is refused by record(), so they are
     // dropped rather than duplicated.
-    const already = Journal.doneAddresses(base);
+    // A journal re-anchored in memory carries its new anchor to the branch with
+    // its first segment. Relative to the new anchor nothing on disk is finished,
+    // so nothing is dropped as already recorded.
+    const reanchor = (base.report_id === journal.report_id &&
+                      Number(journal.anchor_ledger) > Number(base.anchor_ledger))
+      ? { anchor_ledger: journal.anchor_ledger, anchor_close: journal.anchor_close,
+          by: (((journal.reanchored || []).slice(-1)[0]) || {}).by || null }
+      : undefined;
+    const already = reanchor ? new Set() : Journal.doneAddresses(base);
     const fresh = (segment.wallets || []).filter(w => !already.has(w.address));
     const path = journalRowPath(base.report_id, digest);
     const shards = (segment.rows || []).length
       ? [{ path, sha256: digest, rows: segment.rows.length }] : [];
-    const next = Journal.record(base, { wallets: fresh, row_shards: shards });
+    const next = Journal.record(base, { wallets: fresh, row_shards: shards, reanchor });
 
     const files = { [JOURNAL_PATH]: Journal.serialize(next) };
     if (shards.length) files[path] = packed;
     try {
       const written = await A.commitFiles(gh, branch, ref.object.sha, files,
         'journal: ' + next.report_id + ' segment ' + next.segments + ' — ' +
-        next.wallet_count + ' wallets walked — anchor ' + next.anchor_ledger);
+        Journal.doneAddresses(next).size + ' wallets walked' +
+        (Journal.partialRecords(next).size ? ', ' + Journal.partialRecords(next).size + ' partial' : '') +
+        ' — anchor ' + next.anchor_ledger + (reanchor ? ' (re-anchored)' : ''));
       return { journal: next, commit_sha: written.commit_sha };
     } catch (e) {
       if (!e.refConflict || attempt === 3) throw e;
