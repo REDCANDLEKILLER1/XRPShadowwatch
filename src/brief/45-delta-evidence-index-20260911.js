@@ -324,6 +324,26 @@
                   result.window.from_stored + ' stored + ' + result.window.from_this_run + ' this run)' : '') +
               (result.committed ? ' · checkpoint advanced'
                 : ' · checkpoint NOT advanced (' + result.reason + ')'));
+            // WHY THE TWO DENOMINATORS DISAGREE, IN THE LOG, NOT ONLY THE JSON.
+            //
+            // The state keeps proving a wallet the roster no longer lists —
+            // deliberately, because retiring a watched wallet is a decision and
+            // a run does not infer one from a list it was handed. So the
+            // evidence line can legitimately read 91/418 while the scan beside
+            // it reads 90/408, and on 2026-09-16 it did: a preview had written
+            // ten extra wallets into the shared checkpoint and production could
+            // not tell why its own numbers no longer matched.
+            //
+            // The server has always reported this as watched_not_in_roster; it
+            // reached the debug export and nowhere an operator was looking.
+            var absent = result.watched_not_in_roster || [];
+            if (absent.length) {
+              log('Evidence: ' + absent.length + ' wallet(s) are in the checkpoint but not on ' +
+                  'this build’s roster, so they are still walked and counted in the ' +
+                  result.target_wallets + ' above — ' +
+                  absent.slice(0, 3).map(function (a) { return a.slice(0, 6) + '…' + a.slice(-4); }).join(', ') +
+                  (absent.length > 3 ? ' and ' + (absent.length - 3) + ' more' : ''));
+            }
             // WHY, not just WHAT. The reason code alone said
             // JOURNAL_ROWS_UNREADABLE for two runs straight while the cause —
             // a manifest naming shards a discard had already deleted — was
