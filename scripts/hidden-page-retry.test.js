@@ -385,6 +385,20 @@ const check = (name, ok, detail) => {
                                          settle(10000).then(() => ({ ok: false, e: 'TIMED_OUT' }))]);
         o.visibleNoSecondAsk = got2.ok === false && got2.e === 'Failed to fetch' && beginCalls === 1;
         o.visibleAskCount = beginCalls;
+
+        // A SECOND ASK THAT ALSO FAILS MUST REJECT, NOT SPIN.
+        // "Exactly two asks" alone cannot see an infinite retry: a loop that
+        // returns on first success makes exactly two calls too. The difference
+        // only shows when the server keeps refusing — then the correct code
+        // gives up and a loop hangs the report forever.
+        beginCalls = 0; setHidden(true);
+        IDX.begin = function () { beginCalls++; return Promise.reject(new Error('Failed to fetch')); };
+        const p3 = R(WIN, ['rTEST']).then(v => ({ ok: true }), e => ({ ok: false, e: String(e && e.message) }));
+        setTimeout(() => setHidden(false), 400);
+        const got3 = await Promise.race([p3, settle(12000).then(() => ({ ok: false, e: 'TIMED_OUT' }))]);
+        o.resilientGivesUp = got3.ok === false && got3.e === 'Failed to fetch';
+        o.resilientGiveUpOutcome = got3;
+        o.resilientGiveUpCalls = beginCalls;
       } finally { IDX.begin = realBegin; setHidden(false); }
     } catch (e) { o.errs.push('resilient: ' + e.message); }
 
@@ -441,6 +455,10 @@ const check = (name, ok, detail) => {
     r.resilientBeginCalls === 2, r.resilientBeginCalls);
   check('a visible failure falls through without a second ask',
     r.visibleNoSecondAsk === true, r.visibleAskCount);
+  check('a second ask that also fails gives up instead of spinning',
+    r.resilientGivesUp === true, r.resilientGiveUpOutcome);
+  check('and it stopped after two asks, not a loop',
+    r.resilientGiveUpCalls === 2, r.resilientGiveUpCalls);
 
   // ── 3b/3c. THE TWO CASES THAT ACTUALLY HAPPENED ────────────────────────────
   check('a live request is NOT aborted while the screen is off',
