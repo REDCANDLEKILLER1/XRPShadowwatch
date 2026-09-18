@@ -104,13 +104,69 @@
   // genuinely stopped speaking.
   var IDLE_LIMIT_MS = 45000;
 
+  // ── A HIDDEN PAGE DOES NOT GET TO LOSE ──────────────────────
+  //
+  // SW-20260918-56PSL spent all three attempts in TWELVE SECONDS — 12:55:44 and
+  // 12:55:56 — while the screen was off, then fell through to the direct-XRPL
+  // path for thirteen minutes and never sealed. A backgrounded tab has its
+  // fetch killed and its timers throttled, so every one of those failures was
+  // the browser suspending us, not the server refusing us.
+  //
+  // Two consequences, both enforced below. Silence from a hidden page is not
+  // silence: we cannot tell a dead request from a throttled one, so the abort
+  // clock does not run while hidden. And a failure we can attribute to being
+  // hidden is not a strike: we wait for the screen instead of spending the
+  // budget on something that cannot answer.
+  //
+  // The waiting is bounded. A page left hidden forever must not hold a report
+  // open forever, so an unattended run still ends — it just ends after the
+  // screen had a fair chance, rather than instead of one.
+  var HIDDEN_WAIT_MAX_MS = 10 * 60 * 1000;
+  var HIDDEN_RETRY_MAX   = 8;
+
+  function isHidden() {
+    try { return document.visibilityState === 'hidden' || document.hidden === true; }
+    catch (_) { return false; }
+  }
+  function whenVisible(maxMs) {
+    if (!isHidden()) return Promise.resolve(true);
+    return new Promise(function (resolve) {
+      var settled = false, timer = null;
+      function finish(v) {
+        if (settled) return;
+        settled = true;
+        try { document.removeEventListener('visibilitychange', onVis); } catch (_) {}
+        if (timer) clearTimeout(timer);
+        resolve(v);
+      }
+      function onVis() { if (!isHidden()) finish(true); }
+      try { document.addEventListener('visibilitychange', onVis); } catch (_) {}
+      timer = setTimeout(function () { finish(false); },
+        Math.max(1000, Number(maxMs) || HIDDEN_WAIT_MAX_MS));
+    });
+  }
+
   function post(action, body, onLine) {
     var controller = new AbortController();
     var timer = null;
+    // Whether the browser stopped running us at any point during THIS request.
+    // Checked at failure time alone it reads false for a page that was away and
+    // has since come back — which is exactly the case that cost the run.
+    var sawHidden = isHidden();
     function idle() {
-      if (timer) clearTimeout(timer);
+      if (timer) { clearTimeout(timer); timer = null; }
+      if (isHidden()) return;          // no clock runs while we are not running
       timer = setTimeout(function () { controller.abort(); }, IDLE_LIMIT_MS);
     }
+    function onVis() {
+      if (isHidden()) { sawHidden = true; if (timer) { clearTimeout(timer); timer = null; } }
+      else { idle(); }                 // back on screen: a fresh window to speak
+    }
+    function cleanup() {
+      if (timer) { clearTimeout(timer); timer = null; }
+      try { document.removeEventListener('visibilitychange', onVis); } catch (_) {}
+    }
+    try { document.addEventListener('visibilitychange', onVis); } catch (_) {}
     idle();
     var streaming = typeof onLine === 'function';
     return fetch('/api/delta', {
@@ -122,14 +178,17 @@
         return readNdjson(response, onLine, idle);
       }
       return plainBody(response);
-    }).then(function (v) { if (timer) clearTimeout(timer); return v; },
+    }).then(function (v) { cleanup(); return v; },
             function (e) {
-              if (timer) clearTimeout(timer);
+              cleanup();
+              var err = e;
               if (e && e.name === 'AbortError') {
-                var t = new Error('DELTA_RUN_SILENT'); t.transport = true; throw t;
+                err = new Error('DELTA_RUN_SILENT'); err.transport = true;
+              } else if (err && err.status === undefined && err.transport === undefined) {
+                err.transport = true;
               }
-              if (e && e.status === undefined && e.transport === undefined) e.transport = true;
-              throw e;
+              if (sawHidden || isHidden()) { try { err.whileHidden = true; } catch (_) {} }
+              throw err;
             });
   }
 
@@ -232,6 +291,11 @@
   // state, anything with an opinion — is returned as-is.
   function postWithRetry(action, body, attempts) {
     var tries = attempts || 3;
+    // Two counters, because two different things can go wrong and only one of
+    // them is evidence about the server. `strikes` is the budget; hidden-window
+    // failures never touch it.
+    var strikes = 0;
+    var hiddenWaits = 0;
     var attempt = 0;
     // The floor belongs to this run. Retries below must NOT reset it — that is
     // the whole point — so it is cleared here, once, before the first attempt.
@@ -268,10 +332,32 @@
         // identical refusals. Only something that never became an answer is
         // worth asking again.
         var transport = (e.transport === true) && (e.status === undefined);
-        if (!transport || attempt >= tries) throw e;
+        if (!transport) throw e;
+
+        // THE BROWSER SUSPENDED US. Not an answer, not a refusal, and not
+        // something a second request issued one second later can survive
+        // either — so it does not spend the budget. Hold the run and pick the
+        // journal back up when the screen returns.
+        if (e.whileHidden === true || isHidden()) {
+          if (hiddenWaits >= HIDDEN_RETRY_MAX) throw e;
+          hiddenWaits++;
+          if (typeof log === 'function') {
+            log('Evidence: the screen went away mid-request — holding the run rather ' +
+              'than spending a retry on it. Work already walked is journalled and ' +
+              'resumes when the screen comes back.');
+          }
+          return whenVisible(HIDDEN_WAIT_MAX_MS).then(function (returned) {
+            if (!returned) throw e;    // never came back: report the real failure
+            if (typeof log === 'function') log('Evidence: screen back — resuming the delta walk.');
+            return once();
+          });
+        }
+
+        strikes++;
+        if (strikes >= tries) throw e;
         if (typeof log === 'function') {
           log('Evidence: the request was cut (' + e.message + ') — retrying ' +
-            attempt + '/' + (tries - 1) + '. Work already walked is journalled and resumes.');
+            strikes + '/' + (tries - 1) + '. Work already walked is journalled and resumes.');
         }
         return new Promise(function (r) { setTimeout(r, 2000); }).then(once);
       });
@@ -299,6 +385,8 @@
 
   window.SW_EVIDENCE_INDEX = {
     // Everything happens here. The name is kept because layer 17 calls it.
+    isHidden: isHidden,
+    whenVisible: whenVisible,
     begin: function (windowRange, accounts) {
       var S = pageState();
       var reportId = (S && S.reportId) || (S && S.seal && S.seal.report_id) || null;

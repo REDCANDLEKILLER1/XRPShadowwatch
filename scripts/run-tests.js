@@ -92,7 +92,10 @@ const SUITES = [
   ['ledger-anchor',          'ledger-anchor-prerequisites.test.js', null],
   // An XRPL account cannot hold less than zero, so a minus beside the word
   // "balance" is a wording bug — and it was read aloud as a reading.
-  ['negative-flow-wording',  'negative-flow-wording.test.js',     8231]
+  ['negative-flow-wording',  'negative-flow-wording.test.js',     8231],
+  // A backgrounded tab kills the fetch and throttles the timers. Neither is
+  // the server refusing, so neither may spend the retry budget.
+  ['hidden-page-retry',      'hidden-page-retry.test.js',         8232]
 ];
 
 const only = (() => {

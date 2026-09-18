@@ -1951,19 +1951,48 @@ async function scanWallets(ws) {
   state.effectiveWindow = null;
   state.indexRun = null;
   if (window.SW_EVIDENCE_INDEX) {
-    try {
-      log('Evidence index: establishing the server-owned run and roster…');
-      state.anchorAttempts.push({ source:'SERVER_VERIFIED_INDEX', at:new Date().toISOString() });
-      state.indexRun = await window.SW_EVIDENCE_INDEX.begin(getTxWindow(), getActiveWatchlist().map(w => w.address));
-      state.runId = state.indexRun.scan_id;
-      const ir = state.indexRun;
+    const _acceptIndexRun = (ir) => {
+      state.indexRun = ir;
+      state.runId = ir.scan_id;
       state.runAnchor = { ok:true, anchor_ledger:ir.anchor_ledger, anchor_close_ms:ir.anchor_close_ms,
         anchor_close_iso:new Date(ir.anchor_close_ms).toISOString(), history_exhaustion_proof:null,
         transport_epoch:0, source:'SERVER_VERIFIED_INDEX' };
       log('Evidence index: run ' + ir.scan_id + ', roster ' + ir.accounts.length + ', anchor ' + ir.anchor_ledger);
+    };
+    try {
+      log('Evidence index: establishing the server-owned run and roster…');
+      state.anchorAttempts.push({ source:'SERVER_VERIFIED_INDEX', at:new Date().toISOString() });
+      _acceptIndexRun(await window.SW_EVIDENCE_INDEX.begin(getTxWindow(), getActiveWatchlist().map(w => w.address)));
     } catch(e) {
       state.anchorAttempts[state.anchorAttempts.length-1].error=e.message;
-      log('Evidence index unavailable — direct XRPL acquisition: ' + e.message);
+      // ── GIVING UP HERE IS REVOCABLE ──────────────────────────────────────
+      // The line below commits the run to walking all 408 wallets from this
+      // device — the path with the 60-second quota walls, the retired sockets
+      // and the "restarting this wallet" that discards completed pages. On
+      // SW-20260918-56PSL it cost thirteen minutes and produced no seal.
+      //
+      // That is far too expensive to enter while the only thing actually wrong
+      // is that the phone is in a pocket. If we are still hidden, wait for the
+      // screen and ask once more; the journal means the second ask resumes
+      // rather than restarts.
+      let _second = null;
+      try {
+        const V = window.SW_EVIDENCE_INDEX;
+        if (V && typeof V.isHidden === 'function' && typeof V.whenVisible === 'function' && V.isHidden()) {
+          log('Evidence index stopped while the screen was away. The fallback walks every ' +
+              'wallet from this device, so waiting for the screen before taking it.');
+          if (await V.whenVisible(120000)) {
+            log('Evidence index: screen is back — asking once more before the slow path.');
+            state.anchorAttempts.push({ source:'SERVER_VERIFIED_INDEX_RETRY', at:new Date().toISOString() });
+            _second = await V.begin(getTxWindow(), getActiveWatchlist().map(w => w.address));
+          }
+        }
+      } catch (e2) {
+        try { state.anchorAttempts[state.anchorAttempts.length-1].error = e2.message; } catch(_) {}
+        log('Evidence index: the second attempt failed too — ' + e2.message);
+      }
+      if (_second) _acceptIndexRun(_second);
+      else log('Evidence index unavailable — direct XRPL acquisition: ' + e.message);
     }
   }
   const RA = (typeof window !== 'undefined') && window.SW_RUN_ANCHOR;
