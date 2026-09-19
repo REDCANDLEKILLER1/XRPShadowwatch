@@ -98,9 +98,10 @@ const SUITES = [
   ['hidden-page-retry',      'hidden-page-retry.test.js',         8232],
   // A wallet that cannot finish in one budget banks what it read and resumes
   // there; a journal a day behind the ledger re-anchors. Pure node, no port.
-  ['heavy-wallet-resume',    'heavy-wallet-resume.test.js',       null]
+  ['heavy-wallet-resume',    'heavy-wallet-resume.test.js',       null],
+  // A promotion is a claim; the evidence that earned it travels with the entry.
+  ['roster-promotion',       'roster-promotion-sk5r3.test.js',      null]
 ];
-
 const only = (() => {
   const i = process.argv.indexOf('--only');
   return i > -1 ? process.argv[i + 1] : null;
