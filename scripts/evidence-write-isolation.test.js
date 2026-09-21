@@ -149,7 +149,7 @@ const writers = [
     return '';
   };
   const writeFns = ['appendJournal', 'clearJournal', 'commitRun', 'seedGenesis'];
-  const readFns  = ['readState', 'readJournal', 'readJournalRows', 'missingJournalShards', 'readDays'];
+  const readFns  = ['readState', 'readJournal', 'readJournalRowsEach', 'missingJournalShards', 'readDays'];
   const body = name => {
     const at = STORE_SRC.indexOf('function ' + name + '(');
     return at < 0 ? '' : STORE_SRC.slice(at, at + 400);
@@ -157,6 +157,12 @@ const writers = [
   writeFns.forEach(n => check(n + ' resolves through the write guard', /writeTarget\(/.test(body(n)), body(n).slice(0, 120)));
   readFns.forEach(n => check(n + ' still uses the plain read target',
         /(^|[^e])target\(d\.env\)/.test(body(n)) && !/writeTarget\(/.test(body(n)), body(n).slice(0, 120)));
+  // readJournalRows is now a thin accumulator over readJournalRowsEach and
+  // resolves no target of its own — it inherits the read target from the
+  // function it delegates to, and must keep doing so.
+  check('readJournalRows delegates to the streaming reader, and only to it',
+        /await readJournalRowsEach\(journal, deps/.test(body('readJournalRows')) && !/[wW]riteTarget\(|target\(/.test(body('readJournalRows')),
+        body('readJournalRows').slice(0, 160));
   check('no writer was left on the read path',
         writeFns.every(n => /writeTarget\(/.test(body(n))));
 

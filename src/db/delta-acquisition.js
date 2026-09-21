@@ -350,6 +350,217 @@ function buildShards(rows, prior) {
   return { files, shards };
 }
 
+// ── THE ENDING, ONE DAY AT A TIME ──────────────────────────────────────────
+//
+// buildShards above takes every row of the commit as one array. That is fine
+// for a morning's delta and fatal for a stalled week's: on 21 Sep the journal
+// held 419,380 rows — 1.16 GB of decompressed JSON — and reading them into one
+// array took 1.3 GB of heap before the merge began. Vercel killed the instance
+// for running out of memory, twice in a row, with all 418 wallets proven.
+//
+// So the commit is STAGED instead. Each row is read once and split in two:
+// the raw ledger payload goes into a gzipped per-day bucket as text, keyed by
+// which sighting it came from, and the slim remainder — everything the event
+// and provenance rows are built from — into another. What stays resident is
+// one small entry per distinct hash saying which sighting's payload the merge
+// would keep. Then each day is built on its own: its slim rows are merged, the
+// day's stored files are read, the three outputs are sharded and gzipped, and
+// the day's buckets are released before the next day begins. The working set
+// is one day, not the window.
+//
+// The rule for which payload survives is mergeSightings' own — the first
+// sighting's, unless a later one carries strictly more AffectedNodes — applied
+// here to a pointer instead of to the payload. The suite holds this builder to
+// byte-identical output against buildShards for the same rows.
+const STAGE_CHUNK_BYTES = 4 * 1024 * 1024;
+
+class DayPartition {
+  constructor(chunkBytes) {
+    this.limit = chunkBytes || STAGE_CHUNK_BYTES;
+    this.buckets = new Map();
+  }
+  bucket(day, kind) {
+    const key = day + ' ' + kind;
+    let b = this.buckets.get(key);
+    if (!b) { b = { day, pending: [], bytes: 0, chunks: [] }; this.buckets.set(key, b); }
+    return b;
+  }
+  add(day, kind, line) {
+    const b = this.bucket(day, kind);
+    b.pending.push(line); b.bytes += line.length + 1;
+    if (b.bytes >= this.limit) this.flush(b);
+  }
+  flush(b) {
+    if (!b.pending.length) return;
+    // Level 1: this is a holding pen, not the archive. It is decompressed
+    // again minutes from now and the archive's own shards are gzipped at 6.
+    b.chunks.push(zlib.gzipSync(Buffer.from(b.pending.join('\n') + '\n', 'utf8'), { level: 1 }));
+    b.pending = []; b.bytes = 0;
+  }
+  days() { return [...new Set([...this.buckets.values()].map(b => b.day))].sort(); }
+  // Hands the lines back and FORGETS them: a day is read out exactly once.
+  take(day, kind) {
+    const key = day + ' ' + kind;
+    const b = this.buckets.get(key);
+    if (!b) return [];
+    this.flush(b);
+    const lines = [];
+    for (const chunk of b.chunks) {
+      for (const line of zlib.gunzipSync(chunk).toString('utf8').split('\n')) if (line) lines.push(line);
+    }
+    this.buckets.delete(key);
+    return lines;
+  }
+  packedBytes() {
+    let n = 0;
+    for (const b of this.buckets.values()) for (const c of b.chunks) n += c.length;
+    return n;
+  }
+}
+
+class Stage {
+  constructor(opts) {
+    this.partition = new DayPartition(opts && opts.chunkBytes);
+    this.best = new Map();     // hash -> { sid, nodes, has }
+    this.total = 0;            // rows ingested, sightings included
+    this.nextSid = 0;
+  }
+  ingest(row) {
+    // A row with no hash is not evidence; mergeSightings drops it, and so does this.
+    if (!row || !row.hash) return;
+    const day = X.dayOf(row.close_time_iso);
+    if (!day) throw new Error('ROW_WITHOUT_CLOSE_TIME');
+    const sid = this.nextSid++;
+    this.total++;
+    const payload = X.payloadOf(row);
+    const has = X.hasPayload(payload);
+    const nodes = ((row.raw_meta && row.raw_meta.AffectedNodes) || []).length;
+    const prior = this.best.get(row.hash);
+    if (!prior) this.best.set(row.hash, { sid, nodes, has });
+    else if (nodes > prior.nodes) { prior.sid = sid; prior.nodes = nodes; prior.has = has; }
+    if (has) this.partition.add(day, 'payloads', sid + ' ' + row.hash + ' ' + JSON.stringify(payload));
+    const { raw_tx, raw_meta, ...slim } = row;   // eslint-disable-line no-unused-vars
+    this.partition.add(day, 'rows', JSON.stringify(slim));
+  }
+}
+
+// Pass one over the journal. Every shard is hash-checked by the reader before
+// a row of it is delivered; a failure here is the journal's, and the caller
+// treats it as such. The rows are not kept.
+async function stageJournal(journal, deps) {
+  const d = deps || {};
+  const stage = new Stage({ chunkBytes: d.chunkBytes });
+  await Store.readJournalRowsEach(journal, { env: d.env, gh: d.gh, fetch: d.fetch,
+    prefetch: d.prefetch, onShard: d.onShard }, row => stage.ingest(row));
+  return stage;
+}
+
+// Pass two: one day at a time, in day order, so the shard list comes out in
+// the order buildShards produced it. `keep_days` names the days whose merged
+// slim rows the caller wants back — the report window's, so the response can
+// carry what it always carried for those days and nothing for the rest.
+async function buildDays(stage, input, deps) {
+  const d = deps || {};
+  const phase = (name, detail) => { if (typeof d.onPhase === 'function') d.onPhase(name, detail || {}); };
+  const store = { env: d.env, gh: d.gh, fetch: d.fetch };
+  const keep = new Set((input && input.keep_days) || []);
+  const files = {}, shards = [], kept = [];
+  const emit = (records, order, basePath) => {
+    if (!records.length) return;
+    for (const piece of X.shard(records.slice().sort(order), basePath, X.MAX_SHARD_BYTES)) {
+      const packed = gz(piece.text);
+      const path = piece.path + '.gz';
+      files[path] = packed;
+      shards.push({ path, sha256: X.sha256(packed), rows: piece.records.length });
+    }
+  };
+  const mergeBy = (key, previous, fresh) => {
+    const out = [], seen = new Set();
+    for (const record of (previous || []).concat(fresh)) {
+      const id = key(record);
+      if (seen.has(id)) continue;
+      seen.add(id); out.push(record);
+    }
+    return out;
+  };
+  const eventId = e => String(e.hash);
+  const participantId = p => p.tx_hash + '|' + p.address + '|' + p.role;
+  // The hash is the first field of every payload line this code has ever
+  // written, so it is read off the text; a line shaped any other way is parsed.
+  const hashOfLine = line => {
+    const m = /^\{"hash":"([^"\\]*)"/.exec(line);
+    if (m) return m[1];
+    try { return String(JSON.parse(line).hash); } catch (_) { return null; }
+  };
+
+  for (const day of stage.partition.days()) {
+    const base = 'evidence/' + X.dayPath(day);
+    const tDay = Date.now();
+    const merged = T.mergeSightings(stage.partition.take(day, 'rows').map(line => JSON.parse(line)));
+    if (keep.has(day)) for (const row of merged) kept.push(row);
+    const events = [], participants = [];
+    for (const row of merged) {
+      const event = X.eventOf({ ...row, close_time: row.close_time_iso });
+      if (!X.dayOf(event.close_time)) throw new Error('ROW_WITHOUT_CLOSE_TIME');
+      events.push(event);
+      for (const p of T.participantsOf(row)) participants.push(X.participantOf(p));
+    }
+    // What the day already holds, read before it is written, because a commit
+    // ADDS to a day rather than replacing it. Only this day: a run that merely
+    // reports on other days does not cause them to be rewritten.
+    phase('day-merge-read', { day, rows: merged.length });
+    const [pe, pp, pl] = await Promise.all([
+      Store.readDays([day], store),
+      Store.readDays([day], store, 'participants'),
+      Store.readDays([day], store, 'payloads', { lines: true })
+    ]);
+    phase('day-merge-read-done', { day, events: pe.events.length, participants: pp.events.length,
+      payloads: pl.lines.length, took_ms: Date.now() - tDay });
+    emit(mergeBy(eventId, pe.events, events), X.orderEvents, base + '/events.ndjson');
+    emit(mergeBy(participantId, pp.events, participants), X.orderParticipants, base + '/participants.ndjson');
+
+    // Payloads are merged as TEXT. Stored lines first so they are the ones
+    // kept on a tie, then this commit's — one per hash, the sighting the merge
+    // rule chose — ordered by hash and split by the same cap as everything else.
+    const seen = new Set(), lines = [];
+    for (const line of pl.lines) {
+      const h = hashOfLine(line);
+      if (h === null || seen.has(h)) continue;
+      seen.add(h); lines.push({ h, line });
+    }
+    for (const tagged of stage.partition.take(day, 'payloads')) {
+      const sp1 = tagged.indexOf(' '), sp2 = tagged.indexOf(' ', sp1 + 1);
+      const sid = Number(tagged.slice(0, sp1)), h = tagged.slice(sp1 + 1, sp2);
+      const chosen = stage.best.get(h);
+      if (!chosen || chosen.sid !== sid || !chosen.has || seen.has(h)) continue;
+      seen.add(h); lines.push({ h, line: tagged.slice(sp2 + 1) });
+    }
+    lines.sort((a, b) => a.h < b.h ? -1 : (a.h > b.h ? 1 : 0));
+    if (lines.length) {
+      for (const piece of X.shardLines(lines.map(l => l.line), base + '/payloads.ndjson', X.MAX_SHARD_BYTES)) {
+        const packed = gz(piece.text);
+        const path = piece.path + '.gz';
+        files[path] = packed;
+        shards.push({ path, sha256: X.sha256(packed), rows: piece.lines.length });
+      }
+    }
+    phase('day-built', { day, events: events.length, took_ms: Date.now() - tDay });
+  }
+  return { files, shards, transactions: stage.best.size, rows: kept };
+}
+
+// The UTC days a report window touches — the same walk readReportWindow does.
+function windowDays(run) {
+  const from = Number(run && run.window_start_ms), to = Number(run && run.window_end_ms);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return [];
+  const days = [];
+  const start = new Date(from);
+  for (let t = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()); t <= to; t += 86400000) {
+    days.push(new Date(t).toISOString().slice(0, 10));
+  }
+  return days;
+}
+
 // Wallets that did not complete, grouped by the reason they did not. Keeps
 // every address — nothing is summarised away — but says each reason once.
 function groupByCause(results) {
@@ -420,7 +631,7 @@ async function acquire(input, deps) {
   // start (it is small, and it says which wallets to skip) and the rows are
   // fetched only once the whole-run gate has actually passed. The cost lands on
   // the run that finishes, not on every run that does not.
-  let journal = null, resumed = null, resumedRows = null;
+  let journal = null, resumed = null;
   const stale = journalRead && !journalRead.missing && journalRead.journal
     ? Journal.usable(journalRead.journal, state) : null;
   // usable() is pure and cannot see the branch, so it cannot know whether the
@@ -1080,22 +1291,26 @@ async function acquire(input, deps) {
       ...(await saveWork()) };
   }
 
-  // The gate has passed, so this run WILL commit — which is the only moment
-  // the journalled rows are needed. Ninety seconds of reading them belongs
-  // here, once, and not at the start of every attempt that never gets this far.
-  let committedRows = rows;
+  // ── THE GATE HAS PASSED; THE ENDING IS PAID FOR ONE DAY AT A TIME ───────
+  //
+  // This run WILL commit, which is the only moment the journalled rows are
+  // needed. They used to be read into one array here, merged, and rebuilt into
+  // day files all at once — and on 21 Sep, with 419,380 of them banked and every
+  // wallet proven, Vercel killed the instance for running out of memory. Twice.
+  // See the staging builder above: the rows are read once, split, bucketed by
+  // day as gzipped text, and each day is built and released on its own.
+  const keepDays = windowDays(run);
+  let staged = null;
   if (journal && (journal.row_shards || []).length) {
     phase('journal-load', { shards: journal.row_shards.length,
       rows: resumed && resumed.rows_awaiting_load });
     try {
       const t0 = Date.now();
-      resumedRows = await Store.readJournalRows(journal, { env: d.env, gh: d.gh, fetch: d.fetch,
+      staged = await stageJournal(journal, { env: d.env, gh: d.gh, fetch: d.fetch,
         onShard: (n, total, rowCount) => phase('journal-shard',
           { shard: n, of: total, rows: rowCount, ms: Date.now() - t0 }) });
-      phase('journal-loaded', { rows: resumedRows.length, took_ms: Date.now() - t0 });
-      const t1 = Date.now();
-      committedRows = T.mergeSightings(resumedRows.concat(rows));
-      phase('merged', { rows: committedRows.length, took_ms: Date.now() - t1 });
+      phase('journal-loaded', { rows: staged.total, distinct: staged.best.size,
+        staged_bytes: staged.partition.packedBytes(), took_ms: Date.now() - t0 });
     } catch (e) {
       // The wallets are proven — their manifest entries say so and this run
       // walked the rest — but their transactions cannot be produced. Committing
@@ -1125,52 +1340,25 @@ async function acquire(input, deps) {
         ...withoutUnverifiedRecoveries('JOURNAL_ROWS_UNREADABLE: ' + e.message),
         ...saved };
     }
+  } else {
+    staged = new Stage();
   }
+  // This attempt's own rows join the staging after the journal's — the order
+  // the merge always saw them in. A fault in THESE is this run's, not the
+  // journal's, and is thrown as such rather than costing the journal.
+  for (const row of rows) staged.ingest(row);
+
   // ── THE LAST MILE, SAID OUT LOUD ────────────────────────────────────────
   //
   // Between "journal-load" and "done" the run used to say nothing, and that gap
   // turned out to be twenty-eight minutes of a thirty-two minute run. It is the
   // same silent-gap problem as the one before the first wallet, one level
   // deeper: without these lines the only way to find where a commit spends its
-  // time is to guess.
-  // ── WHAT THE AFFECTED DAYS ALREADY HOLD ─────────────────────────────────
-  //
-  // Read before writing, because a commit ADDS to a day rather than replacing
-  // it. Only the days this run's rows actually land in — a reporting window
-  // that merely reads other days does not cause them to be rewritten.
-  //
-  // Measured on the live 2026-09-14: 41,983 events and 138,518 provenance rows
-  // read back in about six seconds, merged and recompressed in six hundred
-  // milliseconds, against a ninety-second ending reserve.
-  const tPrior = Date.now();
-  const touchedDays = [...new Set(committedRows
-    .map(r => X.dayOf(X.eventOf({ ...r, close_time: r.close_time_iso }).close_time))
-    .filter(Boolean))].sort();
-  let priorByDay = {};
-  if (touchedDays.length) {
-    phase('day-merge-read', { days: touchedDays });
-    const [pe, pp, pl] = await Promise.all([
-      Store.readDays(touchedDays, { env: d.env, gh: d.gh, fetch: d.fetch }),
-      Store.readDays(touchedDays, { env: d.env, gh: d.gh, fetch: d.fetch }, 'participants'),
-      Store.readDays(touchedDays, { env: d.env, gh: d.gh, fetch: d.fetch }, 'payloads')
-    ]);
-    const bucket = day => (priorByDay[day] || (priorByDay[day] = { events: [], participants: [], payloads: [] }));
-    for (const e of pe.events) { const day = X.dayOf(e.close_time); if (day) bucket(day).events.push(e); }
-    // A provenance row carries no date of its own; it belongs to the day of the
-    // transaction it names. With one or two days in play, indexing the events
-    // just read is enough to place them.
-    const dayOfHash = new Map();
-    for (const e of pe.events) { const day = X.dayOf(e.close_time); if (day) dayOfHash.set(e.hash, day); }
-    const only = touchedDays.length === 1 ? touchedDays[0] : null;
-    for (const p of pp.events) { const day = dayOfHash.get(p.tx_hash) || only; if (day) bucket(day).participants.push(p); }
-    for (const p of pl.events) { const day = dayOfHash.get(p.hash) || only; if (day) bucket(day).payloads.push(p); }
-    phase('day-merge-read-done', { days: touchedDays.length,
-      events: pe.events.length, participants: pp.events.length, payloads: pl.events.length,
-      took_ms: Date.now() - tPrior });
-  }
-
+  // time is to guess. Each day now reports as it is read, merged and built.
   const tBuild = Date.now();
-  const built = buildShards(committedRows, priorByDay);
+  const built = await buildDays(staged, { keep_days: keepDays },
+    { env: d.env, gh: d.gh, fetch: d.fetch, onPhase: phase });
+  staged = null;
   phase('shards-built', { files: Object.keys(built.files).length,
     bytes: Object.values(built.files).reduce((n, b) => n + b.length, 0),
     took_ms: Date.now() - tBuild });
@@ -1204,8 +1392,12 @@ async function acquire(input, deps) {
     throw err;
   }
 
-  return { ...summary, committed: true, transactions: committedRows.length,
-    rows: committedRows, wallets, freshness, ...committed };
+  // The rows that come back are the report window's days only, merged and
+  // stripped of their raw payloads — the repository holds the evidence, and a
+  // response carrying a week of it is the same memory the ending just refused
+  // to spend. `transactions` still counts every distinct hash committed.
+  return { ...summary, committed: true, transactions: built.transactions,
+    rows: built.rows, rows_retained_days: keepDays, wallets, freshness, ...committed };
 }
 
 // ── REPAIRING WHAT CAN BE PROVEN, AND NOTHING ELSE ────────────────────────
@@ -1387,5 +1579,5 @@ async function readReportWindow(input, deps) {
       ? 'PARTIAL_RECONSTRUCTED' : 'OBSERVED' };
 }
 
-module.exports = { acquire, walkWallet, buildShards, readReportWindow, reconstructProvenance,
-  groupByCause, PAGE_LIMIT };
+module.exports = { acquire, walkWallet, buildShards, Stage, stageJournal, buildDays, windowDays,
+  readReportWindow, reconstructProvenance, groupByCause, PAGE_LIMIT };

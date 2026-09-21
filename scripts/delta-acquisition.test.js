@@ -518,10 +518,16 @@ async function main() {
   check('the WALK never loads a stored shard — it is bounded by the checkpoint',
     !/Store\.readDays/.test(WALK_PHASE));
   const COMMIT_PHASE = SRC2.split('// 4. The gate')[1].split('// ── The report window')[0];
+  // The commit's read moved with the commit's build: buildDays reads each day
+  // it is about to write, one day at a time, and nothing after the gate reads
+  // a day by any other route. (The all-at-once builder stays for the merge
+  // gate in section 39; the run no longer calls it.)
+  const DAY_BUILDER = SRC2.split('async function buildDays')[1].split('\nfunction windowDays')[0];
   check('but the commit reads the days it is about to write, to merge them',
-    /Store\.readDays/.test(COMMIT_PHASE) && /buildShards\(committedRows, priorByDay\)/.test(COMMIT_PHASE));
+    /buildDays\(staged/.test(COMMIT_PHASE) && /Store\.readDays\(\[day\]/.test(DAY_BUILDER));
   check('and it reads only the days this run\'s rows land in',
-    /touchedDays/.test(COMMIT_PHASE) && !/readDays\(days/.test(COMMIT_PHASE));
+    /stage\.partition\.days\(\)/.test(DAY_BUILDER) && !/readDays\(days/.test(DAY_BUILDER) &&
+    !/Store\.readDays/.test(COMMIT_PHASE) && !/buildShards\(/.test(COMMIT_PHASE));
   check('freshly walked rows win a tie against a stored copy',
     /for \(const event of stored\.events\) byHash\.set[\s\S]{0,140}?for \(const event of fresh\) byHash\.set/.test(SRC2));
 
@@ -1798,6 +1804,243 @@ async function main() {
   }, { env: ENV, gh: ghClean.gh });
   check('a fully observed window is not labelled partial',
     cleanWin.provenance === 'OBSERVED' && cleanWin.attributed_derived_only === 0, cleanWin.provenance);
+
+  console.log('\n43. the ending is paid for one day at a time, and the bytes do not change');
+  /* On 21 Sep two invocations in a row reached the ending with all 418 wallets
+     proven and were killed: "instance was killed because it ran out of
+     available memory". The journal held 419,380 rows — 1.16 GB of decompressed
+     JSON — and the ending read every one of them into a single array, merged
+     it, and rebuilt the day files from it. Reproduced locally: 1.3 GB of heap
+     after the parse, out of memory during the merge.
+
+     The fix stages rows as they are read — raw payload to a gzipped per-day
+     bucket as text, the slim remainder to another — and builds each day on its
+     own. What this section holds it to:
+
+       the bytes are the same           byte-identical to buildShards, shard for shard
+       the check is the same            a flipped MTIME byte still refuses the read
+       the order is the same            manifest order, whatever returned first
+       the reads overlap                prefetched, well under one-after-another
+       the response is bounded          window days only, no raw payload
+       the journal is not the casualty  a day read that fails leaves it in place */
+  const T43 = require(path.join(ROOT, 'src/db/transactions.js'));
+  const X43 = require(path.join(ROOT, 'src/db/evidence-export.js'));
+  const q43_hash = (n) => String(n).padStart(64, 'e');
+  const q43_row = (n, o) => {
+    const opts = o || {};
+    const dayIso = (opts.day || '2026-09-12') + 'T0' + ((n % 9) + 1) + ':00:00.000Z';
+    const nodes = [];
+    for (let k = 0; k < (opts.nodes === undefined ? 1 : opts.nodes); k++) {
+      nodes.push({ ModifiedNode: { LedgerEntryType: 'AccountRoot', FinalFields: { Account: 'rX' + k, Balance: String(1000 + n) } } });
+    }
+    const row = {
+      hash: opts.hash || q43_hash(n), ledger_index: 109000000 + n,
+      close_time_ms: Date.parse(dayIso), close_time_iso: dayIso,
+      tx_type: 'Payment', tx_result: 'tesSUCCESS', validated: true,
+      from_account: opts.from || ('rFrom' + (n % 7)), to_account: opts.to || ('rTo' + (n % 5)),
+      amount_drops: String(1000000 * (n + 1)), amount_value: null, currency: 'XRP', issuer: null,
+      destination_tag: null, source_tag: null, sig_mode: 'single', signer_count: 1,
+      escrow_owner: null, escrow_destination: null, escrow_amount_drops: null,
+      fee_drops: '12', sequence: n, tx_flags: null, transaction_index: n % 3, roster_version: 'r',
+      raw_tx: { Account: opts.from || ('rFrom' + (n % 7)), TransactionType: 'Payment', hash: opts.hash || q43_hash(n), Sequence: n },
+      raw_meta: { TransactionResult: 'tesSUCCESS', AffectedNodes: nodes },
+      evidence: { signer_accounts: opts.signers || [] },
+      observed_via: opts.via || ['rAlice'], sightings: 1, conflicts: []
+    };
+    if (opts.noRaw) { row.raw_tx = null; row.raw_meta = null; }
+    return row;
+  };
+  // Three days. The same hash seen from two wallets (the union of observers is
+  // the merge's job); a second sighting carrying a richer payload (it must win);
+  // a richer sighting whose first sighting had no payload at all; a row with
+  // no payload from anyone (nothing is emitted for it); signers to union.
+  const q43_rows = [];
+  for (let n = 0; n < 40; n++) q43_rows.push(q43_row(n, { day: '2026-09-11', via: ['rAlice'] }));
+  for (let n = 40; n < 90; n++) q43_rows.push(q43_row(n, { day: '2026-09-12', via: ['rBob'] }));
+  for (let n = 90; n < 110; n++) q43_rows.push(q43_row(n, { day: '2026-09-13', via: ['rCarol'] }));
+  q43_rows.push(q43_row(41, { day: '2026-09-12', via: ['rCarol'], signers: ['rSig1'] }));          // same hash, other wallet
+  q43_rows.push(q43_row(42, { day: '2026-09-12', via: ['rAlice'], nodes: 4 }));                    // richer payload arrives second
+  q43_rows.push(q43_row(200, { day: '2026-09-13', via: ['rAlice'], noRaw: true }));                 // first sighting: no payload
+  q43_rows.push(q43_row(200, { day: '2026-09-13', via: ['rBob'], nodes: 2 }));                      // second: a payload — it is kept
+  q43_rows.push(q43_row(201, { day: '2026-09-13', via: ['rBob'], noRaw: true }));                   // nobody has a payload
+  q43_rows.push({ hash: null, close_time_iso: '2026-09-13T01:00:00.000Z', observed_via: ['rBob'] }); // not evidence
+  // What the middle day already holds: an earlier commit's files, made by the
+  // builder whose bytes are the reference — including a payload for a hash
+  // this commit sees again (stored wins), and a provenance row whose event is
+  // no longer in the day's events file at all.
+  const q43_priorRows = [];
+  for (let n = 300; n < 320; n++) q43_priorRows.push(q43_row(n, { day: '2026-09-12', via: ['rBob'] }));
+  q43_priorRows.push(q43_row(45, { day: '2026-09-12', via: ['rPriorWallet'], nodes: 9 }));         // stored copy of a hash seen again
+  const q43_priorBuilt = D.buildShards(T43.mergeSightings(q43_priorRows), {});
+  const q43_files = {};
+  for (const [pth, buf] of Object.entries(q43_priorBuilt.files)) q43_files[pth] = buf;
+  const q43_parse = buf => zlib.gunzipSync(buf).toString('utf8').split('\n').filter(Boolean).map(l => JSON.parse(l));
+  // The orphan: a provenance row committed by a walk whose event was lost.
+  {
+    const partsPath = 'evidence/2026/09/12/participants.ndjson.gz';
+    const parts = q43_parse(q43_files[partsPath]);
+    parts.push({ tx_hash: q43_hash(999), address: 'rOrphanSaw', role: 'observed_via' });
+    parts.sort(X43.orderParticipants);
+    q43_files[partsPath] = zlib.gzipSync(Buffer.from(X43.ndjson(parts), 'utf8'), { level: 6 });
+  }
+  const q43_priorByDay = { '2026-09-12': {
+    events: q43_parse(q43_files['evidence/2026/09/12/events.ndjson.gz']),
+    participants: q43_parse(q43_files['evidence/2026/09/12/participants.ndjson.gz']),
+    payloads: q43_parse(q43_files['evidence/2026/09/12/payloads.ndjson.gz']) } };
+
+  // The reference: everything merged at once, the way the ending used to do it.
+  const q43_reference = D.buildShards(T43.mergeSightings(q43_rows), q43_priorByDay);
+  // The staged build, with the same rows arriving through a journal of small
+  // shards and tiny staging chunks, so every seam is crossed.
+  const q43_journal = { row_shards: [] };
+  for (let i = 0; i < q43_rows.length; i += 17) {
+    const text = q43_rows.slice(i, i + 17).map(r => JSON.stringify(r)).join('\n') + '\n';
+    const packed = zlib.gzipSync(Buffer.from(text, 'utf8'));
+    const pth = 'evidence/runs/resume/SW-20260921-Q43AA-' + String(i).padStart(4, '0') + '.ndjson.gz';
+    q43_files[pth] = packed;
+    q43_journal.row_shards.push({ path: pth, sha256: Journal.sha256(packed), rows: 0 });
+  }
+  const q43_gh = fakeGithub(q43_files);
+  const q43_stage = await D.stageJournal(q43_journal, { env: ENV, gh: q43_gh.gh, chunkBytes: 512 });
+  check('every row was staged, sightings included, and nothing was kept whole',
+    q43_stage.total === q43_rows.length - 1 && q43_stage.best.size === new Set(q43_rows.filter(r => r.hash).map(r => r.hash)).size,
+    { total: q43_stage.total, distinct: q43_stage.best.size });
+  const q43_phases = [];
+  const q43_built = await D.buildDays(q43_stage, { keep_days: ['2026-09-12'] },
+    { env: ENV, gh: q43_gh.gh, onPhase: (n, det) => q43_phases.push({ n, ...det }) });
+  check('the same files come out, shard for shard',
+    Object.keys(q43_built.files).sort().join(',') === Object.keys(q43_reference.files).sort().join(','),
+    { staged: Object.keys(q43_built.files).sort(), reference: Object.keys(q43_reference.files).sort() });
+  const q43_differ = Object.keys(q43_reference.files).filter(pth =>
+    !q43_built.files[pth] || !q43_built.files[pth].equals(q43_reference.files[pth]));
+  check('and every one of them is byte-identical to the all-at-once builder\'s',
+    q43_differ.length === 0, q43_differ);
+  check('the shard manifest matches too — same order, same hashes, same counts',
+    JSON.stringify(q43_built.shards) === JSON.stringify(q43_reference.shards));
+  check('it counts the distinct transactions the commit carries',
+    q43_built.transactions === q43_stage.best.size, q43_built.transactions);
+  // Said in words rather than only by equality, because a reference builder
+  // that had the same bug would keep the equality green.
+  const q43_pay12 = q43_parse(q43_built.files['evidence/2026/09/12/payloads.ndjson.gz']);
+  const q43_pay13 = q43_parse(q43_built.files['evidence/2026/09/13/payloads.ndjson.gz']);
+  check('the richer payload wins when it arrives second',
+    q43_pay12.find(pl => pl.hash === q43_hash(42)).raw_meta.AffectedNodes.length === 4);
+  check('a stored payload is kept over a fresh sighting of the same hash',
+    q43_pay12.find(pl => pl.hash === q43_hash(45)).raw_meta.AffectedNodes.length === 9);
+  check('a hash whose first sighting had no payload still gets the one that came later',
+    q43_pay13.find(pl => pl.hash === q43_hash(200)).raw_meta.AffectedNodes.length === 2);
+  check('and a hash nobody has a payload for is not padded in as nulls',
+    !q43_pay13.some(pl => pl.hash === q43_hash(201)));
+  const q43_parts12 = q43_parse(q43_built.files['evidence/2026/09/12/participants.ndjson.gz']);
+  check('both wallets that saw a transaction are on record for it',
+    q43_parts12.filter(pr => pr.tx_hash === q43_hash(41) && pr.role === 'observed_via').map(pr => pr.address).sort().join(',') === 'rBob,rCarol');
+  check('a provenance row whose event was lost is not erased by the rewrite',
+    q43_parts12.some(pr => pr.tx_hash === q43_hash(999) && pr.address === 'rOrphanSaw'));
+  check('each day is read and built on its own, in day order',
+    q43_phases.filter(x => x.n === 'day-merge-read').map(x => x.day).join(',') === '2026-09-11,2026-09-12,2026-09-13' &&
+    q43_phases.filter(x => x.n === 'day-built').length === 3, q43_phases.map(x => x.n + ':' + x.day));
+  check('and its buckets are released once built',
+    q43_stage.partition.packedBytes() === 0 && q43_stage.partition.days().length === 0);
+  // What comes back: the kept day only, merged, and without the evidence.
+  check('the rows handed back are the kept day\'s, merged, and carry no raw payload',
+    q43_built.rows.length === 50 && q43_built.rows.every(r => r.close_time_iso.startsWith('2026-09-12') &&
+      r.raw_tx === undefined && r.raw_meta === undefined) &&
+    q43_built.rows.find(r => r.hash === q43_hash(41)).observed_via.slice().sort().join(',') === 'rBob,rCarol' &&
+    q43_built.rows.find(r => r.hash === q43_hash(41)).evidence.signer_accounts.join(',') === 'rSig1',
+    { rows: q43_built.rows.length });
+
+  // The check is the same. A byte in the gzip header's MTIME field: gunzip
+  // ignores it, so only the manifest hash can see the bytes changed.
+  const q43_victim = q43_journal.row_shards[2].path;
+  const q43_flipped = Buffer.from(q43_files[q43_victim]); q43_flipped[4] ^= 0xff;
+  const q43_ghBad = fakeGithub({ ...q43_files, [q43_victim]: q43_flipped });
+  let q43_refused = null, q43_delivered = 0;
+  try { await Store.readJournalRowsEach(q43_journal, { env: ENV, gh: q43_ghBad.gh }, () => { q43_delivered++; }); }
+  catch (e) { q43_refused = e.message; }
+  check('a shard whose bytes changed refuses the read, wherever it sits',
+    /JOURNAL_SHARD_HASH_MISMATCH/.test(String(q43_refused)) && /0034\.ndjson/.test(String(q43_refused)), q43_refused);
+  check('and no row of it was handed over — the ones before it were, in order',
+    q43_delivered === 34, q43_delivered);
+  const q43_ghGone = fakeGithub(Object.fromEntries(Object.entries(q43_files).filter(([k]) => k !== q43_victim)));
+  let q43_missing = null;
+  try { await Store.readJournalRowsEach(q43_journal, { env: ENV, gh: q43_ghGone.gh }, () => {}); }
+  catch (e) { q43_missing = e.message; }
+  check('a shard the branch no longer holds refuses it too', /JOURNAL_SHARD_MISSING/.test(String(q43_missing)), q43_missing);
+  // Delivered in manifest order, whatever came back first: a slow shard early
+  // in the manifest must not let a fast one behind it go first.
+  const q43_SHARD_MS = 40;
+  const q43_latency = pth => q43_SHARD_MS * (1 + ((parseInt(pth.slice(-12, -10), 10) || 0) % 3));
+  const q43_ghSlow = fakeGithub(q43_files);
+  const q43_slowGh = async (method, pth, body, allow404) => {
+    if (method === 'GET' && /^\/contents\/evidence\/runs\/resume\//.test(pth)) {
+      await new Promise(r => setTimeout(r, q43_latency(decodeURIComponent(pth.split('?')[0]))));
+    }
+    return q43_ghSlow.gh(method, pth, body, allow404);
+  };
+  const q43_order = [];
+  const q43_t0 = Date.now();
+  await Store.readJournalRowsEach(q43_journal, { env: ENV, gh: q43_slowGh },
+    (row, shardIndex) => { if (!q43_order.length || q43_order[q43_order.length - 1] !== shardIndex) q43_order.push(shardIndex); });
+  const q43_took = Date.now() - q43_t0;
+  const q43_serial = q43_journal.row_shards.reduce((n, sh) => n + q43_latency(sh.path), 0);
+  check('rows arrive in manifest order', q43_order.join(',') === q43_journal.row_shards.map((_, i) => i).join(','), q43_order);
+  check('and the fetches overlapped: well under what one-after-another would cost',
+    q43_took < q43_serial / 2, { took_ms: q43_took, serial_ms: q43_serial });
+
+  // Through the run itself: a journalled first attempt, then a commit — the
+  // response carries the window's day and nothing else, and counts everything.
+  const q43_ghRun = fakeGithub(seeded(ANCHOR - 1000));
+  // A pass-through pair that reconciles against BAL, the same shape crashTx uses.
+  const q43_tx = { rAlice: [], rCarol: [],
+    rBob: [{ ledger: ANCHOR - 500, amount: '5000000000000', before: '20000000000000', after: '25000000000000', hash: q43_hash(700) },
+           { ledger: ANCHOR - 400, amount: '5000000000000', before: '25000000000000', after: '20000000000000', hash: q43_hash(701) }] };
+  await D.acquire({ report_id: 'SW-20260921-Q43BB' },
+    { env: ENV, gh: q43_ghRun.gh, reader: fakePeer({ transactions: q43_tx, balances: BAL, failOn: 'rCarol' }).reader, concurrency: 1 });
+  check('the first attempt left a journal behind', q43_ghRun.files().has(Store.JOURNAL_PATH));
+  const q43_out = await D.acquire({ report_id: 'SW-20260921-Q43CC',
+      window_start_ms: Date.UTC(2026, 8, 11, 0, 0, 0), window_end_ms: Date.UTC(2026, 8, 11, 23, 59, 59) },
+    { env: ENV, gh: q43_ghRun.gh, reader: fakePeer({ transactions: q43_tx, balances: BAL }).reader, concurrency: 1 });
+  check('the resumed run commits', q43_out.committed === true, { reason: q43_out.reason, err: q43_out.commit_error });
+  check('it counts every distinct transaction it committed', q43_out.transactions === 2, q43_out.transactions);
+  check('the rows it hands back are the window day\'s, without the evidence',
+    Array.isArray(q43_out.rows) && q43_out.rows.length === 2 && q43_out.rows.every(r => r.raw_tx === undefined) &&
+    JSON.stringify(q43_out.rows_retained_days) === JSON.stringify(['2026-09-11']),
+    { rows: q43_out.rows.length, days: q43_out.rows_retained_days });
+  // A fresh store, because the fake ledger never advances and a second run
+  // against the committed anchor has nothing to be ahead of.
+  const q43_ghQuiet = fakeGithub(seeded(ANCHOR - 1000));
+  const q43_outNoWindow = await D.acquire({ report_id: 'SW-20260921-Q43DD' },
+    { env: ENV, gh: q43_ghQuiet.gh, reader: fakePeer({ transactions: q43_tx, balances: BAL }).reader, concurrency: 1 });
+  check('a run asked for no window hands back none of them, and says so',
+    q43_outNoWindow.committed === true && Array.isArray(q43_outNoWindow.rows) && q43_outNoWindow.rows.length === 0 &&
+    JSON.stringify(q43_outNoWindow.rows_retained_days) === '[]', { reason: q43_outNoWindow.reason, rows: q43_outNoWindow.rows && q43_outNoWindow.rows.length });
+  check('and the journal died with the commit', !q43_ghRun.files().has(Store.JOURNAL_PATH));
+
+  // The journal is not the casualty of a day that will not read. The journal
+  // read-back is the only failure that discards it; a stored day the commit
+  // cannot fetch is GitHub's failure, and the walked work stays banked.
+  const q43_ghDay = fakeGithub(seeded(ANCHOR - 1000));
+  await D.acquire({ report_id: 'SW-20260921-Q43EE' },
+    { env: ENV, gh: q43_ghDay.gh, reader: fakePeer({ transactions: q43_tx, balances: BAL, failOn: 'rCarol' }).reader, concurrency: 1 });
+  const q43_dayGh = async (method, pth, body, allow404) => {
+    if (method === 'GET' && /^\/contents\/evidence\/2026\//.test(pth)) throw Object.assign(new Error('502 bad gateway'), { status: 502 });
+    return q43_ghDay.gh(method, pth, body, allow404);
+  };
+  let q43_dayErr = null;
+  try { await D.acquire({ report_id: 'SW-20260921-Q43FF' },
+    { env: ENV, gh: q43_dayGh, reader: fakePeer({ transactions: q43_tx, balances: BAL }).reader, concurrency: 1 }); }
+  catch (e) { q43_dayErr = e; }
+  check('a day that will not read fails the run', q43_dayErr && /502/.test(q43_dayErr.message), q43_dayErr && q43_dayErr.message);
+  check('but does not cost the journal', q43_ghDay.files().has(Store.JOURNAL_PATH));
+  check('and the checkpoint did not move',
+    JSON.parse(q43_ghDay.files().get(Store.STATE_PATH).toString('utf8')).anchor_ledger === ANCHOR - 1000);
+  // The run must not reach for the accumulating reader again: that is the
+  // array that was killed.
+  const SRC43 = fs.readFileSync(path.join(ROOT, 'src/db/delta-acquisition.js'), 'utf8');
+  check('the run never calls the accumulating reader',
+    !/Store\.readJournalRows\(/.test(SRC43) && /Store\.readJournalRowsEach\(/.test(SRC43));
+  check('what is staged carries no raw payload beside its slim row',
+    /const \{ raw_tx, raw_meta, \.\.\.slim \} = row/.test(SRC43));
 
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA ACQUISITION CHECKS PASS'));
   process.exit(fail ? 1 : 0);

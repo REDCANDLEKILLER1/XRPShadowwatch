@@ -156,22 +156,66 @@ async function readJournal(deps) {
   return { journal, missing: false, branch };
 }
 
-// Read back the rows a journal owns. Every file is checked against the hash the
-// journal recorded, so a resumed run works from the bytes it wrote and not from
-// whatever happens to be at that path now.
-async function readJournalRows(journal, deps) {
+// ── THE ROWS COME BACK ONE SHARD AT A TIME, AND ARE NOT KEPT ─────────────
+//
+// Reading every shard into one array is what killed the ending on 21 Sep:
+// 419,380 rows, 1.16 GB of decompressed JSON, parsed into objects that took
+// 1.3 GB of heap before the merge even began — and Vercel killed the instance
+// for running out of memory, twice in a row, with every wallet already proven.
+//
+// So the rows are HANDED OVER one at a time and never accumulated here. The
+// caller decides what to keep; this function keeps one shard's text at a time.
+// Order is the manifest's, so the merge sees exactly the sequence a sequential
+// read gave it. Every shard is still hash-checked before a single row of it is
+// delivered; a mismatch anywhere refuses the whole read, because a commit built
+// on all-but-one shard is not a commit.
+//
+// The BYTES are fetched a few shards ahead — the fetch is network latency, the
+// parse is CPU, and the two overlap — but the shards are processed in order and
+// at most JOURNAL_PREFETCH packed shards are held at once.
+const JOURNAL_PREFETCH = 4;
+async function readJournalRowsEach(journal, deps, onRow) {
   const d = deps || {};
   const { token, repo, branch } = target(d.env);
   const gh = d.gh || A.client(token, repo, d.fetch || fetch);
   const zlib = require('zlib');
-  const rows = [];
-  for (const shard of ((journal && journal.row_shards) || [])) {
-    const packed = await readBytes(gh, branch, shard.path);
+  const shards = ((journal && journal.row_shards) || []);
+  const ahead = Math.max(1, Math.min(Number(d.prefetch) || JOURNAL_PREFETCH, 8));
+  const fetches = new Array(shards.length);
+  const fetchAt = i => {
+    if (!fetches[i]) {
+      fetches[i] = readBytes(gh, branch, shards[i].path);
+      // A prefetched failure is reported when its turn comes, not as an
+      // unhandled rejection in the meantime.
+      fetches[i].catch(() => {});
+    }
+    return fetches[i];
+  };
+  let delivered = 0;
+  for (let i = 0; i < shards.length; i++) {
+    for (let k = i; k < Math.min(shards.length, i + ahead); k++) fetchAt(k);
+    const shard = shards[i];
+    const packed = await fetchAt(i);
+    fetches[i] = null;
     if (packed === null) throw new Error('JOURNAL_SHARD_MISSING: ' + shard.path);
     if (Journal.sha256(packed) !== shard.sha256) throw new Error('JOURNAL_SHARD_HASH_MISMATCH: ' + shard.path);
     const text = zlib.gunzipSync(packed).toString('utf8');
-    for (const line of text.split('\n')) { if (line) rows.push(JSON.parse(line)); }
+    let inShard = 0;
+    for (const line of text.split('\n')) {
+      if (!line) continue;
+      onRow(JSON.parse(line), i, inShard++);
+      delivered++;
+    }
+    if (typeof d.onShard === 'function') { try { d.onShard(i + 1, shards.length, inShard); } catch (_) {} }
   }
+  return delivered;
+}
+
+// The whole set, for callers that can afford it — a test reading a fixture
+// back, an operator script. The COMMIT does not use this: it cannot afford it.
+async function readJournalRows(journal, deps) {
+  const rows = [];
+  await readJournalRowsEach(journal, deps, row => { rows.push(row); });
   return rows;
 }
 
@@ -486,7 +530,7 @@ async function seedGenesis(input, deps) {
 //
 // A day with no shard is not an error. It means nothing was committed for that
 // day, which for a day inside a proven window means nothing happened.
-async function readDays(days, deps, kind) {
+async function readDays(days, deps, kind, opts) {
   const d = deps || {};
   const { token, repo, branch } = target(d.env);
   const gh = d.gh || A.client(token, repo, d.fetch || fetch);
@@ -500,7 +544,12 @@ async function readDays(days, deps, kind) {
   // and so could only overwrite it.
   const name = kind === 'participants' ? 'participants'
     : kind === 'payloads' ? 'payloads' : 'events';
-  const out = { events: [], files: [], missing: [] };
+  // `lines: true` hands back the stored lines unparsed. The commit merges a
+  // day's payload file by hash, and the hash is the first field of every line,
+  // so parsing forty thousand raw ledger payloads into objects to compare a
+  // prefix was memory spent on nothing.
+  const asLines = !!(opts && opts.lines);
+  const out = { events: [], lines: [], files: [], missing: [] };
   for (const day of (days || [])) {
     const base = 'evidence/' + String(day).replace(/-/g, '/');
     // Shards are numbered only when a day had to be split, so try the plain
@@ -515,7 +564,10 @@ async function readDays(days, deps, kind) {
       const packed = await readBytes(gh, branch, path);
       if (packed === null) { if (suffix === '/' + name + '.ndjson.gz') continue; break; }
       const text = zlib.gunzipSync(packed).toString('utf8');
-      for (const line of text.split('\n')) { if (line) out.events.push(JSON.parse(line)); }
+      for (const line of text.split('\n')) {
+        if (!line) continue;
+        if (asLines) out.lines.push(line); else out.events.push(JSON.parse(line));
+      }
       out.files.push(path); found++;
     }
     if (!found) out.missing.push(day);
@@ -525,4 +577,4 @@ async function readDays(days, deps, kind) {
 
 module.exports = { STATE_PATH, JOURNAL_PATH, historyPath, runPath, journalRowPath, readBytes, readFile,
   readState, commitRun, seedGenesis, readDays,
-  readJournal, readJournalRows, appendJournal, clearJournal, missingJournalShards };
+  readJournal, readJournalRows, readJournalRowsEach, appendJournal, clearJournal, missingJournalShards };

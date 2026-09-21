@@ -81,7 +81,10 @@ async function attachWindow(body, result, input) {
   // The rows never cross the wire. They are the evidence; the repository holds
   // them, and the browser has no use for a raw ledger payload.
   delete body.rows;
-  body.transactions_walked = (result.rows || []).length;
+  // A committed run hands back only the window's days, so its count is the
+  // one it states; an uncommitted one still carries every row it walked.
+  body.transactions_walked = Number.isFinite(Number(result.transactions))
+    ? Number(result.transactions) : (result.rows || []).length;
 
   if (Number.isFinite(startMs) && Number.isFinite(endMs)) {
     try {
@@ -303,7 +306,12 @@ module.exports = async function handler(req, res) {
       // Measured: a cold admission costs about one request and 0.4 seconds, so
       // the whole remaining roster is a minute of walking. The ceiling is a
       // guard against a caller asking for something absurd, not a throttle.
-      max_admissions: Math.max(0, Math.min(Number(input.max_admissions) || 150, 200))
+      max_admissions: Math.max(0, Math.min(Number(input.max_admissions) || 150, 200)),
+      // The report window, so the run knows which days' rows to hand back.
+      // It decides what is RETAINED for the response, never what is proven
+      // or committed: the evidence goes to the repository whole either way.
+      window_start_ms: Number.isFinite(Number(input.window_start_ms)) ? Number(input.window_start_ms) : null,
+      window_end_ms: Number.isFinite(Number(input.window_end_ms)) ? Number(input.window_end_ms) : null
     };
     // Measured, not guessed. A deep account_tx page costs roughly seven
     // seconds on a public node — the cost is the server's, not the 250 ms

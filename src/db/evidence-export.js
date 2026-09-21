@@ -192,29 +192,45 @@ const dayPath = day => day.replace(/-/g, '/');
 
 // Split one day's records into shards no larger than the cap. Deterministic:
 // the split points are a function of the ordered records alone.
-function shard(records, basePath, cap) {
+//
+// The split is done on the LINES, and records are only stringified first,
+// because the commit path builds a day's payload file from lines it never
+// parses — a raw ledger payload read back from the day's stored shard, or one
+// written straight from the walk, is the same bytes either way, and parsing
+// forty thousand of them into objects just to stringify them again was most
+// of what the ending's memory went on. One algorithm, so the two callers
+// cannot split a day at different points.
+function shardLines(lines, basePath, cap) {
   const limit = cap || MAX_SHARD_BYTES;
   const out = [];
   let current = [], bytes = 0;
   const flush = () => {
     if (!current.length) return;
-    out.push({ records: current, text: ndjson(current) });
+    out.push(current);
     current = []; bytes = 0;
   };
-  for (const record of records) {
-    const line = JSON.stringify(record) + '\n';
-    const size = Buffer.byteLength(line, 'utf8');
+  for (const line of lines) {
+    const size = Buffer.byteLength(line, 'utf8') + 1;
     // A single record larger than the cap still gets its own shard rather than
     // being dropped: an oversized row is a problem to report, not to hide.
     if (bytes && bytes + size > limit) flush();
-    current.push(record); bytes += size;
+    current.push(line); bytes += size;
   }
   flush();
-  return out.map((s, i) => ({
+  return out.map((piece, i) => ({
     path: out.length === 1 ? basePath : basePath.replace(/\.ndjson$/, '.' + String(i + 1).padStart(3, '0') + '.ndjson'),
-    records: s.records,
-    text: s.text
+    lines: piece,
+    text: piece.join('\n') + '\n'
   }));
+}
+function shard(records, basePath, cap) {
+  const lines = records.map(r => JSON.stringify(r));
+  let at = 0;
+  return shardLines(lines, basePath, cap).map(piece => {
+    const slice = records.slice(at, at + piece.lines.length);
+    at += piece.lines.length;
+    return { path: piece.path, records: slice, text: piece.text };
+  });
 }
 
 // The manifest entry for one written file. `sha256` is over the plaintext and
@@ -256,6 +272,6 @@ function sealManifest(manifest) {
 module.exports = {
   SCHEMA, MAX_SHARD_BYTES, EVENT_KEYS,
   sha256, eventOf, participantOf, payloadOf, hasPayload, coverageOf,
-  ndjson, orderEvents, orderParticipants, orderPayloads, dayOf, dayPath, shard,
+  ndjson, orderEvents, orderParticipants, orderPayloads, dayOf, dayPath, shard, shardLines,
   fileEntry, manifestDigest, sealManifest
 };
