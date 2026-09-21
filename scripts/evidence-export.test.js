@@ -120,6 +120,19 @@ const hugeShards = X.shard(huge, 'evidence/2026/09/10/events.ndjson', 4000);
 check('a single row larger than the cap is still exported, not dropped',
   hugeShards.length === 1 && hugeShards[0].records.length === 1,
   { shards: hugeShards.length, rows: hugeShards.reduce((n, s) => n + s.records.length, 0) });
+// The cap is on the FILE, and every line in the file ends in a newline. A
+// split that counts the record's bytes and not its newline packs one line
+// too many into a shard right at the boundary — and because the commit path
+// and the exporter now share this one splitter, that would move every split
+// point in the archive. Two ten-byte records and a cap of twenty-one: with
+// their newlines they are twenty-two bytes and must split.
+const tight = [{ a: '12' }, { b: '34' }];
+check('the newline is counted against the cap',
+  X.shard(tight, 'p.ndjson', 21).length === 2 && X.shard(tight, 'p.ndjson', 22).length === 1,
+  { at_21: X.shard(tight, 'p.ndjson', 21).length, at_22: X.shard(tight, 'p.ndjson', 22).length });
+check('and the line splitter agrees with the record splitter, byte for byte',
+  JSON.stringify(X.shardLines(many.map(r => JSON.stringify(r)), 'p.ndjson', 4000).map(s => [s.path, s.text])) ===
+  JSON.stringify(X.shard(many, 'p.ndjson', 4000).map(s => [s.path, s.text])));
 check('sharding is deterministic — the same input splits the same way',
   JSON.stringify(X.shard(many, 'p.ndjson', 4000).map(s => s.records.length)) ===
   JSON.stringify(X.shard(many, 'p.ndjson', 4000).map(s => s.records.length)));
