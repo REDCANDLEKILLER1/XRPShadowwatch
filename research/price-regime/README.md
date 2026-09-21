@@ -51,6 +51,7 @@ Price data must use a documented provider and a single timestamp convention. The
 Implemented on this branch:
 - `daily-table.js`: pure canonical daily aggregator;
 - `build-daily.js`: deterministic JSON/CSV exporter;
+- `shadowwatch-adapter.js`: read-only adapter from canonical ShadowWatch events/coverage into normalized research input;
 - regression coverage in `scripts/price-regime-research.test.js`, wired into `npm test`.
 
 The aggregator is intentionally strict:
@@ -68,7 +69,7 @@ node research/price-regime/build-daily.js INPUT.json OUTPUT.csv
 node research/price-regime/build-daily.js INPUT.json OUTPUT.json
 ```
 
-Input fields are deliberately research-owned and do not read or mutate production storage. The next gate is an adapter that reads a known archived ShadowWatch window into this normalized input shape and reconciles hashes/counts/amounts before historical expansion.
+Input fields are deliberately research-owned and do not read or mutate production storage. The next gate is a known archived ShadowWatch-window fixture: adapt it through `shadowwatch-adapter.js`, then reconcile transaction hashes, counts, XRP amounts, and coverage before historical expansion.
 
 ## Later phases
 
