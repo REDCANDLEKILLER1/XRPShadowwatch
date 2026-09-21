@@ -100,7 +100,9 @@ const SUITES = [
   // there; a journal a day behind the ledger re-anchors. Pure node, no port.
   ['heavy-wallet-resume',    'heavy-wallet-resume.test.js',       null],
   // A promotion is a claim; the evidence that earned it travels with the entry.
-  ['roster-promotion',       'roster-promotion-sk5r3.test.js',      null]
+  ['roster-promotion',       'roster-promotion-sk5r3.test.js',      null],
+  // Isolated historical research: pure aggregation, no production stores or network.
+  ['price-regime-research',  'price-regime-research.test.js',        null]
 ];
 const only = (() => {
   const i = process.argv.indexOf('--only');
