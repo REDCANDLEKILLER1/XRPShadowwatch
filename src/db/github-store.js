@@ -159,19 +159,43 @@ async function readJournal(deps) {
 // Read back the rows a journal owns. Every file is checked against the hash the
 // journal recorded, so a resumed run works from the bytes it wrote and not from
 // whatever happens to be at that path now.
+// ── SIDE BY SIDE, ASSEMBLED IN ORDER ─────────────────────────────────────────
+// 21 Sep: 418,916 rows in 57 shards, read back one round-trip at a time before
+// the checkpoint could be written — the "twenty-eight minutes of a thirty-two
+// minute run" the acquisition file remembers. Several shards are now in flight
+// at once. The rows are assembled in MANIFEST order regardless of which fetch
+// returned first, so mergeSightings sees exactly the sequence a sequential read
+// gave it; every hash is still checked; a failure in any worker still fails the
+// whole read, because a commit built on all-but-one shard is not a commit.
+const JOURNAL_READ_PARALLEL = 6;
 async function readJournalRows(journal, deps) {
   const d = deps || {};
   const { token, repo, branch } = target(d.env);
   const gh = d.gh || A.client(token, repo, d.fetch || fetch);
   const zlib = require('zlib');
+  const shards = ((journal && journal.row_shards) || []);
+  const parallel = Math.max(1, Math.min(Number(d.parallel) || JOURNAL_READ_PARALLEL, 12));
+  const perShard = new Array(shards.length);
+  let next = 0, finished = 0;
+  const worker = async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= shards.length) return;
+      const shard = shards[i];
+      const packed = await readBytes(gh, branch, shard.path);
+      if (packed === null) throw new Error('JOURNAL_SHARD_MISSING: ' + shard.path);
+      if (Journal.sha256(packed) !== shard.sha256) throw new Error('JOURNAL_SHARD_HASH_MISMATCH: ' + shard.path);
+      const text = zlib.gunzipSync(packed).toString('utf8');
+      const rows = [];
+      for (const line of text.split('\n')) { if (line) rows.push(JSON.parse(line)); }
+      perShard[i] = rows;
+      finished++;
+      if (typeof d.onShard === 'function') { try { d.onShard(finished, shards.length, rows.length); } catch (_) {} }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(parallel, Math.max(1, shards.length)) }, worker));
   const rows = [];
-  for (const shard of ((journal && journal.row_shards) || [])) {
-    const packed = await readBytes(gh, branch, shard.path);
-    if (packed === null) throw new Error('JOURNAL_SHARD_MISSING: ' + shard.path);
-    if (Journal.sha256(packed) !== shard.sha256) throw new Error('JOURNAL_SHARD_HASH_MISMATCH: ' + shard.path);
-    const text = zlib.gunzipSync(packed).toString('utf8');
-    for (const line of text.split('\n')) { if (line) rows.push(JSON.parse(line)); }
-  }
+  for (const chunk of perShard) { for (const r of (chunk || [])) rows.push(r); }
   return rows;
 }
 

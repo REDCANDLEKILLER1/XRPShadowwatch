@@ -1799,6 +1799,82 @@ async function main() {
   check('a fully observed window is not labelled partial',
     cleanWin.provenance === 'OBSERVED' && cleanWin.attributed_derived_only === 0, cleanWin.provenance);
 
+  console.log('\n43. the commit reads its shards back side by side, not one after another');
+  /* 21 Sep: 418,916 rows banked in 57 shards, and the commit reads every one
+     of them back before it may write the checkpoint — one GitHub round-trip
+     each, sequentially. The code's own comment remembers a last mile of
+     twenty-eight minutes. The read-back is now bounded-parallel: several
+     shards in flight, assembled in manifest order so mergeSightings sees the
+     same sequence it always did, every hash still checked, any failure still
+     fatal. */
+  const p43_sleepMs = ms => new Promise(r => setTimeout(r, ms));
+  const p43_ghPar = fakeGithub(seeded(ANCHOR - 1000));
+  const p43_SHARD_MS = 80, p43_SHARDS = 16;
+  // Every shard read costs one, two or three SHARD_MS on the wire, decided by
+  // its path — so with several in flight they COMPLETE out of manifest order,
+  // and only deliberate assembly puts them back. A fixed delay would let
+  // completion order equal manifest order and hide that.
+  // The last two hex characters of the shard's digest, which sit just before
+  // ".ndjson.gz" — an earlier slice landed on the letters of "ndjson", parsed
+  // as NaN, and gave every shard the same delay after all.
+  const p43_latency = p => p43_SHARD_MS * (1 + ((parseInt(p.slice(-12, -10), 16) || 0) % 3));
+  // readBytes asks for '/contents/<path>?ref=<branch>'. The latency is keyed
+  // on the manifest path alone, so the request's query string is stripped
+  // first — with it left on, the two hex characters came out of "?ref=main",
+  // every shard got the same delay, and the expected total (computed from the
+  // clean paths) no longer described what the fake actually did.
+  const p43_slowGh = async (method, p, body, allow404) => {
+    const clean = String(p).split('?')[0].replace(/^\/contents\//, '');
+    if (method === 'GET' && /^evidence\/runs\/resume\//.test(clean)) await p43_sleepMs(p43_latency(clean));
+    return p43_ghPar.gh(method, p, body, allow404);
+  };
+  const p43_pdeps = { env: ENV, gh: p43_slowGh };
+  let p43_pj = Journal.begin({ report_id: 'SW-20260921-PARLL', scan_id: 'idx-p',
+    started_at: '2026-09-21T05:00:00.000Z', from_state_version: 1,
+    from_state_sha256: JSON.parse(p43_ghPar.files().get(Store.STATE_PATH).toString('utf8')).state_sha256,
+    anchor_ledger: ANCHOR, anchor_close: '2026-09-21T05:00:00.000Z', cold_from_ledger: null, admitted_wallets: [] });
+  for (let i = 0; i < p43_SHARDS; i++) {
+    p43_pj = (await Store.appendJournal(p43_pj, seg('rW' + String(i).padStart(2, '0'), ['S' + String(i).padStart(2, '0')]), { env: ENV, gh: p43_ghPar.gh })).journal;
+  }
+  check('sixteen shards were banked', p43_pj.row_shards.length === p43_SHARDS, p43_pj.row_shards.length);
+  const p43_seen = [];
+  const p43_t0 = Date.now();
+  const p43_prows = await Store.readJournalRows(p43_pj, { ...p43_pdeps, onShard: (n, total, rows) => p43_seen.push([n, total, rows]) });
+  const p43_took = Date.now() - p43_t0;
+  check('all rows came back', p43_prows.length === p43_SHARDS, p43_prows.length);
+  // "Manifest order" is the order the manifest LISTS its shards — canonical()
+  // sorts them by their hash-named path, so it is not append order and never
+  // was; the sequential read returned it too. Derive the expected sequence
+  // from the shards themselves rather than from the order they were written.
+  const p43_expected = p43_pj.row_shards.map(sh => {
+    const gz = p43_ghPar.files().get(sh.path);
+    return JSON.parse(require('zlib').gunzipSync(gz).toString('utf8').trim().split('\n')[0]).hash;
+  });
+  check('in manifest order — the merge sees the same sequence a sequential read gave it',
+    p43_prows.map(r => r.hash).join(',') === p43_expected.join(','),
+    { got: p43_prows.map(r => r.hash).slice(0, 5), expected: p43_expected.slice(0, 5) });
+  const p43_sequential = p43_pj.row_shards.reduce((n, sh) => n + p43_latency(sh.path), 0);
+  check('and side by side: the reads took well under what one-after-another would cost',
+    p43_took < p43_sequential / 2, { took_ms: p43_took, sequential_would_be_ms: p43_sequential });
+  check('progress was reported once per shard, counting up to the total',
+    p43_seen.length === p43_SHARDS && p43_seen.every(x => x[1] === p43_SHARDS) && p43_seen[p43_seen.length - 1][0] === p43_SHARDS, p43_seen.slice(-2));
+  // A corrupted shard must still refuse the whole read — parallel is not a
+  // licence to lose a failure in another worker's success.
+  const p43_victim = p43_pj.row_shards[p43_SHARDS - 3].path;
+  const p43_bytes = p43_ghPar.files().get(p43_victim);
+  // A byte in the gzip header's MTIME field: gunzip ignores it and decompresses
+  // cleanly, so ONLY the manifest hash can see these are not the bytes the
+  // journal wrote. (A flipped trailer byte makes gunzip itself throw, and the
+  // check below would pass with the hash check deleted.)
+  const p43_flipped = Buffer.from(p43_bytes); p43_flipped[4] ^= 0xff;
+  check('the corruption is one gunzip cannot see',
+    (() => { try { require('zlib').gunzipSync(p43_flipped); return true; } catch (_) { return false; } })());
+  p43_ghPar.files().set(p43_victim, p43_flipped);
+  let p43_refused = null;
+  try { await Store.readJournalRows(p43_pj, p43_pdeps); } catch (e) { p43_refused = e.message; }
+  check('a shard whose p43_bytes changed refuses the read back, wherever it sits in the batch',
+    /JOURNAL_SHARD_HASH_MISMATCH/.test(String(p43_refused)), p43_refused);
+
   console.log('\n' + (fail ? fail + ' FAILED of ' + (pass + fail) : 'ALL ' + pass + ' DELTA ACQUISITION CHECKS PASS'));
   process.exit(fail ? 1 : 0);
 }
