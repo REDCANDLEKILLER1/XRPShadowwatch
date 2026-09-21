@@ -4,6 +4,7 @@
 const assert = require('assert');
 const { buildDailyResearchTable } = require('../research/price-regime/daily-table');
 const { toCsv } = require('../research/price-regime/build-daily');
+const { adaptCanonicalEvents, adaptWallets, adaptCoverage } = require('../research/price-regime/shadowwatch-adapter');
 
 const wallets = [
   { address: 'rEX', cohort: 'exchange' },
@@ -89,6 +90,32 @@ assert.throws(() => buildDailyResearchTable({
     { hash: 'X', date: '2026-09-21', from: 'rOT', to: 'rEX', currency: 'XRP', tx_result: 'tesSUCCESS' }
   ]
 }), /amount_xrp must be finite/);
+
+
+const adaptedEvents = adaptCanonicalEvents([
+  { hash: 'CANON1', date: '2026-09-21T12:00:00Z', validated: true, currency: 'XRP',
+    amount: '1500000', from: 'rOUT', to: 'rEX', tx_result: 'tesSUCCESS', ledger_index: 123 },
+  { hash: 'UNVALIDATED', date: '2026-09-21T12:00:00Z', validated: false, currency: 'XRP',
+    amount: '999999999999', from: 'rOUT', to: 'rEX', tx_result: 'tesSUCCESS' },
+  { hash: 'TOKEN', date: '2026-09-21T12:00:00Z', validated: true, currency: 'USD',
+    amount: '20', from: 'rOUT', to: 'rEX', tx_result: 'tesSUCCESS' }
+]);
+assert.strictEqual(adaptedEvents.length, 1);
+assert.strictEqual(adaptedEvents[0].amount_xrp, 1.5);
+assert.strictEqual(adaptedEvents[0].source, 'GITHUB_EVIDENCE_STORE');
+
+const adaptedWallets = adaptWallets(
+  [{ address: 'rEX', label: 'Exchange A', cat: 'exchange' }, { address: 'rWH', label: 'Whale A' }],
+  { rEX: 'exchange', rWH: 'whale' }
+);
+assert.deepStrictEqual(adaptedWallets.map(x => x.cohort), ['exchange', 'whale']);
+assert.throws(() => adaptWallets([{ address: 'rUNKNOWN' }], {}), /research cohort must be explicit/);
+
+const adaptedCoverage = adaptCoverage('2026-09-21', {
+  scan_id: 'gh-123', target_wallets: 418, indexed_wallets: 418
+});
+assert.strictEqual(adaptedCoverage[0].source, 'gh-123');
+assert.strictEqual(adaptedCoverage[0].proven_wallets, 418);
 
 const csv = toCsv(table);
 assert(csv.startsWith('date,xrp_price_usd,cohort_balance_xrp'));
