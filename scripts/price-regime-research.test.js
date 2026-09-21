@@ -3,6 +3,7 @@
 
 const assert = require('assert');
 const { buildDailyResearchTable } = require('../research/price-regime/daily-table');
+const { toCsv } = require('../research/price-regime/build-daily');
 
 const wallets = [
   { address: 'rEX', cohort: 'exchange' },
@@ -88,5 +89,10 @@ assert.throws(() => buildDailyResearchTable({
     { hash: 'X', date: '2026-09-21', from: 'rOT', to: 'rEX', currency: 'XRP', tx_result: 'tesSUCCESS' }
   ]
 }), /amount_xrp must be finite/);
+
+const csv = toCsv(table);
+assert(csv.startsWith('date,xrp_price_usd,cohort_balance_xrp'));
+assert(csv.includes('2026-09-20,1.4,60'));
+assert(csv.includes('"{""target_wallets"":3,""proven_wallets"":3,""complete"":true,""source"":""fixture""}"'));
 
 console.log('ALL PRICE-REGIME RESEARCH CHECKS PASS');
