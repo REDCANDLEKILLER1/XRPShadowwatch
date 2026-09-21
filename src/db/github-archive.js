@@ -185,6 +185,10 @@ async function commitFiles(gh,branch,parentSha,files,message,onProgress){
       // commit that lands the evidence rather than in a second one that might
       // never happen.
       if(content===null){entries[i]={path:filePath,mode:'100644',type:'blob',sha:null};}
+      // A blob already uploaded — the evidence commit sends each day's files up
+      // as they are built, so the ending never holds the whole commit's bytes.
+      else if(content&&typeof content==='object'&&!Buffer.isBuffer(content)&&typeof content.blob_sha==='string'){
+        entries[i]={path:filePath,mode:'100644',type:'blob',sha:content.blob_sha};}
       else{
         const buffer=Buffer.isBuffer(content)?content:Buffer.from(content,'utf8');
         const blob=await gh('POST','/git/blobs',{content:buffer.toString('base64'),encoding:'base64'});
@@ -200,7 +204,7 @@ async function commitFiles(gh,branch,parentSha,files,message,onProgress){
   catch(e){if(e.status===422)e.refConflict=true;throw e;}
   return {commit_sha:made.sha,files_written:entries.length,
     files_removed:entries.filter(e=>e.sha===null).length,
-    bytes_written:Object.values(files).reduce((n,c)=>n+(c===null?0:(Buffer.isBuffer(c)?c.length:Buffer.byteLength(c,'utf8'))),0)};
+    bytes_written:Object.values(files).reduce((n,c)=>n+(c===null?0:(Buffer.isBuffer(c)?c.length:(c&&typeof c==='object'&&typeof c.blob_sha==='string')?(Number(c.size)||0):Buffer.byteLength(c,'utf8'))),0)};
 }
 
 // Resolve the archive branch, creating it from the default branch the first

@@ -200,28 +200,46 @@ const dayPath = day => day.replace(/-/g, '/');
 // forty thousand of them into objects just to stringify them again was most
 // of what the ending's memory went on. One algorithm, so the two callers
 // cannot split a day at different points.
-function shardLines(lines, basePath, cap) {
-  const limit = cap || MAX_SHARD_BYTES;
-  const out = [];
-  let current = [], bytes = 0;
-  const flush = () => {
-    if (!current.length) return;
-    out.push(current);
-    current = []; bytes = 0;
-  };
-  for (const line of lines) {
+// Incremental: lines are pushed as they come and each finished piece is
+// handed to `pack` the moment it fills, so a day's payload file can be built
+// and compressed slice by slice without its text ever being whole. Without
+// `pack` the piece keeps its text, which is what shard() below relies on.
+class LineSharder {
+  constructor(basePath, cap, pack) {
+    this.basePath = basePath;
+    this.limit = cap || MAX_SHARD_BYTES;
+    this.pack = typeof pack === 'function' ? pack : null;
+    this.pieces = [];
+    this.current = []; this.bytes = 0;
+  }
+  push(line) {
     const size = Buffer.byteLength(line, 'utf8') + 1;
     // A single record larger than the cap still gets its own shard rather than
     // being dropped: an oversized row is a problem to report, not to hide.
-    if (bytes && bytes + size > limit) flush();
-    current.push(line); bytes += size;
+    if (this.bytes && this.bytes + size > this.limit) this.flush();
+    this.current.push(line); this.bytes += size;
   }
-  flush();
-  return out.map((piece, i) => ({
-    path: out.length === 1 ? basePath : basePath.replace(/\.ndjson$/, '.' + String(i + 1).padStart(3, '0') + '.ndjson'),
-    lines: piece,
-    text: piece.join('\n') + '\n'
-  }));
+  flush() {
+    if (!this.current.length) return;
+    const text = this.current.join('\n') + '\n';
+    const piece = { rows: this.current.length };
+    if (this.pack) piece.packed = this.pack(text); else { piece.lines = this.current; piece.text = text; }
+    this.pieces.push(piece);
+    this.current = []; this.bytes = 0;
+  }
+  end() {
+    this.flush();
+    const n = this.pieces.length;
+    return this.pieces.map((piece, i) => ({
+      path: n === 1 ? this.basePath : this.basePath.replace(/\.ndjson$/, '.' + String(i + 1).padStart(3, '0') + '.ndjson'),
+      ...piece
+    }));
+  }
+}
+function shardLines(lines, basePath, cap) {
+  const sharder = new LineSharder(basePath, cap);
+  for (const line of lines) sharder.push(line);
+  return sharder.end();
 }
 function shard(records, basePath, cap) {
   const lines = records.map(r => JSON.stringify(r));
@@ -272,6 +290,6 @@ function sealManifest(manifest) {
 module.exports = {
   SCHEMA, MAX_SHARD_BYTES, EVENT_KEYS,
   sha256, eventOf, participantOf, payloadOf, hasPayload, coverageOf,
-  ndjson, orderEvents, orderParticipants, orderPayloads, dayOf, dayPath, shard, shardLines,
+  ndjson, orderEvents, orderParticipants, orderPayloads, dayOf, dayPath, shard, shardLines, LineSharder,
   fileEntry, manifestDigest, sealManifest
 };

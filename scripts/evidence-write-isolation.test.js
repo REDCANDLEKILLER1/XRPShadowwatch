@@ -148,7 +148,7 @@ const writers = [
     for (let i = line - 1; i >= 0; i--) if (/^(async )?function /.test(lines[i])) return lines[i];
     return '';
   };
-  const writeFns = ['appendJournal', 'clearJournal', 'commitRun', 'seedGenesis'];
+  const writeFns = ['appendJournal', 'clearJournal', 'commitRun', 'seedGenesis', 'uploadBlob'];
   const readFns  = ['readState', 'readJournal', 'readJournalRowsEach', 'missingJournalShards', 'readDays'];
   const body = name => {
     const at = STORE_SRC.indexOf('function ' + name + '(');

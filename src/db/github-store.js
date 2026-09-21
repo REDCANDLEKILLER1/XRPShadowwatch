@@ -492,6 +492,22 @@ async function commitRun(input, deps) {
   throw lastRefusal || new Error('EVIDENCE_STATE_COMMIT_RETRY_EXHAUSTED');
 }
 
+// One file of the commit, sent up ahead of it. The ending uploads each day's
+// shards as they are built and keeps only the blob id, so the bytes of a whole
+// week's evidence are never resident at once; commitRun then names the ids in
+// the tree. An orphaned blob from a commit the gate later refuses costs
+// nothing and is collected by GitHub. Same write target as the commit — this
+// IS a write to the evidence branch, staged early.
+async function uploadBlob(packed, deps) {
+  const d = deps || {};
+  const { token, repo } = writeTarget(d.env);
+  const gh = d.gh || A.client(token, repo, d.fetch || fetch);
+  const buffer = Buffer.isBuffer(packed) ? packed : Buffer.from(String(packed), 'utf8');
+  const blob = await gh('POST', '/git/blobs', { content: buffer.toString('base64'), encoding: 'base64' });
+  if (!blob || typeof blob.sha !== 'string') throw new Error('BLOB_UPLOAD_UNACKNOWLEDGED');
+  return { blob_sha: blob.sha, size: buffer.length };
+}
+
 // Seed the chain once, from the exported coverage snapshot, so the first
 // GitHub-backed run starts from what Neon already proved rather than cold.
 // Refuses to overwrite an existing chain: genesis happens exactly once.
@@ -576,5 +592,5 @@ async function readDays(days, deps, kind, opts) {
 }
 
 module.exports = { STATE_PATH, JOURNAL_PATH, historyPath, runPath, journalRowPath, readBytes, readFile,
-  readState, commitRun, seedGenesis, readDays,
+  readState, commitRun, seedGenesis, uploadBlob, readDays,
   readJournal, readJournalRows, readJournalRowsEach, appendJournal, clearJournal, missingJournalShards };

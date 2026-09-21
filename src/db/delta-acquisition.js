@@ -398,6 +398,18 @@ class DayPartition {
     b.pending = []; b.bytes = 0;
   }
   days() { return [...new Set([...this.buckets.values()].map(b => b.day))].sort(); }
+  // The kinds a day holds under a prefix, in order — payload slices are keyed
+  // by the first character of the hash, so walking them in order is walking
+  // the hashes in order.
+  kinds(day, prefix) {
+    const out = [];
+    for (const [key, b] of this.buckets) {
+      if (b.day !== day) continue;
+      const kind = key.slice(day.length + 1);
+      if (kind.startsWith(prefix)) out.push(kind);
+    }
+    return out.sort();
+  }
   // Hands the lines back and FORGETS them: a day is read out exactly once.
   take(day, kind) {
     const key = day + ' ' + kind;
@@ -438,7 +450,9 @@ class Stage {
     const prior = this.best.get(row.hash);
     if (!prior) this.best.set(row.hash, { sid, nodes, has });
     else if (nodes > prior.nodes) { prior.sid = sid; prior.nodes = nodes; prior.has = has; }
-    if (has) this.partition.add(day, 'payloads', sid + ' ' + row.hash + ' ' + JSON.stringify(payload));
+    // Sliced by the hash's first character, so a day's payloads are merged
+    // and written a slice at a time — in hash order, which is the file's order.
+    if (has) this.partition.add(day, 'payloads:' + String(row.hash).charAt(0), sid + ' ' + row.hash + ' ' + JSON.stringify(payload));
     const { raw_tx, raw_meta, ...slim } = row;   // eslint-disable-line no-unused-vars
     this.partition.add(day, 'rows', JSON.stringify(slim));
   }
@@ -519,29 +533,56 @@ async function buildDays(stage, input, deps) {
     emit(mergeBy(eventId, pe.events, events), X.orderEvents, base + '/events.ndjson');
     emit(mergeBy(participantId, pp.events, participants), X.orderParticipants, base + '/participants.ndjson');
 
-    // Payloads are merged as TEXT. Stored lines first so they are the ones
-    // kept on a tie, then this commit's — one per hash, the sighting the merge
-    // rule chose — ordered by hash and split by the same cap as everything else.
-    const seen = new Set(), lines = [];
+    // Payloads are merged as TEXT, one slice of the hash space at a time.
+    // Stored lines first so they are the ones kept on a tie, then this
+    // commit's — one per hash, the sighting the merge rule chose — ordered by
+    // hash and cut by the same cap as everything else. The slices are walked
+    // in order, so the whole file is in hash order, and each finished piece is
+    // gzipped as it fills rather than the day's text being held whole.
+    const priorByHead = new Map();
     for (const line of pl.lines) {
       const h = hashOfLine(line);
-      if (h === null || seen.has(h)) continue;
-      seen.add(h); lines.push({ h, line });
+      if (h === null) continue;
+      const head = h.charAt(0);
+      if (!priorByHead.has(head)) priorByHead.set(head, []);
+      priorByHead.get(head).push({ h, line });
     }
-    for (const tagged of stage.partition.take(day, 'payloads')) {
-      const sp1 = tagged.indexOf(' '), sp2 = tagged.indexOf(' ', sp1 + 1);
-      const sid = Number(tagged.slice(0, sp1)), h = tagged.slice(sp1 + 1, sp2);
-      const chosen = stage.best.get(h);
-      if (!chosen || chosen.sid !== sid || !chosen.has || seen.has(h)) continue;
-      seen.add(h); lines.push({ h, line: tagged.slice(sp2 + 1) });
+    pl.lines = null;
+    const heads = new Set(priorByHead.keys());
+    for (const kind of stage.partition.kinds(day, 'payloads:')) heads.add(kind.slice('payloads:'.length));
+    const sharder = new X.LineSharder(base + '/payloads.ndjson', X.MAX_SHARD_BYTES, text => gz(text));
+    for (const head of [...heads].sort()) {
+      const seen = new Set(), lines = [];
+      for (const entry of (priorByHead.get(head) || [])) {
+        if (seen.has(entry.h)) continue;
+        seen.add(entry.h); lines.push(entry);
+      }
+      priorByHead.delete(head);
+      for (const tagged of stage.partition.take(day, 'payloads:' + head)) {
+        const sp1 = tagged.indexOf(' '), sp2 = tagged.indexOf(' ', sp1 + 1);
+        const sid = Number(tagged.slice(0, sp1)), h = tagged.slice(sp1 + 1, sp2);
+        const chosen = stage.best.get(h);
+        if (!chosen || chosen.sid !== sid || !chosen.has || seen.has(h)) continue;
+        seen.add(h); lines.push({ h, line: tagged.slice(sp2 + 1) });
+      }
+      lines.sort((a, b) => a.h < b.h ? -1 : (a.h > b.h ? 1 : 0));
+      for (const entry of lines) sharder.push(entry.line);
     }
-    lines.sort((a, b) => a.h < b.h ? -1 : (a.h > b.h ? 1 : 0));
-    if (lines.length) {
-      for (const piece of X.shardLines(lines.map(l => l.line), base + '/payloads.ndjson', X.MAX_SHARD_BYTES)) {
-        const packed = gz(piece.text);
-        const path = piece.path + '.gz';
-        files[path] = packed;
-        shards.push({ path, sha256: X.sha256(packed), rows: piece.lines.length });
+    for (const piece of sharder.end()) {
+      const path = piece.path + '.gz';
+      files[path] = piece.packed;
+      shards.push({ path, sha256: X.sha256(piece.packed), rows: piece.rows });
+    }
+    // Sent up now, if the caller can: what stays behind is the blob id and
+    // the hash, and the bytes of a week's evidence are never resident at once.
+    if (typeof d.upload === 'function') {
+      for (const path of Object.keys(files)) {
+        if (!Buffer.isBuffer(files[path])) continue;
+        const packed = files[path];
+        const sent = await d.upload(packed, path);
+        if (!sent || typeof sent.blob_sha !== 'string') throw new Error('BLOB_UPLOAD_UNACKNOWLEDGED: ' + path);
+        files[path] = { blob_sha: sent.blob_sha, size: packed.length };
+        phase('uploaded', { path, bytes: packed.length, ms: Date.now() - tDay });
       }
     }
     phase('day-built', { day, events: events.length, took_ms: Date.now() - tDay });
@@ -1357,10 +1398,11 @@ async function acquire(input, deps) {
   // time is to guess. Each day now reports as it is read, merged and built.
   const tBuild = Date.now();
   const built = await buildDays(staged, { keep_days: keepDays },
-    { env: d.env, gh: d.gh, fetch: d.fetch, onPhase: phase });
+    { env: d.env, gh: d.gh, fetch: d.fetch, onPhase: phase,
+      upload: packed => Store.uploadBlob(packed, { env: d.env, gh: d.gh, fetch: d.fetch }) });
   staged = null;
   phase('shards-built', { files: Object.keys(built.files).length,
-    bytes: Object.values(built.files).reduce((n, b) => n + b.length, 0),
+    bytes: Object.values(built.files).reduce((n, b) => n + (Buffer.isBuffer(b) ? b.length : (Number(b.size) || 0)), 0),
     took_ms: Date.now() - tBuild });
   const tCommit = Date.now();
   let committed;

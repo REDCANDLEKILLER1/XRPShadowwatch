@@ -1825,7 +1825,10 @@ async function main() {
        the journal is not the casualty  a day read that fails leaves it in place */
   const T43 = require(path.join(ROOT, 'src/db/transactions.js'));
   const X43 = require(path.join(ROOT, 'src/db/evidence-export.js'));
-  const q43_hash = (n) => String(n).padStart(64, 'e');
+  // Hashes across three leading characters, because the payload file is
+  // merged a slice of the hash space at a time and must still come out in
+  // hash order end to end.
+  const q43_hash = (n) => 'AEF'.charAt(n % 3) + String(n).padStart(63, 'e');
   const q43_row = (n, o) => {
     const opts = o || {};
     const dayIso = (opts.day || '2026-09-12') + 'T0' + ((n % 9) + 1) + ':00:00.000Z';
@@ -1939,6 +1942,24 @@ async function main() {
   check('each day is read and built on its own, in day order',
     q43_phases.filter(x => x.n === 'day-merge-read').map(x => x.day).join(',') === '2026-09-11,2026-09-12,2026-09-13' &&
     q43_phases.filter(x => x.n === 'day-built').length === 3, q43_phases.map(x => x.n + ':' + x.day));
+  // Sent up as it is built: with an uploader, what the build hands back is
+  // blob ids, and the commit that names them lands the same bytes.
+  {
+    const q43_gh2 = fakeGithub(q43_files);
+    const q43_stage2 = await D.stageJournal(q43_journal, { env: ENV, gh: q43_gh2.gh, chunkBytes: 512 });
+    const q43_sent = [];
+    const q43_built2 = await D.buildDays(q43_stage2, { keep_days: [] }, { env: ENV, gh: q43_gh2.gh,
+      upload: async (packed, pth) => { q43_sent.push(pth); return Store.uploadBlob(packed, { env: ENV, gh: q43_gh2.gh }); } });
+    check('with an uploader, every file went up as its day was built and only the blob id stayed',
+      q43_sent.length === Object.keys(q43_reference.files).length &&
+      Object.values(q43_built2.files).every(f => !Buffer.isBuffer(f) && typeof f.blob_sha === 'string' && f.size > 0),
+      { sent: q43_sent.length, shape: Object.values(q43_built2.files).slice(0, 1) });
+    check('in day order — the first day\'s files were sent before the last day\'s were built',
+      q43_sent.findIndex(x => x.includes('2026/09/13')) > q43_sent.filter(x => x.includes('2026/09/11')).length - 1 &&
+      q43_sent.filter(x => x.includes('2026/09/11')).length === 3, q43_sent);
+    check('and the manifest is unchanged by sending early',
+      JSON.stringify(q43_built2.shards) === JSON.stringify(q43_reference.shards));
+  }
   check('and its buckets are released once built',
     q43_stage.partition.packedBytes() === 0 && q43_stage.partition.days().length === 0);
   // What comes back: the kept day only, merged, and without the evidence.
@@ -1997,10 +2018,21 @@ async function main() {
   await D.acquire({ report_id: 'SW-20260921-Q43BB' },
     { env: ENV, gh: q43_ghRun.gh, reader: fakePeer({ transactions: q43_tx, balances: BAL, failOn: 'rCarol' }).reader, concurrency: 1 });
   check('the first attempt left a journal behind', q43_ghRun.files().has(Store.JOURNAL_PATH));
+  let q43_atLoaded = -1, q43_atBuilt = -1;
   const q43_out = await D.acquire({ report_id: 'SW-20260921-Q43CC',
       window_start_ms: Date.UTC(2026, 8, 11, 0, 0, 0), window_end_ms: Date.UTC(2026, 8, 11, 23, 59, 59) },
-    { env: ENV, gh: q43_ghRun.gh, reader: fakePeer({ transactions: q43_tx, balances: BAL }).reader, concurrency: 1 });
+    { env: ENV, gh: q43_ghRun.gh, reader: fakePeer({ transactions: q43_tx, balances: BAL }).reader, concurrency: 1,
+      onPhase: n => { if (n === 'journal-loaded') q43_atLoaded = q43_ghRun.calls.length; if (n === 'shards-built') q43_atBuilt = q43_ghRun.calls.length; } });
   check('the resumed run commits', q43_out.committed === true, { reason: q43_out.reason, err: q43_out.commit_error });
+  const q43_state = JSON.parse(q43_ghRun.files().get(Store.STATE_PATH).toString('utf8'));
+  check('every shard the checkpoint names is on the branch and hashes to its bytes',
+    q43_state.evidence_shards.length === 3 && q43_state.evidence_shards.every(sh =>
+      q43_ghRun.files().has(sh.path) && State.sha256(q43_ghRun.files().get(sh.path)) === sh.sha256),
+    q43_state.evidence_shards.map(sh => sh.path));
+  check('and those shards went up while the day was being built, before the commit began',
+    q43_atLoaded >= 0 && q43_atBuilt > q43_atLoaded &&
+    q43_ghRun.calls.slice(q43_atLoaded, q43_atBuilt).filter(c => c.method === 'POST' && c.path === '/git/blobs').length === 3,
+    { loaded_at: q43_atLoaded, built_at: q43_atBuilt });
   check('it counts every distinct transaction it committed', q43_out.transactions === 2, q43_out.transactions);
   check('the rows it hands back are the window day\'s, without the evidence',
     Array.isArray(q43_out.rows) && q43_out.rows.length === 2 && q43_out.rows.every(r => r.raw_tx === undefined) &&
