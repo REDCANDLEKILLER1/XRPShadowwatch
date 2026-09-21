@@ -46,6 +46,30 @@ Use already-banked canonical ShadowWatch evidence first. Crawl XRPL history only
 
 Price data must use a documented provider and a single timestamp convention. The exploratory Jan-Sep baseline prepared separately is not yet the statistical source of record because it mixes daily observations rather than one exact time-of-day series.
 
+## Phase 1 implementation status
+
+Implemented on this branch:
+- `daily-table.js`: pure canonical daily aggregator;
+- `build-daily.js`: deterministic JSON/CSV exporter;
+- regression coverage in `scripts/price-regime-research.test.js`, wired into `npm test`.
+
+The aggregator is intentionally strict:
+- accepts normalized `amount_xrp` only; it never guesses drops vs XRP;
+- counts only `tesSUCCESS` XRP movement;
+- deduplicates by transaction hash;
+- counts exchange/whale accumulation and distribution only when a transfer crosses that cohort boundary;
+- refuses to compute cohort balance or net change from incomplete balance coverage;
+- keeps evidence coverage and balance coverage explicit on every day.
+
+Usage:
+
+```bash
+node research/price-regime/build-daily.js INPUT.json OUTPUT.csv
+node research/price-regime/build-daily.js INPUT.json OUTPUT.json
+```
+
+Input fields are deliberately research-owned and do not read or mutate production storage. The next gate is an adapter that reads a known archived ShadowWatch window into this normalized input shape and reconciles hashes/counts/amounts before historical expansion.
+
 ## Later phases
 
 Only after Phase 1 reconciliation:
