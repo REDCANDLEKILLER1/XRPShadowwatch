@@ -358,6 +358,60 @@ async function main() {
   check('the light wallets, whose anchor read succeeded, were journalled',
     !!j5 && ['rAlice', 'rBob'].every(a => j5.wallets.some(w => w.address === a)));
 
+  // ══ 6. A WALLET THE JOURNAL HAS NEVER MANAGED TO BANK GOES FIRST ════════
+  console.log('\n6. a wallet with no journal record at all is walked before the partial ones, not after');
+  /* Live, 21 Sep: after two re-anchors every wallet was partial except three —
+     COINBASE_HOT, BITHUMB_HOT and one small one — the three that had never
+     once fitted in a budget. "Partial first" therefore put the two wallets
+     that caused the whole wedge BEHIND all 391 others. A wallet the journal
+     has no record of is the one most likely to be unfinishable; it gets the
+     first lane. */
+  const Journal = require(path.join(ROOT, 'src/db/run-journal.js'));
+  const W6 = ['rAlice', 'rBob', 'rCarol', 'rZedHot'];
+  const txs6 = { rAlice: [], rBob: [], rCarol: [], rZedHot: heavy(HEAVY) };
+  const files6 = seededStore(W6, ANCHOR - 1000);
+  const st6 = JSON.parse(files6[Store.STATE_PATH]);
+  // A journal in which the three light wallets are PARTIAL and the heavy one
+  // is absent — the shape a re-anchored journal takes.
+  let j6 = Journal.begin({ report_id: 'SW-20260921-PRIOR', scan_id: null, started_at: '2026-09-21T00:00:00.000Z',
+    from_state_version: st6.state_version, from_state_sha256: st6.state_sha256,
+    anchor_ledger: ANCHOR, anchor_close: '2026-09-21T03:00:00.000Z', cold_from_ledger: null, admitted_wallets: [] });
+  j6 = Journal.record(j6, { wallets: ['rAlice', 'rBob', 'rCarol'].map(a => ({
+    address: a, proven_from: ANCHOR - 999, proven_through: ANCHOR - 500, rows: 0, reconciliation: 'RECONCILED',
+    entry: State.walletEntry({ ...st6.wallets.find(w => w.address === a), last_proven_ledger: ANCHOR - 500 }) })), row_shards: [] });
+  files6[Store.JOURNAL_PATH] = Journal.serialize(j6);
+  const gh6 = fakeGithub(files6);
+  const p6 = pagedPeer({ transactions: txs6, perPage: 1, pageMs: 40 });
+  p6.reader.deadline = Date.now() + 700;
+  const out6 = await D.acquire({ report_id: 'SW-20260921-ORD06' }, { env: ENV, gh: gh6.gh, reader: p6.reader, concurrency: 1, startReserveMs: 0 });
+  const order6 = p6.asked.filter(c => c.command === 'account_tx').map(c => c.account);
+  check('the journal was adopted with three partial wallets', out6.resumed && out6.resumed.adopted === true && out6.resumed.wallets_partial === 3, out6.resumed);
+  check('the never-banked wallet is walked FIRST', order6.length > 0 && order6[0] === 'rZedHot', order6.slice(0, 4));
+
+  // ══ 7. ONE LANE FOR THE LIGHT END ═══════════════════════════════════════
+  console.log('\n7. with more than one lane, the light wallets drain while the heavy ones grind');
+  /* 684 wallets "never started" across two runs on 21 Sep: four lanes, all
+     four held by heavy wallets for the whole budget, and 384 wallets that
+     needed a page each never got one. Heavy-first was right; heavy-ONLY is
+     not. One worker takes from the light end. */
+  const W7 = ['rAlice', 'rBob', 'rCarol', 'rYakHot', 'rZedHot'];
+  const txs7 = { rAlice: [], rBob: [], rCarol: [], rYakHot: heavy(HEAVY), rZedHot: heavy(HEAVY) };
+  const files7 = seededStore(W7, ANCHOR - 1000);
+  const st7 = JSON.parse(files7[Store.STATE_PATH]);
+  st7.wallets = st7.wallets.map(w => State.walletEntry({ ...w,
+    last_observed_tx_ledger: /Hot$/.test(w.address) ? ANCHOR - 1000 : ANCHOR - 900000 }));
+  files7[Store.STATE_PATH] = State.serialize(State.seal(st7));
+  const gh7 = fakeGithub(files7);
+  const p7 = pagedPeer({ transactions: txs7, perPage: 1, pageMs: 40 });
+  p7.reader.deadline = Date.now() + 700;
+  const out7 = await D.acquire({ report_id: 'SW-20260921-LANE7' }, { env: ENV, gh: gh7.gh, reader: p7.reader, concurrency: 2, startReserveMs: 0 });
+  const status7 = Object.fromEntries(out7.wallets.map(w => [w.address, w.status]));
+  check('a heavy wallet took a lane and was cut off', status7.rZedHot === 'ABANDONED' || status7.rYakHot === 'ABANDONED', status7);
+  check('and every light wallet still COMPLETED in the same run',
+    ['rAlice', 'rBob', 'rCarol'].every(a => status7[a] === 'COMPLETE'), status7);
+  check('nothing light was left "not attempted" with a lane idle',
+    !['rAlice', 'rBob', 'rCarol'].some(a => status7[a] === 'NOT_ATTEMPTED'), status7);
+
   console.log('\n' + (fail === 0 ? 'ALL ' + pass + ' CHECKS PASS' : pass + ' pass, ' + fail + ' FAIL'));
   process.exit(fail === 0 ? 0 : 1);
 }

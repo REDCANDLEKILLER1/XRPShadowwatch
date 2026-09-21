@@ -582,12 +582,22 @@ async function acquire(input, deps) {
   // ── HEAVIEST FIRST ─────────────────────────────────────────────────────
   // The walk was alphabetical, and rw… sorts last: COINBASE_HOT and
   // BITHUMB_HOT started after four hundred light wallets had spent the budget,
-  // every morning. A wallet that was cut off last time goes first, and among
-  // the rest the ones that moved most recently — the checkpoint already
-  // records that — go before the ones that never move.
-  const isPartial = e => partials.has(e.address) ? 1 : 0;
+  // every morning.
+  //
+  // The first version of this rule put PARTIAL wallets first. On 21 Sep, after
+  // two re-anchors, every wallet was partial except the three that had never
+  // once fitted in a budget — COINBASE_HOT, BITHUMB_HOT and one small one —
+  // so the rule put the two wallets that caused the wedge behind all 391
+  // others. Backwards.
+  //
+  // Cost, as best the journal can estimate it. A wallet the journal has NO
+  // record of is the one most likely to be unfinishable and goes first. Among
+  // the rest, the rows already banked say how busy a wallet is; recency breaks
+  // ties for wallets that have banked nothing.
+  const banked = e => partials.has(e.address) ? (Number(partials.get(e.address).rows) || 0) : -1;
+  const unknown = e => (journal && !partials.has(e.address) && !walkedSet.has(e.address)) ? 1 : 0;
   const recency = e => Number(e.last_observed_tx_ledger) || 0;
-  entries.sort((a, b) => (isPartial(b) - isPartial(a)) || (recency(b) - recency(a)) ||
+  entries.sort((a, b) => (unknown(b) - unknown(a)) || (banked(b) - banked(a)) || (recency(b) - recency(a)) ||
     (String(a.address) < String(b.address) ? -1 : (String(a.address) > String(b.address) ? 1 : 0)));
   phase('plan', { wallets: roster.length, to_walk: entries.length,
     recovered: alreadyWalked.length, resuming_partial: partials.size,
@@ -749,10 +759,22 @@ async function acquire(input, deps) {
   const startReserveMs = Number.isFinite(Number(d.startReserveMs))
     ? Math.max(0, Number(d.startReserveMs))
     : START_RESERVE_MS + Math.ceil(bankedRows / 5000) * 1000;
-  const worker = async () => {
+  // ── ONE LANE FOR THE LIGHT END ───────────────────────────────────────────
+  // Heavy-first with every worker pulling from the front means every lane is
+  // held by a heavy wallet for the whole budget — 684 wallets "never started"
+  // across two runs on 21 Sep, most of them a single page. So the last worker
+  // pulls from the LIGHT end instead: the heavies grind on the other lanes
+  // while a hundred-odd light wallets a run finish behind them. The two ends
+  // meet in the middle; no wallet is handed out twice.
+  let tailCursor = entries.length - 1;
+  const take = fromTail => {
+    if (cursor > tailCursor) return -1;
+    return fromTail ? tailCursor-- : cursor++;
+  };
+  const worker = async (fromTail) => {
     for (;;) {
-      const index = cursor++;
-      if (index >= entries.length) return;
+      const index = take(fromTail);
+      if (index < 0) return;
       const entry = entries[index];
       // Do not start what cannot finish. A wallet begun with seconds left is
       // cut off mid-walk, and a partial walk proves nothing and cannot be
@@ -825,7 +847,8 @@ async function acquire(input, deps) {
   // waiting; the stragglers are named as abandoned, nothing they were part-way
   // through is journalled — a partial walk proves nothing — and the run returns
   // and says what it did.
-  const workers = Promise.all(Array.from({ length: concurrency }, worker));
+  const workers = Promise.all(Array.from({ length: concurrency },
+    (_, k) => worker(concurrency > 1 && k === concurrency - 1)));
   const budgetLeft = () => Math.max(0, (reader.deadline || 0) - Date.now());
   // NOT unref'd. This timer is the only thing keeping the process alive while a
   // hung wallet holds a promise that will never settle — an unref'd one lets

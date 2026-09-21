@@ -528,8 +528,10 @@ async function main() {
   console.log('\n11. the two lanes run concurrently');
   check('the checkpoint read and the anchor pin do not wait on each other',
     /Promise\.all\(\[\s*Store\.readState/.test(SRC2));
+  // The last worker pulls from the light end (21 Sep), so the workers are
+  // built with an index now. Still exactly `concurrency` of them.
   check('and wallet walks run with bounded concurrency',
-    /Array\.from\(\{ length: concurrency \}, worker\)/.test(SRC2));
+    /Array\.from\(\{ length: concurrency \},\s*\(_, k\) => worker\(/.test(SRC2));
 
   console.log('\n12. the roster grew — what a new wallet costs, and what it may claim');
   /* The roster went from 255 to 408. The state knows the wallets it has proven;
