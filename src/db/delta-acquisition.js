@@ -118,6 +118,7 @@ const JOURNAL_INTERVAL_MS = 30000;
 // partial walk proves nothing and cannot be journalled — the work is simply
 // lost. Stopping cleanly converts that into a flush and a resume.
 const START_RESERVE_MS = 25000;
+const RESERVE_ROWS_PER_SECOND = 2500;
 
 // ── A JOURNAL THAT FELL A DAY BEHIND THE LEDGER RE-ANCHORS ─────────────────
 //
@@ -575,15 +576,17 @@ async function buildDays(stage, input, deps) {
     }
     // Sent up now, if the caller can: what stays behind is the blob id and
     // the hash, and the bytes of a week's evidence are never resident at once.
+    // A day's files go up together — at most a handful, the same fan-out the
+    // commit itself uses — so a week of days is not a week of one-at-a-time.
     if (typeof d.upload === 'function') {
-      for (const path of Object.keys(files)) {
-        if (!Buffer.isBuffer(files[path])) continue;
+      const pending = Object.keys(files).filter(path => Buffer.isBuffer(files[path]));
+      await Promise.all(pending.map(async path => {
         const packed = files[path];
         const sent = await d.upload(packed, path);
         if (!sent || typeof sent.blob_sha !== 'string') throw new Error('BLOB_UPLOAD_UNACKNOWLEDGED: ' + path);
         files[path] = { blob_sha: sent.blob_sha, size: packed.length };
         phase('uploaded', { path, bytes: packed.length, ms: Date.now() - tDay });
-      }
+      }));
     }
     phase('day-built', { day, events: events.length, took_ms: Date.now() - tDay });
   }
@@ -1003,14 +1006,18 @@ async function acquire(input, deps) {
   // finish with. That is why a run reached 266 of 267 and still committed
   // nothing — it was not short of wallets, it was short of ending.
   //
-  // So the reserve grows with what is banked. Roughly a second per five
-  // thousand journalled rows on top of the floor, which covers the measured
-  // read and leaves room for the write.
+  // So the reserve grows with what is banked. A second per twenty-five
+  // hundred journalled rows on top of the floor: the 21 Sep journal of
+  // 419,380 rows staged, built and packed in 88 seconds on a laptop core with
+  // no network in the way, and the read-back and the upload of a quarter of a
+  // gigabyte sit on top of that. (It was one second per five thousand, sized
+  // for an ending that read the rows back and wrote them once; the ending now
+  // also rebuilds and re-uploads every day the rows land in.)
   const bankedRows = journal
     ? (journal.row_shards || []).reduce((n, sh) => n + (Number(sh.rows) || 0), 0) : 0;
   const startReserveMs = Number.isFinite(Number(d.startReserveMs))
     ? Math.max(0, Number(d.startReserveMs))
-    : START_RESERVE_MS + Math.ceil(bankedRows / 5000) * 1000;
+    : START_RESERVE_MS + Math.ceil(bankedRows / RESERVE_ROWS_PER_SECOND) * 1000;
   // ── ONE LANE FOR THE LIGHT END ───────────────────────────────────────────
   // Heavy-first with every worker pulling from the front means every lane is
   // held by a heavy wallet for the whole budget — 684 wallets "never started"

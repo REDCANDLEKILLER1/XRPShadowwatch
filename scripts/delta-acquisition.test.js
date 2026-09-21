@@ -1186,11 +1186,18 @@ async function main() {
   const res = seenPhases.find(p => p.n === 'reserve');
   check('a resumed run says how much is banked, so the reserve is explicable',
     !!res && res.banked_rows === banked, res);
-  // The rule itself, checked directly: more banked work means a longer reserve.
-  const reserveFor = rows => 25000 + Math.ceil(rows / 5000) * 1000;
+  // The rule itself, read from the source rather than restated here, so a
+  // change to it is a change this check sees: more banked work means a longer
+  // reserve, and the 21 Sep journal (419,380 rows, whose ending measured 88 s
+  // before any network) must be paid for with the whole ending in mind.
+  const SRC30 = fs.readFileSync(path.join(ROOT, 'src/db/delta-acquisition.js'), 'utf8');
+  const perSecond = Number((/const RESERVE_ROWS_PER_SECOND = (\d+);/.exec(SRC30) || [])[1]);
+  const reserveFor = rows => 25000 + Math.ceil(rows / perSecond) * 1000;
   check('the reserve grows with what has to be written at the end',
-    reserveFor(165000) > reserveFor(0) && reserveFor(165000) >= 50000,
-    { none: reserveFor(0), banked_165k: reserveFor(165000) });
+    perSecond > 0 && reserveFor(165000) > reserveFor(0) && reserveFor(165000) >= 50000,
+    { per_second: perSecond, none: reserveFor(0), banked_165k: reserveFor(165000) });
+  check('and a journal the size of 21 Sep\'s is given more than its measured ending',
+    reserveFor(419380) >= 88000 + 90000, { banked_419k: reserveFor(419380) });
   check('and a run with nothing banked keeps the plain floor',
     reserveFor(0) === 25000);
   check('an explicit override still wins, so the suite can drive it',

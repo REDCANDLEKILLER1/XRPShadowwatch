@@ -337,6 +337,10 @@ module.exports = async function handler(req, res) {
       const line = value => { try { res.write(JSON.stringify(value) + '\n'); } catch (_) {} };
       const startedAt = Date.now();
       line({ t: 'start', report_id: job.report_id, budget_ms: READ_BUDGET_MS,
+        // The instance's memory, as the platform states it, so the next kill
+        // for running out of it can be read against a number rather than a
+        // guess. Null where the platform does not say.
+        memory_limit_mb: Number(process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE) || null,
         roster_wallets: job.roster.length, max_admissions: job.max_admissions,
         at: new Date().toISOString() });
 
@@ -366,6 +370,9 @@ module.exports = async function handler(req, res) {
               (l.retired ? ' RETIRED' : '')).join(' · ')
           : null,
         first_failure: reader.stats.first_failure || null,
+        // Resident, not just heap: the platform kills on the former, and the
+        // ending's staged buffers and packed shards live outside the heap.
+        rss_mb: Math.round(process.memoryUsage().rss / 1048576),
         ms: Date.now() - startedAt }), 5000);
       if (typeof beat.unref === 'function') beat.unref();
       try {
@@ -404,6 +411,7 @@ module.exports = async function handler(req, res) {
             lanes: typeof reader.laneStats === 'function' ? reader.laneStats() : null,
             events: (reader.stats.events || []).slice(0, 40) },
           heap_mb: Math.round(process.memoryUsage().heapUsed / 1048576),
+          rss_mb: Math.round(process.memoryUsage().rss / 1048576),
           elapsed_ms: Date.now() - startedAt });
       } catch (e) {
         const safe = String(e.message || 'DELTA_RUN_FAILED').replace(/postgres(?:ql)?:\/\/\S+/gi, '[redacted]');
