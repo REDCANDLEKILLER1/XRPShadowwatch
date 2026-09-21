@@ -1,0 +1,11 @@
+[
+  {
+    "report_id": "SW-20260921-QJU9T",
+    "scan_id": "SC-MUB8Y7MS",
+    "generated_at": "2026-09-21T03:19:31.000Z",
+    "coverage_complete": true,
+    "anchor": 107128041,
+    "transactions": null,
+    "report_hash": "42822572f33bce1c88ea788be78f0cb90335652dd41bc2d7189b8fe1124a3584"
+  }
+]
