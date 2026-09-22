@@ -5,7 +5,7 @@ const assert = require('assert');
 const { buildDailyResearchTable } = require('../research/price-regime/daily-table');
 const { toCsv } = require('../research/price-regime/build-daily');
 const { adaptCanonicalEvents, cohortMapFromRoster, adaptWallets, adaptCoverage } = require('../research/price-regime/shadowwatch-adapter');
-const { summarize, productionStyleTotal, dayOk, refOk, rangeOf, solveWindow } = require('../api/research-price-regime')._test;
+const { summarize, productionStyleTotal, researchFlow, dayOk, refOk, rangeOf, solveWindow } = require('../api/research-price-regime')._test;
 
 const wallets = [
   { address: 'rEX', cohort: 'exchange' },
@@ -186,6 +186,22 @@ const legacyWide = productionStyleTotal([
 assert.strictEqual(legacyWide.total_xrp, 9);
 assert.strictEqual(legacyWide.by_result['(blank)'].xrp, 3);
 assert.strictEqual(legacyWide.by_tx_type.EscrowCreate.xrp, 4);
+
+const liveCohortFlow = researchFlow([
+  { hash: 'CF1', close_time: '2026-09-22T01:00:00Z', validated: true, tx_type: 'Payment',
+    currency: 'XRP', amount_drops: '2000000', from_account: 'rExternal',
+    to_account: 'rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh', tx_result: 'tesSUCCESS' },
+  { hash: 'CF2', close_time: '2026-09-22T02:00:00Z', validated: true, tx_type: 'Payment',
+    currency: 'XRP', amount_drops: '3000000', from_account: 'rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh',
+    to_account: 'rPyCQm8E5j78PDbrfKF24fRC7qUAk1kDMZ', tx_result: 'tesSUCCESS' }
+]);
+assert(liveCohortFlow.roster_wallets >= 418);
+assert(liveCohortFlow.cohort_counts.exchange > 0);
+assert(liveCohortFlow.cohort_counts.whale > 0);
+assert.strictEqual(liveCohortFlow.totals.payment_volume_xrp, 5);
+assert.strictEqual(liveCohortFlow.totals.exchange_inflow_xrp, 2);
+assert.strictEqual(liveCohortFlow.totals.exchange_outflow_xrp, 3);
+assert.strictEqual(liveCohortFlow.totals.whale_accumulation_xrp, 3);
 
 const csv = toCsv(table);
 assert(csv.startsWith('date,xrp_price_usd,cohort_balance_xrp'));
