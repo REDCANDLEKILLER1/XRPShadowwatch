@@ -81,7 +81,14 @@ The public reports use variable windows (for example 131h and 25h gap windows), 
 2. reproduce stable UTC-day event/hash/payment totals from that exact evidence commit;
 3. compare variable report-window totals only when the exact start/end boundaries are available from source/runtime metadata.
 
-Historical expansion toward January remains blocked until the immutable evidence/day gate passes.
+The first immutable reconciliation gate now passes for the research metrics on SW-20260922-1E9N2:
+- exact report window solved from canonical evidence: 2026-09-21T11:49:21Z → 2026-09-22T12:25:41Z;
+- 96,651 distinct events reproduced exactly;
+- 126 successful native-XRP Payments >=1M reproduced exactly;
+- 430,781,754.9187591 XRP large-move volume, rendering to the report's 430.78M exactly;
+- canonical hash digest pinned in the reconciliation record.
+
+The public `total_tx_xrp` wide-shot is deliberately not a research flow metric: production sums successful XRP amount fields across transaction types and uses escrow fallbacks. The research engine remains stricter and uses successful XRP Payments for accumulation/distribution. Historical expansion is now unblocked for Payment-based research.
 
 ## Later phases
 
