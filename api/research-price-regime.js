@@ -8,7 +8,8 @@ function dayOk(day) {
 }
 
 function amountXrp(event) {
-  if (!event || event.currency !== 'XRP') return null;
+  if (!event || event.tx_type !== 'Payment' || event.currency !== 'XRP') return null;
+  if (event.amount_drops === null || event.amount_drops === undefined || event.amount_drops === '') return null;
   const drops = Number(event.amount_drops);
   if (!Number.isFinite(drops) || drops < 0) return null;
   return drops / 1e6;
