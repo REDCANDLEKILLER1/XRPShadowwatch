@@ -1,0 +1,85 @@
+🩸 ℜᴇᴅᴄᴀɴᴅʟᴇᴋɪʟʟᴇR 🩸
+ＳＨＡＤＯＷ ＷＡＴＣＨ
+✨ 𝐹𝑒𝑎𝑡𝑢𝑟𝑖𝑛𝑔 ✨
+𝓛𝓪𝓭𝔂 𝓚'𝓼
+🄴🅇🄲🄴🄻🄻🄴🄽🅃!
+𝖂𝖍𝖎𝖑𝖊 𝖄𝖔𝖚 𝖂ᴇʀᴇ 𝕾𝖑𝖊𝖊𝔭𝖎𝖓𝖌
+𝗫𝗥𝗣𝗟  𝕌ℙ𝔻𝔸𝕋𝔼 ✨✨ on
+☕ COFFEE & CRYPTO with 𝐒𝐓ΟΝΕ
+September 22, 2026
+
+Executive Summary
+─────────────────
+430.78M XRP moved across 126 large transfers in the window. Binance ×37 and Kraken ×8 and +3 more absorbed 162.13M XRP this scan. The standout individual anomaly was 23.68M XRP moved from an unidentified high-value wallet to an unidentified wallet in the scanned window. These classifications describe observed movement only; they do not prove intent.
+
+What Mattered Most
+──────────────────
+The tell of the night: Binance ×37 and Kraken ×8 and +3 more absorbed 162.13M XRP this scan, and absa Debuts Ripple-Powered Crypto Custody as XRP Ledger Weighs Lending Upgrade. File it. Two weeks from now it may be the first line of a bigger story.
+
+Evidence
+────────
+Receipts first, opinions never: 23.68M XRP moved from an unidentified high-value wallet to an unidentified wallet in the scanned window. A second transfer of 23.68M XRP reached an unidentified wallet. The discovery queue is holding 18 flagged candidates — 4 found this scan, 1 recommended for review, separate from the 418 wallets on the permanent watch list — all of them flagged, none of them accused; behavioral evidence only, and not ownership proof. Above ground, in the daylight world, published news context: Absa Debuts Ripple-Powered Crypto Custody as XRP Ledger Weighs Lending Upgrade · XRP jumps 8.7% near $1.54 amid whale buying and Ripple custody launch in South Africa · XRP Tops $1.52 As Ripple, Absa Launch Bank-Grade Crypto Custody. I’m not calling anyone guilty. I’m calling the transfer what it was.
+
+
+Escrow Watch
+────────────
+Ripple escrow: 31.70B XRP locked now across 100 active validated-ledger escrow objects · registry check 20/20 known Ripple-labeled addresses.
+No Ripple escrow events are present in the acquired record for the last 36h; this alone does not prove an event-free window.
+Other XRPL escrow, last 36h: 2 new locks totalling 10.00M XRP · 0 releases, across 2 owner wallets.
+• Flare Core Vault: 1 lock 10.00M XRP
+• raAU93…PF3a: 1 lock 38 XRP
+Ripple and non-Ripple escrow are separate. Active escrow objects are ledger objects, not owner wallets. Scope is escrow observed by this scan, not every escrow on the XRPL.
+
+Under the Surface
+─────────────────
+Here’s the part the ≥1M whale counter can miss. Shadow Volume is the big-move spotlight: 430.78M XRP in 126 individual moves of at least 1M. Another 269.22M XRP moved in 1060 payments from 100K to under 1M. 245.63M XRP across 974 of those payments matched 103 repeat-route, fan-in, or fan-out patterns. That is a signal to trace, not proof somebody was hiding funds.
+
+How to Read It
+──────────────
+New here? Shadow Volume shows the obvious ≥1M moves. Mid-size Flow catches 100K–<1M moves. Clustered Flow asks whether those smaller high-value payments keep using common routes. Net watched flow tells whether the tracked wallet board gained or lost XRP versus its prior snapshot.
+
+What To Watch Next
+──────────────────
+• Watch the absorbing wallets — are they stacking it, or handing it back out?
+• Check whether the largest recipient in this window makes another move.
+• Keep the watchlist warm and wait for the next whale to break cover.
+
+Verdict
+───────
+The read, straight up: a stirring night — motion working under the surface. (65/100). What tipped me off: large transfer count, shadow volume, receiver forwarding. Watched wallets are net accumulating — about 82.29M XRP moved inward. Somebody always knows before the rest of us. Tonight I’m somebody. Not financial advice. XRP-only forensic watch.
+
+I’m XRPMan, and I tell on the banks.
+
+LEDGER DIAGNOSTICS
+──────────────────
+• XRP price: ~$1.5355 (24h firm)
+• Market volume (exchanges, 24h): $4.70B
+• Native XRPL DEX observed volume (top 200-token index, 24h): ~$14M (~9.01M XRP, ledger-derived estimate)
+• XRPL EVM: $35.3K TVL
+• RLUSD on XRPL (issuer obligations): 1.10B tokens
+• New funded XRPL accounts (2026-09-21): +3,350
+• Watched wallets: 418
+• Watched activity (all sizes, LAST 25H · GAP SINCE LAST SCAN): 96651 transactions · 843.04M XRP moved · 199 wallets active
+• Shadow volume (whale moves ≥1M, LAST 25H · GAP SINCE LAST SCAN): 430.78M XRP · 126 transfers
+• Net watched flow: 82.29M XRP inward
+
+🙏 THE DAILY PRAYER
+───────────────────
+Lord, in a season of laws being written, lawsuits being settled, and money being moved, give the honest a clear path and the deceitful a short one.
+
+📖 THE DAILY SCRIPTURE
+──────────────────────
+Romans 8:28 (KJV)
+“And we know that all things work together for good to them that love God.”
+
+Sources
+───────
+[1] Absa Debuts Ripple-Powered Crypto Custody as XRP Ledger Weighs Lending Upgrade — https://news.google.com/rss/articles/CBMi2gFBVV95cUxOY3p5bXU3dG1VMnhfamx2bkNpUzVaRnZrVlloVE5hNjZ5cXlRanZlclhSM2cyMHpUNnVkRUlMS0thQ2I5bXJuUXVtT3BDcWkzZk1peVMtU2Rzc2Y5V05pZnRiTllKSGZxbDZ2Nk4xM085Q2drRkZWT2ppV2tWUnhnY29mZDF0QkMySlRvYk5LYzczVUkxbzdwdGV1MVBYQ0VycDRTU1ZtVVM4cEd1RmxJY052NDM5b09pQkdYUk9LUnRPNkVWT1ZodFp2TUZlQ09UQjVYYTFXVDhNZw?oc=5
+[2] XRP jumps 8.7% near $1.54 amid whale buying and Ripple custody launch in South A — https://news.google.com/rss/articles/CBMikgFBVV95cUxPSWs0bV9MdGdxYWdLU3VfWGFYRmJHakltQmRLZ2NNWW9ybURNOWM2QzZYZzFmYkVldWpXQUcwMElacmVlQVUtWDBCX2xuaDdrd1JGX3JHaGNTcGxFb3dhdHdTaVdITUVVS2FfT3pmUWJ2azdxWFl6Wl9HNW03Mk85c0lRMXZMcV8zbUhFODNyRTNiQQ?oc=5
+[3] XRP Tops $1.52 As Ripple, Absa Launch Bank-Grade Crypto Custody — https://news.google.com/rss/articles/CBMikgFBVV95cUxNZEpJdnpYUGxUSC1NR1lvcVA4S29lck9MNlhqNU1PS3hNa0VXWTNIR0RNZEczaFNzOV81dFBIekI5eURFVEtPbmUyeFAwb01jelRDazhQWDRIMUMzQUxpQjNoeTJmZ1dzSXlZemlUYnFpbWp5eUxjMGNrMzZHOXUtamZ4SWYtWU9rUEVzVWhUWU1rZw?oc=5
+
+
+NEWS USED:
+[1] google_news@self — Absa Debuts Ripple-Powered Crypto Custody as XRP Ledger Weighs Lending Upgrade
+[2] google_news@self — XRP jumps 8.7% near $1.54 amid whale buying and Ripple custody launch in South Africa
+[3] google_news@self — XRP Tops $1.52 As Ripple, Absa Launch Bank-Grade Crypto Custody
