@@ -11,6 +11,19 @@ function dayOk(day) {
 function refOk(ref) {
   return /^[a-f0-9]{40}$/.test(String(ref || ''));
 }
+function rangeOf(query) {
+  const fromRaw = String((query || {}).from || '');
+  const toRaw = String((query || {}).to || '');
+  if (!fromRaw && !toRaw) return null;
+  if (!fromRaw || !toRaw) throw new Error('FROM_AND_TO_REQUIRED_TOGETHER');
+  const from = Date.parse(fromRaw), to = Date.parse(toRaw);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) throw new Error('INVALID_TIME_RANGE');
+  if (to - from > 7 * 86400000) throw new Error('TIME_RANGE_EXCEEDS_7_DAYS');
+  const days = [];
+  for (let t = Date.UTC(new Date(from).getUTCFullYear(), new Date(from).getUTCMonth(), new Date(from).getUTCDate());
+       t <= to; t += 86400000) days.push(new Date(t).toISOString().slice(0, 10));
+  return { from, to, days };
+}
 
 async function readKindAtRef(day, kind, ref, deps) {
   const d = deps || {};
@@ -96,12 +109,39 @@ module.exports = async function handler(req, res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   if (req.method !== 'GET') return res.status(405).json({ error: 'METHOD_NOT_ALLOWED' });
 
-  const day = String((req.query || {}).day || '');
-  const ref = String((req.query || {}).ref || '');
-  if (!dayOk(day)) return res.status(400).json({ error: 'DAY_REQUIRED_YYYY_MM_DD' });
+  const query = req.query || {};
+  const day = String(query.day || '');
+  const ref = String(query.ref || '');
+  let range = null;
+  try { range = rangeOf(query); }
+  catch (e) { return res.status(400).json({ error: String(e.message || e) }); }
+
+  if (!range && !dayOk(day)) return res.status(400).json({ error: 'DAY_REQUIRED_YYYY_MM_DD' });
   if (ref && !refOk(ref)) return res.status(400).json({ error: 'REF_MUST_BE_FULL_COMMIT_SHA' });
 
   try {
+    if (range) {
+      const combined = { events: [], files: [], missing: [] };
+      for (const d of range.days) {
+        const part = ref ? await readKindAtRef(d, 'events', ref) : await Store.readDays([d], {}, 'events');
+        combined.events.push(...part.events);
+        combined.files.push(...part.files);
+        combined.missing.push(...part.missing);
+      }
+      const filtered = combined.events.filter(e => {
+        const t = Date.parse(e && e.close_time || '');
+        return Number.isFinite(t) && t >= range.from && t <= range.to;
+      });
+      return res.status(200).json({
+        mode: 'READ_ONLY_RESEARCH_RECONCILIATION',
+        range: { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString(), days: range.days },
+        evidence_ref: ref || 'main',
+        events: summarize(filtered),
+        event_files: [...new Set(combined.files)],
+        missing_event_days: [...new Set(combined.missing)]
+      });
+    }
+
     const events = ref ? await readKindAtRef(day, 'events', ref) : await Store.readDays([day], {}, 'events');
     const participants = ref ? await readKindAtRef(day, 'participants', ref) : await Store.readDays([day], {}, 'participants');
     return res.status(200).json({
@@ -120,4 +160,4 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports._test = { amountXrp, digestHashes, summarize, dayOk, refOk };
+module.exports._test = { amountXrp, digestHashes, summarize, dayOk, refOk, rangeOf };
