@@ -174,6 +174,15 @@ async function walkAddress(reader, address, range, options) {
   throw last || new Error('HISTORICAL_WALK_RETRY_EXHAUSTED');
 }
 
+
+function paymentLeader(payment, selectedAddresses) {
+  const selected = selectedAddresses instanceof Set ? selectedAddresses : new Set(selectedAddresses || []);
+  const endpoints = [payment && payment.from_account, payment && payment.to_account]
+    .filter(address => address && selected.has(address));
+  const unique = [...new Set(endpoints)].sort();
+  return unique.length ? unique[0] : null;
+}
+
 async function scanBatch(reader, addresses, range, options) {
   const list = Array.from(new Set(addresses || []));
   if (!list.length || list.length > MAX_BATCH) throw new Error('HISTORICAL_BATCH_SIZE_OUT_OF_RANGE');
@@ -201,8 +210,12 @@ async function scanBatch(reader, addresses, range, options) {
   await Promise.all(Array.from({ length: concurrency }, worker));
 
   const byHash = new Map();
+  const dedupeSet = options && options.dedupeSet
+    ? (options.dedupeSet instanceof Set ? options.dedupeSet : new Set(options.dedupeSet))
+    : null;
   for (const result of results) {
     for (const payment of result.payments || []) {
+      if (dedupeSet && paymentLeader(payment, dedupeSet) !== result.address) continue;
       if (!byHash.has(payment.hash)) byHash.set(payment.hash, payment);
     }
   }
@@ -214,6 +227,7 @@ async function scanBatch(reader, addresses, range, options) {
     wallets_requested: list.length,
     wallets_complete: results.filter(r => r.status === 'COMPLETE').length,
     wallets_failed: results.filter(r => r.status !== 'COMPLETE').length,
+    dedupe_mode: dedupeSet ? 'SELECTED_ENDPOINT_LEADER' : 'BATCH_HASH_ONLY',
     wallet_results: results.map(r => ({
       address: r.address,
       status: r.status,
@@ -234,6 +248,7 @@ module.exports = {
   timeRange,
   resolveLedgerRange,
   compactPayment,
+  paymentLeader,
   walkAddress,
   scanBatch
 };
