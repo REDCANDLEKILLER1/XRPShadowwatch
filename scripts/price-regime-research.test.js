@@ -7,6 +7,7 @@ const { toCsv } = require('../research/price-regime/build-daily');
 const { adaptCanonicalEvents, cohortMapFromRoster, adaptWallets, adaptCoverage } = require('../research/price-regime/shadowwatch-adapter');
 const { summarize, productionStyleTotal, researchFlow, dayOk, refOk, datasetDays, rangeOf, solveWindow } = require('../api/research-price-regime')._test;
 const frozenDataset = require('../research/price-regime/data/2026-09-09_2026-09-22.json');
+const { analyzeRegime } = require('../research/price-regime/regime-analysis');
 
 const wallets = [
   { address: 'rEX', cohort: 'exchange' },
@@ -240,6 +241,20 @@ assert.strictEqual(liveCohortFlow.totals.payment_volume_xrp, 5);
 assert.strictEqual(liveCohortFlow.totals.exchange_inflow_xrp, 2);
 assert.strictEqual(liveCohortFlow.totals.exchange_outflow_xrp, 3);
 assert.strictEqual(liveCohortFlow.totals.whale_accumulation_xrp, 3);
+
+const provisionalBand = analyzeRegime(frozenDataset);
+assert.strictEqual(provisionalBand.status, 'PROVISIONAL');
+assert.deepStrictEqual(provisionalBand.hypothesis_band_usd, { low: 1.35, high: 1.45 });
+assert.strictEqual(provisionalBand.included_days, 13);
+assert.deepStrictEqual(provisionalBand.excluded_days, [
+  { date: '2026-09-22', reason: 'PARTIAL_UTC_DAY_AT_SNAPSHOT' }
+]);
+assert.strictEqual(provisionalBand.groups.below.days, 5);
+assert.strictEqual(provisionalBand.groups.inside.days, 7);
+assert.strictEqual(provisionalBand.groups.above.days, 1);
+assert(Math.abs(provisionalBand.groups.below.whale_net_xrp - (-615624692.6049006)) < 0.0001);
+assert(Math.abs(provisionalBand.groups.inside.exchange_net_xrp - (-793146.0987877548)) < 0.0001);
+assert(Math.abs(provisionalBand.groups.above.whale_net_xrp - (-16054451.115289167)) < 0.0001);
 
 const csv = toCsv(table);
 assert(csv.startsWith('date,xrp_price_usd,cohort_balance_xrp'));
