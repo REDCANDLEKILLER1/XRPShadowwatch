@@ -6,6 +6,7 @@ const { buildDailyResearchTable } = require('../research/price-regime/daily-tabl
 const { toCsv } = require('../research/price-regime/build-daily');
 const { adaptCanonicalEvents, cohortMapFromRoster, adaptWallets, adaptCoverage } = require('../research/price-regime/shadowwatch-adapter');
 const { summarize, productionStyleTotal, researchFlow, dayOk, refOk, datasetDays, rangeOf, solveWindow } = require('../api/research-price-regime')._test;
+const frozenDataset = require('../research/price-regime/data/2026-09-09_2026-09-22.json');
 
 const wallets = [
   { address: 'rEX', cohort: 'exchange' },
@@ -149,6 +150,25 @@ assert.strictEqual(dsDays.length, 14);
 assert.strictEqual(dsDays[0], '2026-09-09');
 assert.strictEqual(dsDays[13], '2026-09-22');
 assert.throws(() => datasetDays('2026-08-01', '2026-09-22'), /EXCEEDS_31_DAYS/);
+assert.strictEqual(frozenDataset.dataset_id, 'SW-PRICE-REGIME-20260909-20260922');
+assert.strictEqual(frozenDataset.evidence_ref, 'f1d40162179c599929b1d8d6d465ecc8de1ec981');
+assert.strictEqual(frozenDataset.roster_wallets, 418);
+assert.deepStrictEqual(frozenDataset.cohort_counts, { exchange: 58, whale: 100, other: 260 });
+assert.strictEqual(frozenDataset.price_status, 'NOT_YET_JOINED');
+assert.strictEqual(frozenDataset.rows.length, 14);
+assert.strictEqual(new Set(frozenDataset.rows.map(r => r.date)).size, 14);
+assert.strictEqual(frozenDataset.rows.filter(r => r.missing).length, 0);
+assert(frozenDataset.rows.every(r => r.xrp_price_usd === null));
+assert(frozenDataset.rows.every(r => /^[a-f0-9]{64}$/.test(r.hash_digest_sha256)));
+assert.strictEqual(frozenDataset.rows[0].date, '2026-09-09');
+assert.strictEqual(frozenDataset.rows[0].coverage_status, 'BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF');
+assert.strictEqual(frozenDataset.rows[13].date, '2026-09-22');
+assert.strictEqual(frozenDataset.rows[13].coverage_status, 'PARTIAL_UTC_DAY_AT_SNAPSHOT');
+assert.strictEqual(frozenDataset.rows[13].last_close_time, '2026-09-22T13:04:31.000Z');
+assert.strictEqual(frozenDataset.rows[8].date, '2026-09-17');
+assert.strictEqual(frozenDataset.rows[8].large_move_count, 75);
+assert(Math.abs(frozenDataset.rows[8].payment_volume_xrp - 1051687970.4603939) < 0.000001);
+
 
 const bounded = rangeOf({ from: '2026-09-21T11:25:41Z', to: '2026-09-22T12:25:41Z' });
 assert.strictEqual(bounded.days.length, 2);
