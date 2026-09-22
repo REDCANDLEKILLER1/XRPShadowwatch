@@ -98,6 +98,42 @@ function nativeAmountAnyType(event) {
   return drops / 1e6;
 }
 
+
+function productionStyleAmount(event) {
+  if (!event || (event.currency || 'XRP') !== 'XRP') return 0;
+  let amount = 0;
+  if (event.amount_drops !== null && event.amount_drops !== undefined && event.amount_drops !== '') {
+    amount = Number(event.amount_drops) / 1e6;
+  }
+  if (!amount && event.escrow_amount_drops !== null && event.escrow_amount_drops !== undefined && event.escrow_amount_drops !== '') {
+    amount = Number(event.escrow_amount_drops) / 1e6;
+  }
+  return Number.isFinite(amount) && amount > 0 && amount < 1e11 ? amount : 0;
+}
+
+function productionStyleTotal(events) {
+  let total = 0;
+  const byResult = Object.create(null);
+  const byType = Object.create(null);
+  const seen = new Set();
+  for (const e of events || []) {
+    if (!e || !e.hash || seen.has(e.hash)) continue;
+    seen.add(e.hash);
+    const succeeded = !e.tx_result || e.tx_result === 'tesSUCCESS';
+    if (!succeeded) continue;
+    const amount = productionStyleAmount(e);
+    if (!(amount > 0)) continue;
+    total += amount;
+    const result = e.tx_result || '(blank)';
+    const type = e.tx_type || 'UNKNOWN';
+    if (!byResult[result]) byResult[result] = { events: 0, xrp: 0 };
+    if (!byType[type]) byType[type] = { events: 0, xrp: 0 };
+    byResult[result].events++; byResult[result].xrp += amount;
+    byType[type].events++; byType[type].xrp += amount;
+  }
+  return { total_xrp: total, by_result: byResult, by_tx_type: byType };
+}
+
 function digestHashes(events) {
   const h = crypto.createHash('sha256');
   const hashes = [...new Set((events || []).map(e => String(e.hash || '')).filter(Boolean))].sort();
@@ -153,6 +189,7 @@ function summarize(events) {
     large_move_count: largeCount,
     first_close_time: first === null ? null : new Date(first).toISOString(),
     last_close_time: last === null ? null : new Date(last).toISOString(),
+    production_style_total: productionStyleTotal(events),
     ...digestHashes(events)
   };
 }
@@ -248,4 +285,4 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports._test = { amountXrp, nativeAmountAnyType, digestHashes, summarize, dayOk, refOk, rangeOf, solveWindow };
+module.exports._test = { amountXrp, nativeAmountAnyType, productionStyleAmount, productionStyleTotal, digestHashes, summarize, dayOk, refOk, rangeOf, solveWindow };
