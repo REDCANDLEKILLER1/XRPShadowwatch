@@ -48,6 +48,10 @@ async function resolveLedgerRange(reader, startIso, endIso) {
     end_iso: new Date(t.end_ms).toISOString(),
     from_ledger,
     through_ledger,
+    start_floor_ledger: beforeStart.ledger,
+    start_floor_close: new Date(beforeStart.close_ms).toISOString(),
+    end_floor_ledger: beforeEnd.ledger,
+    end_floor_close: new Date(beforeEnd.close_ms).toISOString(),
     tip_ledger: anchor.ledger,
     tip_close: anchor.close_iso
   };
