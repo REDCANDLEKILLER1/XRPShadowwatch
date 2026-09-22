@@ -163,6 +163,9 @@ const reconciled = summarize([
 assert.strictEqual(reconciled.event_rows, 4);
 assert.strictEqual(reconciled.distinct_events, 3);
 assert.strictEqual(reconciled.successful_xrp_moved, 2000000);
+assert.strictEqual(reconciled.successful_native_amount_any_type, 902000000);
+assert.strictEqual(reconciled.successful_native_amount_by_tx_type.Payment.xrp, 2000000);
+assert.strictEqual(reconciled.successful_native_amount_by_tx_type.EscrowCreate.xrp, 900000000);
 assert.strictEqual(reconciled.large_move_volume_xrp, 2000000);
 assert.strictEqual(reconciled.large_move_count, 1);
 
