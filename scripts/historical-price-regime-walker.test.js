@@ -2,7 +2,7 @@
 'use strict';
 
 const assert = require('assert');
-const { timeRange, resolveLedgerRange, scanBatch } = require('../research/price-regime/historical-walker');
+const { timeRange, resolveLedgerRange, paymentLeader, scanBatch } = require('../research/price-regime/historical-walker');
 
 async function main() {
   assert.deepStrictEqual(timeRange('2026-08-10T00:00:00Z', '2026-08-28T00:00:00Z'), {
@@ -57,6 +57,13 @@ async function main() {
   const range = await resolveLedgerRange(fake, '2026-08-10T00:00:00Z', '2026-08-28T00:00:00Z');
   assert.strictEqual(range.from_ledger, 101);
   assert.strictEqual(range.through_ledger, 200);
+  assert.strictEqual(range.start_floor_ledger, 100);
+  assert.strictEqual(range.end_floor_ledger, 200);
+
+  const selected = new Set(['rAAA', 'rBBB']);
+  assert.strictEqual(paymentLeader({ from_account: 'rBBB', to_account: 'rAAA' }, selected), 'rAAA');
+  assert.strictEqual(paymentLeader({ from_account: 'rBBB', to_account: 'rOUT' }, selected), 'rBBB');
+  assert.strictEqual(paymentLeader({ from_account: 'rOUT', to_account: 'rOUT2' }, selected), null);
 
   const result = await scanBatch(fake, ['rTEST'], range);
   assert.strictEqual(result.wallets_complete, 1);
