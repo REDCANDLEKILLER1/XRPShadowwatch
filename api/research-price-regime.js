@@ -4,6 +4,9 @@ const crypto = require('crypto');
 const zlib = require('zlib');
 const Store = require('../src/db/github-store');
 const Archive = require('../src/db/github-archive');
+const Roster = require('../src/db/roster');
+const { buildDailyResearchTable } = require('../research/price-regime/daily-table');
+const { adaptCanonicalEvents, cohortMapFromRoster, adaptWallets } = require('../research/price-regime/shadowwatch-adapter');
 
 function dayOk(day) {
   return /^20\d{2}-\d{2}-\d{2}$/.test(String(day || ''));
@@ -134,6 +137,48 @@ function productionStyleTotal(events) {
   return { total_xrp: total, by_result: byResult, by_tx_type: byType };
 }
 
+
+function researchFlow(events) {
+  const productionRoster = Roster.roster();
+  const cohortMap = cohortMapFromRoster(productionRoster);
+  const wallets = adaptWallets(productionRoster, cohortMap);
+  const normalized = adaptCanonicalEvents(events || []);
+  const rows = buildDailyResearchTable({ wallets, events: normalized });
+
+  const totals = {
+    payment_volume_xrp: 0,
+    exchange_inflow_xrp: 0,
+    exchange_outflow_xrp: 0,
+    whale_accumulation_xrp: 0,
+    whale_distribution_xrp: 0,
+    large_move_volume_xrp: 0,
+    large_move_count: 0
+  };
+  for (const row of rows) {
+    for (const key of Object.keys(totals)) totals[key] += Number(row[key] || 0);
+  }
+  const cohort_counts = { exchange: 0, whale: 0, other: 0 };
+  for (const w of wallets) cohort_counts[w.cohort]++;
+
+  return {
+    roster_wallets: wallets.length,
+    cohort_counts,
+    normalized_payment_rows: normalized.length,
+    daily_rows: rows.map(row => ({
+      date: row.date,
+      payment_volume_xrp: row.payment_volume_xrp,
+      exchange_inflow_xrp: row.exchange_inflow_xrp,
+      exchange_outflow_xrp: row.exchange_outflow_xrp,
+      whale_accumulation_xrp: row.whale_accumulation_xrp,
+      whale_distribution_xrp: row.whale_distribution_xrp,
+      large_move_volume_xrp: row.large_move_volume_xrp,
+      large_move_count: row.large_move_count,
+      active_wallets: row.active_wallets
+    })),
+    totals
+  };
+}
+
 function digestHashes(events) {
   const h = crypto.createHash('sha256');
   const hashes = [...new Set((events || []).map(e => String(e.hash || '')).filter(Boolean))].sort();
@@ -262,6 +307,7 @@ module.exports = async function handler(req, res) {
         range: { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString(), days: range.days },
         evidence_ref: ref || 'main',
         events: summarize(filtered),
+        research_flow: researchFlow(filtered),
         event_files: [...new Set(combined.files)],
         missing_event_days: [...new Set(combined.missing)]
       });
@@ -274,6 +320,7 @@ module.exports = async function handler(req, res) {
       day,
       evidence_ref: ref || 'main',
       events: summarize(events.events),
+      research_flow: researchFlow(events.events),
       event_files: events.files,
       missing_event_days: events.missing,
       participant_rows: participants.events.length,
@@ -285,4 +332,4 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports._test = { amountXrp, nativeAmountAnyType, productionStyleAmount, productionStyleTotal, digestHashes, summarize, dayOk, refOk, rangeOf, solveWindow };
+module.exports._test = { amountXrp, nativeAmountAnyType, productionStyleAmount, productionStyleTotal, researchFlow, digestHashes, summarize, dayOk, refOk, rangeOf, solveWindow };
