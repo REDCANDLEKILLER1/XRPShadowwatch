@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "PARTIAL_PASS",
+  "status": "PASS_WITH_PENDING_ALL_SIZE_SEMANTICS",
   "report_id": "SW-20260922-1E9N2",
   "production_sha": "877b8bf819d401ffea0bc839fabe5befed856a60",
   "evidence_commit_sha": "50413d4b0f592bb5b108e34ac49e0f6521cac816",
@@ -52,11 +52,28 @@
     "immutable_anchor_and_coverage": "PASS",
     "canonical_day_read": "PASS",
     "failed_and_non_payment_filtering": "PASS_BY_TEST",
-    "public_large_move_count": "PASS_ON_24H_ANCHOR_SLICE",
-    "public_large_move_volume_rounding": "PASS_ON_24H_ANCHOR_SLICE",
-    "literal_25h_label_as_exact_duration": "FAIL",
-    "exact_public_window_start": "PENDING",
-    "historical_expansion": "BLOCKED_UNTIL_RECONCILIATION_GATE"
+    "public_large_move_count": "PASS",
+    "public_large_move_volume_rounding": "PASS",
+    "literal_25h_label_as_exact_duration": "FAIL_CONFIRMED_LABEL_IS_ROUNDED",
+    "exact_public_window_start": "PASS",
+    "historical_expansion": "BLOCKED_UNTIL_ALL_SIZE_SEMANTICS_ARE_EXPLAINED",
+    "public_transaction_count": "PASS",
+    "public_watched_activity_all_sizes": "PENDING_SEMANTIC_RECONCILIATION"
   },
-  "note": "The report label is presentation rounding, not an exact interval contract. Do not choose a start time merely to force the public count. The count-boundary solver exists only to locate and then independently validate the real ledger timestamp boundary."
+  "note": "Exact event-count boundary is 2026-09-21T11:49:21Z through the immutable report anchor. This reproduces the public transaction count and whale metric exactly. Payment-only volume is intentionally narrower than the report's 'all sizes XRP moved' figure; identify the extra transaction-type contribution before historical expansion.",
+  "solved_public_window": {
+    "from": "2026-09-21T11:49:21.000Z",
+    "to": "2026-09-22T12:25:41.000Z",
+    "duration_seconds": 88580,
+    "duration_hours": 24.6055555556,
+    "target_transaction_count": 96651,
+    "distinct_events": 96651,
+    "exact_timestamp_boundary": true,
+    "prior_excluded_close_time": "2026-09-21T11:49:20.000Z",
+    "successful_xrp_payment_volume": 823124880.4177474,
+    "large_move_count": 126,
+    "large_move_volume_xrp": 430781754.9187591,
+    "rendered_large_move_volume": "430.78M XRP",
+    "hash_digest_sha256": "b15ee52a47a049380af7826f5189dd648c9c85a11a4eb8d061d8cee730be5ab0"
+  }
 }
