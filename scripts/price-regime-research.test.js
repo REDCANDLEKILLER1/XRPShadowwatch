@@ -5,7 +5,7 @@ const assert = require('assert');
 const { buildDailyResearchTable } = require('../research/price-regime/daily-table');
 const { toCsv } = require('../research/price-regime/build-daily');
 const { adaptCanonicalEvents, adaptWallets, adaptCoverage } = require('../research/price-regime/shadowwatch-adapter');
-const { summarize } = require('../api/research-price-regime')._test;
+const { summarize, dayOk, refOk } = require('../api/research-price-regime')._test;
 
 const wallets = [
   { address: 'rEX', cohort: 'exchange' },
@@ -130,6 +130,11 @@ const adaptedCoverage = adaptCoverage('2026-09-21', {
 });
 assert.strictEqual(adaptedCoverage[0].source, 'gh-123');
 assert.strictEqual(adaptedCoverage[0].proven_wallets, 418);
+
+assert.strictEqual(dayOk('2026-09-22'), true);
+assert.strictEqual(dayOk('22-09-2026'), false);
+assert.strictEqual(refOk('50413d4b0f592bb5b108e34ac49e0f6521cac816'), true);
+assert.strictEqual(refOk('main'), false);
 
 const reconciled = summarize([
   { hash: 'R1', close_time: '2026-09-21T10:00:00Z', validated: true, tx_type: 'Payment',
