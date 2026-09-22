@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "purpose": "Immutable report-window acceptance targets for historical price-regime reconciliation. Displayed XRP totals are intentionally marked rounded; exact reconciliation must come from canonical evidence, not prose rounding.",
+  "production_sha": "877b8bf819d401ffea0bc839fabe5befed856a60",
+  "targets": [
+    {
+      "report_id": "SW-20260921-BM4CV",
+      "scan_id": "SC-MUBU6H1X",
+      "evidence_scan_id": "gh-107137062",
+      "anchor_ledger": 107137062,
+      "anchor_close": "2026-09-21T13:00:11.000Z",
+      "state_version": 25,
+      "state_sha256": "5315d665329e35eac1a8b2a08de0c4d0a3a7bc7a86998ad189a8775639b58352",
+      "report_hash": "c77656d079a2df2890eace6532144c3d8d868ab9976745af2bdbbaffd6311cc6",
+      "target_wallets": 418,
+      "proved_wallets": 418,
+      "price_usd": 1.5579,
+      "report_window_label": "LAST 131H · GAP SINCE LAST SCAN",
+      "transactions_in_window": 373672,
+      "active_wallets": 223,
+      "large_move_count": 301,
+      "shadow_volume_display": "1.41B XRP",
+      "watched_activity_display": "2.82B XRP",
+      "net_flow_display": "487.33M XRP outward",
+      "rounded_display_fields": [
+        "shadow_volume_display",
+        "watched_activity_display",
+        "net_flow_display"
+      ]
+    },
+    {
+      "report_id": "SW-20260922-1E9N2",
+      "scan_id": "SC-MUCNI9ZM",
+      "evidence_scan_id": "gh-107158879",
+      "anchor_ledger": 107158879,
+      "anchor_close": "2026-09-22T12:25:41.000Z",
+      "state_version": 30,
+      "state_sha256": "9098380e4550751d7d29f57eca36498f0ab4f57b55e3ecc1ad407db1ea88ac22",
+      "report_hash": "df972b9997bf0c6931f14ca5f7c4f9340c9e7ee2a06a620a64558b9339e72531",
+      "target_wallets": 418,
+      "proved_wallets": 418,
+      "price_usd": 1.5355,
+      "report_window_label": "LAST 25H · GAP SINCE LAST SCAN",
+      "transactions_in_window": 96651,
+      "active_wallets": 199,
+      "large_move_count": 126,
+      "shadow_volume_display": "430.78M XRP",
+      "watched_activity_display": "843.04M XRP",
+      "net_flow_display": "82.29M XRP inward",
+      "rounded_display_fields": [
+        "shadow_volume_display",
+        "watched_activity_display",
+        "net_flow_display"
+      ]
+    }
+  ]
+}
