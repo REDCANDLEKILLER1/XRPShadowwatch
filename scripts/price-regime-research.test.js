@@ -5,7 +5,7 @@ const assert = require('assert');
 const { buildDailyResearchTable } = require('../research/price-regime/daily-table');
 const { toCsv } = require('../research/price-regime/build-daily');
 const { adaptCanonicalEvents, adaptWallets, adaptCoverage } = require('../research/price-regime/shadowwatch-adapter');
-const { summarize, dayOk, refOk, rangeOf, solveWindow } = require('../api/research-price-regime')._test;
+const { summarize, productionStyleTotal, dayOk, refOk, rangeOf, solveWindow } = require('../api/research-price-regime')._test;
 
 const wallets = [
   { address: 'rEX', cohort: 'exchange' },
@@ -168,6 +168,15 @@ assert.strictEqual(reconciled.successful_native_amount_by_tx_type.Payment.xrp, 2
 assert.strictEqual(reconciled.successful_native_amount_by_tx_type.EscrowCreate.xrp, 900000000);
 assert.strictEqual(reconciled.large_move_volume_xrp, 2000000);
 assert.strictEqual(reconciled.large_move_count, 1);
+const legacyWide = productionStyleTotal([
+  { hash: 'P1', tx_type: 'Payment', currency: 'XRP', amount_drops: '2000000', tx_result: 'tesSUCCESS' },
+  { hash: 'P2', tx_type: 'Payment', currency: 'XRP', amount_drops: '3000000', tx_result: '' },
+  { hash: 'PF', tx_type: 'Payment', currency: 'XRP', amount_drops: '1000000000000000', tx_result: 'tecPATH_DRY' },
+  { hash: 'EC', tx_type: 'EscrowCreate', currency: 'XRP', amount_drops: null, escrow_amount_drops: '4000000', tx_result: 'tesSUCCESS' }
+]);
+assert.strictEqual(legacyWide.total_xrp, 9);
+assert.strictEqual(legacyWide.by_result['(blank)'].xrp, 3);
+assert.strictEqual(legacyWide.by_tx_type.EscrowCreate.xrp, 4);
 
 const csv = toCsv(table);
 assert(csv.startsWith('date,xrp_price_usd,cohort_balance_xrp'));
