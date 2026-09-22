@@ -2,7 +2,7 @@
 'use strict';
 
 const assert = require('assert');
-const { timeRange, resolveLedgerRange, paymentLeader, scanBatch } = require('../research/price-regime/historical-walker');
+const { timeRange, resolveLedgerRange, proveLedgerRange, paymentLeader, scanBatch } = require('../research/price-regime/historical-walker');
 
 async function main() {
   assert.deepStrictEqual(timeRange('2026-08-10T00:00:00Z', '2026-08-28T00:00:00Z'), {
@@ -59,6 +59,22 @@ async function main() {
   assert.strictEqual(range.through_ledger, 200);
   assert.strictEqual(range.start_floor_ledger, 100);
   assert.strictEqual(range.end_floor_ledger, 200);
+
+  const pinnedReader = {
+    ledger: async index => {
+      const headers = {
+        100: { ledger: 100, close_ms: Date.parse('2026-08-09T23:59:52Z') },
+        101: { ledger: 101, close_ms: Date.parse('2026-08-10T00:00:00Z') },
+        200: { ledger: 200, close_ms: Date.parse('2026-08-27T23:59:52Z') },
+        201: { ledger: 201, close_ms: Date.parse('2026-08-28T00:00:00Z') }
+      };
+      return headers[index];
+    }
+  };
+  const pinned = await proveLedgerRange(pinnedReader, '2026-08-10T00:00:00Z', '2026-08-28T00:00:00Z', 101, 200);
+  assert.strictEqual(pinned.from_ledger, 101);
+  assert.strictEqual(pinned.through_ledger, 200);
+  assert.strictEqual(pinned.proof, 'PINNED_LEDGER_BOUNDARIES_REVALIDATED');
 
   const selected = new Set(['rAAA', 'rBBB']);
   assert.strictEqual(paymentLeader({ from_account: 'rBBB', to_account: 'rAAA' }, selected), 'rAAA');
