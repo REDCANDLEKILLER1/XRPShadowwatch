@@ -143,12 +143,13 @@ module.exports = async function handler(req, res) {
   const query = req.query || {};
   const day = String(query.day || '');
   const ref = String(query.ref || '');
-  let range = null;
-  try { range = rangeOf(query); }
-  catch (e) { return res.status(400).json({ error: String(e.message || e) }); }
-
   const solveCountRaw = query.solve_count;
   const solveCount = solveCountRaw === undefined ? null : Number(solveCountRaw);
+  let range = null;
+  if (solveCount === null) {
+    try { range = rangeOf(query); }
+    catch (e) { return res.status(400).json({ error: String(e.message || e) }); }
+  }
   const solveTo = String(query.to || '');
   const lookbackHours = query.lookback_hours === undefined ? 48 : Number(query.lookback_hours);
 
