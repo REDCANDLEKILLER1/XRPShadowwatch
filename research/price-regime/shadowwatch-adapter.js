@@ -3,6 +3,9 @@
 const ALLOWED_COHORTS = new Set(['exchange', 'whale', 'other']);
 
 function finite(value, label) {
+  if (value === null || value === undefined || value === '' || typeof value === 'boolean') {
+    throw new Error(label + ' must be finite');
+  }
   const n = Number(value);
   if (!Number.isFinite(n)) throw new Error(label + ' must be finite');
   return n;
@@ -12,6 +15,7 @@ function adaptCanonicalEvents(events) {
   const out = [];
   for (const e of events || []) {
     if (!e || e.validated !== true) continue;
+    if (e.tx_type !== 'Payment') continue;
     if (e.currency !== 'XRP') continue;
     if (typeof e.hash !== 'string' || !e.hash) throw new Error('canonical event missing hash');
     if (typeof e.close_time !== 'string' || !e.close_time) throw new Error('canonical event missing close_time: ' + e.hash);
@@ -53,15 +57,18 @@ function adaptWallets(roster, cohortByAddress) {
 function adaptCoverage(date, metrics) {
   metrics = metrics || {};
   const target = Number(metrics.target_wallets);
-  const proven = Number(metrics.indexed_wallets);
+  const rawProven = metrics.complete_wallets !== undefined ? metrics.complete_wallets
+    : metrics.transaction_windows_proved !== undefined ? metrics.transaction_windows_proved
+    : metrics.indexed_wallets;
+  const proven = Number(rawProven);
   if (!Number.isFinite(target) || !Number.isFinite(proven)) {
-    throw new Error('metrics must include target_wallets and indexed_wallets');
+    throw new Error('metrics must include target_wallets and a proved-wallet count');
   }
   return [{
     date,
     target_wallets: target,
     proven_wallets: proven,
-    source: metrics.scan_id || 'GITHUB_EVIDENCE_STORE'
+    source: metrics.evidence_scan_id || metrics.scan_id || 'GITHUB_EVIDENCE_STORE'
   }];
 }
 
