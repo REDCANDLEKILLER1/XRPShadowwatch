@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "status": "PARTIAL_PASS",
+  "report_id": "SW-20260922-1E9N2",
+  "production_sha": "877b8bf819d401ffea0bc839fabe5befed856a60",
+  "evidence_commit_sha": "50413d4b0f592bb5b108e34ac49e0f6521cac816",
+  "evidence_scan_id": "gh-107158879",
+  "anchor_ledger": 107158879,
+  "anchor_close": "2026-09-22T12:25:41.000Z",
+  "coverage": {
+    "target_wallets": 418,
+    "proved_wallets": 418,
+    "complete": true
+  },
+  "public_report_target": {
+    "window_label": "LAST 25H · GAP SINCE LAST SCAN",
+    "transaction_count": 96651,
+    "large_move_count": 126,
+    "large_move_volume_display": "430.78M XRP",
+    "watched_activity_display": "843.04M XRP",
+    "price_usd": 1.5355
+  },
+  "immutable_utc_day_to_anchor": {
+    "from": "2026-09-22T00:00:00.000Z",
+    "to": "2026-09-22T12:25:41.000Z",
+    "distinct_events": 41822,
+    "successful_xrp_payment_volume": 391372808.3665213,
+    "large_move_count": 49,
+    "large_move_volume_xrp": 240075425.47353402,
+    "hash_digest_sha256": "6a43062c1bf0a0c00022095fc2e3e6ef26f78968bd73d65baecdddddea4b0d62"
+  },
+  "anchor_24h_slice": {
+    "from": "2026-09-21T12:25:41.000Z",
+    "to": "2026-09-22T12:25:41.000Z",
+    "distinct_events": 94316,
+    "successful_xrp_payment_volume": 812361064.6531605,
+    "large_move_count": 126,
+    "large_move_volume_xrp": 430781754.9187589,
+    "rendered_large_move_volume": "430.78M XRP",
+    "hash_digest_sha256": "fe2099ac4279d44521baf9e898c8bb6078f8356b78d7cf438359cb188856bb22"
+  },
+  "literal_25h_slice": {
+    "from": "2026-09-21T11:25:41.000Z",
+    "to": "2026-09-22T12:25:41.000Z",
+    "distinct_events": 98224,
+    "successful_xrp_payment_volume": 829821378.5762944,
+    "large_move_count": 128,
+    "large_move_volume_xrp": 433394774.0002089,
+    "hash_digest_sha256": "c683cbd8a4016d641fd9d5532613a326fceadc180e4da99df8f4a2403476c6d6"
+  },
+  "verdicts": {
+    "immutable_anchor_and_coverage": "PASS",
+    "canonical_day_read": "PASS",
+    "failed_and_non_payment_filtering": "PASS_BY_TEST",
+    "public_large_move_count": "PASS_ON_24H_ANCHOR_SLICE",
+    "public_large_move_volume_rounding": "PASS_ON_24H_ANCHOR_SLICE",
+    "literal_25h_label_as_exact_duration": "FAIL",
+    "exact_public_window_start": "PENDING",
+    "historical_expansion": "BLOCKED_UNTIL_RECONCILIATION_GATE"
+  },
+  "note": "The report label is presentation rounding, not an exact interval contract. Do not choose a start time merely to force the public count. The count-boundary solver exists only to locate and then independently validate the real ledger timestamp boundary."
+}
