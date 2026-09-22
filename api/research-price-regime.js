@@ -1,10 +1,41 @@
 'use strict';
 
 const crypto = require('crypto');
+const zlib = require('zlib');
 const Store = require('../src/db/github-store');
+const Archive = require('../src/db/github-archive');
 
 function dayOk(day) {
   return /^20\d{2}-\d{2}-\d{2}$/.test(String(day || ''));
+}
+function refOk(ref) {
+  return /^[a-f0-9]{40}$/.test(String(ref || ''));
+}
+
+async function readKindAtRef(day, kind, ref, deps) {
+  const d = deps || {};
+  const target = Archive.evidenceTarget(d.env || process.env);
+  const gh = d.gh || Archive.client(target.token, target.repo, d.fetch || fetch);
+  const name = kind === 'participants' ? 'participants' : 'events';
+  const base = 'evidence/' + day.replace(/-/g, '/');
+  const suffixes = ['/' + name + '.ndjson.gz'];
+  for (let i = 1; i <= 999; i++) suffixes.push('/' + name + '.' + String(i).padStart(3, '0') + '.ndjson.gz');
+
+  const rows = [], files = [];
+  let found = 0;
+  for (const suffix of suffixes) {
+    const path = base + suffix;
+    const packed = await Store.readBytes(gh, target.branch, path, ref);
+    if (packed === null) {
+      if (suffix === '/' + name + '.ndjson.gz') continue;
+      break;
+    }
+    const text = zlib.gunzipSync(packed).toString('utf8');
+    for (const line of text.split('\n')) if (line) rows.push(JSON.parse(line));
+    files.push(path);
+    found++;
+  }
+  return { events: rows, files, missing: found ? [] : [day] };
 }
 
 function amountXrp(event) {
@@ -66,14 +97,17 @@ module.exports = async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'METHOD_NOT_ALLOWED' });
 
   const day = String((req.query || {}).day || '');
+  const ref = String((req.query || {}).ref || '');
   if (!dayOk(day)) return res.status(400).json({ error: 'DAY_REQUIRED_YYYY_MM_DD' });
+  if (ref && !refOk(ref)) return res.status(400).json({ error: 'REF_MUST_BE_FULL_COMMIT_SHA' });
 
   try {
-    const events = await Store.readDays([day], {}, 'events');
-    const participants = await Store.readDays([day], {}, 'participants');
+    const events = ref ? await readKindAtRef(day, 'events', ref) : await Store.readDays([day], {}, 'events');
+    const participants = ref ? await readKindAtRef(day, 'participants', ref) : await Store.readDays([day], {}, 'participants');
     return res.status(200).json({
       mode: 'READ_ONLY_RESEARCH_RECONCILIATION',
       day,
+      evidence_ref: ref || 'main',
       events: summarize(events.events),
       event_files: events.files,
       missing_event_days: events.missing,
@@ -86,4 +120,4 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports._test = { amountXrp, digestHashes, summarize };
+module.exports._test = { amountXrp, digestHashes, summarize, dayOk, refOk };
