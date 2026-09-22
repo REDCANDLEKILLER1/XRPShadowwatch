@@ -5,7 +5,7 @@ const ReaderPool = require('../src/db/xrpl-reader');
 const Roster = require('../src/db/roster');
 const { buildDailyResearchTable } = require('../research/price-regime/daily-table');
 const { cohortMapFromRoster, adaptWallets } = require('../research/price-regime/shadowwatch-adapter');
-const { MAX_BATCH, resolveLedgerRange, scanBatch } = require('../research/price-regime/historical-walker');
+const { MAX_BATCH, resolveLedgerRange, proveLedgerRange, scanBatch } = require('../research/price-regime/historical-walker');
 
 function cohortSelection(roster, mode) {
   const m = String(mode || 'large').toLowerCase();
@@ -52,7 +52,13 @@ async function runBatch(query, deps) {
   const reader = d.reader || ReaderPool.acquireReader();
   const release = d.release || (r => ReaderPool.releaseReader(r));
   try {
-    const range = await resolveLedgerRange(reader, query.start, query.end);
+    const pinned = query.from_ledger !== undefined || query.through_ledger !== undefined;
+    if (pinned && (query.from_ledger === undefined || query.through_ledger === undefined)) {
+      throw new Error('PINNED_LEDGER_RANGE_REQUIRES_BOTH_BOUNDS');
+    }
+    const range = pinned
+      ? await proveLedgerRange(reader, query.start, query.end, query.from_ledger, query.through_ledger)
+      : await resolveLedgerRange(reader, query.start, query.end);
     const scanned = await scanBatch(reader, batch.map(w => w.address), range, {
       dedupeSet: new Set(selected.map(w => w.address)),
       scan_id: 'RESEARCH_HISTORY_' + range.start_iso.slice(0, 10) + '_' + range.end_iso.slice(0, 10),
