@@ -57,6 +57,39 @@ async function resolveLedgerRange(reader, startIso, endIso) {
   };
 }
 
+
+async function proveLedgerRange(reader, startIso, endIso, fromLedger, throughLedger) {
+  const t = timeRange(startIso, endIso);
+  const from = Number(fromLedger), through = Number(throughLedger);
+  if (!Number.isInteger(from) || !Number.isInteger(through) || from < 2 || through < from) {
+    throw new Error('INVALID_PINNED_LEDGER_RANGE');
+  }
+  const [beforeStart, first, last, afterEnd] = await Promise.all([
+    reader.ledger(from - 1), reader.ledger(from), reader.ledger(through), reader.ledger(through + 1)
+  ]);
+  if (!(beforeStart.close_ms < t.start_ms && first.close_ms >= t.start_ms)) {
+    throw new Error('PINNED_START_LEDGER_DOES_NOT_BRACKET_TIME');
+  }
+  if (!(last.close_ms < t.end_ms && afterEnd.close_ms >= t.end_ms)) {
+    throw new Error('PINNED_END_LEDGER_DOES_NOT_BRACKET_TIME');
+  }
+  return {
+    start_ms: t.start_ms,
+    end_ms: t.end_ms,
+    start_iso: new Date(t.start_ms).toISOString(),
+    end_iso: new Date(t.end_ms).toISOString(),
+    from_ledger: from,
+    through_ledger: through,
+    start_floor_ledger: beforeStart.ledger,
+    start_floor_close: new Date(beforeStart.close_ms).toISOString(),
+    end_floor_ledger: last.ledger,
+    end_floor_close: new Date(last.close_ms).toISOString(),
+    next_ledger: afterEnd.ledger,
+    next_close: new Date(afterEnd.close_ms).toISOString(),
+    proof: 'PINNED_LEDGER_BOUNDARIES_REVALIDATED'
+  };
+}
+
 function compactPayment(row) {
   if (!row || row.validated !== true || row.tx_type !== 'Payment' ||
       row.tx_result !== 'tesSUCCESS' || row.currency !== 'XRP' ||
@@ -247,6 +280,7 @@ module.exports = {
   MAX_WINDOW_DAYS,
   timeRange,
   resolveLedgerRange,
+  proveLedgerRange,
   compactPayment,
   paymentLeader,
   walkAddress,
