@@ -5,7 +5,7 @@ const assert = require('assert');
 const { buildDailyResearchTable } = require('../research/price-regime/daily-table');
 const { toCsv } = require('../research/price-regime/build-daily');
 const { adaptCanonicalEvents, cohortMapFromRoster, adaptWallets, adaptCoverage } = require('../research/price-regime/shadowwatch-adapter');
-const { summarize, productionStyleTotal, researchFlow, dayOk, refOk, rangeOf, solveWindow } = require('../api/research-price-regime')._test;
+const { summarize, productionStyleTotal, researchFlow, dayOk, refOk, datasetDays, rangeOf, solveWindow } = require('../api/research-price-regime')._test;
 
 const wallets = [
   { address: 'rEX', cohort: 'exchange' },
@@ -144,6 +144,12 @@ assert.strictEqual(dayOk('2026-09-22'), true);
 assert.strictEqual(dayOk('22-09-2026'), false);
 assert.strictEqual(refOk('50413d4b0f592bb5b108e34ac49e0f6521cac816'), true);
 assert.strictEqual(refOk('main'), false);
+const dsDays = datasetDays('2026-09-09', '2026-09-22');
+assert.strictEqual(dsDays.length, 14);
+assert.strictEqual(dsDays[0], '2026-09-09');
+assert.strictEqual(dsDays[13], '2026-09-22');
+assert.throws(() => datasetDays('2026-08-01', '2026-09-22'), /EXCEEDS_31_DAYS/);
+
 const bounded = rangeOf({ from: '2026-09-21T11:25:41Z', to: '2026-09-22T12:25:41Z' });
 assert.strictEqual(bounded.days.length, 2);
 assert.strictEqual(bounded.to - bounded.from, 25 * 60 * 60 * 1000);
