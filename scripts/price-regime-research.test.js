@@ -5,6 +5,7 @@ const assert = require('assert');
 const { buildDailyResearchTable } = require('../research/price-regime/daily-table');
 const { toCsv } = require('../research/price-regime/build-daily');
 const { adaptCanonicalEvents, adaptWallets, adaptCoverage } = require('../research/price-regime/shadowwatch-adapter');
+const { summarize } = require('../api/research-price-regime')._test;
 
 const wallets = [
   { address: 'rEX', cohort: 'exchange' },
@@ -31,13 +32,14 @@ const table = buildDailyResearchTable({
     { date: '2026-09-21', address: 'rOT', balance_xrp: 29 }
   ],
   events: [
-    { hash: 'A', date: '2026-09-20T10:00:00Z', from: 'rOUT', to: 'rEX', amount_xrp: 2000000, currency: 'XRP', tx_result: 'tesSUCCESS' },
-    { hash: 'A', date: '2026-09-20T10:00:00Z', from: 'rOUT', to: 'rEX', amount_xrp: 2000000, currency: 'XRP', tx_result: 'tesSUCCESS' },
-    { hash: 'FAIL', date: '2026-09-20T11:00:00Z', from: 'rOUT', to: 'rEX', amount_xrp: 1000000000, currency: 'XRP', tx_result: 'tecPATH_DRY' },
-    { hash: 'TOK', date: '2026-09-20T12:00:00Z', from: 'rOUT', to: 'rEX', amount_xrp: 50000000, currency: 'USD', tx_result: 'tesSUCCESS' },
-    { hash: 'B', date: '2026-09-21T09:00:00Z', from: 'rEX', to: 'rWH', amount_xrp: 1500000, currency: 'XRP', tx_result: 'tesSUCCESS' },
-    { hash: 'C', date: '2026-09-21T10:00:00Z', from: 'rEX', to: 'rEX', amount_xrp: 3000000, currency: 'XRP', tx_result: 'tesSUCCESS' },
-    { hash: 'D', date: '2026-09-21T11:00:00Z', from: 'rWH', to: 'rOT', amount_xrp: 500000, currency: 'XRP', tx_result: 'tesSUCCESS' }
+    { hash: 'A', date: '2026-09-20T10:00:00Z', from: 'rOUT', to: 'rEX', amount_xrp: 2000000, currency: 'XRP', tx_type: 'Payment', tx_result: 'tesSUCCESS' },
+    { hash: 'A', date: '2026-09-20T10:00:00Z', from: 'rOUT', to: 'rEX', amount_xrp: 2000000, currency: 'XRP', tx_type: 'Payment', tx_result: 'tesSUCCESS' },
+    { hash: 'FAIL', date: '2026-09-20T11:00:00Z', from: 'rOUT', to: 'rEX', amount_xrp: 1000000000, currency: 'XRP', tx_type: 'Payment', tx_result: 'tecPATH_DRY' },
+    { hash: 'TOK', date: '2026-09-20T12:00:00Z', from: 'rOUT', to: 'rEX', amount_xrp: 50000000, currency: 'USD', tx_type: 'Payment', tx_result: 'tesSUCCESS' },
+    { hash: 'ESCROW', date: '2026-09-20T13:00:00Z', from: 'rOUT', to: 'rEX', amount_xrp: 900000000, currency: 'XRP', tx_type: 'EscrowCreate', tx_result: 'tesSUCCESS' },
+    { hash: 'B', date: '2026-09-21T09:00:00Z', from: 'rEX', to: 'rWH', amount_xrp: 1500000, currency: 'XRP', tx_type: 'Payment', tx_result: 'tesSUCCESS' },
+    { hash: 'C', date: '2026-09-21T10:00:00Z', from: 'rEX', to: 'rEX', amount_xrp: 3000000, currency: 'XRP', tx_type: 'Payment', tx_result: 'tesSUCCESS' },
+    { hash: 'D', date: '2026-09-21T11:00:00Z', from: 'rWH', to: 'rOT', amount_xrp: 500000, currency: 'XRP', tx_type: 'Payment', tx_result: 'tesSUCCESS' }
   ]
 });
 
@@ -87,22 +89,34 @@ assert.strictEqual(partial[2].net_cohort_change_xrp, null);
 assert.throws(() => buildDailyResearchTable({
   wallets,
   events: [
-    { hash: 'X', date: '2026-09-21', from: 'rOT', to: 'rEX', currency: 'XRP', tx_result: 'tesSUCCESS' }
+    { hash: 'X', date: '2026-09-21', from: 'rOT', to: 'rEX', currency: 'XRP', tx_type: 'Payment', tx_result: 'tesSUCCESS' }
   ]
 }), /amount_xrp must be finite/);
 
 
 const adaptedEvents = adaptCanonicalEvents([
-  { hash: 'CANON1', date: '2026-09-21T12:00:00Z', validated: true, currency: 'XRP',
-    amount: '1500000', from: 'rOUT', to: 'rEX', tx_result: 'tesSUCCESS', ledger_index: 123 },
-  { hash: 'UNVALIDATED', date: '2026-09-21T12:00:00Z', validated: false, currency: 'XRP',
-    amount: '999999999999', from: 'rOUT', to: 'rEX', tx_result: 'tesSUCCESS' },
-  { hash: 'TOKEN', date: '2026-09-21T12:00:00Z', validated: true, currency: 'USD',
-    amount: '20', from: 'rOUT', to: 'rEX', tx_result: 'tesSUCCESS' }
+  { hash: 'CANON1', close_time: '2026-09-21T12:00:00Z', validated: true, tx_type: 'Payment',
+    currency: 'XRP', amount_drops: '1500000', from_account: 'rOUT', to_account: 'rEX',
+    tx_result: 'tesSUCCESS', ledger_index: 123 },
+  { hash: 'FAILED', close_time: '2026-09-21T12:01:00Z', validated: true, tx_type: 'Payment',
+    currency: 'XRP', amount_drops: '1000000000000000', from_account: 'rOUT', to_account: 'rEX',
+    tx_result: 'tecPATH_DRY', ledger_index: 124 },
+  { hash: 'ESCROW_CANON', close_time: '2026-09-21T12:02:00Z', validated: true, tx_type: 'EscrowCreate',
+    currency: 'XRP', amount_drops: '900000000000000', from_account: 'rOUT', to_account: 'rEX',
+    tx_result: 'tesSUCCESS', ledger_index: 125 },
+  { hash: 'UNVALIDATED', close_time: '2026-09-21T12:03:00Z', validated: false, tx_type: 'Payment',
+    currency: 'XRP', amount_drops: '999999999999', from_account: 'rOUT', to_account: 'rEX',
+    tx_result: 'tesSUCCESS', ledger_index: 126 },
+  { hash: 'TOKEN', close_time: '2026-09-21T12:04:00Z', validated: true, tx_type: 'Payment',
+    currency: 'USD', amount_value: '20', from_account: 'rOUT', to_account: 'rEX',
+    tx_result: 'tesSUCCESS', ledger_index: 127 }
 ]);
-assert.strictEqual(adaptedEvents.length, 1);
+assert.strictEqual(adaptedEvents.length, 2);
 assert.strictEqual(adaptedEvents[0].amount_xrp, 1.5);
+assert.strictEqual(adaptedEvents[0].from, 'rOUT');
+assert.strictEqual(adaptedEvents[0].to, 'rEX');
 assert.strictEqual(adaptedEvents[0].source, 'GITHUB_EVIDENCE_STORE');
+assert.strictEqual(adaptedEvents[1].tx_result, 'tecPATH_DRY');
 
 const adaptedWallets = adaptWallets(
   [{ address: 'rEX', label: 'Exchange A', cat: 'exchange' }, { address: 'rWH', label: 'Whale A' }],
@@ -112,10 +126,26 @@ assert.deepStrictEqual(adaptedWallets.map(x => x.cohort), ['exchange', 'whale'])
 assert.throws(() => adaptWallets([{ address: 'rUNKNOWN' }], {}), /research cohort must be explicit/);
 
 const adaptedCoverage = adaptCoverage('2026-09-21', {
-  scan_id: 'gh-123', target_wallets: 418, indexed_wallets: 418
+  evidence_scan_id: 'gh-123', target_wallets: 418, complete_wallets: 418
 });
 assert.strictEqual(adaptedCoverage[0].source, 'gh-123');
 assert.strictEqual(adaptedCoverage[0].proven_wallets, 418);
+
+const reconciled = summarize([
+  { hash: 'R1', close_time: '2026-09-21T10:00:00Z', validated: true, tx_type: 'Payment',
+    currency: 'XRP', amount_drops: '2000000000000', tx_result: 'tesSUCCESS' },
+  { hash: 'R1', close_time: '2026-09-21T10:00:00Z', validated: true, tx_type: 'Payment',
+    currency: 'XRP', amount_drops: '2000000000000', tx_result: 'tesSUCCESS' },
+  { hash: 'RF', close_time: '2026-09-21T11:00:00Z', validated: true, tx_type: 'Payment',
+    currency: 'XRP', amount_drops: '1000000000000000', tx_result: 'tecPATH_DRY' },
+  { hash: 'RE', close_time: '2026-09-21T12:00:00Z', validated: true, tx_type: 'EscrowCreate',
+    currency: 'XRP', amount_drops: '900000000000000', tx_result: 'tesSUCCESS' }
+]);
+assert.strictEqual(reconciled.event_rows, 4);
+assert.strictEqual(reconciled.distinct_events, 3);
+assert.strictEqual(reconciled.successful_xrp_moved, 2000000);
+assert.strictEqual(reconciled.large_move_volume_xrp, 2000000);
+assert.strictEqual(reconciled.large_move_count, 1);
 
 const csv = toCsv(table);
 assert(csv.startsWith('date,xrp_price_usd,cohort_balance_xrp'));
