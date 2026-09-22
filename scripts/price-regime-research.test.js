@@ -5,7 +5,7 @@ const assert = require('assert');
 const { buildDailyResearchTable } = require('../research/price-regime/daily-table');
 const { toCsv } = require('../research/price-regime/build-daily');
 const { adaptCanonicalEvents, adaptWallets, adaptCoverage } = require('../research/price-regime/shadowwatch-adapter');
-const { summarize, dayOk, refOk, rangeOf } = require('../api/research-price-regime')._test;
+const { summarize, dayOk, refOk, rangeOf, solveWindow } = require('../api/research-price-regime')._test;
 
 const wallets = [
   { address: 'rEX', cohort: 'exchange' },
@@ -139,6 +139,16 @@ const bounded = rangeOf({ from: '2026-09-21T11:25:41Z', to: '2026-09-22T12:25:41
 assert.strictEqual(bounded.days.length, 2);
 assert.strictEqual(bounded.to - bounded.from, 25 * 60 * 60 * 1000);
 assert.throws(() => rangeOf({ from: '2026-09-01T00:00:00Z', to: '2026-09-22T00:00:00Z' }), /EXCEEDS_7_DAYS/);
+
+const solved = solveWindow([
+  { hash: 'S1', close_time: '2026-09-22T12:00:00Z', validated: true, tx_type: 'Payment', currency: 'XRP', amount_drops: '3000000', tx_result: 'tesSUCCESS' },
+  { hash: 'S2', close_time: '2026-09-22T11:00:00Z', validated: true, tx_type: 'Payment', currency: 'XRP', amount_drops: '2000000', tx_result: 'tesSUCCESS' },
+  { hash: 'S3', close_time: '2026-09-22T10:00:00Z', validated: true, tx_type: 'Payment', currency: 'XRP', amount_drops: '1000000', tx_result: 'tesSUCCESS' }
+], Date.parse('2026-09-22T12:30:00Z'), 2);
+assert.strictEqual(solved.exact_timestamp_boundary, true);
+assert.strictEqual(solved.solved_start_at_or_before, '2026-09-22T11:00:00.000Z');
+assert.strictEqual(solved.prior_excluded_close_time, '2026-09-22T10:00:00.000Z');
+assert.strictEqual(solved.selected_summary.distinct_events, 2);
 
 const reconciled = summarize([
   { hash: 'R1', close_time: '2026-09-21T10:00:00Z', validated: true, tx_type: 'Payment',
