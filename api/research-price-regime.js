@@ -90,6 +90,14 @@ function amountXrp(event) {
   return drops / 1e6;
 }
 
+function nativeAmountAnyType(event) {
+  if (!event || event.currency !== 'XRP') return null;
+  if (event.amount_drops === null || event.amount_drops === undefined || event.amount_drops === '') return null;
+  const drops = Number(event.amount_drops);
+  if (!Number.isFinite(drops) || drops < 0) return null;
+  return drops / 1e6;
+}
+
 function digestHashes(events) {
   const h = crypto.createHash('sha256');
   const hashes = [...new Set((events || []).map(e => String(e.hash || '')).filter(Boolean))].sort();
@@ -103,6 +111,8 @@ function summarize(events) {
   let largeCount = 0;
   let first = null;
   let last = null;
+  let successfulNativeAnyType = 0;
+  const byType = Object.create(null);
   const seen = new Set();
 
   for (const e of events || []) {
@@ -114,6 +124,14 @@ function summarize(events) {
       if (last === null || t > last) last = t;
     }
     if (e.validated !== true || e.tx_result !== 'tesSUCCESS') continue;
+    const anyNative = nativeAmountAnyType(e);
+    if (anyNative !== null) {
+      successfulNativeAnyType += anyNative;
+      const type = String(e.tx_type || 'UNKNOWN');
+      if (!byType[type]) byType[type] = { events: 0, xrp: 0 };
+      byType[type].events += 1;
+      byType[type].xrp += anyNative;
+    }
     const xrp = amountXrp(e);
     if (xrp === null) continue;
     successXrp += xrp;
@@ -127,6 +145,10 @@ function summarize(events) {
     event_rows: (events || []).length,
     distinct_events: seen.size,
     successful_xrp_moved: successXrp,
+    successful_native_amount_any_type: successfulNativeAnyType,
+    successful_native_amount_by_tx_type: Object.keys(byType).sort().reduce((out, key) => {
+      out[key] = byType[key]; return out;
+    }, {}),
     large_move_volume_xrp: largeXrp,
     large_move_count: largeCount,
     first_close_time: first === null ? null : new Date(first).toISOString(),
@@ -226,4 +248,4 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports._test = { amountXrp, digestHashes, summarize, dayOk, refOk, rangeOf, solveWindow };
+module.exports._test = { amountXrp, nativeAmountAnyType, digestHashes, summarize, dayOk, refOk, rangeOf, solveWindow };
