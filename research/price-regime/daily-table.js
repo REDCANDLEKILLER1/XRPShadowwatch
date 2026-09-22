@@ -4,6 +4,9 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const ALLOWED_COHORTS = new Set(['exchange', 'whale', 'other']);
 
 function finiteNumber(value, label) {
+  if (value === null || value === undefined || value === '' || typeof value === 'boolean') {
+    throw new Error(label + ' must be finite');
+  }
   const n = Number(value);
   if (!Number.isFinite(n)) throw new Error(label + ' must be finite');
   return n;
@@ -126,6 +129,9 @@ function buildDailyResearchTable(input) {
 
   for (const event of input.events || []) {
     if (!event) continue;
+    // Research flow is movement, not merely a transaction carrying an amount.
+    // Only successful native-XRP Payments belong in these flow columns.
+    if (event.tx_type !== 'Payment') continue;
     if (event.currency !== 'XRP') continue;
     if (event.tx_result !== 'tesSUCCESS') continue;
     if (typeof event.hash !== 'string' || !event.hash) throw new Error('successful XRP event missing hash');
