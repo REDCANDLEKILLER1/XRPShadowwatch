@@ -12,7 +12,7 @@
     "whale": 100,
     "other": 260
   },
-  "price_status": "NOT_YET_JOINED",
+  "price_status": "JOINED_COINBASE_XRP_USD_06AM_AMERICA_CHICAGO",
   "historical_coverage_warning": "Current 418-wallet cohort contains late promotions. Banked day presence does not prove full historical coverage for every current wallet; promoted wallets must be backfilled before full-cohort statistical claims.",
   "notes": [
     "All 14 date directories were present in the pinned evidence snapshot.",
@@ -34,9 +34,12 @@
       "large_move_volume_xrp": 61727979.654059,
       "large_move_count": 32,
       "active_wallets": 163,
-      "xrp_price_usd": null,
+      "xrp_price_usd": 1.4229,
       "missing": false,
-      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF"
+      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF",
+      "price_timestamp_local": "2026-09-09T06:00:00 America/Chicago",
+      "price_timestamp_utc": "2026-09-09T11:00:00Z",
+      "price_field": "hourly_open"
     },
     {
       "date": "2026-09-10",
@@ -52,9 +55,12 @@
       "large_move_volume_xrp": 189323155.143185,
       "large_move_count": 64,
       "active_wallets": 172,
-      "xrp_price_usd": null,
+      "xrp_price_usd": 1.3746,
       "missing": false,
-      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF"
+      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF",
+      "price_timestamp_local": "2026-09-10T06:00:00 America/Chicago",
+      "price_timestamp_utc": "2026-09-10T11:00:00Z",
+      "price_field": "hourly_open"
     },
     {
       "date": "2026-09-11",
@@ -70,9 +76,12 @@
       "large_move_volume_xrp": 275909842.6482351,
       "large_move_count": 76,
       "active_wallets": 173,
-      "xrp_price_usd": null,
+      "xrp_price_usd": 1.3323,
       "missing": false,
-      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF"
+      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF",
+      "price_timestamp_local": "2026-09-11T06:00:00 America/Chicago",
+      "price_timestamp_utc": "2026-09-11T11:00:00Z",
+      "price_field": "hourly_open"
     },
     {
       "date": "2026-09-12",
@@ -88,9 +97,12 @@
       "large_move_volume_xrp": 22576675.711567,
       "large_move_count": 8,
       "active_wallets": 149,
-      "xrp_price_usd": null,
+      "xrp_price_usd": 1.3731,
       "missing": false,
-      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF"
+      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF",
+      "price_timestamp_local": "2026-09-12T06:00:00 America/Chicago",
+      "price_timestamp_utc": "2026-09-12T11:00:00Z",
+      "price_field": "hourly_open"
     },
     {
       "date": "2026-09-13",
@@ -106,9 +118,12 @@
       "large_move_volume_xrp": 2868191.172196,
       "large_move_count": 2,
       "active_wallets": 139,
-      "xrp_price_usd": null,
+      "xrp_price_usd": 1.3403,
       "missing": false,
-      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF"
+      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF",
+      "price_timestamp_local": "2026-09-13T06:00:00 America/Chicago",
+      "price_timestamp_utc": "2026-09-13T11:00:00Z",
+      "price_field": "hourly_open"
     },
     {
       "date": "2026-09-14",
@@ -124,9 +139,12 @@
       "large_move_volume_xrp": 285349423.66080403,
       "large_move_count": 24,
       "active_wallets": 172,
-      "xrp_price_usd": null,
+      "xrp_price_usd": 1.3965,
       "missing": false,
-      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF"
+      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF",
+      "price_timestamp_local": "2026-09-14T06:00:00 America/Chicago",
+      "price_timestamp_utc": "2026-09-14T11:00:00Z",
+      "price_field": "hourly_open"
     },
     {
       "date": "2026-09-15",
@@ -142,9 +160,12 @@
       "large_move_volume_xrp": 323720685.52731204,
       "large_move_count": 106,
       "active_wallets": 196,
-      "xrp_price_usd": null,
+      "xrp_price_usd": 1.4019,
       "missing": false,
-      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF"
+      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF",
+      "price_timestamp_local": "2026-09-15T06:00:00 America/Chicago",
+      "price_timestamp_utc": "2026-09-15T11:00:00Z",
+      "price_field": "hourly_open"
     },
     {
       "date": "2026-09-16",
@@ -160,9 +181,12 @@
       "large_move_volume_xrp": 179414455.42553106,
       "large_move_count": 70,
       "active_wallets": 188,
-      "xrp_price_usd": null,
+      "xrp_price_usd": 1.2886,
       "missing": false,
-      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF"
+      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF",
+      "price_timestamp_local": "2026-09-16T06:00:00 America/Chicago",
+      "price_timestamp_utc": "2026-09-16T11:00:00Z",
+      "price_field": "hourly_open"
     },
     {
       "date": "2026-09-17",
@@ -178,9 +202,12 @@
       "large_move_volume_xrp": 786587025.4788388,
       "large_move_count": 75,
       "active_wallets": 188,
-      "xrp_price_usd": null,
+      "xrp_price_usd": 1.2948,
       "missing": false,
-      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF"
+      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF",
+      "price_timestamp_local": "2026-09-17T06:00:00 America/Chicago",
+      "price_timestamp_utc": "2026-09-17T11:00:00Z",
+      "price_field": "hourly_open"
     },
     {
       "date": "2026-09-18",
@@ -196,9 +223,12 @@
       "large_move_volume_xrp": 213620318.45308805,
       "large_move_count": 81,
       "active_wallets": 188,
-      "xrp_price_usd": null,
+      "xrp_price_usd": 1.3306,
       "missing": false,
-      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF"
+      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF",
+      "price_timestamp_local": "2026-09-18T06:00:00 America/Chicago",
+      "price_timestamp_utc": "2026-09-18T11:00:00Z",
+      "price_field": "hourly_open"
     },
     {
       "date": "2026-09-19",
@@ -214,9 +244,12 @@
       "large_move_volume_xrp": 118891369.54751098,
       "large_move_count": 36,
       "active_wallets": 154,
-      "xrp_price_usd": null,
+      "xrp_price_usd": 1.4175,
       "missing": false,
-      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF"
+      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF",
+      "price_timestamp_local": "2026-09-19T06:00:00 America/Chicago",
+      "price_timestamp_utc": "2026-09-19T11:00:00Z",
+      "price_field": "hourly_open"
     },
     {
       "date": "2026-09-20",
@@ -232,9 +265,12 @@
       "large_move_volume_xrp": 83240215.32510702,
       "large_move_count": 25,
       "active_wallets": 149,
-      "xrp_price_usd": null,
+      "xrp_price_usd": 1.3758,
       "missing": false,
-      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF"
+      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF",
+      "price_timestamp_local": "2026-09-20T06:00:00 America/Chicago",
+      "price_timestamp_utc": "2026-09-20T11:00:00Z",
+      "price_field": "hourly_open"
     },
     {
       "date": "2026-09-21",
@@ -250,9 +286,12 @@
       "large_move_volume_xrp": 284609690.979773,
       "large_move_count": 117,
       "active_wallets": 190,
-      "xrp_price_usd": null,
+      "xrp_price_usd": 1.4901,
       "missing": false,
-      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF"
+      "coverage_status": "BANKED_DAY_PRESENT_NOT_FULL_COHORT_PROOF",
+      "price_timestamp_local": "2026-09-21T06:00:00 America/Chicago",
+      "price_timestamp_utc": "2026-09-21T11:00:00Z",
+      "price_field": "hourly_open"
     },
     {
       "date": "2026-09-22",
@@ -268,9 +307,24 @@
       "large_move_volume_xrp": 250590721.88028002,
       "large_move_count": 51,
       "active_wallets": 173,
-      "xrp_price_usd": null,
+      "xrp_price_usd": 1.5315,
       "missing": false,
-      "coverage_status": "PARTIAL_UTC_DAY_AT_SNAPSHOT"
+      "coverage_status": "PARTIAL_UTC_DAY_AT_SNAPSHOT",
+      "price_timestamp_local": "2026-09-22T06:00:00 America/Chicago",
+      "price_timestamp_utc": "2026-09-22T11:00:00Z",
+      "price_field": "hourly_open"
     }
-  ]
+  ],
+  "price_source": {
+    "provider": "Coinbase Exchange",
+    "product_id": "XRP-USD",
+    "endpoint": "GET /products/XRP-USD/candles",
+    "granularity_seconds": 3600,
+    "timestamp_convention": "06:00 America/Chicago",
+    "september_utc_equivalent": "11:00 UTC",
+    "selected_field": "open",
+    "interpretation": "Opening price of the hourly candle beginning exactly at 06:00 America/Chicago.",
+    "documentation": "https://docs.cdp.coinbase.com/api-reference/exchange-api/rest-api/products/get-product-candles",
+    "caveat": "Coinbase notes historical candle data may be incomplete where no ticks exist. Every requested 06:00 Central bucket in this block returned a candle."
+  }
 }
