@@ -69,7 +69,19 @@ node research/price-regime/build-daily.js INPUT.json OUTPUT.csv
 node research/price-regime/build-daily.js INPUT.json OUTPUT.json
 ```
 
-Input fields are deliberately research-owned and do not read or mutate production storage. The next gate is a known archived ShadowWatch-window fixture: adapt it through `shadowwatch-adapter.js`, then reconcile transaction hashes, counts, XRP amounts, and coverage before historical expansion.
+Input fields are deliberately research-owned and do not read or mutate production storage.
+
+### Reconciliation gate
+
+Recent acceptance targets are pinned in `fixtures/recent-report-targets.json`, including the immutable evidence commit for each report. The read-only `/api/research-price-regime` endpoint can read a UTC evidence day either from current evidence `main` or from an exact 40-character evidence commit SHA and returns counts/totals/hash digests only — never raw private evidence.
+
+The public reports use variable windows (for example 131h and 25h gap windows), while the current archive receipt records the anchor but not the exact window start timestamp. Therefore Phase 1 does **not** infer a start from a display label. Reconciliation is split deliberately:
+
+1. prove immutable evidence commit, anchor and 418/418 coverage;
+2. reproduce stable UTC-day event/hash/payment totals from that exact evidence commit;
+3. compare variable report-window totals only when the exact start/end boundaries are available from source/runtime metadata.
+
+Historical expansion toward January remains blocked until the immutable evidence/day gate passes.
 
 ## Later phases
 
