@@ -104,7 +104,8 @@ const SUITES = [
   // Isolated historical research: pure aggregation, no production stores or network.
   ['price-regime-research',  'price-regime-research.test.js',        null],
   // Read-only historical XRPL traversal: bounded ledgers, pagination and movement filtering.
-  ['historical-regime-walker','historical-price-regime-walker.test.js', null]
+  ['historical-regime-walker','historical-price-regime-walker.test.js', null],
+  ['research-history-api',   'research-history-api.test.js',          null]
 ];
 const only = (() => {
   const i = process.argv.indexOf('--only');
