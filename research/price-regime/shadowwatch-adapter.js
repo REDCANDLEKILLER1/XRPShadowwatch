@@ -37,6 +37,19 @@ function adaptCanonicalEvents(events) {
   return out;
 }
 
+
+function cohortMapFromRoster(roster) {
+  const out = {};
+  for (const w of roster || []) {
+    if (!w || typeof w.address !== 'string' || !w.address) throw new Error('roster wallet missing address');
+    // This is not identity inference. It is a versioned mapping of the
+    // operator-curated production category into the three research cohorts.
+    out[w.address] = w.cat === 'exchange' ? 'exchange'
+      : w.cat === 'whale' ? 'whale' : 'other';
+  }
+  return out;
+}
+
 function adaptWallets(roster, cohortByAddress) {
   const cohorts = cohortByAddress || {};
   return (roster || []).map(w => {
@@ -74,6 +87,7 @@ function adaptCoverage(date, metrics) {
 
 module.exports = {
   adaptCanonicalEvents,
+  cohortMapFromRoster,
   adaptWallets,
   adaptCoverage
 };
