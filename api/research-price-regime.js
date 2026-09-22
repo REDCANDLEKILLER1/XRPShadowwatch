@@ -25,6 +25,37 @@ function rangeOf(query) {
   return { from, to, days };
 }
 
+function solveWindow(events, toMs, targetCount) {
+  const unique = new Map();
+  for (const e of events || []) {
+    if (!e || !e.hash) continue;
+    const t = Date.parse(e.close_time || '');
+    if (!Number.isFinite(t) || t > toMs) continue;
+    if (!unique.has(e.hash)) unique.set(e.hash, e);
+  }
+  const ordered = [...unique.values()].sort((a, b) => {
+    const dt = Date.parse(b.close_time) - Date.parse(a.close_time);
+    return dt || String(a.hash).localeCompare(String(b.hash));
+  });
+  if (!Number.isInteger(targetCount) || targetCount < 1 || targetCount > ordered.length) {
+    throw new Error('TARGET_COUNT_OUTSIDE_LOOKBACK');
+  }
+  const selected = ordered.slice(0, targetCount);
+  const oldestMs = Date.parse(selected[selected.length - 1].close_time);
+  const older = ordered[targetCount] || null;
+  const olderMs = older ? Date.parse(older.close_time) : null;
+  const byBoundary = ordered.filter(e => Date.parse(e.close_time) >= oldestMs);
+  return {
+    target_count: targetCount,
+    exact_timestamp_boundary: byBoundary.length === targetCount,
+    solved_start_at_or_before: new Date(oldestMs).toISOString(),
+    prior_excluded_close_time: olderMs === null ? null : new Date(olderMs).toISOString(),
+    boundary_event_count: byBoundary.length,
+    selected_summary: summarize(selected),
+    timestamp_boundary_summary: summarize(byBoundary)
+  };
+}
+
 async function readKindAtRef(day, kind, ref, deps) {
   const d = deps || {};
   const target = Archive.evidenceTarget(d.env || process.env);
@@ -116,10 +147,44 @@ module.exports = async function handler(req, res) {
   try { range = rangeOf(query); }
   catch (e) { return res.status(400).json({ error: String(e.message || e) }); }
 
-  if (!range && !dayOk(day)) return res.status(400).json({ error: 'DAY_REQUIRED_YYYY_MM_DD' });
+  const solveCountRaw = query.solve_count;
+  const solveCount = solveCountRaw === undefined ? null : Number(solveCountRaw);
+  const solveTo = String(query.to || '');
+  const lookbackHours = query.lookback_hours === undefined ? 48 : Number(query.lookback_hours);
+
+  if (solveCount !== null) {
+    if (!Number.isInteger(solveCount) || solveCount < 1) return res.status(400).json({ error: 'SOLVE_COUNT_MUST_BE_POSITIVE_INTEGER' });
+    if (!Number.isFinite(Date.parse(solveTo))) return res.status(400).json({ error: 'SOLVE_TO_REQUIRED' });
+    if (!Number.isFinite(lookbackHours) || lookbackHours <= 0 || lookbackHours > 168) return res.status(400).json({ error: 'LOOKBACK_HOURS_OUT_OF_RANGE' });
+  } else if (!range && !dayOk(day)) {
+    return res.status(400).json({ error: 'DAY_REQUIRED_YYYY_MM_DD' });
+  }
   if (ref && !refOk(ref)) return res.status(400).json({ error: 'REF_MUST_BE_FULL_COMMIT_SHA' });
 
   try {
+    if (solveCount !== null) {
+      const toMs = Date.parse(solveTo);
+      const fromMs = toMs - lookbackHours * 3600000;
+      const days = [];
+      for (let t = Date.UTC(new Date(fromMs).getUTCFullYear(), new Date(fromMs).getUTCMonth(), new Date(fromMs).getUTCDate());
+           t <= toMs; t += 86400000) days.push(new Date(t).toISOString().slice(0, 10));
+      const all = [];
+      const files = [], missing = [];
+      for (const d of days) {
+        const part = ref ? await readKindAtRef(d, 'events', ref) : await Store.readDays([d], {}, 'events');
+        all.push(...part.events); files.push(...part.files); missing.push(...part.missing);
+      }
+      return res.status(200).json({
+        mode: 'READ_ONLY_RESEARCH_WINDOW_SOLVER',
+        evidence_ref: ref || 'main',
+        to: new Date(toMs).toISOString(),
+        lookback_hours: lookbackHours,
+        days,
+        solution: solveWindow(all, toMs, solveCount),
+        event_files: [...new Set(files)],
+        missing_event_days: [...new Set(missing)]
+      });
+    }
     if (range) {
       const combined = { events: [], files: [], missing: [] };
       for (const d of range.days) {
@@ -160,4 +225,4 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports._test = { amountXrp, digestHashes, summarize, dayOk, refOk, rangeOf };
+module.exports._test = { amountXrp, digestHashes, summarize, dayOk, refOk, rangeOf, solveWindow };
