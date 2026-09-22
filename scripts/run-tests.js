@@ -102,7 +102,9 @@ const SUITES = [
   // A promotion is a claim; the evidence that earned it travels with the entry.
   ['roster-promotion',       'roster-promotion-sk5r3.test.js',      null],
   // Isolated historical research: pure aggregation, no production stores or network.
-  ['price-regime-research',  'price-regime-research.test.js',        null]
+  ['price-regime-research',  'price-regime-research.test.js',        null],
+  // Read-only historical XRPL traversal: bounded ledgers, pagination and movement filtering.
+  ['historical-regime-walker','historical-price-regime-walker.test.js', null]
 ];
 const only = (() => {
   const i = process.argv.indexOf('--only');
