@@ -4,7 +4,7 @@
 const assert = require('assert');
 const { buildDailyResearchTable } = require('../research/price-regime/daily-table');
 const { toCsv } = require('../research/price-regime/build-daily');
-const { adaptCanonicalEvents, adaptWallets, adaptCoverage } = require('../research/price-regime/shadowwatch-adapter');
+const { adaptCanonicalEvents, cohortMapFromRoster, adaptWallets, adaptCoverage } = require('../research/price-regime/shadowwatch-adapter');
 const { summarize, productionStyleTotal, dayOk, refOk, rangeOf, solveWindow } = require('../api/research-price-regime')._test;
 
 const wallets = [
@@ -47,6 +47,7 @@ assert.strictEqual(table.length, 2);
 assert.strictEqual(table[0].date, '2026-09-20');
 assert.strictEqual(table[0].xrp_price_usd, 1.40);
 assert.strictEqual(table[0].exchange_inflow_xrp, 2000000);
+assert.strictEqual(table[0].payment_volume_xrp, 2000000);
 assert.strictEqual(table[0].large_move_volume_xrp, 2000000);
 assert.strictEqual(table[0].large_move_count, 1);
 assert.strictEqual(table[0].active_wallets, 1);
@@ -57,6 +58,7 @@ assert.strictEqual(table[0].evidence_coverage.complete, true);
 assert.strictEqual(table[1].exchange_outflow_xrp, 1500000);
 assert.strictEqual(table[1].whale_accumulation_xrp, 1500000);
 assert.strictEqual(table[1].whale_distribution_xrp, 500000);
+assert.strictEqual(table[1].payment_volume_xrp, 5000000);
 assert.strictEqual(table[1].large_move_volume_xrp, 4500000);
 assert.strictEqual(table[1].large_move_count, 2);
 assert.strictEqual(table[1].active_wallets, 3);
@@ -117,6 +119,13 @@ assert.strictEqual(adaptedEvents[0].from, 'rOUT');
 assert.strictEqual(adaptedEvents[0].to, 'rEX');
 assert.strictEqual(adaptedEvents[0].source, 'GITHUB_EVIDENCE_STORE');
 assert.strictEqual(adaptedEvents[1].tx_result, 'tecPATH_DRY');
+
+const derivedCohorts = cohortMapFromRoster([
+  { address: 'rEX', cat: 'exchange' },
+  { address: 'rWH', cat: 'whale' },
+  { address: 'rES', cat: 'escrow' }
+]);
+assert.deepStrictEqual(derivedCohorts, { rEX: 'exchange', rWH: 'whale', rES: 'other' });
 
 const adaptedWallets = adaptWallets(
   [{ address: 'rEX', label: 'Exchange A', cat: 'exchange' }, { address: 'rWH', label: 'Whale A' }],
