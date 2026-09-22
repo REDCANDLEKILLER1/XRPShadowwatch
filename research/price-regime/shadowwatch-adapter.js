@@ -14,16 +14,17 @@ function adaptCanonicalEvents(events) {
     if (!e || e.validated !== true) continue;
     if (e.currency !== 'XRP') continue;
     if (typeof e.hash !== 'string' || !e.hash) throw new Error('canonical event missing hash');
-    if (typeof e.date !== 'string' || !e.date) throw new Error('canonical event missing date: ' + e.hash);
-    const drops = finite(e.amount, 'canonical XRP amount drops');
+    if (typeof e.close_time !== 'string' || !e.close_time) throw new Error('canonical event missing close_time: ' + e.hash);
+    const drops = finite(e.amount_drops, 'canonical XRP amount_drops');
     if (drops < 0) throw new Error('canonical XRP amount cannot be negative: ' + e.hash);
     out.push({
       hash: e.hash,
-      date: e.date,
-      from: e.from || '',
-      to: e.to || '',
+      date: e.close_time,
+      from: e.from_account || '',
+      to: e.to_account || '',
       amount_xrp: drops / 1000000,
       currency: 'XRP',
+      tx_type: e.tx_type || '',
       tx_result: e.tx_result || '',
       ledger_index: e.ledger_index == null ? null : Number(e.ledger_index),
       source: 'GITHUB_EVIDENCE_STORE'
