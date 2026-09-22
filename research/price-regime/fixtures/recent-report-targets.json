@@ -26,7 +26,8 @@
         "shadow_volume_display",
         "watched_activity_display",
         "net_flow_display"
-      ]
+      ],
+      "evidence_commit_sha": "8f2531347643f842683a8ba9d972247878cbd49f"
     },
     {
       "report_id": "SW-20260922-1E9N2",
@@ -51,7 +52,8 @@
         "shadow_volume_display",
         "watched_activity_display",
         "net_flow_display"
-      ]
+      ],
+      "evidence_commit_sha": "50413d4b0f592bb5b108e34ac49e0f6521cac816"
     }
   ]
 }
