@@ -93,6 +93,7 @@ function emptyRow(day, price, coverage) {
     exchange_outflow_xrp: 0,
     whale_accumulation_xrp: 0,
     whale_distribution_xrp: 0,
+    payment_volume_xrp: 0,
     large_move_volume_xrp: 0,
     large_move_count: 0,
     active_wallets: 0,
@@ -161,6 +162,7 @@ function buildDailyResearchTable(input) {
       if (toMeta) active.add(event.to);
 
       const amount = event.amount_xrp;
+      row.payment_volume_xrp += amount;
       if (amount >= threshold) {
         row.large_move_volume_xrp += amount;
         row.large_move_count += 1;
