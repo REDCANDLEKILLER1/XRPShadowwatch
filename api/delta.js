@@ -206,6 +206,7 @@ async function buildPreviewReadOnlyRun(input, deps) {
 
   // A preview may only claim through the checkpoint it actually read. If the
   // requested end is newer, cap it rather than opening XRPL to fill the gap.
+  const staleWindow = requestedEnd > anchorCloseMs;
   const endMs = Math.min(requestedEnd, anchorCloseMs);
   if (endMs < requestedStart) {
     const e = new Error('PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE: checkpoint predates the requested window');
@@ -229,12 +230,20 @@ async function buildPreviewReadOnlyRun(input, deps) {
     };
   });
   const complete = wallets.filter(w => w.proven).length;
+  if (complete !== accounts.length) {
+    throw new Error('PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE: roster is not fully proven');
+  }
 
   const assembled = await readWindow({
     window_start_ms: requestedStart,
     window_end_ms: endMs,
     rows: []
   }, {});
+
+  if (!assembled || !Array.isArray(assembled.events) || assembled.error ||
+      !Array.isArray(assembled.days_without_shards) || assembled.days_without_shards.length) {
+    throw new Error('PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE: stored report window is incomplete');
+  }
 
   const body = {
     scan_id: 'preview-' + anchorLedger,
@@ -250,7 +259,7 @@ async function buildPreviewReadOnlyRun(input, deps) {
     failures: wallets.filter(w => !w.proven).map(w => ({ address: w.address, error: w.error })),
     wallets,
     committed: false,
-    reason: 'PREVIEW_READ_ONLY_SNAPSHOT',
+    reason: staleWindow ? 'STORED_WINDOW_STALE' : 'PREVIEW_READ_ONLY_SNAPSHOT',
     preview_read_only: true,
     live_acquisition_disabled: true,
     checkpoint_advanced: false,
@@ -260,7 +269,10 @@ async function buildPreviewReadOnlyRun(input, deps) {
       mode: 'PREVIEW_READ_ONLY_SNAPSHOT',
       anchor_close: new Date(anchorCloseMs).toISOString(),
       requested_end: new Date(requestedEnd).toISOString(),
-      capped_to_checkpoint: requestedEnd > anchorCloseMs,
+      capped_to_checkpoint: staleWindow,
+      full_window_complete: !staleWindow,
+      status: staleWindow ? 'STORED_WINDOW_STALE' : 'COMPLETE',
+      evidence_cutoff: new Date(endMs).toISOString(),
       claimed_beyond_checkpoint_ms: Math.max(0, requestedEnd - anchorCloseMs)
     },
     events: assembled.events.map(slim),
@@ -268,7 +280,10 @@ async function buildPreviewReadOnlyRun(input, deps) {
       from: new Date(requestedStart).toISOString(),
       to: new Date(endMs).toISOString(),
       requested_to: new Date(requestedEnd).toISOString(),
-      capped_to_checkpoint: requestedEnd > anchorCloseMs,
+      capped_to_checkpoint: staleWindow,
+      full_window_complete: !staleWindow,
+      status: staleWindow ? 'STORED_WINDOW_STALE' : 'COMPLETE',
+      evidence_cutoff: new Date(endMs).toISOString(),
       days: assembled.days,
       in_window: assembled.in_window,
       from_stored: assembled.from_stored,
@@ -323,8 +338,18 @@ module.exports = async function handler(req, res) {
     if (origin !== req.headers.host) return res.status(403).json({ error: 'CROSS_ORIGIN_WRITE_REFUSED' });
   }
 
-  const allowed = req.method === 'GET' ? ['state', 'health'] : ['run', 'seed'];
+  const allowed = req.method === 'GET' ? ['state', 'health', 'policy'] : ['run', 'seed'];
   if (!allowed.includes(input.action)) return res.status(400).json({ error: 'ACTION_NOT_ALLOWED' });
+
+  if (input.action === 'policy') {
+    const environment = process.env.VERCEL_ENV || 'development';
+    return res.json({
+      environment,
+      preview_read_only: environment !== 'production',
+      live_acquisition_disabled: environment !== 'production',
+      direct_fallback_allowed: environment === 'production'
+    });
+  }
 
   // A preview shares production's evidence repository but may not advance its
   // checkpoint. Serve a normal-looking run from the latest VERIFIED checkpoint
@@ -337,7 +362,9 @@ module.exports = async function handler(req, res) {
     } catch (e) {
       const safe = String(e && e.message || 'PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE');
       return res.status(503).json({
-        error: safe,
+        error: 'PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE',
+        code: 'PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE',
+        detail: safe,
         preview_read_only: true,
         live_acquisition_disabled: true,
         evidence_reads_allowed: true

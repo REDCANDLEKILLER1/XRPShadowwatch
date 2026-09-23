@@ -228,6 +228,9 @@
       line = 'NOT MEASURED — transaction-window coverage was not established this run. No zero-result claim below is definitive.';
     } else if (full) {
       line = 'COMPLETE — ' + complete + '/' + target + ' watched wallets proved the requested transaction window.';
+    } else if (c.stored_window_stale === true || c.coverage_status === 'STORED_WINDOW_STALE') {
+      line = 'STORED WINDOW STALE — all ' + complete + '/' + target + ' watched wallets are proven only through ' +
+             (c.evidence_cutoff || 'the stored checkpoint') + '; the requested tail is not covered. No report created.';
     } else {
       // Every cause named. Three buckets against a roster denominator meant a
       // listener heard "0 failed; 0 truncated" while wallets went missing from
@@ -248,6 +251,9 @@
       unproven_wallets: unproven,
       unknown_status_wallets: unknown,
       anchor_ok: anchorOk,
+      stored_window_stale: c.stored_window_stale === true,
+      evidence_cutoff: c.evidence_cutoff || null,
+      coverage_status: c.coverage_status || null,
       measured: measured,
       full_window_complete: full,
       line: line
@@ -338,6 +344,13 @@
     var notChecked = Math.max(0, target - list.length);
     unproven += notChecked;
 
+    var storedWindowStale = false, evidenceCutoff = null;
+    try {
+      var ir = (typeof state !== 'undefined') && state.indexRun;
+      storedWindowStale = !!(ir && ir.freshness && ir.freshness.status === 'STORED_WINDOW_STALE');
+      evidenceCutoff = storedWindowStale ? (ir.freshness.evidence_cutoff || ir.anchor_close || null) : null;
+    } catch (_) {}
+
     var c = {
       target_wallets: target,
       complete_wallets: complete,
@@ -347,9 +360,12 @@
       unknown_status_wallets: unknown,
       not_checked_wallets: notChecked,
       anchor_ok: anchorOk,
+      stored_window_stale: storedWindowStale,
+      evidence_cutoff: evidenceCutoff,
+      coverage_status: storedWindowStale ? 'STORED_WINDOW_STALE' : 'COMPLETE_OR_MEASURED',
       // The identity that makes a missing bucket visible instead of silent.
       counts_reconcile: (complete + failed + truncated + unproven + unknown) === target,
-      full_window_complete: anchorOk && target > 0 && complete === target &&
+      full_window_complete: !storedWindowStale && anchorOk && target > 0 && complete === target &&
                             failed === 0 && truncated === 0 && unproven === 0 && unknown === 0
     };
     try { if (typeof state !== 'undefined') state.txScanCoverage = c; } catch (_) {}
@@ -741,7 +757,26 @@
         try { state._proveEveryCheckedWallet = true; } catch (_) {}
 
         try {
+          // Establishing the evidence index happens inside the original scanner, but a
+          // stale stored window is already terminal in preview. Abort from the first
+          // Phase-2 wallet instead of letting balances/escrow/offers spend another minute.
+          var _preIndexRun = (typeof state !== 'undefined') ? state.indexRun : null;
+          if (_preIndexRun && _preIndexRun.freshness && _preIndexRun.freshness.status === 'STORED_WINDOW_STALE') {
+            var _preCutoff = _preIndexRun.freshness.evidence_cutoff || _preIndexRun.anchor_close || 'the stored checkpoint';
+            var _preStale = new Error('STORED_WINDOW_STALE: Stored evidence is available only through ' + _preCutoff + '. The requested transaction window is not fully proven. No report created. Preview remains read-only; direct watched-wallet account_tx is disabled.');
+            _preStale.code = 'STORED_WINDOW_STALE';
+            _preStale.evidence_cutoff = _preCutoff;
+            throw _preStale;
+          }
           var out = await original.apply(this, arguments);
+          var _earlyIndexRun = (typeof state !== 'undefined') ? state.indexRun : null;
+          if (_earlyIndexRun && _earlyIndexRun.freshness && _earlyIndexRun.freshness.status === 'STORED_WINDOW_STALE') {
+            var _cutoff = _earlyIndexRun.freshness.evidence_cutoff || _earlyIndexRun.anchor_close || 'the stored checkpoint';
+            var _stale = new Error('STORED_WINDOW_STALE: Stored evidence is available only through ' + _cutoff + '. The requested transaction window is not fully proven. No report created. Preview remains read-only; direct watched-wallet account_tx is disabled.');
+            _stale.code = 'STORED_WINDOW_STALE';
+            _stale.evidence_cutoff = _cutoff;
+            throw _stale;
+          }
           completed = true;
 
           var proofs = (accountTxWindowDepth && accountTxWindowDepth._proofByAccount) || {};
@@ -818,6 +853,14 @@
           }
 
           var cov = aggregateCoverage();
+          if (cov.stored_window_stale) {
+            var cutoff = cov.evidence_cutoff || 'the stored checkpoint';
+            var err = new Error('STORED_WINDOW_STALE: Stored evidence is available only through ' + cutoff + '. The requested transaction window is not fully proven. No report created. Preview remains read-only; direct watched-wallet account_tx is disabled.');
+            err.code = 'STORED_WINDOW_STALE';
+            err.evidence_cutoff = cutoff;
+            err.tx_scan_coverage = cov;
+            throw err;
+          }
           if (state.indexRun && window.SW_EVIDENCE_INDEX && window.SW_EVIDENCE_INDEX.finish) {
             try { await window.SW_EVIDENCE_INDEX.finish(state.indexRun); }
             catch(e) { if(typeof elog==='function')elog('Evidence index summary',e); }
