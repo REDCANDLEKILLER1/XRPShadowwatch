@@ -13,13 +13,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 10
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Apply exact locally-tested patch
-        run: node .github/pr83-repair.cjs
+        run: |
+          node .github/pr83-repair.cjs
+          git add -u
       - name: Test actual acquisition and memory integration
         run: |
           node scripts/run-tests.js --only preview
@@ -32,7 +34,7 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/agent/pr83-preview-memory-repair
           git rm .github/pr83-repair.cjs .github/pr83-repair.json.gz .github/workflows/pr83-repair.yml
-          git add api/delta.js docs/CONTRACT.md scripts/coordination-render-memory.test.js scripts/memory-guard.test.js scripts/preview-no-direct-xrpl-fallback.test.js src/brief/02-core.js src/brief/45-delta-evidence-index-20260911.js src/brief/46-memory-guard-20260923.js src/brief/47-preview-no-direct-xrpl-20260923.js src/brief/48-coordination-render-20260923.js
+          git add api/delta.js docs/CONTRACT.md scripts/coordination-render-memory.test.js scripts/memory-guard.test.js scripts/preview-no-direct-xrpl-fallback.test.js src/brief/02-core.js src/brief/45-delta-evidence-index-20260911.js src/brief/46-memory-guard-20260923.js
           git diff --cached --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'

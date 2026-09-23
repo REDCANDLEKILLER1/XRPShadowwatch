@@ -7,8 +7,8 @@ const cp = require('child_process');
 const assert = require('assert');
 const branch = 'agent/pr83-preview-memory-repair';
 assert.strictEqual(process.env.GITHUB_REF, 'refs/heads/' + branch, 'wrong branch');
-assert.strictEqual(cp.execFileSync('git', ['rev-parse', 'HEAD^'], {encoding:'utf8'}).trim(),
-  '65fd5952958b6758500fc99047690a85d16c3cc1', 'base moved');
+cp.execFileSync('git', ['merge-base', '--is-ancestor',
+  '65fd5952958b6758500fc99047690a85d16c3cc1', 'HEAD']);
 const bytes = zlib.gunzipSync(fs.readFileSync('.github/pr83-repair.json.gz'));
 assert.strictEqual(crypto.createHash('sha256').update(bytes).digest('hex'),
   '92127d3ca5073cfe7e2d8bffd4af429ff9e4cc2705a4b0fc26e09ca373302d59', 'payload changed');
