@@ -1,0 +1,30 @@
+name: pr85-early-stale-stop
+on:
+  push:
+    branches: [agent/pr83-preview-memory-repair]
+    paths: [.github/pr85-early-stale-stop.cjs, .github/workflows/pr85-early-stale-stop.yml]
+permissions: {contents: write}
+jobs:
+  patch-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: node .github/pr85-early-stale-stop.cjs
+      - run: |
+          node scripts/run-tests.js --only preview
+          node scripts/run-tests.js --only syntax
+      - env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          set -euo pipefail
+          git rm .github/pr85-early-stale-stop.cjs .github/workflows/pr85-early-stale-stop.yml
+          git add src/brief/17-report-scan-tuning-20260816.js
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: stop stale preview before downstream scan work'
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/agent/pr83-preview-memory-repair
