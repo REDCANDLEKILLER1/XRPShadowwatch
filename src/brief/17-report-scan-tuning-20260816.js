@@ -757,6 +757,17 @@
         try { state._proveEveryCheckedWallet = true; } catch (_) {}
 
         try {
+          // Establishing the evidence index happens inside the original scanner, but a
+          // stale stored window is already terminal in preview. Abort from the first
+          // Phase-2 wallet instead of letting balances/escrow/offers spend another minute.
+          var _preIndexRun = (typeof state !== 'undefined') ? state.indexRun : null;
+          if (_preIndexRun && _preIndexRun.freshness && _preIndexRun.freshness.status === 'STORED_WINDOW_STALE') {
+            var _preCutoff = _preIndexRun.freshness.evidence_cutoff || _preIndexRun.anchor_close || 'the stored checkpoint';
+            var _preStale = new Error('STORED_WINDOW_STALE: Stored evidence is available only through ' + _preCutoff + '. The requested transaction window is not fully proven. No report created. Preview remains read-only; direct watched-wallet account_tx is disabled.');
+            _preStale.code = 'STORED_WINDOW_STALE';
+            _preStale.evidence_cutoff = _preCutoff;
+            throw _preStale;
+          }
           var out = await original.apply(this, arguments);
           var _earlyIndexRun = (typeof state !== 'undefined') ? state.indexRun : null;
           if (_earlyIndexRun && _earlyIndexRun.freshness && _earlyIndexRun.freshness.status === 'STORED_WINDOW_STALE') {

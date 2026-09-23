@@ -1,7 +1,0 @@
-'use strict';
-const fs=require('fs'),assert=require('assert');
-const p='src/brief/17-report-scan-tuning-20260816.js';
-let s=fs.readFileSync(p,'utf8');
-const a="          var out = await original.apply(this, arguments);\n          var _earlyIndexRun";
-const b="          // Establishing the evidence index happens inside the original scanner, but a\n          // stale stored window is already terminal in preview. Abort from the first\n          // Phase-2 wallet instead of letting balances/escrow/offers spend another minute.\n          var _preIndexRun = (typeof state !== 'undefined') ? state.indexRun : null;\n          if (_preIndexRun && _preIndexRun.freshness && _preIndexRun.freshness.status === 'STORED_WINDOW_STALE') {\n            var _preCutoff = _preIndexRun.freshness.evidence_cutoff || _preIndexRun.anchor_close || 'the stored checkpoint';\n            var _preStale = new Error('STORED_WINDOW_STALE: Stored evidence is available only through ' + _preCutoff + '. The requested transaction window is not fully proven. No report created. Preview remains read-only; direct watched-wallet account_tx is disabled.');\n            _preStale.code = 'STORED_WINDOW_STALE';\n            _preStale.evidence_cutoff = _preCutoff;\n            throw _preStale;\n          }\n          var out = await original.apply(this, arguments);\n          var _earlyIndexRun";
-assert.strictEqual(s.split(a).length,2); s=s.replace(a,b); fs.writeFileSync(p,s); console.log('pre-phase2 stale abort applied');
