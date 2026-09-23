@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "status": "PASS_RESEARCH_METRICS",
+  "report_id": "SW-20260922-1E9N2",
+  "production_sha": "877b8bf819d401ffea0bc839fabe5befed856a60",
+  "evidence_commit_sha": "50413d4b0f592bb5b108e34ac49e0f6521cac816",
+  "evidence_scan_id": "gh-107158879",
+  "anchor_ledger": 107158879,
+  "anchor_close": "2026-09-22T12:25:41.000Z",
+  "coverage": {
+    "target_wallets": 418,
+    "proved_wallets": 418,
+    "complete": true
+  },
+  "public_report_target": {
+    "window_label": "LAST 25H · GAP SINCE LAST SCAN",
+    "transaction_count": 96651,
+    "large_move_count": 126,
+    "large_move_volume_display": "430.78M XRP",
+    "watched_activity_display": "843.04M XRP",
+    "price_usd": 1.5355
+  },
+  "immutable_utc_day_to_anchor": {
+    "from": "2026-09-22T00:00:00.000Z",
+    "to": "2026-09-22T12:25:41.000Z",
+    "distinct_events": 41822,
+    "successful_xrp_payment_volume": 391372808.3665213,
+    "large_move_count": 49,
+    "large_move_volume_xrp": 240075425.47353402,
+    "hash_digest_sha256": "6a43062c1bf0a0c00022095fc2e3e6ef26f78968bd73d65baecdddddea4b0d62"
+  },
+  "anchor_24h_slice": {
+    "from": "2026-09-21T12:25:41.000Z",
+    "to": "2026-09-22T12:25:41.000Z",
+    "distinct_events": 94316,
+    "successful_xrp_payment_volume": 812361064.6531605,
+    "large_move_count": 126,
+    "large_move_volume_xrp": 430781754.9187589,
+    "rendered_large_move_volume": "430.78M XRP",
+    "hash_digest_sha256": "fe2099ac4279d44521baf9e898c8bb6078f8356b78d7cf438359cb188856bb22"
+  },
+  "literal_25h_slice": {
+    "from": "2026-09-21T11:25:41.000Z",
+    "to": "2026-09-22T12:25:41.000Z",
+    "distinct_events": 98224,
+    "successful_xrp_payment_volume": 829821378.5762944,
+    "large_move_count": 128,
+    "large_move_volume_xrp": 433394774.0002089,
+    "hash_digest_sha256": "c683cbd8a4016d641fd9d5532613a326fceadc180e4da99df8f4a2403476c6d6"
+  },
+  "verdicts": {
+    "immutable_anchor_and_coverage": "PASS",
+    "canonical_day_read": "PASS",
+    "failed_and_non_payment_filtering": "PASS_BY_TEST",
+    "public_large_move_count": "PASS",
+    "public_large_move_volume_rounding": "PASS",
+    "literal_25h_label_as_exact_duration": "FAIL_CONFIRMED_LABEL_IS_ROUNDED",
+    "exact_public_window_start": "PASS",
+    "historical_expansion": "UNBLOCKED_FOR_PAYMENT_BASED_RESEARCH",
+    "public_transaction_count": "PASS",
+    "public_watched_activity_all_sizes": "NOT_A_RESEARCH_METRIC__LEGACY_BROAD_TOTAL_REPRODUCED_WITH_SMALL_RESIDUAL"
+  },
+  "note": "The exact report window, canonical event count, >=1M Payment count and >=1M Payment volume reconcile. Production's broad totalTxXRP includes non-Payment amounts (including escrow create/cancel and AccountDelete) and differs from the archived public display by ~87.8K XRP (~0.01%). It is intentionally excluded from price-regime flow metrics; do not alter production in this research PR.",
+  "solved_public_window": {
+    "from": "2026-09-21T11:49:21.000Z",
+    "to": "2026-09-22T12:25:41.000Z",
+    "duration_seconds": 88580,
+    "duration_hours": 24.6055555556,
+    "target_transaction_count": 96651,
+    "distinct_events": 96651,
+    "exact_timestamp_boundary": true,
+    "prior_excluded_close_time": "2026-09-21T11:49:20.000Z",
+    "successful_xrp_payment_volume": 823124880.4177474,
+    "large_move_count": 126,
+    "large_move_volume_xrp": 430781754.9187591,
+    "rendered_large_move_volume": "430.78M XRP",
+    "hash_digest_sha256": "b15ee52a47a049380af7826f5189dd648c9c85a11a4eb8d061d8cee730be5ab0"
+  },
+  "production_wide_shot_diagnostic": {
+    "production_formula": "successful/blank-result XRP-denominated state.txs amount, any tx type, escrow_amount fallback, <100B guard",
+    "reproduced_from_immutable_evidence_xrp": 843127777.9538844,
+    "rendered_from_reproduced_value": "843.13M XRP",
+    "public_report_display": "843.04M XRP",
+    "residual_xrp": 87777.9538844,
+    "by_tx_type": {
+      "Payment": {
+        "events": 80813,
+        "xrp": 823124880.4177474
+      },
+      "AccountDelete": {
+        "events": 52,
+        "xrp": 2897.536137
+      },
+      "EscrowCreate": {
+        "events": 1,
+        "xrp": 10000000
+      },
+      "EscrowCancel": {
+        "events": 1,
+        "xrp": 10000000
+      }
+    },
+    "research_decision": "EXCLUDE_FROM_REGIME_FLOW",
+    "reason": "The regime model measures successful native-XRP Payment flow. Broad legacy activity totals include non-Payment amount fields and are not used as accumulation/distribution evidence."
+  }
+}
