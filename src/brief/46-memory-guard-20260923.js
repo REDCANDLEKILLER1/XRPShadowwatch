@@ -205,3 +205,15 @@
     document.body.appendChild(g);
   } catch (_) {}
 })();
+
+
+(function loadCoordinationRenderPatch() {
+  try {
+    if (document.querySelector('script[data-sw-coordination-render]')) return;
+    var g = document.createElement('script');
+    g.src = '/src/brief/48-coordination-render-20260923.js';
+    g.async = false;
+    g.setAttribute('data-sw-coordination-render', '2026-09-23.1');
+    document.body.appendChild(g);
+  } catch (_) {}
+})();
