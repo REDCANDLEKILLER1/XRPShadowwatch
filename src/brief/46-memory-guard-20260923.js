@@ -46,10 +46,8 @@
   function readBriefHistory() {
     var primary = readJson(BRIEF_BLACKBOX);
     if (looksLikeBriefSnapshots(primary)) return primary;
-    var legacy = readJson(LEGACY_SNAPSHOT);
-    if (looksLikeBriefSnapshots(legacy)) return legacy;
-    var outer = readJson(OUTER_BLACKBOX);
-    if (looksLikeBriefSnapshots(outer)) return outer;
+    // Brief coordination has one owner: v34. Do not silently promote the
+    // Outer/legacy stores into Brief history; those are separate contracts.
     if (Array.isArray(primary)) return primary;
     return [];
   }
@@ -103,20 +101,46 @@
     };
   }
 
+  function persistBriefSnapshot(snapshot) {
+    var saved = readJson(BRIEF_BLACKBOX);
+    if (!Array.isArray(saved)) saved = [];
+    if (snapshot && typeof snapshot === 'object') {
+      saved.push(snapshot);
+      if (saved.length > 30) saved = saved.slice(saved.length - 30);
+      localStorage.setItem(BRIEF_BLACKBOX, JSON.stringify(saved));
+    }
+    return saved;
+  }
+
+  function refreshCoordination(saved, p) {
+    saved = Array.isArray(saved) ? saved : readBriefHistory();
+    if (typeof state === 'object' && state) {
+      state.blackbox = saved;
+      if (typeof detectCoordination === 'function') {
+        state.coordination = detectCoordination(saved);
+        // Contract: the count is the persisted v34 array length, regardless of
+        // any legacy detector default/warm-up behavior.
+        if (!state.coordination || typeof state.coordination !== 'object') state.coordination = {};
+        state.coordination.snapshots_analyzed = saved.length;
+        if (p) p.coordination = state.coordination;
+      }
+    }
+    return saved;
+  }
+
   if (typeof saveBlackboxSnapshot === 'function') {
     var origSave = saveBlackboxSnapshot;
     saveBlackboxSnapshot = function (p) {
+      var before = readBriefHistory().length;
       origSave(p);
-      try {
-        var saved = guardedLoad();
-        if (typeof state === 'object' && state) {
-          state.blackbox = saved;
-          if (typeof detectCoordination === 'function') {
-            state.coordination = detectCoordination(saved);
-            if (p) p.coordination = state.coordination;
-          }
-        }
-      } catch (_) {}
+      var saved = readBriefHistory();
+
+      // Some live save paths write only Outer/legacy boxes. If v34 did not
+      // advance, persist this Brief snapshot here. Never count Outer as Brief.
+      if (saved.length <= before && p && typeof p === 'object') {
+        saved = persistBriefSnapshot(p);
+      }
+      refreshCoordination(saved, p);
     };
   }
 
@@ -156,7 +180,7 @@
   }
 
   window.SW_MEMORY_GUARD = {
-    version: '2026.09.23.1',
+    version: '2026.09.23.2',
     probe: probe,
     readBriefHistory: readBriefHistory,
     keys: {
