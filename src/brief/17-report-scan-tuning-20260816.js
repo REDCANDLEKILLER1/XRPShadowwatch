@@ -338,6 +338,13 @@
     var notChecked = Math.max(0, target - list.length);
     unproven += notChecked;
 
+    var storedWindowStale = false, evidenceCutoff = null;
+    try {
+      var ir = (typeof state !== 'undefined') && state.indexRun;
+      storedWindowStale = !!(ir && ir.freshness && ir.freshness.status === 'STORED_WINDOW_STALE');
+      evidenceCutoff = storedWindowStale ? (ir.freshness.evidence_cutoff || ir.anchor_close || null) : null;
+    } catch (_) {}
+
     var c = {
       target_wallets: target,
       complete_wallets: complete,
@@ -347,9 +354,12 @@
       unknown_status_wallets: unknown,
       not_checked_wallets: notChecked,
       anchor_ok: anchorOk,
+      stored_window_stale: storedWindowStale,
+      evidence_cutoff: evidenceCutoff,
+      coverage_status: storedWindowStale ? 'STORED_WINDOW_STALE' : 'COMPLETE_OR_MEASURED',
       // The identity that makes a missing bucket visible instead of silent.
       counts_reconcile: (complete + failed + truncated + unproven + unknown) === target,
-      full_window_complete: anchorOk && target > 0 && complete === target &&
+      full_window_complete: !storedWindowStale && anchorOk && target > 0 && complete === target &&
                             failed === 0 && truncated === 0 && unproven === 0 && unknown === 0
     };
     try { if (typeof state !== 'undefined') state.txScanCoverage = c; } catch (_) {}

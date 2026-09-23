@@ -458,14 +458,22 @@
           run.byAddress = Object.create(null);
           (result.wallets || []).forEach(function (w) { run.byAddress[w.address] = w; });
           if (typeof log === 'function') {
+            var staleStoredWindow = !!(result.freshness && result.freshness.status === 'STORED_WINDOW_STALE');
             log('Evidence: anchor ' + result.anchor_ledger + ' · ' + result.complete_wallets + '/' +
-              result.target_wallets + ' proved · ' + (result.transactions || 0) + ' transactions · ' +
-              (result.xrpl_requests || 0) + ' XRPL reads' +
+              result.target_wallets + (staleStoredWindow ? ' wallets proven through stored cutoff' : ' proved') +
+              ' · new transactions acquired=' + (result.transactions || 0) +
+              ' · ' + (result.xrpl_requests || 0) + ' watched-wallet XRPL reads' +
               (result.window && result.window.in_window !== undefined
-                ? ' · window ' + result.window.in_window + ' events (' +
+                ? ' · stored transactions loaded=' + result.window.in_window + ' (' +
                   result.window.from_stored + ' stored + ' + result.window.from_this_run + ' this run)' : '') +
               (result.committed ? ' · checkpoint advanced'
                 : ' · checkpoint NOT advanced (' + result.reason + ')'));
+            if (staleStoredWindow) {
+              log('Evidence: STORED_WINDOW_STALE — requested window is only proven through ' +
+                (result.freshness.evidence_cutoff || result.anchor_close) + '; ' +
+                Math.round((Number(result.freshness.claimed_beyond_checkpoint_ms) || 0) / 1000) +
+                's of the requested tail is not covered. Preview remains read-only; direct watched-wallet account_tx is disabled.');
+            }
             // WHY THE TWO DENOMINATORS DISAGREE, IN THE LOG, NOT ONLY THE JSON.
             //
             // The state keeps proving a wallet the roster no longer lists —

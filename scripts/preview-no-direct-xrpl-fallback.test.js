@@ -19,7 +19,8 @@ const snapshot = () => ({
   scan_id: 'preview-' + anchor, anchor_ledger: anchor, anchor_close: close,
   target_wallets: 1, complete_wallets: 1, wallets: [{ address, status: 'COMPLETE', proven: true, proven_through: anchor }],
   events: [], transactions: 0, xrpl_requests: 0, committed: false, checkpoint_advanced: false,
-  reason: 'PREVIEW_READ_ONLY_SNAPSHOT', preview_read_only: true, live_acquisition_disabled: true,
+  reason: 'STORED_WINDOW_STALE', preview_read_only: true, live_acquisition_disabled: true,
+  freshness: { status: 'STORED_WINDOW_STALE', evidence_cutoff: close, claimed_beyond_checkpoint_ms: 3600000, full_window_complete: false },
   window: { from: new Date(range.startMs).toISOString(), to: close, in_window: 0, from_stored: 0, from_this_run: 0, days_without_shards: [] }
 });
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -131,6 +132,8 @@ function response() {
     assert.equal(r.s.state.indexRun.anchor_ledger, anchor);
     assert(!r.xrplCalls.includes('account_tx'));
     assert.equal(r.s.SW_EVIDENCE_INDEX.metrics().checkpoint_advanced, false);
+    assert(r.logs.some(x => x.includes('new transactions acquired=0')));
+    assert(r.logs.some(x => x.includes('stored transactions loaded=0')));
     const proof = await r.s.SW_EVIDENCE_INDEX.proveWallet(r.s.state.indexRun, address);
     assert.equal(proof.proof.through_ledger, anchor);
   });
@@ -189,6 +192,12 @@ function response() {
       assert.equal(done.t, 'done'); assert.equal(done.window.to, close);
       assert.equal(done.xrpl_requests, 0); assert.equal(done.committed, false);
       assert.equal(done.complete_wallets, 1);
+      assert.equal(done.reason, 'STORED_WINDOW_STALE');
+      assert.equal(done.freshness.status, 'STORED_WINDOW_STALE');
+      assert.equal(done.freshness.full_window_complete, false);
+      assert.equal(done.freshness.evidence_cutoff, close);
+      assert.equal(done.window.status, 'STORED_WINDOW_STALE');
+      assert.equal(done.window.full_window_complete, false);
     });
     await test('production request validation unaffected', async () => {
       process.env.VERCEL_ENV = 'production';

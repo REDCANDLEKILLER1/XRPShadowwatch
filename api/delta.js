@@ -206,6 +206,7 @@ async function buildPreviewReadOnlyRun(input, deps) {
 
   // A preview may only claim through the checkpoint it actually read. If the
   // requested end is newer, cap it rather than opening XRPL to fill the gap.
+  const staleWindow = requestedEnd > anchorCloseMs;
   const endMs = Math.min(requestedEnd, anchorCloseMs);
   if (endMs < requestedStart) {
     const e = new Error('PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE: checkpoint predates the requested window');
@@ -258,7 +259,7 @@ async function buildPreviewReadOnlyRun(input, deps) {
     failures: wallets.filter(w => !w.proven).map(w => ({ address: w.address, error: w.error })),
     wallets,
     committed: false,
-    reason: 'PREVIEW_READ_ONLY_SNAPSHOT',
+    reason: staleWindow ? 'STORED_WINDOW_STALE' : 'PREVIEW_READ_ONLY_SNAPSHOT',
     preview_read_only: true,
     live_acquisition_disabled: true,
     checkpoint_advanced: false,
@@ -268,7 +269,10 @@ async function buildPreviewReadOnlyRun(input, deps) {
       mode: 'PREVIEW_READ_ONLY_SNAPSHOT',
       anchor_close: new Date(anchorCloseMs).toISOString(),
       requested_end: new Date(requestedEnd).toISOString(),
-      capped_to_checkpoint: requestedEnd > anchorCloseMs,
+      capped_to_checkpoint: staleWindow,
+      full_window_complete: !staleWindow,
+      status: staleWindow ? 'STORED_WINDOW_STALE' : 'COMPLETE',
+      evidence_cutoff: new Date(endMs).toISOString(),
       claimed_beyond_checkpoint_ms: Math.max(0, requestedEnd - anchorCloseMs)
     },
     events: assembled.events.map(slim),
@@ -276,7 +280,10 @@ async function buildPreviewReadOnlyRun(input, deps) {
       from: new Date(requestedStart).toISOString(),
       to: new Date(endMs).toISOString(),
       requested_to: new Date(requestedEnd).toISOString(),
-      capped_to_checkpoint: requestedEnd > anchorCloseMs,
+      capped_to_checkpoint: staleWindow,
+      full_window_complete: !staleWindow,
+      status: staleWindow ? 'STORED_WINDOW_STALE' : 'COMPLETE',
+      evidence_cutoff: new Date(endMs).toISOString(),
       days: assembled.days,
       in_window: assembled.in_window,
       from_stored: assembled.from_stored,
