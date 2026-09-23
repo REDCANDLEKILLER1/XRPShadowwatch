@@ -20,14 +20,14 @@
 // Regenerate with scripts/build-hvt-roster.js after adding wallets to either
 // app. Do not hand-edit — the generator is the source of truth.
 //
-// 243 targets · 128 with a sourced identity · 32 carrying a size claim
+// 248 targets · 128 with a sourced identity · 32 carrying a size claim
 window.SW_HVT_ROSTER = {
  "version": 1,
- "generated": "2026-08-20",
+ "generated": "2026-09-23",
  "stats": {
-  "total": 243,
+  "total": 248,
   "identified": 128,
-  "from_report_only": 109,
+  "from_report_only": 114,
   "from_wall_only": 5,
   "from_registry_only": 29,
   "both": 45,
@@ -2013,6 +2013,19 @@ window.SW_HVT_ROSTER = {
    ]
   },
   {
+   "address": "rnTJrNZAeLmahACbkFdBDTMPmqmm6fCbTE",
+   "label": "EXOUT_RECV_rnTJrN",
+   "handle": "EXOUT_RECV_rnTJrN",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
    "address": "rsnXj9TDwt49XxCM64YrTEnSzwcY4awZnn",
    "label": "EXOUT_RECV_rsnXj9",
    "handle": "EXOUT_RECV_rsnXj9",
@@ -2224,6 +2237,19 @@ window.SW_HVT_ROSTER = {
    "address": "r44AzNe4LSHQkB95qm6pQCauJ3Vz7Yx3iU",
    "label": "LARGE_RECV_r44AzN",
    "handle": "LARGE_RECV_r44AzN",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "r4MQxQHJMLAGKR4pmM6TgZtsjkjog5iQX8",
+   "label": "LARGE_RECV_r4MQxQ",
+   "handle": "LARGE_RECV_r4MQxQ",
    "type": "HVT",
    "identified": false,
    "confidence": null,
@@ -2819,6 +2845,19 @@ window.SW_HVT_ROSTER = {
    ]
   },
   {
+   "address": "rGdZW2rphjrEFvr2M2zL16EryUXe9ryHwd",
+   "label": "SPLITTER_rGdZW2",
+   "handle": "SPLITTER_rGdZW2",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
    "address": "rh4WneLFo6FsAko8UvCApGHvBYUFkKMDw8",
    "label": "SPLITTER_rh4Wne",
    "handle": "SPLITTER_rh4Wne",
@@ -3092,6 +3131,19 @@ window.SW_HVT_ROSTER = {
    ]
   },
   {
+   "address": "r4SZcNFQ1u3xfQp5WG9WUHUSPyRgdsZaZq",
+   "label": "WHALE_RECV_r4SZcN",
+   "handle": "WHALE_RECV_r4SZcN",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
    "address": "rDHYrdu78ZU3qhiKttB7z73GJYpSQFMVHj",
    "label": "WHALE_RECV_rDHYrd",
    "handle": "WHALE_RECV_rDHYrd",
@@ -3160,6 +3212,19 @@ window.SW_HVT_ROSTER = {
    "address": "rjqMerAJeP3XBc22CEAA9bkPZXfAETfkT",
    "label": "WHALE_RECV_rjqMer",
    "handle": "WHALE_RECV_rjqMer",
+   "type": "HVT",
+   "identified": false,
+   "confidence": null,
+   "expected_xrp": null,
+   "expected_source": null,
+   "sources": [
+    "report"
+   ]
+  },
+  {
+   "address": "rKryEVqD7SUZ9SJYRgeESZDQeJ9EkkA1sg",
+   "label": "WHALE_RECV_rKryEV",
+   "handle": "WHALE_RECV_rKryEV",
    "type": "HVT",
    "identified": false,
    "confidence": null,
