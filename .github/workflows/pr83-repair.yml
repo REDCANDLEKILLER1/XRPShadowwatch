@@ -1,0 +1,43 @@
+name: pr83-isolated-repair
+on:
+  push:
+    branches: [agent/pr83-preview-memory-repair]
+    paths: [.github/pr83-repair.cjs, .github/pr83-repair.json.gz, .github/workflows/pr83-repair.yml]
+permissions:
+  contents: write
+jobs:
+  publish-tested-repair:
+    if: github.ref == 'refs/heads/agent/pr83-preview-memory-repair'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply exact locally-tested patch
+        run: node .github/pr83-repair.cjs
+      - name: Test actual acquisition and memory integration
+        run: |
+          node scripts/run-tests.js --only preview
+          node scripts/run-tests.js --only coordination
+          node scripts/run-tests.js --only syntax
+      - name: Commit only to the isolated agent branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/agent/pr83-preview-memory-repair
+          git rm .github/pr83-repair.cjs .github/pr83-repair.json.gz .github/workflows/pr83-repair.yml
+          git add api/delta.js docs/CONTRACT.md scripts/coordination-render-memory.test.js scripts/memory-guard.test.js scripts/preview-no-direct-xrpl-fallback.test.js src/brief/02-core.js src/brief/45-delta-evidence-index-20260911.js src/brief/46-memory-guard-20260923.js src/brief/47-preview-no-direct-xrpl-20260923.js src/brief/48-coordination-render-20260923.js
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: fail closed in previews and finalize Brief memory before sealing'
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$AUTH"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/agent/pr83-preview-memory-repair
+          echo "TESTED_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
