@@ -120,10 +120,14 @@ async function main() {
   check('reader is released when acquisition throws', () => assert(threw && released));
 
   const vercel = JSON.parse(fs.readFileSync(path.join(ROOT,'vercel.json'),'utf8'));
-  check('Vercel registers hourly production cron path', () => {
-    const c=(vercel.crons||[]).find(x=>x.path==='/api/evidence-scheduler');
-    assert(c);
-    assert.equal(c.schedule,'5 * * * *');
+  check('Vercel registers 12 Hobby-safe two-hour production cron slots', () => {
+    const c=(vercel.crons||[]).filter(x=>x.path==='/api/evidence-scheduler');
+    assert.equal(c.length,12);
+    assert.deepEqual(c.map(x=>x.schedule), [
+      '5 0 * * *','5 2 * * *','5 4 * * *','5 6 * * *','5 8 * * *','5 10 * * *',
+      '5 12 * * *','5 14 * * *','5 16 * * *','5 18 * * *','5 20 * * *','5 22 * * *'
+    ]);
+    assert(c.every(x => /^5 (?:[02468]|1[02468]|2[02]) \* \* \*$/.test(x.schedule)));
   });
   check('scheduler function keeps 300s function ceiling', () => {
     assert.equal(vercel.functions['api/evidence-scheduler.js'].maxDuration,300);
