@@ -107,7 +107,7 @@ test('after save, coordination is recomputed from store', () => {
       store.setItem('shadowwatch_blackbox_v34', JSON.stringify(cur));
     }
   });
-  const pack = {};
+  const pack = { ts: 2, date: '2026-09-23', large_transfers: [], wallets: [] };
   sb.saveBlackboxSnapshot(pack);
   assert.strictEqual(pack.coordination.snapshots_analyzed, 2);
   assert.strictEqual(state.coordination.snapshots_analyzed, 2);
