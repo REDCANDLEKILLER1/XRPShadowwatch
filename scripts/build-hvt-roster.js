@@ -54,7 +54,20 @@ const REPORT_PROMOTIONS = [
   { handle: 'EXOUT_RECV_rnrqyM', address: 'rnrqyM7kS6wmC5demJm9vrfdN2vLgS8LfY', cat: 'discovered_receiver' },
   { handle: 'WHALE_RECV_rDHYrd', address: 'rDHYrdu78ZU3qhiKttB7z73GJYpSQFMVHj', cat: 'discovered_whale' },
   { handle: 'WHALE_RECV_rUkxsG', address: 'rUkxsGUE3E7AUngmwRT46uGwRDJ8pa5L7s', cat: 'discovered_whale' },
-  { handle: 'LARGE_RECV_rDT9vb', address: 'rDT9vb8Jd9USHfWFh5nEhpwfJD3DbjXn88', cat: 'discovered_receiver' }
+  { handle: 'LARGE_RECV_rDT9vb', address: 'rDT9vb8Jd9USHfWFh5nEhpwfJD3DbjXn88', cat: 'discovered_receiver' },
+
+  // SW-20260923-H21LA — operator-reviewed ADD candidates from Auto Discovery.
+  // Behavioral handles only; none of these labels asserts an owner or identity.
+  // rGdZW2: NEXT_HOP_SPLITTER, 175/200, forwarded 1.20M XRP after Kraken receipt.
+  { handle: 'SPLITTER_rGdZW2', address: 'rGdZW2rphjrEFvr2M2zL16EryUXe9ryHwd', cat: 'next_hop_splitter' },
+  // rnTJrN: EXCHANGE_OUTFLOW_RECEIVER, 140/200, still holding size.
+  { handle: 'EXOUT_RECV_rnTJrN', address: 'rnTJrNZAeLmahACbkFdBDTMPmqmm6fCbTE', cat: 'discovered_receiver' },
+  // r4MQxQ: LARGE_TRANSFER_RECEIVER, 140/200, richlist-seen, still holding size.
+  { handle: 'LARGE_RECV_r4MQxQ', address: 'r4MQxQHJMLAGKR4pmM6TgZtsjkjog5iQX8', cat: 'discovered_receiver' },
+  // r4SZcN: WHALE_RECEIVER, 125/200, 74M XRP observed holding after four large receipts.
+  { handle: 'WHALE_RECV_r4SZcN', address: 'r4SZcNFQ1u3xfQp5WG9WUHUSPyRgdsZaZq', cat: 'discovered_whale' },
+  // rKryEV: WHALE_RECEIVER, 100/200, exchange-adjacent behavior around eToro.
+  { handle: 'WHALE_RECV_rKryEV', address: 'rKryEVqD7SUZ9SJYRgeESZDQeJ9EkkA1sg', cat: 'discovered_whale' }
 ];
 
 // "20M Split 1" / "RIPPLE_1.3B" / "Main 300M Reserve" → the size the label claims.
