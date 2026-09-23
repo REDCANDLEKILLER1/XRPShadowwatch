@@ -1,9 +1,27 @@
 {
   "functions": {
-    "api/evidence.js": { "maxDuration": 300, "includeFiles": "src/{brief,shared}/**" },
-    "api/delta.js": { "maxDuration": 300, "includeFiles": "src/{brief,shared}/**" },
-    "api/report-archive.js": { "maxDuration": 60 }
+    "api/evidence.js": {
+      "maxDuration": 300,
+      "includeFiles": "src/{brief,shared}/**"
+    },
+    "api/delta.js": {
+      "maxDuration": 300,
+      "includeFiles": "src/{brief,shared}/**"
+    },
+    "api/evidence-scheduler.js": {
+      "maxDuration": 300,
+      "includeFiles": "src/{db,brief,shared}/**"
+    },
+    "api/report-archive.js": {
+      "maxDuration": 60
+    }
   },
+  "crons": [
+    {
+      "path": "/api/evidence-scheduler",
+      "schedule": "5 * * * *"
+    }
+  ],
   "redirects": [
     {
       "source": "/report/",
