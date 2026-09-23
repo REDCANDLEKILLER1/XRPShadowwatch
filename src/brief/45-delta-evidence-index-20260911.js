@@ -188,7 +188,7 @@
                 err.transport = true;
               }
               if (sawHidden || isHidden()) { try { err.whileHidden = true; } catch (_) {} }
-              throw err;
+              throw tagError(err, e);
             });
   }
 
@@ -235,7 +235,7 @@
             // connection, and asking again gives the same answer more slowly.
             var e = new Error(final.error || 'DELTA_RUN_FAILED');
             e.status = 200; e.transport = false; e.runSummary = final;
-            throw e;
+            throw tagError(e, final);
           }
           return inflateEvents(final);
         }
@@ -263,7 +263,7 @@
           var e = new Error((parsed && data && data.error) || ('DELTA_HTTP_' + response.status));
           e.status = response.status;
           e.transport = false;
-          throw e;
+          throw tagError(e, data);
         }
         if (!parsed) {
           var bad = new Error('DELTA_RESPONSE_UNPARSEABLE: ' + text.length + ' bytes');
@@ -381,13 +381,52 @@
     catch (_) { return window.state || null; }
   }
 
+
+  var acquisitionPolicy = null, policyRequest = null;
+  function tagError(error, payload) {
+    var p = payload || {};
+    error.previewReadOnly = p.preview_read_only === true || p.previewReadOnly === true ||
+      !!(acquisitionPolicy && acquisitionPolicy.preview_read_only);
+    error.liveAcquisitionDisabled = p.live_acquisition_disabled === true || p.liveAcquisitionDisabled === true ||
+      !!(acquisitionPolicy && acquisitionPolicy.live_acquisition_disabled);
+    error.scanIncomplete = p.scanIncomplete === true || error.previewReadOnly || error.liveAcquisitionDisabled;
+    if (p.code) error.code = p.code;
+    return error;
+  }
+  function getAcquisitionPolicy() {
+    if (acquisitionPolicy) return Promise.resolve(acquisitionPolicy);
+    if (policyRequest) return policyRequest;
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, 15000);
+    policyRequest = fetch('/api/delta?action=policy', { cache: 'no-store', signal: controller.signal })
+      .then(plainBody).then(function (p) {
+        var production = p && p.environment === 'production';
+        if (!p || typeof p.environment !== 'string' ||
+            p.direct_fallback_allowed !== production ||
+            p.preview_read_only !== !production || p.live_acquisition_disabled !== !production) {
+          throw new Error('EVIDENCE_POLICY_INVALID');
+        }
+        acquisitionPolicy = Object.freeze(p);
+        if (typeof log === 'function') log('[preview-fence] installed · mode=' + p.environment);
+        return acquisitionPolicy;
+      }).catch(function (e) {
+        e.scanIncomplete = true;
+        e.liveAcquisitionDisabled = true;
+        e.code = 'EVIDENCE_POLICY_UNAVAILABLE';
+        throw e;
+      }).finally(function () { clearTimeout(timer); policyRequest = null; });
+    return policyRequest;
+  }
+
   var run = null;   // the single acquisition this page performed
 
   window.SW_EVIDENCE_INDEX = {
     // Everything happens here. The name is kept because layer 17 calls it.
     isHidden: isHidden,
     whenVisible: whenVisible,
+    getAcquisitionPolicy: getAcquisitionPolicy,
     begin: function (windowRange, accounts) {
+      run = null; // a failed retry must not leave last run's proof readable
       var S = pageState();
       var reportId = (S && S.reportId) || (S && S.seal && S.seal.report_id) || null;
       if (!reportId) throw new Error('DELTA_REPORT_ID_REQUIRED');
@@ -400,6 +439,21 @@
       return postWithRetry('run', { report_id: reportId, scan_id: (S && S.scanId) || null,
         window_start_ms: w.startMs, window_end_ms: w.endMs })
         .then(function (result) {
+          if (!result || result.error || !Number.isInteger(result.anchor_ledger) || result.anchor_ledger <= 0 ||
+              !Number.isFinite(Date.parse(result.anchor_close)) ||
+              !Array.isArray(result.wallets) || !result.wallets.length) {
+            var invalid = tagError(new Error('EVIDENCE_RUN_INVALID: missing anchor, roster or result'), result);
+            invalid.scanIncomplete = true;
+            throw invalid;
+          }
+          if (acquisitionPolicy && acquisitionPolicy.preview_read_only &&
+              (result.preview_read_only !== true || result.live_acquisition_disabled !== true ||
+               result.xrpl_requests !== 0 || result.committed !== false ||
+               result.complete_wallets !== result.target_wallets ||
+               !Array.isArray(result.events) || !result.window || result.window.error ||
+               !Array.isArray(result.window.days_without_shards) || result.window.days_without_shards.length)) {
+            throw tagError(new Error('PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE: invalid stored snapshot'), result);
+          }
           run = result;
           run.byAddress = Object.create(null);
           (result.wallets || []).forEach(function (w) { run.byAddress[w.address] = w; });

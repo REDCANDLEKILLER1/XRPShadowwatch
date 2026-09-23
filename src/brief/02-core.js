@@ -2033,8 +2033,15 @@ async function scanWallets(ws) {
   state.anchorAttempts = [];
   state.effectiveWindow = null;
   state.indexRun = null;
-  if (window.SW_EVIDENCE_INDEX) {
+  {
+    let acquisitionPolicy = null;
     const _acceptIndexRun = (ir) => {
+      if (!ir || !Number.isInteger(ir.anchor_ledger) || ir.anchor_ledger <= 0 ||
+          !Number.isFinite(ir.anchor_close_ms) || !Array.isArray(ir.accounts) || !ir.accounts.length) {
+        const invalid = new Error('EVIDENCE_RUN_INVALID: anchor or roster missing');
+        invalid.scanIncomplete = true;
+        throw invalid;
+      }
       state.indexRun = ir;
       state.runId = ir.scan_id;
       state.runAnchor = { ok:true, anchor_ledger:ir.anchor_ledger, anchor_close_ms:ir.anchor_close_ms,
@@ -2045,10 +2052,33 @@ async function scanWallets(ws) {
     try {
       log('Evidence index: establishing the server-owned run and roster…');
       state.anchorAttempts.push({ source:'SERVER_VERIFIED_INDEX', at:new Date().toISOString() });
+      const evidence = window.SW_EVIDENCE_INDEX;
+      if (!evidence || typeof evidence.getAcquisitionPolicy !== 'function') {
+        throw new Error('EVIDENCE_POLICY_UNAVAILABLE: evidence client is not ready');
+      }
+      acquisitionPolicy = await evidence.getAcquisitionPolicy();
+      state.acquisitionPolicy = acquisitionPolicy;
       _acceptIndexRun(await beginEvidenceIndexResilient(
         getTxWindow(), getActiveWatchlist().map(w => w.address)));
     } catch(e) {
       state.anchorAttempts[state.anchorAttempts.length-1].error=e.message;
+      // Fail closed before any direct anchor/balance/transaction acquisition.
+      // A transport error cannot turn a preview (or unknown deployment) into
+      // production. Only an explicitly confirmed production policy may fall back.
+      if (!acquisitionPolicy || acquisitionPolicy.direct_fallback_allowed !== true ||
+          e.previewReadOnly || e.preview_read_only || e.liveAcquisitionDisabled ||
+          e.live_acquisition_disabled || e.scanIncomplete) {
+        state.indexRun = null;
+        state.runAnchor = null;
+        const stopped = new Error('PREVIEW READ-ONLY SNAPSHOT UNAVAILABLE / EVIDENCE INCOMPLETE: ' + e.message);
+        stopped.scanIncomplete = true;
+        stopped.previewReadOnly = !!(acquisitionPolicy && acquisitionPolicy.preview_read_only || e.previewReadOnly || e.preview_read_only);
+        stopped.liveAcquisitionDisabled = true;
+        stopped.code = e.code || 'EVIDENCE_ACQUISITION_STOPPED';
+        stopped.cause = e;
+        log('Evidence acquisition stopped incomplete — direct XRPL fallback disabled.');
+        throw stopped;
+      }
       log('Evidence index unavailable — direct XRPL acquisition: ' + e.message);
     }
   }
@@ -21610,6 +21640,10 @@ function buildWeightedOffers(p) {
 // Saves a compact snapshot of each scan. Cap at 30 snapshots rolling.
 function saveBlackboxSnapshot(p) {
   try {
+    const raw = localStorage.getItem(BLACKBOX_STORE);
+    if (raw && !isBriefSnapshotHistory(JSON.parse(raw))) {
+      throw new Error('BRIEF_HISTORY_INVALID: preserved without overwrite');
+    }
     const history = loadBlackboxHistory();
     const snapshot = {
       ts: Date.now(),
@@ -21652,12 +21686,18 @@ function saveBlackboxSnapshot(p) {
   }
 }
 
+function isBriefSnapshotHistory(rows) {
+  return Array.isArray(rows) && rows.every(s => s && typeof s === 'object' &&
+    (Array.isArray(s.wallets) || Array.isArray(s.large_transfers)) &&
+    (s.offers === undefined || Array.isArray(s.offers)));
+}
+
 function loadBlackboxHistory() {
   try {
     const raw = localStorage.getItem(BLACKBOX_STORE);
     if (!raw) return [];
     const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
+    return isBriefSnapshotHistory(arr) ? arr : [];
   } catch { return []; }
 }
 
@@ -21674,7 +21714,8 @@ function clearBlackbox() {
 //  - same-price-zone offers (both placed offers in same $0.05 bucket on same scan)
 function detectCoordination(history) {
   if (!Array.isArray(history) || history.length < COORD_MIN_SNAPSHOTS) {
-    return { pairs: [], summary: 'Need ' + COORD_MIN_SNAPSHOTS + '+ snapshots — current: ' + (history?.length || 0) };
+    const count = Array.isArray(history) ? history.length : 0;
+    return { pairs: [], snapshots_analyzed: count, summary: 'Need ' + COORD_MIN_SNAPSHOTS + '+ snapshots — current: ' + count };
   }
   const pairScore = {};  // key: "A|B" (sorted), value: { same_hour_transfer: n, shared_receiver: n, same_price_zone: n }
   const bump = (a, b, field) => {
@@ -22280,6 +22321,13 @@ async function run() {
       }
     } catch (e) { elog('v3.24 stage3: news router', e); }
 
+    // Resolve from the actually persisted compact snapshot BEFORE any final
+    // rendering, seal or archive. Re-rendering must never append another row.
+    saveBlackboxSnapshot(p);
+    state.blackbox = loadBlackboxHistory();
+    state.coordination = detectCoordination(state.blackbox);
+    p.coordination = state.coordination;
+
     // v3.26-hotfix3: After all intelligence stages, recompute news_health one
     // last time (in case fetchEvidenceLedNews added matched articles) and
     // build IntelBrief NOW — so it sees the real headline count and newsMode.
@@ -22356,8 +22404,7 @@ async function run() {
       if (mr) mr.textContent = mr.textContent || ' ';
     } catch (_) {}
 
-    // v3.4: persist this scan to black box AFTER pack is fully built
-    saveBlackboxSnapshot(p);
+    // Snapshot and coordination were finalized before rendering/sealing.
     renderBlackbox();
 
     shadowSay('Scan complete. Report ready.', 'READY', 100);

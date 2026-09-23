@@ -39,14 +39,14 @@ If a key is not on this list, it is not a shared contract.
 
 A Brief report that prints “Need 5+ snapshots. Current: 0” while `shadowwatch_blackbox_v34` already holds rows is a defect.
 
-A Brief report that counts Outer `XRPMAN_BLACKBOX_V2` as Brief coordination history is also a defect. Fallback from V2 is allowed only when v34 is empty **and** the loaded rows look like Brief snapshots (array of objects with `large_transfers` or `wallets`).
+Brief coordination never imports Outer `XRPMAN_BLACKBOX_V2` or the legacy balance snapshot. Every v34 row must have a Brief snapshot shape; timestamp-only or mixed-shape arrays are refused without overwriting their stored bytes.
 
 ## Write rules
 
 1. Never `removeItem` a contract key except the operator Clear Black Box path.
 2. Never persist an empty array over a non-empty store.
 3. `detectCoordination` must re-read `shadowwatch_blackbox_v34` if the in-memory history is empty.
-4. After `saveBlackboxSnapshot`, recompute `state.coordination` from the saved store so the sealed report matches the log line `BLACK_BOX: snapshot saved (N/30)`.
+4. Once transaction coverage passes, persist the compact Brief snapshot and resolve coordination from the saved v34 store before final rendering, sealing, and archiving. Every detector return includes `snapshots_analyzed`. Rendering never appends snapshots, and post-seal work never changes the finalized coordination object.
 5. Pattern memory may drop self-directed `sender_receiver` keys. It may not wipe snapshots to prove a theory.
 
 ## Public report rules
@@ -59,6 +59,6 @@ A Brief report that counts Outer `XRPMAN_BLACKBOX_V2` as Brief coordination hist
 ## What this branch implements
 
 Patch 0: this contract.
-Patch 1: Brief memory guard (`src/brief/46-memory-guard-20260923.js`) + tests.
+Patch 1: Brief storage guard plus real core detector/renderer/save integration tests. Preview acquisition obtains a deployment policy from `GET /api/delta?action=policy` before the run. Preview or unknown policy failures stop incomplete at the scan boundary; only confirmed production may use ordinary direct fallback. No synthetic successful empty run is permitted.
 
 Patches 2–4 (news governor object, dual window, entity lines) stay off this PR.
