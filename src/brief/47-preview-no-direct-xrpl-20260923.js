@@ -1,75 +1,88 @@
 /* 47-preview-no-direct-xrpl-20260923.js
- * Preview fence on audit/memory-contract-guard. Does not edit 02-core.js.
- *
- * Preview may READ the shared evidence store. It must not WRITE the
- * production checkpoint. If the stored snapshot cannot be served, the
- * scan stops incomplete. It must not start account_tx on all 418 wallets.
- *
- * Server half lives in api/delta.js (buildPreviewReadOnlyRun).
- * This file is the client fail-closed net around scanWallets' catch.
+ * Preview-only fail-closed net for the stored evidence snapshot.
+ * Does not edit 02-core.js and never acquires XRPL.
  */
-(function previewNoDirectXrpl() {
+(function shadowPreviewNoDirectXrplFence() {
   'use strict';
 
-  var BLOCK_RE = /PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE|EVIDENCE_WRITE_REFUSED_NON_PRODUCTION/;
+  if (typeof window === 'undefined' || typeof window.fetch !== 'function') return;
+  if (window.SW_PREVIEW_NO_DIRECT_XRPL_FENCE) return;
 
-  function previewUnavailableError() {
-    var _previewErr = new Error('PREVIEW READ-ONLY SNAPSHOT UNAVAILABLE: stored evidence could not satisfy this test window. Production was not modified and no direct 418-wallet crawl was started.');
-    _previewErr.scanIncomplete = true;
-    _previewErr.previewReadOnly = true;
-    return _previewErr;
+  var nativeFetch = window.fetch.bind(window);
+
+  function logFence(message) {
+    try {
+      if (typeof log === 'function') log(message);
+      else if (window.console && console.warn) console.warn(message);
+    } catch (_) {}
   }
 
-  if (typeof beginEvidenceIndexResilient === 'function') {
-    var origBegin = beginEvidenceIndexResilient;
-    beginEvidenceIndexResilient = async function () {
-      try {
-        return await origBegin.apply(this, arguments);
-      } catch (e) {
-        var _evidenceMsg = String(e && e.message || e || '');
-        var _previewReadOnlyUnavailable = BLOCK_RE.test(_evidenceMsg);
-        if (_previewReadOnlyUnavailable) {
-          try {
-            if (typeof log === 'function') {
-              log('Preview read-only snapshot unavailable — direct XRPL fallback remains disabled.');
-            }
-          } catch (_) {}
-          throw previewUnavailableError();
-        }
-        throw e;
-      }
-    };
-    if (typeof window !== 'undefined') window.beginEvidenceIndexResilient = beginEvidenceIndexResilient;
+  function parseRun(input, init) {
+    try {
+      var url = typeof input === 'string' ? input : (input && input.url) || '';
+      if (url.indexOf('/api/delta') < 0) return null;
+      var body = init && init.body;
+      if (!body && input && typeof input.body === 'string') body = input.body;
+      if (!body) return null;
+      var parsed = typeof body === 'string' ? JSON.parse(body) : body;
+      return parsed && parsed.action === 'run' ? parsed : null;
+    } catch (_) {
+      return null;
+    }
   }
 
-  if (typeof log === 'function') {
-    var origLog = log;
-    log = function (msg) {
-      origLog(msg);
-      var text = String(msg || '');
-      if (/Evidence index unavailable — direct XRPL acquisition:/.test(text) && BLOCK_RE.test(text)) {
-        throw previewUnavailableError();
-      }
-    };
-  }
-
-  if (typeof xrpl === 'function') {
-    var origXrpl = xrpl;
-    xrpl = async function (ws, req) {
-      if (req && req.command === 'account_tx') {
-        try {
-          if (typeof state === 'object' && state && state._previewBlockDirectXrpl) {
-            throw previewUnavailableError();
-          }
-        } catch (e) {
-          if (e && e.previewReadOnly) throw e;
-        }
-      }
-      return origXrpl.apply(this, arguments);
+  function unavailableBody(run) {
+    return {
+      scan_id: null,
+      report_id: run && run.report_id || null,
+      target_wallets: 0,
+      complete_wallets: 0,
+      balance_contradictions: 0,
+      balance_contradiction_addresses: [],
+      transactions: 0,
+      xrpl_requests: 0,
+      failures: [],
+      wallets: [],
+      committed: false,
+      reason: 'PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE',
+      error: 'PREVIEW READ-ONLY SNAPSHOT UNAVAILABLE',
+      preview_read_only: true,
+      live_acquisition_disabled: true,
+      checkpoint_advanced: false,
+      events: [],
+      window: { error: 'PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE' }
     };
   }
 
-  try {
-    if (typeof log === 'function') log('[preview-fence] installed');
-  } catch (_) {}
+  window.fetch = async function previewFencedFetch(input, init) {
+    var run = parseRun(input, init);
+    var response = await nativeFetch(input, init);
+    if (!run || response.ok) return response;
+
+    var payload = null;
+    try { payload = await response.clone().json(); } catch (_) {}
+    var msg = String(payload && payload.error || '');
+    if (!/PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE|EVIDENCE_WRITE_REFUSED_NON_PRODUCTION/.test(msg)) {
+      return response;
+    }
+
+    logFence('Preview read-only snapshot unavailable — direct XRPL fallback remains disabled.');
+    var body = unavailableBody(run);
+    if (run.stream) {
+      return new Response(JSON.stringify({ t: 'done', ...body }) + '\n', {
+        status: 200,
+        headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8' }
+      });
+    }
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' }
+    });
+  };
+
+  window.SW_PREVIEW_NO_DIRECT_XRPL_FENCE = {
+    version: '2026.09.23.2',
+    behavior: 'PREVIEW_READ_ONLY_FAIL_CLOSED'
+  };
+  logFence('[preview-fence] installed');
 })();
