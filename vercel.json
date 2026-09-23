@@ -1,9 +1,71 @@
 {
   "functions": {
-    "api/evidence.js": { "maxDuration": 300, "includeFiles": "src/{brief,shared}/**" },
-    "api/delta.js": { "maxDuration": 300, "includeFiles": "src/{brief,shared}/**" },
-    "api/report-archive.js": { "maxDuration": 60 }
+    "api/evidence.js": {
+      "maxDuration": 300,
+      "includeFiles": "src/{brief,shared}/**"
+    },
+    "api/delta.js": {
+      "maxDuration": 300,
+      "includeFiles": "src/{brief,shared}/**"
+    },
+    "api/evidence-scheduler.js": {
+      "maxDuration": 300,
+      "includeFiles": "src/{db,brief,shared}/**"
+    },
+    "api/report-archive.js": {
+      "maxDuration": 60
+    }
   },
+  "crons": [
+    {
+      "path": "/api/evidence-scheduler",
+      "schedule": "5 0 * * *"
+    },
+    {
+      "path": "/api/evidence-scheduler",
+      "schedule": "5 2 * * *"
+    },
+    {
+      "path": "/api/evidence-scheduler",
+      "schedule": "5 4 * * *"
+    },
+    {
+      "path": "/api/evidence-scheduler",
+      "schedule": "5 6 * * *"
+    },
+    {
+      "path": "/api/evidence-scheduler",
+      "schedule": "5 8 * * *"
+    },
+    {
+      "path": "/api/evidence-scheduler",
+      "schedule": "5 10 * * *"
+    },
+    {
+      "path": "/api/evidence-scheduler",
+      "schedule": "5 12 * * *"
+    },
+    {
+      "path": "/api/evidence-scheduler",
+      "schedule": "5 14 * * *"
+    },
+    {
+      "path": "/api/evidence-scheduler",
+      "schedule": "5 16 * * *"
+    },
+    {
+      "path": "/api/evidence-scheduler",
+      "schedule": "5 18 * * *"
+    },
+    {
+      "path": "/api/evidence-scheduler",
+      "schedule": "5 20 * * *"
+    },
+    {
+      "path": "/api/evidence-scheduler",
+      "schedule": "5 22 * * *"
+    }
+  ],
   "redirects": [
     {
       "source": "/report/",

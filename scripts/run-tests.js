@@ -73,6 +73,8 @@ const SUITES = [
   ['delta-report-path',      'delta-report-path.test.js',        8213],
   ['run-journal',            'run-journal.test.js',              null],
   ['delta-acquisition',      'delta-acquisition.test.js',          null],
+  // Server-owned evidence stays fresh even when no phone/report is open.
+  ['evidence-scheduler',      'evidence-scheduler.test.js',          null],
   // The checkpoint was in the repository all along: a sealed 255/255 report
   // names the ledger every wallet was proven through.
   ['seed-from-receipt',      'seed-from-receipt.test.js',          null],
