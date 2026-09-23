@@ -1493,9 +1493,15 @@ function _buildSources(interpretations, pack){
   var legacySources='';
   if(typeof window.renderPlainTextSources==='function'){
     legacySources=_safe(function(){
-      var items=typeof window.clearedMorningNewsSources==='function'?window.clearedMorningNewsSources(pack):(typeof window.getNewsSources==='function')
+      // Sources are provenance, not narrative authority. The Morning News
+      // Governor may reject every fetched headline for story use while RSS /
+      // Google News still completed successfully. In that case the SOURCES
+      // footer must say what was fetched instead of falsely saying there were
+      // no external sources.
+      var items=typeof window.buildMorningStorySources==='function'?window.buildMorningStorySources(pack):(typeof window.getNewsSources==='function')
         ? window.getNewsSources(pack)
         : [];
+      var contextOnly=_arr(items).some(function(item){ return item&&item._context_only===true; });
       if(typeof window.filterSourcesForReport==='function'){
         items=window.filterSourcesForReport(items);
       } else if(typeof window.rankNewsItems==='function'){
@@ -1518,10 +1524,14 @@ function _buildSources(interpretations, pack){
       // indented continuation lines are untouched, and this keeps working if the
       // renderer's formatting changes.
       var offset=sources.length;
-      return (window.renderPlainTextSources(items)||'')
+      var rendered=(window.renderPlainTextSources(items)||'')
         .replace(/^\s*SOURCES\s*\n?/i,'')
         .replace(/^\[(\d+)\]/gm, function(_m, d){ return '['+(Number(d)+offset)+']'; })
         .trim();
+      if(contextOnly&&rendered){
+        rendered='[Context only — fetched successfully; none cleared the Morning News Governor for narrative use.]\n'+rendered;
+      }
+      return rendered;
     },'');
   }
   if(!sources.length && !legacySources) return '[No external sources for today\u2019s scan.]';
