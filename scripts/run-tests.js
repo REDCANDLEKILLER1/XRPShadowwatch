@@ -39,6 +39,7 @@ const SUITES = [
   ['developer-language',     'developer-language.test.js',       8207],
   ['prayer-scripture',       'prayer-scripture.test.js',         8208],
   ['source-relevance',       'source-relevance.test.js',         8209],
+  ['news-context-sources',   'news-context-source-visibility.test.js', 8233],
   ['in-page-smoke',          'in-page-smoke.test.js',            8210],
   ['morning-story-canonical','morning-story-canonical.test.js',  8211],
   // A report that cannot be posted was not published. The field holds 4,000.
