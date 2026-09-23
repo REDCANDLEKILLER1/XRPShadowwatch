@@ -113,4 +113,46 @@ test('after save, coordination is recomputed from store', () => {
   assert.strictEqual(state.coordination.snapshots_analyzed, 2);
 });
 
+
+test('save one Brief snapshot persists v34 and detectCoordination reports one', () => {
+  const store = makeStore({
+    XRPMAN_BLACKBOX_V2: JSON.stringify([{ ts: 99 }]),
+    shadowwatch_snapshot_v30: JSON.stringify([{ ts: 88 }])
+  });
+  const state = {};
+  const sb = runGuard(store, {
+    state: state,
+    loadBlackboxHistory: function () { return []; },
+    detectCoordination: function (h) {
+      return { snapshots_analyzed: (h || []).length, pairs: [] };
+    },
+    // Reproduce the live defect: the underlying save advances Outer/legacy,
+    // but does not write Brief v34.
+    saveBlackboxSnapshot: function () {
+      store.setItem('XRPMAN_BLACKBOX_V2', JSON.stringify([{ ts: 99 }, { ts: 100 }]));
+      store.setItem('shadowwatch_snapshot_v30', JSON.stringify([{ ts: 88 }, { ts: 100 }]));
+    }
+  });
+  const pack = { ts: 100, date: '2026-09-23', large_transfers: [], wallets: [] };
+  sb.saveBlackboxSnapshot(pack);
+  const v34 = JSON.parse(store.getItem('shadowwatch_blackbox_v34'));
+  assert.strictEqual(v34.length, 1);
+  assert.strictEqual(state.coordination.snapshots_analyzed, 1);
+  assert.strictEqual(pack.coordination.snapshots_analyzed, 1);
+});
+
+test('Outer and legacy boxes are never counted as Brief coordination', () => {
+  const store = makeStore({
+    XRPMAN_BLACKBOX_V2: JSON.stringify([{ ts: 9 }, { ts: 8 }, { ts: 7 }]),
+    shadowwatch_snapshot_v30: JSON.stringify([{ ts: 6 }, { ts: 5 }])
+  });
+  const sb = runGuard(store, {
+    loadBlackboxHistory: function () { return []; },
+    detectCoordination: function (h) {
+      return { snapshots_analyzed: (h || []).length, pairs: [] };
+    }
+  });
+  assert.strictEqual(sb.detectCoordination([]).snapshots_analyzed, 0);
+});
+
 console.log('\n' + passed + ' memory-guard tests passed');
