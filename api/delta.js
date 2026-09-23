@@ -183,6 +183,20 @@ module.exports = async function handler(req, res) {
   const allowed = req.method === 'GET' ? ['state', 'health'] : ['run', 'seed'];
   if (!allowed.includes(input.action)) return res.status(400).json({ error: 'ACTION_NOT_ALLOWED' });
 
+  // A preview shares production's evidence repository but is intentionally
+  // forbidden to advance its checkpoint. Do not spend hundreds of XRPL reads
+  // walking a run that can never commit, only to discover the write refusal at
+  // the end and make the browser fall back to the legacy direct crawl.
+  if (input.action === 'run' && process.env.VERCEL_ENV &&
+      process.env.VERCEL_ENV !== 'production') {
+    return res.status(409).json({
+      error: 'PREVIEW_READ_ONLY_NO_ACQUISITION',
+      preview_read_only: true,
+      live_acquisition_disabled: true,
+      evidence_reads_allowed: true
+    });
+  }
+
   let reader;
   try {
     if (input.action === 'health' || input.action === 'state') {
