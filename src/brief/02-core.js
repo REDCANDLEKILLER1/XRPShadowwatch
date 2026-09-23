@@ -2050,10 +2050,10 @@ async function scanWallets(ws) {
     } catch(e) {
       state.anchorAttempts[state.anchorAttempts.length-1].error=e.message;
       var _evidenceMsg=String(e&&e.message||e||'');
-      var _previewReadOnly=/PREVIEW_READ_ONLY_NO_ACQUISITION|EVIDENCE_WRITE_REFUSED_NON_PRODUCTION/.test(_evidenceMsg);
-      if(_previewReadOnly){
-        log('Preview is read-only — live XRPL acquisition and direct fallback are disabled.');
-        var _previewErr=new Error('PREVIEW READ-ONLY: live acquisition is disabled on preview deployments. The shared evidence store was not modified and no direct 418-wallet crawl was started.');
+      var _previewReadOnlyUnavailable=/PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE|EVIDENCE_WRITE_REFUSED_NON_PRODUCTION/.test(_evidenceMsg);
+      if(_previewReadOnlyUnavailable){
+        log('Preview read-only snapshot unavailable — direct XRPL fallback remains disabled.');
+        var _previewErr=new Error('PREVIEW READ-ONLY SNAPSHOT UNAVAILABLE: stored evidence could not satisfy this test window. Production was not modified and no direct 418-wallet crawl was started.');
         _previewErr.scanIncomplete=true;
         _previewErr.previewReadOnly=true;
         throw _previewErr;
