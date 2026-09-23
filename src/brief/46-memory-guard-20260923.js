@@ -170,3 +170,14 @@
     if (typeof log === 'function') log('[memory-guard] installed');
   } catch (_) {}
 })();
+
+(function loadPreviewFenceFromMemoryGuard() {
+  try {
+    if (document.querySelector('script[data-sw-preview-fence]')) return;
+    var g = document.createElement('script');
+    g.src = '/src/brief/47-preview-no-direct-xrpl-20260923.js';
+    g.async = false;
+    g.setAttribute('data-sw-preview-fence', '2026-09-23.1');
+    document.body.appendChild(g);
+  } catch (_) {}
+})();
