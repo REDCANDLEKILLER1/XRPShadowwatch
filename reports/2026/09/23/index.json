@@ -1,0 +1,11 @@
+[
+  {
+    "report_id": "SW-20260923-JK10O",
+    "scan_id": "SC-MUE2HD2J",
+    "generated_at": "2026-09-23T12:13:20.000Z",
+    "coverage_complete": true,
+    "anchor": 107181040,
+    "transactions": null,
+    "report_hash": "58dec64238952f2fafad2c1fdedc1019e31de64b09d292d307182619a46162ca"
+  }
+]
