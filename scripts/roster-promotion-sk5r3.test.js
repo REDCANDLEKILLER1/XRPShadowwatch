@@ -29,8 +29,9 @@ const fs   = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const CORE = fs.readFileSync(path.join(ROOT, 'src/brief/02-core.js'), 'utf8');
-const R    = require(path.join(ROOT, 'src/db/roster.js'));
+const CORE  = fs.readFileSync(path.join(ROOT, 'src/brief/02-core.js'), 'utf8');
+const BUILD = fs.readFileSync(path.join(ROOT, 'scripts/build-hvt-roster.js'), 'utf8');
+const R     = require(path.join(ROOT, 'src/db/roster.js'));
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail) => {
@@ -70,7 +71,7 @@ const byAddr = new Map(roster.map(w => [w.address, w]));
 // of 02-core.js and throws ROSTER_MISMATCH for any address the browser sends
 // that the server's list lacks — so an entry the parser cannot read does not
 // fail here, it fails the next morning's scan.
-console.log('1. the server-side parser sees all ten');
+console.log('1. the server-side parser sees both reviewed promotion sets');
 check('the reviewed permanent roster now contains exactly 423 wallets', roster.length === 423, roster.length);
 PROMOTED.forEach(([addr, cat, label]) => {
   const w = byAddr.get(addr);
@@ -81,8 +82,14 @@ PROMOTED.forEach(([addr, cat, label]) => {
 
 H21LA_PROMOTED.forEach(([addr, cat, label]) => {
   const w = byAddr.get(addr);
+  const sourceLine = BUILD.split('\n').find(l => l.indexOf(addr) > -1) || '';
   check(label + ' is on the server roster', !!w, addr);
-  if (w) check('  ' + label + ' carries its reviewed category', w.cat === cat, w.cat);
+  // Shared HVT rows are intentionally normalized by src/db/roster.js to the
+  // server's broad "whale" category. The finer discovery subtype remains in
+  // REPORT_PROMOTIONS so roster regeneration keeps the reviewed classification.
+  if (w) check('  ' + label + ' is normalized to the server HVT category', w.cat === 'whale', w.cat);
+  check('  ' + label + ' keeps its reviewed discovery subtype in the generator',
+        sourceLine.indexOf("cat: '" + cat + "'") > -1, sourceLine);
   if (w) check('  ' + label + ' carries its behavioral label', w.label === label, w.label);
 });
 
