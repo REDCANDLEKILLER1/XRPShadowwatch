@@ -1,0 +1,82 @@
+🩸 ℜᴇᴅᴄᴀɴᴅʟᴇᴋɪʟʟᴇR 🩸
+ＳＨＡＤＯＷ ＷＡＴＣＨ
+✨ 𝐹𝑒𝑎𝑡𝑢𝑟𝑖𝑛𝑔 ✨
+𝓛𝓪𝓭𝔂 𝓚'𝓼
+🄴🅇🄲🄴🄻🄻🄴🄽🅃!
+𝖂𝖍𝖎𝖑𝖊 𝖄𝖔𝖚 𝖂ᴇʀᴇ 𝕾𝖑𝖊𝖊𝔭𝖎𝖓𝖌
+𝗫𝗥𝗣𝗟  𝕌ℙ𝔻𝔸𝕋𝔼 ✨✨ on
+☕ COFFEE & CRYPTO with 𝐒𝐓ΟΝΕ
+September 24, 2026
+
+Executive Summary
+─────────────────
+355.59M XRP moved across 98 large transfers in the window. Binance ×19 and Upbit ×2 and +5 more absorbed 117.34M XRP this scan. The standout individual anomaly was 30M XRP moved from a large XRP holder to a large XRP holder in the scanned window. These classifications describe observed movement only; they do not prove intent.
+
+What Mattered Most
+──────────────────
+The tell of the night: Binance ×19 and Upbit ×2 and +5 more absorbed 117.34M XRP this scan, and viral Commentator Eyes $100 XRP by December — ETF Data Reveals the Catch. That’s the move under the move — the part the ticker never shows you.
+
+Evidence
+────────
+Here’s exactly what the Ledger logged: 30M XRP moved from a large XRP holder to a large XRP holder in the scanned window. A second transfer of 25M XRP reached an unidentified wallet. The discovery queue is holding 38 flagged candidates — 8 found this scan, 1 recommended for review, separate from the 423 wallets on the permanent watch list — all of them flagged, none of them accused; behavioral evidence only, and not ownership proof. Above ground, in the daylight world, published news context: Viral Commentator Eyes $100 XRP by December — ETF Data Reveals the Catch · Ripple Powers Absa’s Digital Asset Custody Push as Market Heads Toward $4.3T. Big money leaves small tracks. That’s the whole trick.
+
+
+Escrow Watch
+────────────
+Ripple escrow: 31.70B XRP locked now across 100 active validated-ledger escrow objects · registry check 20/20 known Ripple-labeled addresses.
+No Ripple escrow events are present in the acquired record for the last 36h; this alone does not prove an event-free window.
+Other XRPL escrow, last 36h: 1 new lock totalling 10.00M XRP · 0 releases, across 1 owner wallet.
+• Flare Core Vault: 1 lock 10.00M XRP
+Ripple and non-Ripple escrow are separate. Active escrow objects are ledger objects, not owner wallets. Scope is escrow observed by this scan, not every escrow on the XRPL.
+
+Under the Surface
+─────────────────
+Here’s the part the ≥1M whale counter can miss. Shadow Volume is the big-move spotlight: 355.59M XRP in 98 individual moves of at least 1M. Another 237.76M XRP moved in 842 payments from 100K to under 1M. 220.63M XRP across 777 of those payments matched 99 repeat-route, fan-in, or fan-out patterns. That is a signal to trace, not proof somebody was hiding funds.
+
+How to Read It
+──────────────
+New here? Shadow Volume shows the obvious ≥1M moves. Mid-size Flow catches 100K–<1M moves. Clustered Flow asks whether those smaller high-value payments keep using common routes. Net watched flow tells whether the tracked wallet board gained or lost XRP versus its prior snapshot.
+
+What To Watch Next
+──────────────────
+• Watch the absorbing wallets — are they stacking it, or handing it back out?
+• Check whether the largest recipient in this window makes another move.
+• If a dormant giant wakes up, I’ll flag it before the chart does.
+
+Verdict
+───────
+The read, straight up: an unsettled night — I’m leaning in on it. (54/100). What put me here: large transfer count, shadow volume, receiver forwarding. Watched wallets are net distributing — about 4.95M XRP moved outward. The banks count on nobody watching. I count on catching them. Not financial advice. XRP-only forensic watch.
+
+I’m XRPMan, and I tell on the banks.
+
+LEDGER DIAGNOSTICS
+──────────────────
+• XRP price: ~$1.4688 (24h soft)
+• Market volume (exchanges, 24h): $3.34B
+• Native XRPL DEX observed volume (top 200-token index, 24h): ~$9M (~5.82M XRP, ledger-derived estimate)
+• XRPL EVM: $2 DEX · $34.7K TVL
+• RLUSD on XRPL (issuer obligations): 1.06B tokens
+• New funded XRPL accounts (2026-09-23): +11,432
+• Watched wallets: 423
+• Watched activity (all sizes, LAST 24H): 82432 transactions · 719.42M XRP moved · 197 wallets active
+• Shadow volume (whale moves ≥1M, LAST 24H): 355.59M XRP · 98 transfers
+• Net watched flow: 4.95M XRP outward
+
+🙏 THE DAILY PRAYER
+───────────────────
+Lord, where war or sanctions reshape liquidity, let us see the shift early and report it without political dressing.
+
+📖 THE DAILY SCRIPTURE
+──────────────────────
+Psalm 27:14 (KJV)
+“Wait on the Lord: be of good courage, and he shall strengthen thine heart: wait, I say, on the Lord.”
+
+Sources
+───────
+[1] Viral Commentator Eyes $100 XRP by December — ETF Data Reveals the Catch — https://news.google.com/rss/articles/CBMipAFBVV95cUxPMXRYZ0djNTdjcFlMUzdPN1g5NmV4UGw0aDB2bkdGWnYyZTFCUlFpYWhSYTdJZ1pSc3E3RFNMSnRCTjFGVmJqSVFMd2U1bElDdnhoM0pnVVg3bjBWLTZ2U0d2eFdzXzdDUjc4NEw3MEFiSmY0UmFucjN0TGdEWGl6U3FGaGhzVjFSQ0plSGU1MjIxZXpoV1VnLTVtTUl1SlpnSVVrcQ?oc=5
+[2] Ripple Powers Absa’s Digital Asset Custody Push as Market Heads Toward $4.3T — https://news.google.com/rss/articles/CBMingFBVV95cUxObXRsLXRidkoxZy1IclZpbnhqa2ZPMWRHaHJFUnZzZWltcS1RSE9RdzA1WVctalZSNjdxRUt2Q0p6dUljZWllRC1SMEVaSVR1V0tDc1cwRFF5ZzhveEhKN1BfZm5FQkZOTVAzeUVzTkdtMkhoQTE3aDhwdk9kZjU4T1A4Z3BEY2I4VVJDblIzOWRyVjNTSk5KOUZ6MHdkQQ?oc=5
+
+
+NEWS USED:
+[1] google_news@self — Viral Commentator Eyes $100 XRP by December — ETF Data Reveals the Catch
+[2] google_news@self — Ripple Powers Absa’s Digital Asset Custody Push as Market Heads Toward $4.3T

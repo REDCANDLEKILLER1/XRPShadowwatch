@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20260924-F1BZK",
+  "generated_at": "2026-09-24T12:37:12.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107203807,
+  "transactions_in_window": null,
+  "new_observations": null,
+  "xrpl_requests": null,
+  "report_hash": "eef0a2216a16061ccb83578c024cbd8fbad00c128a4aa2c583dc7a321dadece5"
+}
