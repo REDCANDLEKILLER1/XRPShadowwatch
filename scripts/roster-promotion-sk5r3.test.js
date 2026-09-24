@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /* ── A PROMOTION IS A CLAIM, AND IT HAS TO BE CHECKABLE LATER ────────────────
    Ten candidates from SW-20260916-SK5R3's discovery queue, reviewed and
-   approved by the operator, joining the permanent roster: 408 → 418.
+   approved by the operator, joined the permanent roster: 408 → 418.
+   Five operator-reviewed ADD candidates from SW-20260923-H21LA later lifted
+   the current roster to 423; this suite guards both reviewed promotion sets.
 
    Promotion is the one moment a wallet stops being "flagged" and starts being
    watched, so the entry has to carry the evidence that earned it. Every figure
@@ -27,8 +29,9 @@ const fs   = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const CORE = fs.readFileSync(path.join(ROOT, 'src/brief/02-core.js'), 'utf8');
-const R    = require(path.join(ROOT, 'src/db/roster.js'));
+const CORE  = fs.readFileSync(path.join(ROOT, 'src/brief/02-core.js'), 'utf8');
+const BUILD = fs.readFileSync(path.join(ROOT, 'scripts/build-hvt-roster.js'), 'utf8');
+const R     = require(path.join(ROOT, 'src/db/roster.js'));
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail) => {
@@ -50,7 +53,15 @@ const PROMOTED = [
   ['rGpaXxcBQFCkELhqnHbrascpPDdxSbNqxA', 'discovered_receiver',         'RLUSD_FLOW_MULTISIG']
 ];
 
-console.log('ROSTER PROMOTION — SW-20260916-SK5R3, 408 → 418\n');
+const H21LA_PROMOTED = [
+  ['rGdZW2rphjrEFvr2M2zL16EryUXe9ryHwd', 'next_hop_splitter',  'SPLITTER_rGdZW2'],
+  ['rnTJrNZAeLmahACbkFdBDTMPmqmm6fCbTE', 'discovered_receiver', 'EXOUT_RECV_rnTJrN'],
+  ['r4MQxQHJMLAGKR4pmM6TgZtsjkjog5iQX8', 'discovered_receiver', 'LARGE_RECV_r4MQxQ'],
+  ['r4SZcNFQ1u3xfQp5WG9WUHUSPyRgdsZaZq', 'discovered_whale',    'WHALE_RECV_r4SZcN'],
+  ['rKryEVqD7SUZ9SJYRgeESZDQeJ9EkkA1sg', 'discovered_whale',    'WHALE_RECV_rKryEV']
+];
+
+console.log('ROSTER PROMOTION — reviewed discovery sets; current roster 423\n');
 
 const roster = R.roster();
 const byAddr = new Map(roster.map(w => [w.address, w]));
@@ -60,13 +71,26 @@ const byAddr = new Map(roster.map(w => [w.address, w]));
 // of 02-core.js and throws ROSTER_MISMATCH for any address the browser sends
 // that the server's list lacks — so an entry the parser cannot read does not
 // fail here, it fails the next morning's scan.
-console.log('1. the server-side parser sees all ten');
-check('the roster grew by exactly ten', roster.length === 418, roster.length);
+console.log('1. the server-side parser sees both reviewed promotion sets');
+check('the reviewed permanent roster now contains exactly 423 wallets', roster.length === 423, roster.length);
 PROMOTED.forEach(([addr, cat, label]) => {
   const w = byAddr.get(addr);
   check(label + ' is on the server roster', !!w, addr);
   if (w) check('  ' + label + ' carries its promoted category', w.cat === cat, w.cat);
   if (w) check('  ' + label + ' carries its label', w.label === label, w.label);
+});
+
+H21LA_PROMOTED.forEach(([addr, cat, label]) => {
+  const w = byAddr.get(addr);
+  const sourceLine = BUILD.split('\n').find(l => l.indexOf(addr) > -1) || '';
+  check(label + ' is on the server roster', !!w, addr);
+  // Shared HVT rows are intentionally normalized by src/db/roster.js to the
+  // server's broad "whale" category. The finer discovery subtype remains in
+  // REPORT_PROMOTIONS so roster regeneration keeps the reviewed classification.
+  if (w) check('  ' + label + ' is normalized to the server HVT category', w.cat === 'whale', w.cat);
+  check('  ' + label + ' keeps its reviewed discovery subtype in the generator',
+        sourceLine.indexOf("cat: '" + cat + "'") > -1, sourceLine);
+  if (w) check('  ' + label + ' carries its behavioral label', w.label === label, w.label);
 });
 
 // ══ 2. NOTHING IS DOUBLE-COUNTED OR INDISTINGUISHABLE ════════════════════════
@@ -76,7 +100,7 @@ check('every address on the roster is unique',
       roster.length - new Set(roster.map(w => w.address)).size);
 const labelCounts = {};
 roster.forEach(w => { labelCounts[w.label] = (labelCounts[w.label] || 0) + 1; });
-const collided = PROMOTED.map(p => p[2]).filter(l => labelCounts[l] !== 1);
+const collided = PROMOTED.concat(H21LA_PROMOTED).map(p => p[2]).filter(l => labelCounts[l] !== 1);
 check('none of the ten labels collides with an existing one', collided.length === 0, collided);
 
 // ══ 3. THE ADDRESSES ARE WELL-FORMED ═════════════════════════════════════════
@@ -85,7 +109,7 @@ check('none of the ten labels collides with an existing one', collided.length ==
 // are already in this file for that reason.
 console.log('\n3. every promoted address is a well-formed XRPL address');
 const XRPL_ADDR = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
-PROMOTED.forEach(([addr, , label]) => {
+PROMOTED.concat(H21LA_PROMOTED).forEach(([addr, , label]) => {
   check(label + ' matches the XRPL address form', XRPL_ADDR.test(addr), addr);
 });
 check('and so does every OTHER address on the roster (the promotion broke none)',
