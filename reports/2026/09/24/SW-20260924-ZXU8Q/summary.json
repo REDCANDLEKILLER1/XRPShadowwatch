@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20260924-ZXU8Q",
+  "generated_at": "2026-09-24T03:34:50.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107195344,
+  "transactions_in_window": null,
+  "new_observations": null,
+  "xrpl_requests": null,
+  "report_hash": "fdcdf922aa5c16315b285d8972c9999c265db9a751393953b46e396da2798b42"
+}
