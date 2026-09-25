@@ -1,0 +1,11 @@
+[
+  {
+    "report_id": "SW-20260925-P1WS5",
+    "scan_id": "SC-MUGYKKQH",
+    "generated_at": "2026-09-25T10:19:32.000Z",
+    "coverage_complete": true,
+    "anchor": 107224057,
+    "transactions": null,
+    "report_hash": "6560289f1ab8f82978567695df92a133e2527f2fadab7d8c65fa9bdb6ca3c011"
+  }
+]
