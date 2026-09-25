@@ -2049,6 +2049,10 @@ async function scanWallets(ws) {
         getTxWindow(), getActiveWatchlist().map(w => w.address)));
     } catch(e) {
       state.anchorAttempts[state.anchorAttempts.length-1].error=e.message;
+      if (window.SW_EVIDENCE_INDEX && window.SW_EVIDENCE_INDEX.canonical_report_only === true) {
+        log('Evidence snapshot unavailable — refusing browser-specific fallback: ' + e.message);
+        throw e;
+      }
       log('Evidence index unavailable — direct XRPL acquisition: ' + e.message);
     }
   }
@@ -2089,7 +2093,20 @@ async function scanWallets(ws) {
     log('COVERAGE: this run cannot claim a complete transaction window — no validated run anchor.');
   }
 
-  const twRequested = getTxWindow();
+  const _sharedWindow = state.indexRun && state.indexRun.report_window &&
+    state.indexRun.report_window.from && state.indexRun.report_window.to
+      ? state.indexRun.report_window : null;
+  const twRequested = _sharedWindow
+    ? {
+        startMs: Date.parse(_sharedWindow.from),
+        endMs: Date.parse(_sharedWindow.to),
+        custom: _sharedWindow.custom === true,
+        hours: (Date.parse(_sharedWindow.to) - Date.parse(_sharedWindow.from)) / 3600000,
+        label: _sharedWindow.label || 'LAST 24H · SHARED SNAPSHOT',
+        autoHours: 24,
+        dayName: ''
+      }
+    : getTxWindow();
   // The window the Report may actually claim. A run cannot report on ledger
   // time it did not read, so the end is capped to the anchor's close.
   const ew = RA
@@ -4424,6 +4441,8 @@ function buildPack(v) {
     anchor_attempts: state.anchorAttempts || [],
     phase_timings: state.phaseTimings || [],
     evidence_index: state.indexRun && window.SW_EVIDENCE_INDEX ? window.SW_EVIDENCE_INDEX.metrics() : null,
+    balance_baseline: state.balanceBaseline || null,
+    balance_delta_source: state.balanceBaseline ? 'SERVER_EVIDENCE_STATE' : 'LOCAL_OR_UNAVAILABLE',
     shadow_volume_xrp: shadowVolumeXRP(), total_balance_delta_xrp: totalDeltaXRP(),
     // The measured delta with the escrow-attributable part removed, and the
     // adjustment itself so the two reconcile in the debug pack.
