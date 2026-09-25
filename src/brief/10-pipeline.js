@@ -431,6 +431,45 @@ function summarizeDominanceShift(pack){
   }, _blank());
 }
 
+function _morningClearedNewsSources(pack){
+  return _safe(function(){
+    var items=[];
+    if(typeof window.clearedMorningNewsSources==='function'){
+      items=_arr(window.clearedMorningNewsSources(pack));
+      if(items.length) return items;
+    }
+
+    // A cleared helper may be empty because its own input lane was never
+    // populated, even though news_intel already contains usable routed news.
+    // That was SW-20260925-P1WS5: 30 headlines / 19 matches, but the Morning
+    // Story printed "No external sources". Use the report pool only as a
+    // fallback and put it through the SAME strict Morning News Governor before
+    // publication. This is a lane repair, not a relaxation of the news policy.
+    if(typeof window.getNewsSources!=='function') return [];
+    var fallback=_arr(window.getNewsSources(pack));
+    if(!fallback.length) return [];
+
+    var G=window.MORNING_NEWS_GOVERNOR;
+    if(G && typeof G.filterPublicNewsArticles==='function'){
+      var governed=G.filterPublicNewsArticles(fallback,pack);
+      if(!governed || !governed.counts || governed.counts.usable!==true) return [];
+      items=_arr(governed.articles);
+      if(typeof G.dedupeSources==='function') items=G.dedupeSources(items);
+    } else if(typeof window.filterSourcesForReport==='function'){
+      // Compatibility only for stripped test/legacy surfaces where the strict
+      // governor is not loaded. Production carries MORNING_NEWS_GOVERNOR.
+      items=window.filterSourcesForReport(fallback);
+    } else {
+      return [];
+    }
+
+    if(typeof window.filterSourcesForReport==='function'){
+      items=window.filterSourcesForReport(_arr(items));
+    }
+    return _arr(items).slice(0,3);
+  },[]);
+}
+
 /* Helper 3 — summarizeNewsImpact */
 function summarizeNewsImpact(pack){
   return _safe(function(){
@@ -447,10 +486,10 @@ function summarizeNewsImpact(pack){
         if(Array.isArray(a)) items=items.concat(a);
       });
     }
-    // The spoken headlines and NEWS USED must share the same cleared list.
-    // Topic-matching the unfiltered news pool here used to quote rejected
-    // headlines while the final provenance block named a different article.
-    if(typeof window.clearedMorningNewsSources==='function')items=window.clearedMorningNewsSources(pack);
+    // Spoken news and the citation block use one governed source list.
+    // An empty canonical lane may fall back to news_intel, but only through the
+    // same strict Morning News Governor used by the normal publication path.
+    items=_morningClearedNewsSources(pack);
     // XRP-only filter, dedup, top 3
     var seen={};
     var xrp=[];
@@ -1493,14 +1532,7 @@ function _buildSources(interpretations, pack){
   var legacySources='';
   if(typeof window.renderPlainTextSources==='function'){
     legacySources=_safe(function(){
-      var items=typeof window.clearedMorningNewsSources==='function'?window.clearedMorningNewsSources(pack):(typeof window.getNewsSources==='function')
-        ? window.getNewsSources(pack)
-        : [];
-      if(typeof window.filterSourcesForReport==='function'){
-        items=window.filterSourcesForReport(items);
-      } else if(typeof window.rankNewsItems==='function'){
-        items=window.rankNewsItems(items).slice(0,8);
-      }
+      var items=_morningClearedNewsSources(pack);
       items=_arr(items).filter(function(item){
         var url=item&&item.url;
         if(!url||seen[url]) return false;
