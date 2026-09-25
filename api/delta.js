@@ -208,6 +208,30 @@ function canonicalWalletProjection(currentState, previousState) {
   });
 }
 
+async function readBalanceBaselineState(currentState, targetMs) {
+  const current = currentState || {};
+  const latestVersion = Number(current.state_version);
+  const target = Number(targetMs);
+  if (!Number.isInteger(latestVersion) || latestVersion <= 1 || !Number.isFinite(target)) return null;
+
+  // State versions are monotonic in both version and anchor time. Binary-search
+  // the immutable history for the latest checkpoint AT OR BEFORE the report
+  // window start. That makes the balance comparison server-owned and stable
+  // across browsers without pretending a 16-minute previous checkpoint is a
+  // 24-hour balance reading.
+  let lo = 1, hi = latestVersion - 1, best = null;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const got = await Store.readStateVersion(mid, {});
+    if (got.missing || !got.state) { hi = mid - 1; continue; }
+    const at = Date.parse(got.state.anchor_close || '');
+    if (!Number.isFinite(at)) { hi = mid - 1; continue; }
+    if (at <= target) { best = got.state; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  return best;
+}
+
 async function buildCanonicalReportSnapshot(input) {
   const loaded = await Store.readState({});
   if (loaded.missing || !loaded.state) throw new Error('EVIDENCE_STATE_MISSING');
@@ -218,14 +242,8 @@ async function buildCanonicalReportSnapshot(input) {
   const pending = selected.accounts.filter(a => !stateAddresses.includes(a));
   const retired = stateAddresses.filter(a => !rosterSet.has(a));
 
-  const priorVersion = Number(state.state_version) - 1;
-  let previous = null;
-  if (priorVersion >= 1) {
-    const p = await Store.readStateVersion(priorVersion, {});
-    if (!p.missing) previous = p.state;
-  }
-
   const win = canonicalReportWindow(state, input);
+  const previous = await readBalanceBaselineState(state, win.start_ms);
   const assembled = await D.readReportWindow(
     { window_start_ms: win.start_ms, window_end_ms: win.end_ms, rows: [] }, {});
 
@@ -259,12 +277,15 @@ async function buildCanonicalReportSnapshot(input) {
     wallets,
     balance_baseline: previous ? {
       source: 'SERVER_EVIDENCE_STATE',
+      requested_window_start: new Date(win.start_ms).toISOString(),
       from_state_version: previous.state_version,
       from_anchor_ledger: Number(previous.anchor_ledger),
       from_anchor_close: previous.anchor_close,
       to_state_version: state.state_version,
       to_anchor_ledger: Number(state.anchor_ledger),
-      to_anchor_close: state.anchor_close
+      to_anchor_close: state.anchor_close,
+      span_ms: Date.parse(state.anchor_close) - Date.parse(previous.anchor_close),
+      start_offset_ms: win.start_ms - Date.parse(previous.anchor_close)
     } : null,
     freshness: {
       canonical_snapshot: true,
@@ -596,5 +617,6 @@ module.exports.packEvents = packEvents;
 module.exports.buildStreamDone = buildStreamDone;
 module.exports.canonicalReportWindow = canonicalReportWindow;
 module.exports.canonicalWalletProjection = canonicalWalletProjection;
+module.exports.readBalanceBaselineState = readBalanceBaselineState;
 module.exports.buildCanonicalReportSnapshot = buildCanonicalReportSnapshot;
 module.exports.GZIP_EVENTS_ABOVE = GZIP_EVENTS_ABOVE;
