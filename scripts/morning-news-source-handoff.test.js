@@ -85,7 +85,7 @@ const check = (name, ok, detail) => {
 
     const GOOD = {
       source:'coinpedia',
-      title:'XRP Ledger Sees Record 11,610 New Accounts',
+      title:'XRP ETF inflows hit record as institutional custody expands',
       url:'https://example.test/xrp-ledger-accounts'
     };
     const JUNK = {
@@ -109,7 +109,7 @@ const check = (name, ok, detail) => {
       // the report news pool contains usable articles.
       window.clearedMorningNewsSources = () => [];
       window.getNewsSources = () => [GOOD, JUNK];
-      const fallback = String(P.assemble(base) || '');
+      const fallback = String((P.assemble(base) || {}).text || '');
       result.fallbackHasGood = fallback.includes(GOOD.title) && fallback.includes(GOOD.url);
       result.fallbackNoPlaceholder = !fallback.includes('[No external sources for today');
       result.fallbackDropsJunk = !fallback.includes(JUNK.title) && !fallback.includes(JUNK.url);
@@ -118,14 +118,14 @@ const check = (name, ok, detail) => {
 
       // A genuinely empty run should still say there are no sources.
       window.getNewsSources = () => [];
-      const empty = String(P.assemble(base) || '');
+      const empty = String((P.assemble(base) || {}).text || '');
       result.emptyKeepsPlaceholder = empty.includes('[No external sources for today');
 
       // If the canonical cleared list has content, it still wins; fallback is
       // only for the empty-list case.
       window.clearedMorningNewsSources = () => [CLEARED];
       window.getNewsSources = () => [OTHER_XRP];
-      const authoritative = String(P.assemble(base) || '');
+      const authoritative = String((P.assemble(base) || {}).text || '');
       result.clearedWins = authoritative.includes(CLEARED.title) &&
         authoritative.includes(CLEARED.url) &&
         !authoritative.includes(OTHER_XRP.title) &&
