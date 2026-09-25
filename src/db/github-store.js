@@ -137,6 +137,26 @@ async function readState(deps) {
   return { state, missing: false, branch };
 }
 
+async function readStateVersion(version, deps) {
+  const d = deps || {};
+  const { token, repo, branch } = target(d.env);
+  const gh = d.gh || A.client(token, repo, d.fetch || fetch);
+  const v = Number(version);
+  if (!Number.isInteger(v) || v < 1) return { state: null, missing: true, branch, version: v };
+  const path = historyPath(v);
+  const text = await readFile(gh, branch, path);
+  if (text === null) return { state: null, missing: true, branch, version: v };
+  let state;
+  try { state = JSON.parse(text); }
+  catch (_) { throw new Error('EVIDENCE_STATE_UNREADABLE: ' + path + ' is not JSON'); }
+  const verdict = State.verify(state);
+  if (!verdict.ok) throw new Error('EVIDENCE_STATE_UNVERIFIED: ' + verdict.problems.join(','));
+  if (Number(state.state_version) !== v) {
+    throw new Error('EVIDENCE_STATE_VERSION_MISMATCH: requested ' + v + ' got ' + state.state_version);
+  }
+  return { state, missing: false, branch, version: v };
+}
+
 // ── THE RESUME JOURNAL ─────────────────────────────────────────────────────
 //
 // Read at the start of a run, appended as the run goes, and deleted by the
@@ -592,5 +612,5 @@ async function readDays(days, deps, kind, opts) {
 }
 
 module.exports = { STATE_PATH, JOURNAL_PATH, historyPath, runPath, journalRowPath, readBytes, readFile,
-  readState, commitRun, seedGenesis, uploadBlob, readDays,
+  readState, readStateVersion, commitRun, seedGenesis, uploadBlob, readDays,
   readJournal, readJournalRows, readJournalRowsEach, appendJournal, clearJournal, missingJournalShards };
