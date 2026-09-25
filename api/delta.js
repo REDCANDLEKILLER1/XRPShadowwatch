@@ -156,6 +156,141 @@ async function respondWithWindow(res, result, input, reader) {
 // spelling. A source check can see the word "gzip" in a file whose compression
 // never runs — one did, and passed while the feature was disabled.
 const GZIP_EVENTS_ABOVE = 200;
+const CANONICAL_REPORT_MS = 24 * 60 * 60 * 1000;
+
+function canonicalReportWindow(state, input) {
+  const st = state || {};
+  const anchorMs = Date.parse(st.anchor_close || '');
+  if (!Number.isFinite(anchorMs)) throw new Error('CANONICAL_REPORT_ANCHOR_TIME_MISSING');
+
+  const i = input || {};
+  if (i.custom_window === true) {
+    let start = Number(i.window_start_ms), end = Number(i.window_end_ms);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) {
+      throw new Error('CANONICAL_CUSTOM_WINDOW_INVALID');
+    }
+    if (end < start) { const t = start; start = end; end = t; }
+    end = Math.min(end, anchorMs);
+    if (start >= end) throw new Error('CANONICAL_CUSTOM_WINDOW_EMPTY_AT_ANCHOR');
+    return { start_ms: start, end_ms: end, custom: true,
+      label: 'CUSTOM · SHARED SNAPSHOT', anchor_close_ms: anchorMs };
+  }
+
+  return { start_ms: anchorMs - CANONICAL_REPORT_MS, end_ms: anchorMs, custom: false,
+    label: 'LAST 24H · SHARED SNAPSHOT', anchor_close_ms: anchorMs };
+}
+
+function canonicalWalletProjection(currentState, previousState) {
+  const current = currentState || {};
+  const previous = previousState || {};
+  const prev = new Map((previous.wallets || []).map(w => [w.address, w]));
+  return (current.wallets || []).map(w => {
+    const p = prev.get(w.address) || null;
+    const nowDrops = w.balance_drops == null ? null : Number(w.balance_drops);
+    const prevDrops = !p || p.balance_drops == null ? null : Number(p.balance_drops);
+    const deltaDrops = Number.isFinite(nowDrops) && Number.isFinite(prevDrops)
+      ? nowDrops - prevDrops : null;
+    return {
+      address: w.address,
+      status: 'COMPLETE',
+      proven: Number(w.last_proven_ledger) === Number(current.anchor_ledger),
+      proven_through: Number(w.last_proven_ledger) || null,
+      rows: 0,
+      reconciliation: 'RECONCILED',
+      attempts: 0,
+      error: null,
+      balance_drops: Number.isFinite(nowDrops) ? nowDrops : null,
+      balance_ledger: w.balance_ledger == null ? null : Number(w.balance_ledger),
+      previous_balance_drops: Number.isFinite(prevDrops) ? prevDrops : null,
+      previous_balance_ledger: !p || p.balance_ledger == null ? null : Number(p.balance_ledger),
+      balance_delta_drops: deltaDrops
+    };
+  });
+}
+
+async function buildCanonicalReportSnapshot(input) {
+  const loaded = await Store.readState({});
+  if (loaded.missing || !loaded.state) throw new Error('EVIDENCE_STATE_MISSING');
+  const state = loaded.state;
+  const selected = roster.select();
+  const rosterSet = new Set(selected.accounts);
+  const stateAddresses = (state.wallets || []).map(w => w.address);
+  const pending = selected.accounts.filter(a => !stateAddresses.includes(a));
+  const retired = stateAddresses.filter(a => !rosterSet.has(a));
+
+  const priorVersion = Number(state.state_version) - 1;
+  let previous = null;
+  if (priorVersion >= 1) {
+    const p = await Store.readStateVersion(priorVersion, {});
+    if (!p.missing) previous = p.state;
+  }
+
+  const win = canonicalReportWindow(state, input);
+  const assembled = await D.readReportWindow(
+    { window_start_ms: win.start_ms, window_end_ms: win.end_ms, rows: [] }, {});
+
+  const wallets = canonicalWalletProjection(state, previous);
+  const proved = wallets.filter(w => w.proven).length;
+  const body = {
+    report_id: input.report_id || null,
+    scan_id: 'state-v' + state.state_version,
+    canonical_snapshot: true,
+    state_version_read: state.state_version,
+    state_sha256: state.state_sha256,
+    anchor_ledger: Number(state.anchor_ledger),
+    anchor_close: state.anchor_close,
+    target_wallets: Number(state.wallet_count || wallets.length),
+    complete_wallets: proved,
+    failed_wallets: 0,
+    not_attempted_wallets: 0,
+    abandoned_wallets: 0,
+    partial_wallets: 0,
+    balance_contradictions: 0,
+    balance_contradiction_addresses: [],
+    transactions: 0,
+    transactions_walked: 0,
+    xrpl_requests: 0,
+    committed: false,
+    reason: 'CANONICAL_STATE_READ',
+    roster_wallets: selected.accounts.length,
+    wallets_awaiting_admission: pending.length,
+    admitted_wallets: [],
+    watched_not_in_roster: retired,
+    wallets,
+    balance_baseline: previous ? {
+      source: 'SERVER_EVIDENCE_STATE',
+      from_state_version: previous.state_version,
+      from_anchor_ledger: Number(previous.anchor_ledger),
+      from_anchor_close: previous.anchor_close,
+      to_state_version: state.state_version,
+      to_anchor_ledger: Number(state.anchor_ledger),
+      to_anchor_close: state.anchor_close
+    } : null,
+    freshness: {
+      canonical_snapshot: true,
+      anchor_ledger: Number(state.anchor_ledger),
+      anchor_close: state.anchor_close,
+      state_version: state.state_version
+    },
+    events: assembled.events.map(slim),
+    window: {
+      from: new Date(win.start_ms).toISOString(),
+      to: new Date(win.end_ms).toISOString(),
+      label: win.label,
+      custom: win.custom,
+      days: assembled.days,
+      in_window: assembled.in_window,
+      from_stored: assembled.from_stored,
+      from_this_run: 0,
+      days_without_shards: assembled.days_without_shards,
+      unattributed: assembled.unattributed,
+      attributed_derived_only: assembled.attributed_derived_only,
+      provenance: assembled.provenance
+    }
+  };
+  return body;
+}
+
 function packEvents(body) {
   if (!body || !Array.isArray(body.events) || body.events.length <= GZIP_EVENTS_ABOVE) return body;
   body.events_count = body.events.length;
@@ -180,7 +315,7 @@ module.exports = async function handler(req, res) {
     if (origin !== req.headers.host) return res.status(403).json({ error: 'CROSS_ORIGIN_WRITE_REFUSED' });
   }
 
-  const allowed = req.method === 'GET' ? ['state', 'health'] : ['run', 'seed'];
+  const allowed = req.method === 'GET' ? ['state', 'health'] : ['run', 'report', 'seed'];
   if (!allowed.includes(input.action)) return res.status(400).json({ error: 'ACTION_NOT_ALLOWED' });
 
   let reader;
@@ -205,6 +340,23 @@ module.exports = async function handler(req, res) {
         // a run starts rather than only after it finishes.
         wallets_detail: input.action === 'state' && loaded.state ? loaded.state.wallets : undefined
       });
+    }
+
+
+    // ── CANONICAL REPORT READ ──────────────────────────────────────────────
+    //
+    // Browsers do not advance the forensic checkpoint. Vercel's scheduler is
+    // the writer; every browser reads the same committed state and the same
+    // 24-hour window ending at that state's anchor. This is the cross-browser
+    // consistency boundary: localStorage, browser clocks and scan cadence may
+    // not choose the public ledger frame.
+    if (input.action === 'report') {
+      if (!/^SW-\d{8}-[A-Z0-9]{5}$/.test(String(input.report_id || ''))) {
+        return res.status(400).json({ error: 'INVALID_REPORT_ID' });
+      }
+      const body = await buildCanonicalReportSnapshot(input);
+      packEvents(body);
+      return res.json(body);
     }
 
     // ── Seed the checkpoint from a sealed report, over HTTP ────────────────
@@ -442,4 +594,7 @@ module.exports = async function handler(req, res) {
 
 module.exports.packEvents = packEvents;
 module.exports.buildStreamDone = buildStreamDone;
+module.exports.canonicalReportWindow = canonicalReportWindow;
+module.exports.canonicalWalletProjection = canonicalWalletProjection;
+module.exports.buildCanonicalReportSnapshot = buildCanonicalReportSnapshot;
 module.exports.GZIP_EVENTS_ABOVE = GZIP_EVENTS_ABOVE;
