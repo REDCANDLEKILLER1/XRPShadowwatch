@@ -2049,6 +2049,15 @@ async function scanWallets(ws) {
         getTxWindow(), getActiveWatchlist().map(w => w.address)));
     } catch(e) {
       state.anchorAttempts[state.anchorAttempts.length-1].error=e.message;
+      var _evidenceMsg=String(e&&e.message||e||'');
+      var _previewReadOnlyUnavailable=/PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE|EVIDENCE_WRITE_REFUSED_NON_PRODUCTION/.test(_evidenceMsg);
+      if(_previewReadOnlyUnavailable){
+        log('Preview read-only snapshot unavailable — direct XRPL fallback remains disabled.');
+        var _previewErr=new Error('PREVIEW READ-ONLY SNAPSHOT UNAVAILABLE: stored evidence could not satisfy this test window. Production was not modified and no direct 418-wallet crawl was started.');
+        _previewErr.scanIncomplete=true;
+        _previewErr.previewReadOnly=true;
+        throw _previewErr;
+      }
       log('Evidence index unavailable — direct XRPL acquisition: ' + e.message);
     }
   }
