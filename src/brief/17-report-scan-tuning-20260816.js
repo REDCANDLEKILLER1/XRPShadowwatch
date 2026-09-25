@@ -746,21 +746,54 @@
 
           var proofs = (accountTxWindowDepth && accountTxWindowDepth._proofByAccount) || {};
           try {
+            if (typeof state !== 'undefined') {
+              state.balanceBaseline = state.indexRun && state.indexRun.balance_baseline
+                ? state.indexRun.balance_baseline : null;
+            }
             if (typeof state !== 'undefined' && Array.isArray(state.wallets)) {
               state.wallets.forEach(function (w) {
                 if (!w || w.status !== 'CHECKED') return;
-                var prior = previous[w.address];
-                if (prior && prior.balance_xrp !== null && prior.balance_xrp !== undefined) {
-                  w.prev_balance_xrp = num(prior.balance_xrp);
-                  w.delta_xrp = num(w.balance_xrp) - num(prior.balance_xrp);
+                var proof = proofs[w.address] || null;
+
+                // PUBLIC TRUTH COMES FROM THE SHARED EVIDENCE STATE.
+                //
+                // The browser still performs its Phase-1 balance reads for the
+                // legacy UI, but those readings and localStorage are not allowed
+                // to choose report deltas. The server snapshot is pinned to one
+                // shared anchor and carries the prior immutable state version,
+                // so every browser gets the same current balance and the same
+                // baseline.
+                if (proof && proof.balance_source === 'SERVER_EVIDENCE_STATE' &&
+                    proof.balance_drops !== null && isFinite(Number(proof.balance_drops))) {
+                  w.balance_xrp = Number(proof.balance_drops) / 1000000;
+                  if (proof.previous_balance_drops !== null &&
+                      isFinite(Number(proof.previous_balance_drops))) {
+                    w.prev_balance_xrp = Number(proof.previous_balance_drops) / 1000000;
+                    w.delta_xrp = Number(proof.balance_delta_drops) / 1000000;
+                  } else {
+                    w.prev_balance_xrp = null;
+                    w.delta_xrp = null;
+                  }
+                  w.balance_source = 'SERVER_EVIDENCE_STATE';
+                  w.balance_ledger = proof.balance_ledger;
+                  w.prev_balance_ledger = proof.previous_balance_ledger;
                 } else {
-                  w.prev_balance_xrp = null;
-                  w.delta_xrp = null;
+                  // Legacy/direct-XRPL compatibility only. Canonical report
+                  // mode should never land here; keeping it means old fixtures
+                  // and non-report tools retain their prior behavior.
+                  var prior = previous[w.address];
+                  if (prior && prior.balance_xrp !== null && prior.balance_xrp !== undefined) {
+                    w.prev_balance_xrp = num(prior.balance_xrp);
+                    w.delta_xrp = num(w.balance_xrp) - num(prior.balance_xrp);
+                  } else {
+                    w.prev_balance_xrp = null;
+                    w.delta_xrp = null;
+                  }
                 }
                 // EXPLICIT nulls/falses. Every absent field here would read
                 // as `undefined`, and any downstream `x !== false` test takes
                 // undefined for consent.
-                w.tx_scan = proofs[w.address] || {
+                w.tx_scan = proof || {
                   status: 'FAILED', pages_scanned: 0, boundary_reached: false,
                   history_exhausted: false, request_bounded: false,
                   transport_consistent: false, anchor_ledger: null, run_id: null,
