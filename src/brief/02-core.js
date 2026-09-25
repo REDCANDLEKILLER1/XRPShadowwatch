@@ -4340,6 +4340,10 @@ if (typeof window !== 'undefined') {
   window.groupMovement = groupMovement;
 }
 
+function _sharedBalanceDelta(pack) {
+  return !!(pack && pack.balance_delta_source === 'SERVER_EVIDENCE_STATE');
+}
+
 function deltaBaseline(pack) {
   const p = pack || {};
   const ws = (Array.isArray(p.wallet_results) && p.wallet_results.length) ? p.wallet_results
@@ -4349,17 +4353,23 @@ function deltaBaseline(pack) {
   const total = checked.length;
   const have  = measured.length;
   const pct   = total > 0 ? have / total : 1;
+  const shared = _sharedBalanceDelta(p);
   return {
     measured: have, checked: total,
     pct: pct, percent: Math.round(pct * 100),
+    source: shared ? 'SERVER_EVIDENCE_STATE' : 'LOCAL_OR_UNAVAILABLE',
     // No prior reading anywhere — the delta is meaningless, not zero.
     none:    total > 0 && have === 0,
-    // Some wallets are new to this device; the total is real but incomplete.
+    // Some wallets may be new to the shared checkpoint; the total is real but incomplete.
     partial: total > 0 && have > 0 && have < total,
     line: have === 0
-      ? 'No previous balances stored on this device, so net flow cannot be measured yet — this is the first scan here.'
+      ? (shared
+          ? 'No prior shared evidence balance checkpoint is available for this window, so balance change cannot be measured.'
+          : 'No previous balances stored on this device, so net flow cannot be measured yet — this is the first scan here.')
       : (have < total
-          ? (total - have) + ' of ' + total + ' wallets are new to this device and have no prior balance, so they contribute nothing to the net figure.'
+          ? (shared
+              ? (total - have) + ' of ' + total + ' wallets were not present in the prior shared evidence checkpoint, so they contribute nothing to the balance-change figure.'
+              : (total - have) + ' of ' + total + ' wallets are new to this device and have no prior balance, so they contribute nothing to the net figure.')
           : '')
   };
 }
@@ -4620,7 +4630,9 @@ FORENSIC SNAPSHOT
 Wallets scored: ${p.wallets_checked}/${p.watchlist_total}
 Transactions in scan window${txWinSuffix}: ${p.tx_24h_count}
 Shadow volume (>1M transfers): ${p.shadow_volume_xrp > 0 ? fmt(p.shadow_volume_xrp, 0) + ' XRP' : 'NONE FLAGGED'}
-Net watchlist flow: ${netFlowPhrase(p.total_balance_delta_xrp)}
+${_sharedBalanceDelta(p)
+  ? 'Shared-checkpoint balance change: ' + (n(p.total_balance_delta_xrp) >= 0 ? '+' : '−') + fmt(Math.abs(n(p.total_balance_delta_xrp)), 0) + ' XRP'
+  : 'Net watchlist flow: ' + netFlowPhrase(p.total_balance_delta_xrp)}
 Large transfers flagged: ${(p.large_transfers || []).length}
 Next-hop receivers scanned: ${(p.receiver_followthrough || []).length}
 
@@ -5000,9 +5012,11 @@ function buildXRPMainReport(p) {
         .sort((a, b) => b.delta - a.delta);
       if (accumulators.length) {
         const top = accumulators[0];
-        r.push(`• Highest active accumulator: ${_swWho(top.address, top.label, { bare: true })} (+${fmt(top.delta, 0)} XRP this window)`);
+        r.push(`• Highest active accumulator: ${_swWho(top.address, top.label, { bare: true })} (+${fmt(top.delta, 0)} XRP ${_sharedBalanceDelta(p) ? 'since the prior shared checkpoint' : 'this window'})`);
       } else if (_dbNoBaseline(p)) {
-        r.push('• Highest active accumulator: not measurable — no prior balances stored on this device, so no wallet can be shown to have gained yet.');
+        r.push(_sharedBalanceDelta(p)
+          ? '• Highest active accumulator: not measurable — no prior shared evidence balance checkpoint is available.'
+          : '• Highest active accumulator: not measurable — no prior balances stored on this device, so no wallet can be shown to have gained yet.');
       }
       // Strongest behavioral cluster
       if (hasCluster) {
@@ -15930,9 +15944,14 @@ function buildExecutiveSummary(p, netDelta, news) {
   // v16.21: with no stored baseline, "remained flat at 0 XRP net" is a claim we
   // cannot make. Say what is actually true — there is nothing to compare to yet.
   const _db = deltaBaseline(p);
+  const _sharedDelta = _sharedBalanceDelta(p);
   const boardClause = _db.none
-    ? `the tracked wallet board has no prior balances on this device yet, so net flow is not measurable on this run`
-    : `the tracked wallet board ${dir} ${absStr} XRP net versus the local snapshot`;
+    ? (_sharedDelta
+        ? `the tracked wallet board has no prior shared evidence balance checkpoint for this window, so balance change is not measurable`
+        : `the tracked wallet board has no prior balances on this device yet, so net flow is not measurable on this run`)
+    : (_sharedDelta
+        ? `the tracked wallet board ${dir} ${absStr} XRP versus the prior shared evidence checkpoint`
+        : `the tracked wallet board ${dir} ${absStr} XRP net versus the local snapshot`);
   return `Today's scan shows institutional-style rotation under ${tape}: XRP sits near ${priceStr}, while ${boardClause}.${_db.partial ? ' ' + _db.line : ''}${newsLine}`;
 }
 
@@ -16099,7 +16118,9 @@ function shadowWatchSection(buckets, p) {
   // fewer bullets, and a reader could not tell a quiet board from an
   // unmeasured one.
   if (_unmeasured.length) {
-    lines.push(`• ⚪ Movement not measurable for ${_unmeasured.length} wallet${_unmeasured.length === 1 ? '' : 's'}: no prior balance stored on this device, so no gain, loss or flat reading can be claimed for ${_unmeasured.length === 1 ? 'it' : 'them'} this run. Balances were read; a second scan measures against them.`);
+    lines.push(_sharedBalanceDelta(p)
+      ? `• ⚪ Balance change not measurable for ${_unmeasured.length} wallet${_unmeasured.length === 1 ? '' : 's'}: ${_unmeasured.length === 1 ? 'it was' : 'they were'} not present in the prior shared evidence checkpoint.`
+      : `• ⚪ Movement not measurable for ${_unmeasured.length} wallet${_unmeasured.length === 1 ? '' : 's'}: no prior balance stored on this device, so no gain, loss or flat reading can be claimed for ${_unmeasured.length === 1 ? 'it' : 'them'} this run. Balances were read; a second scan measures against them.`);
   }
   // 9. Failed / invalid — yellow if any
   const failed = (p.wallets_failed || 0);
@@ -16140,10 +16161,15 @@ function anomalySection(buckets, p, netDelta) {
     // findings. Reporting baseline drift over wallets that were never measured
     // asserts a comparison that did not happen.
     if (_dbNoBaseline(p)) {
-      return [
-        '• Event: Balance anomaly detection did not run this window.',
-        '• Evidence: No prior balances stored on this device, so no wallet delta could be computed. This is the first scan here; the next one can measure against it.'
-      ];
+      return _sharedBalanceDelta(p)
+        ? [
+            '• Event: Balance anomaly detection did not run for the shared checkpoint comparison.',
+            '• Evidence: No prior shared evidence balance checkpoint is available, so no wallet balance change could be computed.'
+          ]
+        : [
+            '• Event: Balance anomaly detection did not run this window.',
+            '• Evidence: No prior balances stored on this device, so no wallet delta could be computed. This is the first scan here; the next one can measure against it.'
+          ];
     }
     return [
       '• Event: No statistically significant balance anomaly this window.',
@@ -16450,7 +16476,7 @@ function buildIntelBrief(p) {
   // stay daily on purpose, but XRPMan does not repeat himself inside one day.
   const runSeed = swRunSeed(p);
   const _db = deltaBaseline(p);
-  const tw = getTxWindow();
+  const tw = (p && p.tx_window) ? p.tx_window : getTxWindow();
 
   // 1 — the arithmetic, with the window it covers. A weekend sweep and an
   // overnight look identical in a bare total, so the window is stated.
@@ -16460,13 +16486,19 @@ function buildIntelBrief(p) {
     // v16.21: "Net inflow of 0 XRP" on a device with no stored baseline is not a
     // reading, it is the absence of one. Say which it is.
     (_db.none
-      ? 'Net flow not measurable this run — no previous balances stored on this device. ' +
-        n(p.wallets_checked) + ' wallets read, window ' + tw.label + '.'
+      ? (_sharedBalanceDelta(p)
+          ? 'Shared-checkpoint balance change not measurable — no prior shared evidence balance checkpoint is available. '
+          : 'Net flow not measurable this run — no previous balances stored on this device. ') +
+        n(p.wallets_checked) + ' wallets read, transaction window ' + tw.label + '.'
       : (Math.abs(n(p.total_balance_delta_xrp)) < 1
-          ? 'Net flow was flat across '
-          : 'Net ' + (n(p.total_balance_delta_xrp) < 0 ? 'outflow' : 'inflow') + ' of ' +
-            fmt(Math.abs(n(p.total_balance_delta_xrp)), 0) + ' XRP across ') +
-        n(p.wallets_checked) + ' watched wallets, window ' + tw.label + '.' +
+          ? (_sharedBalanceDelta(p) ? 'Shared-checkpoint balance change was flat across ' : 'Net flow was flat across ')
+          : (_sharedBalanceDelta(p) ? 'Shared-checkpoint balance ' : 'Net ') +
+            (n(p.total_balance_delta_xrp) < 0 ? (_sharedBalanceDelta(p) ? 'decrease' : 'outflow') : (_sharedBalanceDelta(p) ? 'increase' : 'inflow')) +
+            ' of ' + fmt(Math.abs(n(p.total_balance_delta_xrp)), 0) + ' XRP across ') +
+        n(p.wallets_checked) + ' watched wallets' +
+        (_sharedBalanceDelta(p)
+          ? ' versus the prior shared evidence checkpoint; transaction window ' + tw.label + '.'
+          : ', window ' + tw.label + '.') +
         (_db.partial ? ' ' + _db.line : '')),
     lt + ' transfer' + (lt === 1 ? '' : 's') + ' above threshold. Shadow volume: ' +
       fmt(p.shadow_volume_xrp, 0) + ' XRP.',
@@ -18067,10 +18099,14 @@ function buildLedgerNarrativeParagraph(pack) {
   const lines = [];
   const _wc = n(pack.wallets_checked || 0);
   if (Math.abs(i.netDelta) < 1) {
-    lines.push('Across ' + _wc + ' watched wallets the net position came out flat this window — money changed hands, but the board ended roughly where it started.');
+    lines.push(_sharedBalanceDelta(pack)
+      ? 'Across ' + _wc + ' watched wallets the balance change versus the prior shared evidence checkpoint was flat.'
+      : 'Across ' + _wc + ' watched wallets the net position came out flat this window — money changed hands, but the board ended roughly where it started.');
   } else {
-    lines.push('Net flow across ' + _wc + ' watched wallets: ' +
-      netFlowPhrase(i.netDelta) + '.');
+    lines.push(_sharedBalanceDelta(pack)
+      ? 'Shared-checkpoint balance change across ' + _wc + ' watched wallets: ' +
+        (i.netDelta > 0 ? '+' : '−') + fmt(Math.abs(i.netDelta), 0) + ' XRP.'
+      : 'Net flow across ' + _wc + ' watched wallets: ' + netFlowPhrase(i.netDelta) + '.');
   }
   if (i.shadowVol > 0) {
     lines.push('Shadow volume: ' + fmt(i.shadowVol, 0) + ' XRP across ' + i.largeTxs.length + ' flagged transfer' + (i.largeTxs.length === 1 ? '' : 's') + '.');
