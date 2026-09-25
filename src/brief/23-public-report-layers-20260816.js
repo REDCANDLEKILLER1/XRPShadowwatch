@@ -152,7 +152,7 @@
     lines.push(
       'New here? Shadow Volume shows the obvious ≥1M moves. Mid-size Flow catches 100K–<1M moves. ' +
       'Clustered Flow asks whether those smaller high-value payments keep using common routes. ' +
-      'Net watched flow tells whether the tracked wallet board gained or lost XRP versus its prior snapshot.'
+      'Shared-checkpoint balance change compares the watched wallet board with the prior server-owned evidence checkpoint.'
     );
     return lines.join('\n');
   }
