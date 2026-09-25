@@ -113,8 +113,7 @@ const check = (name, ok, detail) => {
       result.fallbackHasGood = fallback.includes(GOOD.title) && fallback.includes(GOOD.url);
       result.fallbackNoPlaceholder = !fallback.includes('[No external sources for today');
       result.fallbackDropsJunk = !fallback.includes(JUNK.title) && !fallback.includes(JUNK.url);
-      result.fallbackBindsSpokenNews = /Relevant headline:|Published news context:/.test(fallback) &&
-        fallback.includes(GOOD.title);
+      result.fallbackSourceOnce = fallback.split(GOOD.url).length - 1 === 1;
 
       // A genuinely empty run should still say there are no sources.
       window.getNewsSources = () => [];
@@ -141,7 +140,7 @@ const check = (name, ok, detail) => {
   check('empty cleared list falls back to usable report news', out.fallbackHasGood, out);
   check('fallback prevents the false no-sources footer', out.fallbackNoPlaceholder, out);
   check('fallback still passes through relevance filtering', out.fallbackDropsJunk, out);
-  check('spoken news and source footer use the same fallback headline', out.fallbackBindsSpokenNews, out);
+  check('the recovered source is emitted once, without duplicate citation blocks', out.fallbackSourceOnce, out);
   check('a truly empty news pool still prints the no-sources footer', out.emptyKeepsPlaceholder, out);
   check('a non-empty cleared list remains authoritative', out.clearedWins, out);
   check('no page errors', errs.length === 0, errs.slice(0,3));
