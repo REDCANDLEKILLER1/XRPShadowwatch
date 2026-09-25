@@ -391,22 +391,29 @@
       var S = pageState();
       var reportId = (S && S.reportId) || (S && S.seal && S.seal.report_id) || null;
       if (!reportId) throw new Error('DELTA_REPORT_ID_REQUIRED');
-      if (typeof log === 'function') log('Evidence: reading checkpoint and walking the delta (one server call)...');
-      // The window travels with the request. Without it the server has no way
-      // to know which days the report covers, and can only hand back this run's
-      // delta — which on a second run of the same day is nearly empty while the
-      // morning's transactions sit committed in the evidence repository.
+      if (typeof log === 'function') log('Evidence: reading shared canonical snapshot (browser is read-only)...');
+      // Vercel's scheduler owns checkpoint advancement. A browser report only
+      // reads the last committed state, so two browsers cannot choose two
+      // different ledger anchors or two different balance baselines.
       var w = windowRange || {};
-      return postWithRetry('run', { report_id: reportId, scan_id: (S && S.scanId) || null,
+      return post('report', { report_id: reportId, scan_id: (S && S.scanId) || null,
+        custom_window: w.custom === true,
         window_start_ms: w.startMs, window_end_ms: w.endMs })
         .then(function (result) {
           run = result;
+          if (Number(result.wallets_awaiting_admission || 0) > 0 ||
+              Number(result.complete_wallets || 0) !== Number(result.target_wallets || 0)) {
+            throw new Error('CANONICAL_SNAPSHOT_ROSTER_PENDING: ' +
+              Number(result.complete_wallets || 0) + '/' +
+              Number(result.roster_wallets || result.target_wallets || 0) +
+              ' wallets are in the shared snapshot; wait for the scheduler to admit the rest');
+          }
           run.byAddress = Object.create(null);
           (result.wallets || []).forEach(function (w) { run.byAddress[w.address] = w; });
           if (typeof log === 'function') {
-            log('Evidence: anchor ' + result.anchor_ledger + ' · ' + result.complete_wallets + '/' +
-              result.target_wallets + ' proved · ' + (result.transactions || 0) + ' transactions · ' +
-              (result.xrpl_requests || 0) + ' XRPL reads' +
+            log('Evidence: canonical state v' + result.state_version_read + ' · anchor ' +
+              result.anchor_ledger + ' · ' + result.complete_wallets + '/' +
+              result.target_wallets + ' proved · browser XRPL writes 0' +
               (result.window && result.window.in_window !== undefined
                 ? ' · window ' + result.window.in_window + ' events (' +
                   result.window.from_stored + ' stored + ' + result.window.from_this_run + ' this run)' : '') +
@@ -470,12 +477,16 @@
             }
           }
           return {
-            scan_id: result.scan_id || ('gh-' + result.anchor_ledger),
+            scan_id: result.scan_id || ('state-v' + result.state_version_read),
             anchor_ledger: result.anchor_ledger,
             anchor_close_ms: Date.parse(result.anchor_close),
             accounts: (result.wallets || []).map(function (w) { return w.address; }),
             roster_hash: result.state_sha256 || 'github-state',
-            committed: result.committed, freshness: result.freshness
+            committed: false,
+            canonical_snapshot: result.canonical_snapshot === true,
+            report_window: result.window || null,
+            balance_baseline: result.balance_baseline || null,
+            freshness: result.freshness
           };
         });
     },
@@ -528,7 +539,13 @@
           covers_window_start: true, request_bounded: true, transport_consistent: true,
           window_bounded_by_anchor: true, response_validated: true,
           response_ledger_index_max: run.anchor_ledger, pages_scanned: 0,
-          attempts: w.attempts, reconciliation: w.reconciliation } };
+          attempts: w.attempts, reconciliation: w.reconciliation,
+          balance_source: 'SERVER_EVIDENCE_STATE',
+          balance_drops: w.balance_drops == null ? null : Number(w.balance_drops),
+          balance_ledger: w.balance_ledger == null ? null : Number(w.balance_ledger),
+          previous_balance_drops: w.previous_balance_drops == null ? null : Number(w.previous_balance_drops),
+          previous_balance_ledger: w.previous_balance_ledger == null ? null : Number(w.previous_balance_ledger),
+          balance_delta_drops: w.balance_delta_drops == null ? null : Number(w.balance_delta_drops) } };
       });
     },
 
@@ -582,4 +599,5 @@
   };
 
   window.SW_DELTA_EVIDENCE_20260911 = true;
+  try { window.SW_EVIDENCE_INDEX.canonical_report_only = true; } catch (_) {}
 })();
