@@ -1300,6 +1300,10 @@ function _buildWatchNext(interps, pack){
   return bullets.slice(0,4).map(function(b){return '\u2022 '+b;}).join('\n');
 }
 
+function _sharedBalanceDelta(pack){
+  return !!(pack && pack.balance_delta_source === 'SERVER_EVIDENCE_STATE');
+}
+
 function _buildVerdict(interps, pack){
   // v16.8: risk_score is an OBJECT {score,label,drivers} — read .score (the object
   // coerced to NaN, so every verdict wrongly read "quiet" even at BLACK/100).
@@ -1344,8 +1348,13 @@ function _buildVerdict(interps, pack){
   var dir=' ('+risk+'/100).';
   if(_drivers.length) dir+=' '+_nvPick(['What tipped me off: ','What put me here: ','The flags that lit up: ','What earned the score: '],seed,31)+_drivers.join(', ')+'.';
   var delta=_num(pack&&(pack.total_balance_delta_xrp!=null?pack.total_balance_delta_xrp:pack.balance_delta));
-  if(delta>500000) dir+=' Watched wallets are net accumulating — about '+_xrpFmt(delta)+' XRP moved inward.';
-  else if(delta<-500000) dir+=' Watched wallets are net distributing — about '+_xrpFmt(Math.abs(delta))+' XRP moved outward.';
+  if(_sharedBalanceDelta(pack)){
+    if(delta>500000) dir+=' Watched-wallet balances are about '+_xrpFmt(delta)+' XRP higher than the prior shared evidence checkpoint.';
+    else if(delta<-500000) dir+=' Watched-wallet balances are about '+_xrpFmt(Math.abs(delta))+' XRP lower than the prior shared evidence checkpoint.';
+  } else {
+    if(delta>500000) dir+=' Watched wallets are net accumulating — about '+_xrpFmt(delta)+' XRP moved inward.';
+    else if(delta<-500000) dir+=' Watched wallets are net distributing — about '+_xrpFmt(Math.abs(delta))+' XRP moved outward.';
+  }
   if(cov.degraded) dir+=' Scored across '+cov.checked+' of '+cov.total+' wallets that '+
                         (cov.basis_noun||'answered')+' ('+cov.percent+'%) — '+
                         cov.failed+(cov.basis==='transaction window'
@@ -1453,9 +1462,12 @@ function _buildLedgerDiagnostics(pack){
   var sv=_num(p.shadow_volume_xrp), lt=_arr(p.large_transfers).length||_num(p.large_transfers_count);
   if(sv>0) L.push('\u2022 Shadow volume (whale moves \u22651M'+winSuffix+'): '+_xrpFmt(sv)+' XRP'+(lt>0?(' \u00b7 '+lt+' transfer'+(lt===1?'':'s')):''));
   var nd=_num(p.total_balance_delta_xrp!=null?p.total_balance_delta_xrp:p.balance_delta);
-  // Magnitude positive, direction in words — '\u22123.11M XRP outward' says out
-  // twice and negates it once. See netFlowPhrase in 02-core.
-  if(Math.abs(nd)>=100000) L.push('\u2022 Net watched flow: '+_xrpFmt(Math.abs(nd))+' XRP '+(nd>0?'inward':'outward'));
+  // Shared evidence-state comparisons are balance changes between two pinned
+  // checkpoints, not transaction-flow totals. Keep the names separate.
+  if(Math.abs(nd)>=100000){
+    if(_sharedBalanceDelta(p)) L.push('\u2022 Shared-checkpoint balance change: '+_xrpFmt(Math.abs(nd))+' XRP '+(nd>0?'higher':'lower'));
+    else L.push('\u2022 Net watched flow: '+_xrpFmt(Math.abs(nd))+' XRP '+(nd>0?'inward':'outward'));
+  }
   if(!L.length) return 'The rails were quiet \u2014 no market or ledger metrics crossed the wire this scan.';
   return L.join('\n');
 }
