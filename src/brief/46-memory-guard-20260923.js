@@ -126,27 +126,39 @@
       };
     });
 
+    var priorCounts = p.counts && typeof p.counts === 'object' ? p.counts : {};
     var walletCount = Array.isArray(p.wallet_results) ? p.wallet_results.length :
-      (Array.isArray(p.wallets) ? p.wallets.length : _num(p.wallets_checked || p.watchlist_total));
-    var txCount = Array.isArray(p.txs) ? p.txs.length : _num(p.tx_24h_count || p.transactions);
+      (Array.isArray(p.wallets) ? p.wallets.length :
+        _num(p.wallets_checked || p.watchlist_total || priorCounts.wallets));
+    var txCount = Array.isArray(p.txs) ? p.txs.length :
+      _num(p.tx_24h_count || p.transactions || priorCounts.transactions);
     var offerCount = 0;
     try {
       if (Array.isArray(p.offers)) offerCount = p.offers.length;
+      else if (_num(priorCounts.offers)) offerCount = _num(priorCounts.offers);
       else if (typeof state === 'object' && state && Array.isArray(state.offers)) offerCount = state.offers.length;
     } catch (_) {}
-    var discoveryCount = Array.isArray(p.discovery_inbox) ? p.discovery_inbox.length : 0;
+    var discoveryCount = Array.isArray(p.discovery_inbox) ? p.discovery_inbox.length : _num(priorCounts.discovery);
+    var stateReportId = '', stateScanId = '';
+    try {
+      if (typeof state === 'object' && state) {
+        stateReportId = state.reportId || (state.seal && state.seal.report_id) || '';
+        stateScanId = state.scanId || (state.indexRun && state.indexRun.scan_id) || '';
+      }
+    } catch (_) {}
 
     return {
       schema: 'shadowwatch-brief-snapshot/1',
       ts: _num(p.ts) || Date.now(),
       date: p.date || '',
-      report_id: p.report_id || (p.seal && p.seal.report_id) || '',
-      scan_id: p.scan_id || '',
+      report_id: p.report_id || (p.seal && p.seal.report_id) || stateReportId,
+      scan_id: p.scan_id || stateScanId,
       data_as_of_utc: p.data_as_of_utc || '',
       counts: {
         wallets: walletCount,
         transactions: txCount,
-        large_transfers: Array.isArray(p.large_transfers) ? p.large_transfers.length : transfers.length,
+        large_transfers: Array.isArray(p.large_transfers)
+          ? p.large_transfers.length : _num(priorCounts.large_transfers || transfers.length),
         offers: offerCount,
         discovery: discoveryCount
       },
@@ -184,7 +196,9 @@
     // Migrate any old/full snapshots at the write boundary. A prior build may
     // already have stored wallets/offers or, via the old guard fallback, the
     // entire live pack. None of that is allowed back into v34.
-    var saved = prior.map(compactBriefSnapshot);
+    var saved = prior.map(function (row) {
+      return row && row.schema === 'shadowwatch-brief-snapshot/1' ? row : compactBriefSnapshot(row);
+    });
     if (snapshot && typeof snapshot === 'object') {
       var compact = compactBriefSnapshot(snapshot);
       var key = snapshotKey(compact);
@@ -283,7 +297,9 @@
           return;
         }
         if (Array.isArray(incoming)) {
-          var normalized = fitHistory(incoming.map(compactBriefSnapshot));
+          var normalized = fitHistory(incoming.map(function (row) {
+            return row && row.schema === 'shadowwatch-brief-snapshot/1' ? row : compactBriefSnapshot(row);
+          }));
           value = normalized.text;
         }
       } catch (_) {}
