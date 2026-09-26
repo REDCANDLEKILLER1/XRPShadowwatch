@@ -21,6 +21,9 @@
   var OUTER_BLACKBOX = 'XRPMAN_BLACKBOX_V2';
   var LEGACY_SNAPSHOT = 'shadowwatch_snapshot_v30';
   var PATTERN_KEY = 'SHADOW_WATCH_PATTERN_MEMORY_V1';
+  var MAX_BRIEF_SNAPSHOTS = 30;
+  var MAX_BRIEF_BYTES = 200 * 1024;
+  var MAX_LARGE_TRANSFERS = 24;
 
   function looksLikeBriefSnapshots(arr) {
     if (!Array.isArray(arr) || !arr.length) return false;
@@ -101,47 +104,168 @@
     };
   }
 
-  function persistBriefSnapshot(snapshot) {
-    var saved = readJson(BRIEF_BLACKBOX);
-    if (!Array.isArray(saved)) saved = [];
-    if (snapshot && typeof snapshot === 'object') {
-      saved.push(snapshot);
-      if (saved.length > 30) saved = saved.slice(saved.length - 30);
-      localStorage.setItem(BRIEF_BLACKBOX, JSON.stringify(saved));
+  function _num(v) {
+    var n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function compactBriefSnapshot(p) {
+    p = (p && typeof p === 'object') ? p : {};
+    var transfers = Array.isArray(p.large_transfers) ? p.large_transfers.slice() : [];
+    transfers.sort(function (a, b) { return _num(b && b.amount) - _num(a && a.amount); });
+    transfers = transfers.slice(0, MAX_LARGE_TRANSFERS).map(function (t) {
+      return {
+        from: t && t.from || '',
+        to: t && t.to || '',
+        sender_label: t && t.sender_label || '',
+        receiver_label: t && t.receiver_label || '',
+        amount: _num(t && t.amount),
+        classification: t && t.classification || '',
+        hash: t && t.hash || '',
+        date: t && t.date || ''
+      };
+    });
+
+    var walletCount = Array.isArray(p.wallet_results) ? p.wallet_results.length :
+      (Array.isArray(p.wallets) ? p.wallets.length : _num(p.wallets_checked || p.watchlist_total));
+    var txCount = Array.isArray(p.txs) ? p.txs.length : _num(p.tx_24h_count || p.transactions);
+    var offerCount = 0;
+    try {
+      if (Array.isArray(p.offers)) offerCount = p.offers.length;
+      else if (typeof state === 'object' && state && Array.isArray(state.offers)) offerCount = state.offers.length;
+    } catch (_) {}
+    var discoveryCount = Array.isArray(p.discovery_inbox) ? p.discovery_inbox.length : 0;
+
+    return {
+      schema: 'shadowwatch-brief-snapshot/1',
+      ts: _num(p.ts) || Date.now(),
+      date: p.date || '',
+      report_id: p.report_id || (p.seal && p.seal.report_id) || '',
+      scan_id: p.scan_id || '',
+      data_as_of_utc: p.data_as_of_utc || '',
+      counts: {
+        wallets: walletCount,
+        transactions: txCount,
+        large_transfers: Array.isArray(p.large_transfers) ? p.large_transfers.length : transfers.length,
+        offers: offerCount,
+        discovery: discoveryCount
+      },
+      large_transfers: transfers
+    };
+  }
+
+  function snapshotKey(s) {
+    if (!s || typeof s !== 'object') return '';
+    return s.report_id || s.scan_id ||
+      ((s.date || '') + '|' + (s.data_as_of_utc || '') + '|' + String(s.ts || ''));
+  }
+
+  function jsonBytes(text) {
+    try {
+      if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(text).length;
+    } catch (_) {}
+    return String(text || '').length;
+  }
+
+  function fitHistory(rows) {
+    var out = (Array.isArray(rows) ? rows : []).slice(-MAX_BRIEF_SNAPSHOTS);
+    var text = JSON.stringify(out);
+    while (out.length > 1 && jsonBytes(text) > MAX_BRIEF_BYTES) {
+      out.shift();
+      text = JSON.stringify(out);
     }
-    return saved;
+    return { rows: out, text: text, bytes: jsonBytes(text) };
+  }
+
+  function persistBriefSnapshot(snapshot) {
+    var prior = readJson(BRIEF_BLACKBOX);
+    if (!Array.isArray(prior)) prior = [];
+
+    // Migrate any old/full snapshots at the write boundary. A prior build may
+    // already have stored wallets/offers or, via the old guard fallback, the
+    // entire live pack. None of that is allowed back into v34.
+    var saved = prior.map(compactBriefSnapshot);
+    if (snapshot && typeof snapshot === 'object') {
+      var compact = compactBriefSnapshot(snapshot);
+      var key = snapshotKey(compact);
+      var replaced = false;
+      for (var i = saved.length - 1; i >= 0; i--) {
+        if (key && snapshotKey(saved[i]) === key) {
+          saved[i] = compact;
+          replaced = true;
+          break;
+        }
+      }
+      if (!replaced) saved.push(compact);
+    }
+
+    var fitted = fitHistory(saved);
+    localStorage.setItem(BRIEF_BLACKBOX, fitted.text);
+    try {
+      if (typeof log === 'function') {
+        log('BLACK_BOX: snapshot saved (' + fitted.rows.length + '/' + MAX_BRIEF_SNAPSHOTS +
+          ') · ' + fitted.bytes + ' bytes');
+      }
+    } catch (_) {}
+    return fitted.rows;
+  }
+
+  function coordinationUnavailable(saved, err) {
+    return {
+      pairs: [],
+      snapshots_analyzed: Array.isArray(saved) ? saved.length : 0,
+      unavailable: true,
+      reason: 'COORDINATION_UNAVAILABLE',
+      summary: 'COORDINATION_UNAVAILABLE' + (err && err.message ? ': ' + err.message : '')
+    };
   }
 
   function refreshCoordination(saved, p) {
     saved = Array.isArray(saved) ? saved : readBriefHistory();
-    if (typeof state === 'object' && state) {
-      state.blackbox = saved;
-      if (typeof detectCoordination === 'function') {
-        state.coordination = detectCoordination(saved);
-        // Contract: the count is the persisted v34 array length, regardless of
-        // any legacy detector default/warm-up behavior.
-        if (!state.coordination || typeof state.coordination !== 'object') state.coordination = {};
-        state.coordination.snapshots_analyzed = saved.length;
-        if (p) p.coordination = state.coordination;
-      }
+    var coord = null;
+    try {
+      coord = (typeof detectCoordination === 'function')
+        ? detectCoordination(saved)
+        : coordinationUnavailable(saved, new Error('detector unavailable'));
+    } catch (e) {
+      coord = coordinationUnavailable(saved, e);
+      try {
+        if (typeof log === 'function') log('COORDINATION_UNAVAILABLE: ' + (e && e.message || e));
+      } catch (_) {}
     }
-    return saved;
+    if (!coord || typeof coord !== 'object') coord = coordinationUnavailable(saved);
+    coord.snapshots_analyzed = saved.length;
+
+    try {
+      if (typeof state === 'object' && state) {
+        state.blackbox = saved;
+        state.coordination = coord;
+      }
+    } catch (_) {}
+    if (p && typeof p === 'object') p.coordination = coord;
+    return coord;
   }
 
   if (typeof saveBlackboxSnapshot === 'function') {
     var origSave = saveBlackboxSnapshot;
     saveBlackboxSnapshot = function (p) {
-      var before = readBriefHistory().length;
-      origSave(p);
-      var saved = readBriefHistory();
-
-      // Some live save paths write only Outer/legacy boxes. If v34 did not
-      // advance, persist this Brief snapshot here. Never count Outer as Brief.
-      if (saved.length <= before && p && typeof p === 'object') {
+      // Do NOT call the legacy saver. It serializes wallet/offers arrays and
+      // the old guard could fall back to persisting the entire live pack.
+      // This wrapper is now the only v34 writer and is deliberately compact.
+      var saved;
+      try {
         saved = persistBriefSnapshot(p);
+      } catch (e) {
+        saved = readBriefHistory();
+        try {
+          if (typeof log === 'function') log('BLACK_BOX compact save unavailable: ' + (e && e.message || e));
+        } catch (_) {}
       }
       refreshCoordination(saved, p);
+      return saved;
     };
+    saveBlackboxSnapshot._swCompactMemory = true;
+    saveBlackboxSnapshot._original = origSave;
   }
 
   function guardedSetItem(origSet, thisArg, key, value) {
@@ -157,6 +281,10 @@
             }
           } catch (_) {}
           return;
+        }
+        if (Array.isArray(incoming)) {
+          var normalized = fitHistory(incoming.map(compactBriefSnapshot));
+          value = normalized.text;
         }
       } catch (_) {}
     }
@@ -180,9 +308,18 @@
   }
 
   window.SW_MEMORY_GUARD = {
-    version: '2026.09.23.2',
+    version: '2026.09.26.1',
     probe: probe,
     readBriefHistory: readBriefHistory,
+    compactBriefSnapshot: compactBriefSnapshot,
+    persistBriefSnapshot: persistBriefSnapshot,
+    refreshCoordination: refreshCoordination,
+    fitHistory: fitHistory,
+    limits: {
+      snapshots: MAX_BRIEF_SNAPSHOTS,
+      bytes: MAX_BRIEF_BYTES,
+      large_transfers: MAX_LARGE_TRANSFERS
+    },
     keys: {
       BRIEF_BLACKBOX: BRIEF_BLACKBOX,
       OUTER_BLACKBOX: OUTER_BLACKBOX,
