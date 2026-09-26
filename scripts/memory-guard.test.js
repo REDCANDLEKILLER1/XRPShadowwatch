@@ -199,8 +199,10 @@ test('ten 150k-tx saves stay compact and preserve ten snapshot counts', () => {
   assert.strictEqual(state.coordination.snapshots_analyzed, 10);
   assert.strictEqual(legacyCalls, 0, 'legacy/core saver must be bypassed');
   assert(v34.every(s => !Object.prototype.hasOwnProperty.call(s, 'txs')), 'full tx arrays leaked into v34');
+  assert(v34.every(s => !Object.prototype.hasOwnProperty.call(s, 'wallets')), 'full wallet arrays leaked into v34');
   assert(v34.every(s => (s.large_transfers || []).length <= 24), 'large-transfer cap was not enforced');
   assert(v34.every(s => s.counts && s.counts.transactions === 150000), 'transaction count was not retained');
+  assert(v34.every(s => s.flow_summary && typeof s.flow_summary === 'object'), 'compact flow summary missing');
 });
 
 console.log('\n' + passed + ' memory-guard tests passed');
