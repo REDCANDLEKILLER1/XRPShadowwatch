@@ -105,7 +105,8 @@ testCase('one persisted Brief snapshot is saved before Section 11 and renders Cu
   const pack = {
     date: '2026-09-23',
     large_transfers: [],
-    wallet_results: []
+    wallet_results: [],
+    tx_scan_coverage: { full_window_complete: true }
   };
   const out = sandbox.buildXRPMainReport(pack);
   assert(out.includes('Current: 2.'), out);
@@ -120,7 +121,8 @@ testCase('render persists only Brief memory and never counts Outer memory', () =
     shadowwatch_snapshot_v30: JSON.stringify(new Array(7).fill({ ts: 8 }))
   });
   const { sandbox } = runPatch(store, { state: { offers: [], txs: [] } });
-  sandbox.buildXRPMainReport({ report_id: 'SW-20260926-ABCDE', date: '2026-09-26', large_transfers: [], wallet_results: [] });
+  sandbox.buildXRPMainReport({ report_id: 'SW-20260926-ABCDE', date: '2026-09-26', large_transfers: [], wallet_results: [],
+    tx_scan_coverage: { full_window_complete: true } });
   const v34 = JSON.parse(store.getItem('shadowwatch_blackbox_v34'));
   assert.strictEqual(v34.length, 2, 'current Brief snapshot must be persisted before render');
   assert.strictEqual(sandbox.state.coordination.snapshots_analyzed, 2,
@@ -131,7 +133,8 @@ testCase('the fifth scan reaches the coordination detector as five snapshots', (
   const persisted = [1,2,3,4].map(ts => ({ ts, large_transfers: [], offers: [] }));
   const store = makeStore({ shadowwatch_blackbox_v34: JSON.stringify(persisted) });
   const { sandbox, seen } = runPatch(store, { state: { offers: [] } });
-  const pack = { date: '2026-09-23', large_transfers: [], wallet_results: [] };
+  const pack = { date: '2026-09-23', large_transfers: [], wallet_results: [],
+    tx_scan_coverage: { full_window_complete: true } };
   sandbox.buildXRPMainReport(pack);
   assert.strictEqual(seen[0].length, 5);
   assert.strictEqual(pack.coordination.snapshots_analyzed, 5);
@@ -142,7 +145,8 @@ testCase('rolling cap stays 30 at render time', () => {
   const persisted = Array.from({ length: 30 }, (_, i) => ({ ts: i + 1, large_transfers: [], offers: [] }));
   const store = makeStore({ shadowwatch_blackbox_v34: JSON.stringify(persisted) });
   const { sandbox, seen } = runPatch(store, { state: { offers: [] } });
-  sandbox.buildXRPMainReport({ date: '2026-09-23', large_transfers: [], wallet_results: [] });
+  sandbox.buildXRPMainReport({ date: '2026-09-23', large_transfers: [], wallet_results: [],
+    tx_scan_coverage: { full_window_complete: true } });
   assert.strictEqual(seen[0].length, 30);
   assert.strictEqual(sandbox.state.coordination.snapshots_analyzed, 30);
 });
@@ -160,12 +164,37 @@ testCase('coordination stack overflow fails open and preserves transaction evide
     txs,
     tx_24h_count: txs.length,
     wallets_checked: 423,
-    large_transfers: []
+    large_transfers: [],
+    tx_scan_coverage: { full_window_complete: true }
   });
   assert(out.includes('COORDINATION_UNAVAILABLE'), out);
   assert.strictEqual(state.txs, before, 'state.txs reference changed');
   assert.strictEqual(state.txs.length, 150000, 'transaction evidence was wiped');
   assert.strictEqual(JSON.parse(store.getItem('shadowwatch_blackbox_v34')).length, 5);
+});
+
+testCase('synthetic report render stays pure and preserves supplied coordination', () => {
+  const store = makeStore();
+  const supplied = {
+    snapshots_analyzed: 7,
+    pairs: [{ label_a: 'BITFLYER_COLD', label_b: 'WHALE_1.8B', score: 12 }]
+  };
+  const { sandbox } = runPatch(store, { state: { offers: [], txs: [], coordination: supplied } });
+  const pack = {
+    date: '2026-05-12',
+    large_transfers: [{
+      from: 'rABC', to: 'rDEF', amount: 4500000,
+      sender_label: 'UPBIT_1.2B', receiver_label: 'UNKNOWN'
+    }],
+    wallet_results: [],
+    coordination: supplied
+  };
+  const out = sandbox.buildXRPMainReport(pack);
+  assert(out.includes('BITFLYER_COLD') || out.includes('7 snapshots analyzed'), out);
+  assert.strictEqual(store.getItem('shadowwatch_blackbox_v34'), null,
+    'synthetic render must not write v34');
+  assert.strictEqual(pack.coordination, supplied,
+    'synthetic render must preserve supplied coordination');
 });
 
 testCase('pattern-memory stack overflow is converted to a public-safe unavailable line', () => {
