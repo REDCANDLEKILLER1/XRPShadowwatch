@@ -12,7 +12,9 @@
  *   - Brief coordination reads shadowwatch_blackbox_v34.
  *   - Empty in-memory history re-reads the store.
  *   - Empty persist must not overwrite a non-empty store.
+ *   - v34 stores compact Brief snapshots only: no live pack, txs or wallet arrays.
  *   - After save, coordination is recomputed from the saved store.
+ *   - Memory failures fail open; report sealing must not discard transaction evidence.
  */
 (function shadowMemoryGuard() {
   'use strict';
@@ -192,8 +194,7 @@
       data_as_of_utc: p.data_as_of_utc || '',
       xrp_price: _num(p.xrp_price),
       xrp_delta_24h_pct: _num(p.xrp_delta_24h_pct),
-      flow_summary: p.flow_summary && typeof p.flow_summary === 'object'
-        ? p.flow_summary : compactFlowSummary(p),
+      flow_summary: compactFlowSummary(p),
       counts: {
         wallets: walletCount,
         transactions: txCount,
