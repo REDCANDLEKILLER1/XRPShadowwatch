@@ -36,73 +36,97 @@
     return null;
   }
 
-  function compactCurrentSnapshot(p) {
-    var s = currentState() || {};
-    p = p || {};
+  function coordinationUnavailable(rows, err) {
     return {
-      ts: Date.now(),
-      date: p.date,
-      data_as_of_utc: p.data_as_of_utc,
-      xrp_price: p.xrp_price,
-      xrp_delta_24h_pct: p.xrp_delta_24h_pct,
-      wallets: (p.wallet_results || p.wallets || []).map(function (w) {
-        return {
-          label: w && w.label,
-          address: w && w.address,
-          balance_xrp: w && w.balance_xrp,
-          delta_xrp: w && w.delta_xrp
-        };
-      }),
-      large_transfers: (p.large_transfers || []).map(function (t) {
-        return {
-          from: t && t.from,
-          to: t && t.to,
-          sender_label: t && t.sender_label,
-          receiver_label: t && t.receiver_label,
-          amount: t && t.amount,
-          classification: t && t.classification,
-          hash: t && t.hash,
-          date: t && t.date
-        };
-      }),
-      offers: (s.offers || []).map(function (o) {
-        return {
-          owner: o && o.owner,
-          label: o && o.label,
-          side: o && o.side,
-          direction: o && o.direction,
-          xrp_amount: o && o.xrp_amount,
-          xrp_price_usd: o && o.xrp_price_usd,
-          is_stable_pair: o && o.is_stable_pair
-        };
-      })
+      pairs: [],
+      snapshots_analyzed: Array.isArray(rows) ? rows.length : 0,
+      unavailable: true,
+      reason: 'COORDINATION_UNAVAILABLE',
+      summary: 'COORDINATION_UNAVAILABLE' + (err && err.message ? ': ' + err.message : '')
     };
   }
 
-  function projectedHistory(p) {
-    var rows = readBriefHistory().slice();
-    // The report is rendered before core persists this run. Include this run
-    // transiently so "Current" describes the report being rendered.
-    rows.push(compactCurrentSnapshot(p));
-    if (rows.length > MAX_SNAPSHOTS) rows = rows.slice(rows.length - MAX_SNAPSHOTS);
-    return rows;
+  function saveBeforeRender(p) {
+    var guard = window.SW_MEMORY_GUARD;
+    if (guard && typeof guard.persistBriefSnapshot === 'function') {
+      return guard.persistBriefSnapshot(p);
+    }
+    if (typeof saveBlackboxSnapshot === 'function') {
+      saveBlackboxSnapshot(p);
+      return readBriefHistory();
+    }
+    return readBriefHistory();
+  }
+
+  function projectedHistory() {
+    // Section 11 must describe what is actually persisted, not a transient
+    // "+ current run" projection. The current run is saved before rendering.
+    return readBriefHistory();
   }
 
   function refreshCoordinationForRender(p) {
-    if (typeof detectCoordination !== 'function') return null;
-    var rows = projectedHistory(p);
-    var coord = detectCoordination(rows);
-    if (!coord || typeof coord !== 'object') coord = { pairs: [] };
-    // Core's <5 branch omits this field. The report contract requires it.
+    var rows = [];
+    var coord = null;
+    try {
+      rows = saveBeforeRender(p);
+      var guard = window.SW_MEMORY_GUARD;
+      if (guard && typeof guard.refreshCoordination === 'function') {
+        coord = guard.refreshCoordination(rows, p);
+      } else if (typeof detectCoordination === 'function') {
+        coord = detectCoordination(rows);
+      }
+    } catch (e) {
+      coord = coordinationUnavailable(rows, e);
+      try { if (typeof log === 'function') log('COORDINATION_UNAVAILABLE: ' + (e && e.message || e)); } catch (_) {}
+    }
+    if (!coord || typeof coord !== 'object') coord = coordinationUnavailable(rows);
     coord.snapshots_analyzed = rows.length;
 
-    var s = currentState();
-    if (s) {
-      s.coordination = coord;
-      // Transient only: do not replace s.blackbox with the projected row.
-    }
+    var st = currentState();
+    if (st) st.coordination = coord;
     if (p && typeof p === 'object') p.coordination = coord;
     return coord;
+  }
+
+  // Public rendering must never turn a memory failure into a failed report.
+  if (typeof renderCoordinationMemory === 'function' && !renderCoordinationMemory.__swCoordFailOpen) {
+    var originalRenderCoordinationMemory = renderCoordinationMemory;
+    renderCoordinationMemory = function (coord) {
+      if (coord && coord.unavailable) {
+        return {
+          lines: ['• COORDINATION_UNAVAILABLE — ' +
+            Number(coord.snapshots_analyzed || 0) +
+            ' persisted snapshot(s) retained; report sealed without coordination analysis.'],
+          gating: null
+        };
+      }
+      try {
+        return originalRenderCoordinationMemory(coord);
+      } catch (e) {
+        return {
+          lines: ['• COORDINATION_UNAVAILABLE — coordination analysis could not be rendered.'],
+          gating: null
+        };
+      }
+    };
+    renderCoordinationMemory.__swCoordFailOpen = true;
+    renderCoordinationMemory.__swOriginal = originalRenderCoordinationMemory;
+  }
+
+  // Pattern memory is advisory. A bad historical object may withhold that
+  // section, but it must not take down the evidence capsule or clear state.txs.
+  if (typeof summarizePatternMemory === 'function' && !summarizePatternMemory.__swMemoryFailOpen) {
+    var originalSummarizePatternMemory = summarizePatternMemory;
+    summarizePatternMemory = function () {
+      try {
+        return originalSummarizePatternMemory.apply(this, arguments);
+      } catch (e) {
+        try { if (typeof log === 'function') log('PATTERN_MEMORY_UNAVAILABLE: ' + (e && e.message || e)); } catch (_) {}
+        return { lines: ['• PATTERN_MEMORY_UNAVAILABLE — historical comparison skipped for this report.'], snapCount: 0 };
+      }
+    };
+    summarizePatternMemory.__swMemoryFailOpen = true;
+    summarizePatternMemory.__swOriginal = originalSummarizePatternMemory;
   }
 
   if (typeof buildXRPMainReport === 'function' && !buildXRPMainReport.__swCoordRenderTruth) {
@@ -117,7 +141,7 @@
   }
 
   window.SW_COORDINATION_RENDER_20260923 = {
-    version: '2026.09.23.1',
+    version: '2026.09.26.1',
     key: BRIEF_BLACKBOX,
     readBriefHistory: readBriefHistory,
     projectedHistory: projectedHistory,
