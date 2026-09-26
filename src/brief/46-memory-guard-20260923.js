@@ -109,6 +109,42 @@
     return Number.isFinite(n) ? n : 0;
   }
 
+  function categoryOfWallet(w) {
+    try {
+      if (w && w.address && typeof KNOWN !== 'undefined' && KNOWN[w.address] && KNOWN[w.address].cat)
+        return KNOWN[w.address].cat;
+    } catch (_) {}
+    try {
+      if (typeof getWalletGroup === 'function')
+        return getWalletGroup((w && (w.address || w.label)) || '');
+    } catch (_) {}
+    return 'whale';
+  }
+
+  function compactFlowSummary(p) {
+    var rows = Array.isArray(p.wallet_results) ? p.wallet_results :
+      (Array.isArray(p.wallets) ? p.wallets : []);
+    var flows = Object.create(null);
+    var exchangeIn = 0, exchangeOut = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var w = rows[i] || {};
+      var d = _num(w.delta_xrp);
+      if (!d) continue;
+      var cat = categoryOfWallet(w);
+      flows[cat] = _num(flows[cat]) + d;
+      if (cat === 'exchange') {
+        if (d > 0) exchangeIn += d;
+        else exchangeOut += d;
+      }
+    }
+    return {
+      flows: flows,
+      exchange_in: exchangeIn,
+      exchange_out: exchangeOut,
+      wallets_seen: rows.length
+    };
+  }
+
   function compactBriefSnapshot(p) {
     p = (p && typeof p === 'object') ? p : {};
     var transfers = Array.isArray(p.large_transfers) ? p.large_transfers.slice() : [];
@@ -154,6 +190,10 @@
       report_id: p.report_id || (p.seal && p.seal.report_id) || stateReportId,
       scan_id: p.scan_id || stateScanId,
       data_as_of_utc: p.data_as_of_utc || '',
+      xrp_price: _num(p.xrp_price),
+      xrp_delta_24h_pct: _num(p.xrp_delta_24h_pct),
+      flow_summary: p.flow_summary && typeof p.flow_summary === 'object'
+        ? p.flow_summary : compactFlowSummary(p),
       counts: {
         wallets: walletCount,
         transactions: txCount,
@@ -328,6 +368,7 @@
     probe: probe,
     readBriefHistory: readBriefHistory,
     compactBriefSnapshot: compactBriefSnapshot,
+    compactFlowSummary: compactFlowSummary,
     persistBriefSnapshot: persistBriefSnapshot,
     refreshCoordination: refreshCoordination,
     fitHistory: fitHistory,
