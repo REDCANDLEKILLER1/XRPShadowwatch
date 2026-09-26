@@ -155,4 +155,52 @@ test('Outer and legacy boxes are never counted as Brief coordination', () => {
   assert.strictEqual(sb.detectCoordination([]).snapshots_analyzed, 0);
 });
 
+
+test('ten 150k-tx saves stay compact and preserve ten snapshot counts', () => {
+  const store = makeStore();
+  const state = {};
+  let legacyCalls = 0;
+  const sb = runGuard(store, {
+    state,
+    loadBlackboxHistory: function () { return []; },
+    detectCoordination: function (h) {
+      return { snapshots_analyzed: (h || []).length, pairs: [] };
+    },
+    saveBlackboxSnapshot: function () { legacyCalls++; }
+  });
+
+  const hugeTxs = Array.from({ length: 150000 }, (_, i) => ({ hash: 'H' + i, amount: i }));
+  const large = Array.from({ length: 80 }, (_, i) => ({
+    from: 'rFROM' + i, to: 'rTO' + i, sender_label: 'S' + i, receiver_label: 'R' + i,
+    amount: 100000000 - i, classification: 'TEST', hash: 'L' + i,
+    date: '2026-09-26T12:' + String(i % 60).padStart(2, '0') + ':00.000Z'
+  }));
+
+  for (let i = 0; i < 10; i++) {
+    const pack = {
+      report_id: 'SW-20260926-T' + String(i).padStart(4, '0'),
+      scan_id: 'SC-' + i,
+      date: '2026-09-26',
+      data_as_of_utc: '15:' + String(i).padStart(2, '0') + ':00 UTC',
+      txs: hugeTxs,
+      tx_24h_count: hugeTxs.length,
+      wallets_checked: 423,
+      large_transfers: large
+    };
+    sb.saveBlackboxSnapshot(pack);
+  }
+
+  const raw = store.getItem('shadowwatch_blackbox_v34');
+  assert(raw, 'v34 was not persisted');
+  assert(raw.length < 200 * 1024, 'v34 exceeded 200KB: ' + raw.length);
+  assert.doesNotThrow(() => JSON.stringify(JSON.parse(raw)));
+  const v34 = JSON.parse(raw);
+  assert.strictEqual(v34.length, 10);
+  assert.strictEqual(state.coordination.snapshots_analyzed, 10);
+  assert.strictEqual(legacyCalls, 0, 'legacy/core saver must be bypassed');
+  assert(v34.every(s => !Object.prototype.hasOwnProperty.call(s, 'txs')), 'full tx arrays leaked into v34');
+  assert(v34.every(s => (s.large_transfers || []).length <= 24), 'large-transfer cap was not enforced');
+  assert(v34.every(s => s.counts && s.counts.transactions === 150000), 'transaction count was not retained');
+});
+
 console.log('\n' + passed + ' memory-guard tests passed');
