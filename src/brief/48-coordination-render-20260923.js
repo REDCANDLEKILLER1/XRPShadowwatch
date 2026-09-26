@@ -47,6 +47,11 @@
     };
   }
 
+  function isCompletedEvidencePack(p) {
+    return !!(p && p.tx_scan_coverage &&
+      p.tx_scan_coverage.full_window_complete === true);
+  }
+
   function saveBeforeRender(p) {
     var guard = window.SW_MEMORY_GUARD;
     if (guard && typeof guard.persistBriefSnapshot === 'function') {
@@ -133,7 +138,13 @@
   if (typeof buildXRPMainReport === 'function' && !buildXRPMainReport.__swCoordRenderTruth) {
     var originalBuildXRPMainReport = buildXRPMainReport;
     var wrapped = function (p) {
-      try { refreshCoordinationForRender(p); } catch (_) {}
+      // Only a completed evidence pack may mutate forensic memory. Utility
+      // renders, smoke fixtures, previews of partial packs and other synthetic
+      // report calls must remain pure and preserve any explicitly supplied
+      // coordination object.
+      if (isCompletedEvidencePack(p)) {
+        try { refreshCoordinationForRender(p); } catch (_) {}
+      }
       return originalBuildXRPMainReport(p);
     };
     wrapped.__swCoordRenderTruth = true;
@@ -146,7 +157,8 @@
     key: BRIEF_BLACKBOX,
     readBriefHistory: readBriefHistory,
     projectedHistory: projectedHistory,
-    refreshCoordinationForRender: refreshCoordinationForRender
+    refreshCoordinationForRender: refreshCoordinationForRender,
+    isCompletedEvidencePack: isCompletedEvidencePack
   };
 
   try {
