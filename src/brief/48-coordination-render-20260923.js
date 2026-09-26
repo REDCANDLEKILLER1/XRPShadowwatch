@@ -7,10 +7,11 @@
  * snapshots_analyzed entirely, which renders as Current: 0.
  *
  * This patch changes the REPORT boundary only:
+ *   - persist the current run's compact Brief snapshot before Section 11 renders;
  *   - read Brief history from shadowwatch_blackbox_v34 only;
- *   - add the current pack as a transient (not persisted) snapshot;
- *   - recompute coordination for the report/panel from that projected history;
- *   - leave persistence and Outer XRPMAN_BLACKBOX_V2 untouched.
+ *   - recompute coordination from the persisted compact history;
+ *   - fail open with COORDINATION_UNAVAILABLE if historical analysis fails;
+ *   - leave Outer XRPMAN_BLACKBOX_V2 and transaction evidence untouched.
  */
 (function installCoordinationRenderMemory() {
   'use strict';
