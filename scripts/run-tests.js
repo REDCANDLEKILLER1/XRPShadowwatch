@@ -71,6 +71,7 @@ const SUITES = [
   ['evidence-write-isolation','evidence-write-isolation.test.js',  null],
   // Preview reads the shared checkpoint/window but never opens XRPL or writes it.
   ['preview-read-only',      'preview-no-direct-xrpl-fallback.test.js', null],
+  ['memory-guard',          'memory-guard.test.js', null],
   ['coordination-render',    'coordination-render-memory.test.js', null],
   // A morning run with no database: GitHub in, XRPL delta, GitHub out.
   ['delta-report-path',      'delta-report-path.test.js',        8213],
