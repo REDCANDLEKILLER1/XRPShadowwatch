@@ -42,6 +42,7 @@ const SUITES = [
   ['in-page-smoke',          'in-page-smoke.test.js',            8210],
   ['morning-story-canonical','morning-story-canonical.test.js',  8211],
   ['morning-news-sources',   'morning-news-source-handoff.test.js', 8233],
+  ['post-news-stack',      'post-news-stack-overflow.test.js', 8234],
   // A report that cannot be posted was not published. The field holds 4,000.
   ['public-morning-4k',      'public-morning-4k.test.js',           null],
   // A working scan that says nothing is indistinguishable from a hung one.
