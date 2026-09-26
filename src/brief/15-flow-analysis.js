@@ -83,16 +83,32 @@
           : (typeof loadBlackboxHistory === 'function' ? loadBlackboxHistory() : []);
     if (!Array.isArray(h)) return [];
     var rows = h.map(function (snap) {
-      var flows = {}, inOut = { exchange_in: 0, exchange_out: 0 };
+      var flows = {}, inOut = { exchange_in: 0, exchange_out: 0 }, walletsSeen = 0;
       CATS.forEach(function (c) { flows[c] = 0; });
-      (snap.wallets || []).forEach(function (w) {
-        var d = _n(w.delta_xrp);
-        if (!d) return;
-        var c = _catOf(w);
-        if (flows[c] === undefined) flows[c] = 0;
-        flows[c] += d;
-        if (c === 'exchange') { if (d > 0) inOut.exchange_in += d; else inOut.exchange_out += d; }
-      });
+
+      // 2026-09-26 memory contract: new v34 rows are compact. They carry the
+      // category totals directly so the 30-scan exchange-pressure analysis
+      // survives without retaining hundreds of wallet objects per snapshot.
+      var compact = snap && snap.flow_summary && typeof snap.flow_summary === 'object'
+        ? snap.flow_summary : null;
+      if (compact) {
+        var savedFlows = compact.flows && typeof compact.flows === 'object' ? compact.flows : {};
+        Object.keys(savedFlows).forEach(function (c) { flows[c] = _n(savedFlows[c]); });
+        inOut.exchange_in = _n(compact.exchange_in);
+        inOut.exchange_out = _n(compact.exchange_out);
+        walletsSeen = _n(compact.wallets_seen);
+      } else {
+        (snap.wallets || []).forEach(function (w) {
+          var d = _n(w.delta_xrp);
+          if (!d) return;
+          var c = _catOf(w);
+          if (flows[c] === undefined) flows[c] = 0;
+          flows[c] += d;
+          if (c === 'exchange') { if (d > 0) inOut.exchange_in += d; else inOut.exchange_out += d; }
+        });
+        walletsSeen = (snap.wallets || []).length;
+      }
+
       return {
         date: (snap.date || String(snap.data_as_of_utc || '')).slice(0, 10),
         price: _n(snap.xrp_price),
@@ -101,7 +117,7 @@
         exchange_in: inOut.exchange_in,
         exchange_out: inOut.exchange_out,
         net_exchange_flow: flows.exchange || 0,
-        wallets_seen: (snap.wallets || []).length
+        wallets_seen: walletsSeen
       };
     }).filter(function (r) { return r.date && r.price > 0; });
     // Snapshots are appended in scan order, but a restored store can arrive out
