@@ -285,3 +285,23 @@
     document.body.appendChild(tx);
   } catch (_) {}
 })();
+
+// Patch 1 loader — wait until detectCoordination exists, then wrap it.
+// Do not edit 02-core.js. See docs/CONTRACT.md.
+(function loadMemoryGuard() {
+  var tries = 0;
+  var t = setInterval(function () {
+    tries++;
+    if (window.SW_MEMORY_GUARD) { clearInterval(t); return; }
+    if (typeof detectCoordination === 'function' || tries > 60) {
+      clearInterval(t);
+      try {
+        var g = document.createElement('script');
+        g.src = '/src/brief/46-memory-guard-20260923.js';
+        g.async = false;
+        g.setAttribute('data-sw-memory-guard', '2026-09-23.1');
+        document.body.appendChild(g);
+      } catch (_) {}
+    }
+  }, 200);
+})();

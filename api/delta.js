@@ -165,6 +165,149 @@ function packEvents(body) {
   return body;
 }
 
+
+async function buildPreviewReadOnlyRun(input, deps) {
+  const d = deps || {};
+  const readState = d.readState || (x => Store.readState(x));
+  const readWindow = d.readReportWindow || ((x, y) => D.readReportWindow(x, y));
+  const selectRoster = d.selectRoster || (() => roster.select());
+
+  const loaded = await readState({});
+  if (!loaded || loaded.missing || !loaded.state) {
+    const e = new Error('PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE: evidence state is not seeded');
+    e.previewReadOnly = true;
+    throw e;
+  }
+
+  const state = loaded.state;
+  const selected = selectRoster();
+  const accounts = (selected && Array.isArray(selected.accounts)) ? selected.accounts : [];
+  if (!accounts.length) {
+    const e = new Error('PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE: committed roster is empty');
+    e.previewReadOnly = true;
+    throw e;
+  }
+
+  const anchorLedger = Number(state.anchor_ledger);
+  const anchorCloseMs = Date.parse(state.anchor_close || '');
+  if (!Number.isInteger(anchorLedger) || anchorLedger <= 0 || !Number.isFinite(anchorCloseMs)) {
+    const e = new Error('PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE: checkpoint anchor is incomplete');
+    e.previewReadOnly = true;
+    throw e;
+  }
+
+  const requestedStart = Number(input.window_start_ms);
+  const requestedEnd = Number(input.window_end_ms);
+  if (!Number.isFinite(requestedStart) || !Number.isFinite(requestedEnd) || requestedEnd < requestedStart) {
+    const e = new Error('PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE: report window is invalid');
+    e.previewReadOnly = true;
+    throw e;
+  }
+
+  // A preview may only claim through the checkpoint it actually read. If the
+  // requested end is newer, cap it rather than opening XRPL to fill the gap.
+  const endMs = Math.min(requestedEnd, anchorCloseMs);
+  if (endMs < requestedStart) {
+    const e = new Error('PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE: checkpoint predates the requested window');
+    e.previewReadOnly = true;
+    throw e;
+  }
+
+  const stateByAddress = new Map((state.wallets || []).map(w => [w.address, w]));
+  const wallets = accounts.map(address => {
+    const w = stateByAddress.get(address);
+    const through = w ? Number(w.last_proven_ledger) : null;
+    const proven = !!w && Number.isInteger(through) && through >= anchorLedger;
+    return {
+      address,
+      status: proven ? 'COMPLETE' : 'FAILED',
+      proven,
+      proven_through: Number.isInteger(through) ? through : null,
+      attempts: 0,
+      reconciliation: w && w.reconciliation || 'NOT_APPLICABLE',
+      error: proven ? null : (w ? 'CHECKPOINT_BEHIND_ANCHOR' : 'WALLET_NOT_IN_EVIDENCE_STATE')
+    };
+  });
+  const complete = wallets.filter(w => w.proven).length;
+
+  const assembled = await readWindow({
+    window_start_ms: requestedStart,
+    window_end_ms: endMs,
+    rows: []
+  }, {});
+
+  const body = {
+    scan_id: 'preview-' + anchorLedger,
+    report_id: input.report_id || null,
+    anchor_ledger: anchorLedger,
+    anchor_close: new Date(anchorCloseMs).toISOString(),
+    target_wallets: accounts.length,
+    complete_wallets: complete,
+    balance_contradictions: 0,
+    balance_contradiction_addresses: [],
+    transactions: 0,
+    xrpl_requests: 0,
+    failures: wallets.filter(w => !w.proven).map(w => ({ address: w.address, error: w.error })),
+    wallets,
+    committed: false,
+    reason: 'PREVIEW_READ_ONLY_SNAPSHOT',
+    preview_read_only: true,
+    live_acquisition_disabled: true,
+    checkpoint_advanced: false,
+    state_version: state.state_version,
+    state_sha256: state.state_sha256,
+    freshness: {
+      mode: 'PREVIEW_READ_ONLY_SNAPSHOT',
+      anchor_close: new Date(anchorCloseMs).toISOString(),
+      requested_end: new Date(requestedEnd).toISOString(),
+      capped_to_checkpoint: requestedEnd > anchorCloseMs,
+      claimed_beyond_checkpoint_ms: Math.max(0, requestedEnd - anchorCloseMs)
+    },
+    events: assembled.events.map(slim),
+    window: {
+      from: new Date(requestedStart).toISOString(),
+      to: new Date(endMs).toISOString(),
+      requested_to: new Date(requestedEnd).toISOString(),
+      capped_to_checkpoint: requestedEnd > anchorCloseMs,
+      days: assembled.days,
+      in_window: assembled.in_window,
+      from_stored: assembled.from_stored,
+      from_this_run: 0,
+      days_without_shards: assembled.days_without_shards,
+      unattributed: assembled.unattributed,
+      attributed_derived_only: assembled.attributed_derived_only,
+      provenance: assembled.provenance
+    }
+  };
+  packEvents(body);
+  return body;
+}
+
+async function respondPreviewReadOnly(res, input) {
+  const body = await buildPreviewReadOnlyRun(input);
+  if (input.stream) {
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.write(JSON.stringify({
+      t: 'start',
+      report_id: input.report_id || null,
+      roster_wallets: body.target_wallets,
+      preview_read_only: true,
+      at: new Date().toISOString()
+    }) + '\n');
+    res.write(JSON.stringify({
+      t: 'phase',
+      phase: 'stored-window',
+      wallets: body.complete_wallets,
+      rows: body.events_count || (Array.isArray(body.events) ? body.events.length : 0),
+      preview_read_only: true
+    }) + '\n');
+    res.write(JSON.stringify({ t: 'done', ...body }) + '\n');
+    return res.end();
+  }
+  return res.json(body);
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
   res.setHeader('CDN-Cache-Control', 'no-store');
@@ -182,6 +325,25 @@ module.exports = async function handler(req, res) {
 
   const allowed = req.method === 'GET' ? ['state', 'health'] : ['run', 'seed'];
   if (!allowed.includes(input.action)) return res.status(400).json({ error: 'ACTION_NOT_ALLOWED' });
+
+  // A preview shares production's evidence repository but may not advance its
+  // checkpoint. Serve a normal-looking run from the latest VERIFIED checkpoint
+  // plus the stored report-window shards. That lets the report/news UI be tested
+  // without either a write or the old 418-wallet account_tx fallback.
+  if (input.action === 'run' && process.env.VERCEL_ENV &&
+      process.env.VERCEL_ENV !== 'production') {
+    try {
+      return await respondPreviewReadOnly(res, input);
+    } catch (e) {
+      const safe = String(e && e.message || 'PREVIEW_READ_ONLY_SNAPSHOT_UNAVAILABLE');
+      return res.status(503).json({
+        error: safe,
+        preview_read_only: true,
+        live_acquisition_disabled: true,
+        evidence_reads_allowed: true
+      });
+    }
+  }
 
   let reader;
   try {
@@ -443,3 +605,4 @@ module.exports = async function handler(req, res) {
 module.exports.packEvents = packEvents;
 module.exports.buildStreamDone = buildStreamDone;
 module.exports.GZIP_EVENTS_ABOVE = GZIP_EVENTS_ABOVE;
+module.exports.buildPreviewReadOnlyRun = buildPreviewReadOnlyRun;
