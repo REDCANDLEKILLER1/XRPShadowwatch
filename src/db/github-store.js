@@ -536,6 +536,61 @@ async function seedGenesis(input, deps) {
     state_version: state.state_version, state_sha256: state.state_sha256, wallets: state.wallet_count };
 }
 
+// ── VERIFIED REPORT MANIFESTS ───────────────────────────────────────────────
+//
+// latest.json names the shards written by the LATEST successful acquisition,
+// not every day a 72-hour report may touch.  A report therefore walks the
+// hash-chained state history backwards until it finds the newest manifest that
+// wrote each requested UTC day.  Every state on that walk is verified against
+// the state after it before any shard hash is trusted.
+async function resolveDayManifests(days, deps) {
+  const d = deps || {};
+  const { token, repo, branch } = target(d.env);
+  const gh = d.gh || A.client(token, repo, d.fetch || fetch);
+  const loaded = await readState({ ...d, gh });
+  if (loaded.missing || !loaded.state) throw new Error('EVIDENCE_STATE_MISSING');
+  const wanted = new Set((days || []).map(String));
+  const byDay = {};
+  let current = loaded.state;
+  let walked = 0;
+
+  while (wanted.size && current && Number(current.state_version) >= 1) {
+    walked++;
+    const shards = Array.isArray(current.evidence_shards) ? current.evidence_shards : [];
+    for (const day of [...wanted]) {
+      const prefix = 'evidence/' + day.replace(/-/g, '/') + '/';
+      const matching = shards.filter(s => s && typeof s.path === 'string' && s.path.indexOf(prefix) === 0);
+      if (!matching.length) continue;
+      const map = {};
+      for (const s of matching) map[s.path] = { path: s.path, sha256: s.sha256, rows: s.rows };
+      byDay[day] = {
+        state_version: current.state_version,
+        state_sha256: current.state_sha256,
+        shards: map
+      };
+      wanted.delete(day);
+    }
+    if (!wanted.size || Number(current.state_version) <= 1) break;
+
+    const previousVersion = Number(current.state_version) - 1;
+    const text = await readFile(gh, branch, historyPath(previousVersion));
+    if (text === null) throw new Error('EVIDENCE_STATE_HISTORY_MISSING: v' + previousVersion);
+    let previous;
+    try { previous = JSON.parse(text); }
+    catch (_) { throw new Error('EVIDENCE_STATE_HISTORY_UNREADABLE: v' + previousVersion); }
+    const verdict = State.verify(current, previous);
+    if (!verdict.ok) {
+      throw new Error('EVIDENCE_STATE_HISTORY_UNVERIFIED: v' + current.state_version +
+        ' <- v' + previousVersion + ' ' + verdict.problems.join(','));
+    }
+    current = previous;
+    if (walked > 500) throw new Error('EVIDENCE_MANIFEST_HISTORY_LIMIT');
+  }
+
+  if (wanted.size) throw new Error('EVIDENCE_DAY_MANIFEST_MISSING: ' + [...wanted].sort().join(','));
+  return { byDay, state: loaded.state, states_walked: walked, branch };
+}
+
 // ── Reading back the evidence we already own ───────────────────────────────
 //
 // ACQUISITION never calls this: the walk needs the checkpoint and nothing else.
@@ -565,9 +620,20 @@ async function readDays(days, deps, kind, opts) {
   // so parsing forty thousand raw ledger payloads into objects to compare a
   // prefix was memory spent on nothing.
   const asLines = !!(opts && opts.lines);
-  const out = { events: [], lines: [], files: [], missing: [] };
+  const verifyManifest = !!(opts && opts.requireManifest);
+  const manifests = (opts && opts.manifest) || null;
+  const out = { events: [], lines: [], files: [], missing: [], verified: [] };
   for (const day of (days || [])) {
     const base = 'evidence/' + String(day).replace(/-/g, '/');
+    const dayManifest = manifests && manifests[String(day)];
+    if (verifyManifest && (!dayManifest || !dayManifest.shards)) {
+      throw new Error('EVIDENCE_DAY_MANIFEST_MISSING: ' + day);
+    }
+    const expected = dayManifest ? Object.keys(dayManifest.shards || {}).filter(p => {
+      const file = p.slice(p.lastIndexOf('/') + 1);
+      return file === name + '.ndjson.gz' || file.indexOf(name + '.') === 0;
+    }) : [];
+    const seenPaths = new Set();
     // Shards are numbered only when a day had to be split, so try the plain
     // name first and then the numbered series until one is absent.
     const candidates = ['/' + name + '.ndjson.gz'];
@@ -579,6 +645,16 @@ async function readDays(days, deps, kind, opts) {
       // tens of thousands of events — so they go through the same path.
       const packed = await readBytes(gh, branch, path);
       if (packed === null) { if (suffix === '/' + name + '.ndjson.gz') continue; break; }
+      if (verifyManifest) {
+        const expectedShard = dayManifest.shards[path];
+        if (!expectedShard) throw new Error('EVIDENCE_SHARD_UNMANIFESTED: ' + path);
+        const actual = State.sha256(packed);
+        if (actual !== expectedShard.sha256) {
+          throw new Error('EVIDENCE_SHARD_HASH_MISMATCH: ' + path);
+        }
+        seenPaths.add(path);
+        out.verified.push({ path, sha256: actual, state_version: dayManifest.state_version });
+      }
       const text = zlib.gunzipSync(packed).toString('utf8');
       for (const line of text.split('\n')) {
         if (!line) continue;
@@ -586,11 +662,17 @@ async function readDays(days, deps, kind, opts) {
       }
       out.files.push(path); found++;
     }
+    if (verifyManifest) {
+      for (const path of expected) {
+        if (!seenPaths.has(path)) throw new Error('EVIDENCE_SHARD_MISSING: ' + path);
+      }
+      if (!expected.length) throw new Error('EVIDENCE_KIND_MANIFEST_MISSING: ' + day + ':' + name);
+    }
     if (!found) out.missing.push(day);
   }
   return out;
 }
 
 module.exports = { STATE_PATH, JOURNAL_PATH, historyPath, runPath, journalRowPath, readBytes, readFile,
-  readState, commitRun, seedGenesis, uploadBlob, readDays,
+  readState, commitRun, seedGenesis, uploadBlob, readDays, resolveDayManifests,
   readJournal, readJournalRows, readJournalRowsEach, appendJournal, clearJournal, missingJournalShards };
