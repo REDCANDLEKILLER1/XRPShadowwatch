@@ -573,3 +573,5 @@ module.exports = async function handler(req, res) {
 module.exports.packEvents = packEvents;
 module.exports.buildStreamDone = buildStreamDone;
 module.exports.GZIP_EVENTS_ABOVE = GZIP_EVENTS_ABOVE;
+module.exports.storedReport = storedReport;
+module.exports.nextScheduledSlot = nextScheduledSlot;
