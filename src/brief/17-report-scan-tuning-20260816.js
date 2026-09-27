@@ -189,6 +189,25 @@
     return Number.isFinite(x) ? x : 0;
   }
 
+  // Preview transaction evidence is server-owned. Balance acquisition is a
+  // separate lane and may fail without invalidating a stored 418-wallet proof.
+  function previewEvidenceSnapshot() {
+    try {
+      var api = window.SW_EVIDENCE_INDEX;
+      if (!api || typeof api.currentRunEvidence !== 'function') return null;
+      var snap = api.currentRunEvidence();
+      if (!snap || snap.preview_read_only !== true || snap.live_acquisition_disabled !== true) return null;
+      return snap;
+    } catch (_) { return null; }
+  }
+
+  function previewWindowBeyondSnapshot(snap) {
+    var w = snap && snap.window;
+    if (!w) return false;
+    if (w.partial_reason === 'WINDOW_BEYOND_SNAPSHOT') return true;
+    return Array.isArray(w.days_without_shards) && w.days_without_shards.length > 0;
+  }
+
   function readPreviousSnapshot() {
     try {
       var x = JSON.parse(localStorage.getItem(SNAPSHOT_KEY) || '{}');
@@ -257,6 +276,50 @@
   function proofList() {
     var rows = [];
     try { rows = (typeof state !== 'undefined' && Array.isArray(state.wallets)) ? state.wallets : []; } catch (_) {}
+
+    // A preview stored-window run already carries one server verdict per roster
+    // wallet. Do not reduce 418/418 to the subset whose account_info calls
+    // happened to finish on the phone. ULDLY did exactly that (418/418 -> 0/418).
+    var preview = previewEvidenceSnapshot();
+    if (preview && Array.isArray(preview.wallets) && preview.wallets.length) {
+      var beyond = previewWindowBeyondSnapshot(preview);
+      return preview.wallets.map(function (w) {
+        var proven = w && (w.proven === true || w.status === 'COMPLETE');
+        var st = proven && !beyond ? 'COMPLETE' : 'UNPROVEN';
+        return {
+          proven_reason: st === 'COMPLETE' ? 'SERVER_STORED_WINDOW' : null,
+          unproven_reason: beyond ? 'WINDOW_BEYOND_SNAPSHOT'
+            : (proven ? null : ((w && w.error) || 'SERVER_WALLET_NOT_PROVEN')),
+          request_bounded: true,
+          transport_consistent: true,
+          run_id: preview.scan_id || null,
+          source: 'GITHUB_EVIDENCE_STORE',
+          actual_endpoint: null,
+          transport_epoch: null,
+          from_ledger: null,
+          through_ledger: w && w.proven_through != null ? w.proven_through : preview.anchor_ledger,
+          retained_from_ledger: null,
+          retained_through_ledger: null,
+          edge_fetch_from_ledger: null,
+          edge_fetch_to_ledger: null,
+          xrpl_requests: 0,
+          index_rows_returned: null,
+          address: w && w.address,
+          label: '',
+          status: st,
+          pages_scanned: 0,
+          boundary_reached: st === 'COMPLETE',
+          history_exhausted: false,
+          anchor_ledger: preview.anchor_ledger,
+          oldest_observed_ledger: null,
+          newest_observed_ledger: null,
+          history_exhaustion_proof: null,
+          error: st === 'COMPLETE' ? null
+            : (beyond ? 'WINDOW_BEYOND_SNAPSHOT' : ((w && w.error) || 'SERVER_WALLET_NOT_PROVEN'))
+        };
+      });
+    }
+
     var liveAnchor = null, liveRun = null;
     try {
       liveAnchor = (state.runAnchor && state.runAnchor.ok) ? state.runAnchor.anchor_ledger : null;
@@ -406,12 +469,20 @@
       var proofByAccount = Object.create(null);
 
       accountTxWindowDepth = async function (ws, account, startMs, endMs, limit) {
-        if (state.indexRun && state.indexRun.accounts.indexOf(account) >= 0 && state.effectiveWindow &&
-            startMs === state.effectiveWindow.start_ms && endMs === state.effectiveWindow.end_ms) {
+        var _previewStored = previewEvidenceSnapshot();
+        var _previewHasAccount = !!(_previewStored && Array.isArray(_previewStored.wallets) &&
+          _previewStored.wallets.some(function (w) { return w && w.address === account; }));
+        var _exactIndexedWindow = !!(state.indexRun && state.indexRun.accounts.indexOf(account) >= 0 &&
+          state.effectiveWindow && startMs === state.effectiveWindow.start_ms &&
+          endMs === state.effectiveWindow.end_ms);
+
+        if (state.indexRun && state.indexRun.accounts.indexOf(account) >= 0 &&
+            (_exactIndexedWindow || _previewHasAccount)) {
           try {
-            // Prove the new XRPL edge for this wallet without downloading its
-            // stored history. Once every wallet is proven, scanWallets loads a
-            // single canonical, deduplicated run stream from Neon below.
+            // Preview is already bounded by the checkpoint on the server. A
+            // client end-time mismatch caused by that cap must NOT reopen
+            // account_tx. Missing stored days are represented as
+            // WINDOW_BEYOND_SNAPSHOT by proofList(), never filled live here.
             var indexApi = window.SW_EVIDENCE_INDEX;
             var indexed = indexApi.proveWallet
               ? await indexApi.proveWallet(state.indexRun, account)
