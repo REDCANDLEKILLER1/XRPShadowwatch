@@ -385,6 +385,7 @@
     var w = windowRange || {};
     var qs = new URLSearchParams({
       action: 'report',
+      stream: '1',
       report_id: String(reportId || ''),
       window_start_ms: String(w.startMs),
       window_end_ms: String(w.endMs)
@@ -394,9 +395,24 @@
 
     function once() {
       used++;
+      var streamed = [];
       return fetch('/api/delta?' + qs.toString(), {
         method: 'GET', cache: 'no-store', credentials: 'same-origin'
       }).then(function (response) {
+        var type = String(response.headers && response.headers.get &&
+          response.headers.get('content-type') || '');
+        if (response.ok && response.body && response.body.getReader &&
+            /application\/x-ndjson/i.test(type)) {
+          return readNdjson(response, function (value) {
+            if (value && value.t === 'events' && Array.isArray(value.events)) {
+              for (var i = 0; i < value.events.length; i++) streamed.push(value.events[i]);
+            }
+          }, function () {}).then(function (final) {
+            final.events = streamed;
+            final.events_count = streamed.length;
+            return final;
+          });
+        }
         return plainBody(response);
       }).then(inflateEvents).catch(function (e) {
         var transport = e && e.status === undefined &&
