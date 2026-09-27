@@ -116,6 +116,51 @@ async function main() {
     assert(/EVIDENCE_DAY_MANIFEST_MISSING/.test(msg),msg);
   });
 
+  console.log('\n3b. older report days resolve through the verified state-history chain');
+  const baseState = State.genesis([{ address:'rWatched', scan_coverage_through:100 }], {
+    anchor_ledger:100, anchor_close:'2026-09-25T00:00:00.000Z'
+  });
+  const day26Path = 'evidence/2026/09/26/events.ndjson.gz';
+  const day27Path = 'evidence/2026/09/27/events.ndjson.gz';
+  const s2 = State.advance(baseState, {
+    report_id:'SW-20260926-AAAAA', scan_id:'s2', sealed_at:'2026-09-26T01:00:00.000Z',
+    anchor_ledger:200, anchor_close:'2026-09-26T01:00:00.000Z',
+    target_wallets:1, complete_wallets:1, balance_contradictions:0,
+    evidence_shards:[{path:day26Path,sha256:'1'.repeat(64),rows:1}],
+    wallets:[{address:'rWatched',last_proven_ledger:200,balance_drops:'1000000',
+      balance_ledger:200,reconciliation:'RECONCILED'}]
+  });
+  const s3 = State.advance(s2, {
+    report_id:'SW-20260927-BBBBB', scan_id:'s3', sealed_at:'2026-09-27T01:00:00.000Z',
+    anchor_ledger:300, anchor_close:'2026-09-27T01:00:00.000Z',
+    target_wallets:1, complete_wallets:1, balance_contradictions:0,
+    evidence_shards:[{path:day27Path,sha256:'2'.repeat(64),rows:1}],
+    wallets:[{address:'rWatched',last_proven_ledger:300,balance_drops:'2000000',
+      balance_ledger:300,reconciliation:'RECONCILED'}]
+  });
+  const stateFiles = new Map([
+    [Store.STATE_PATH, State.serialize(s3)],
+    [Store.historyPath(2), State.serialize(s2)],
+    [Store.historyPath(1), State.serialize(baseState)]
+  ]);
+  const stateGh = async (method,p,body,allow404) => {
+    if (method === 'GET' && /^\/git\/ref\/heads\//.test(p)) return {object:{sha:'snapshot-head'}};
+    if (method === 'GET' && p.startsWith('/contents/')) {
+      const name = decodeURIComponent(p.slice('/contents/'.length).split('?')[0]);
+      if (!stateFiles.has(name)) { if (allow404) return null; throw new Error('404'); }
+      const raw = Buffer.from(stateFiles.get(name),'utf8');
+      return {content:raw.toString('base64'),encoding:'base64',size:raw.length,sha:'blob-'+name};
+    }
+    throw new Error('UNEXPECTED_STATE_GH_CALL ' + method + ' ' + p);
+  };
+  await checkAsync('resolver finds each day at the state version that last wrote it', async () => {
+    const r = await Store.resolveDayManifests(['2026-09-26','2026-09-27'],{env:ENV,gh:stateGh});
+    assert.equal(r.ref,'snapshot-head');
+    assert.equal(r.byDay['2026-09-27'].state_version,3);
+    assert.equal(r.byDay['2026-09-26'].state_version,2);
+    assert.equal(r.byDay['2026-09-26'].shards[day26Path].sha256,'1'.repeat(64));
+  });
+
   console.log('\n4. the post-core fence never re-crawls a watched wallet');
   let networkCalls = 0;
   const elements = {};
