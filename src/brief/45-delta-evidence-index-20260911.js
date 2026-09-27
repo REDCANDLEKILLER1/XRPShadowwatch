@@ -381,18 +381,31 @@
     catch (_) { return window.state || null; }
   }
 
-  function getStoredReport(windowRange) {
+  function getStoredReport(windowRange, reportId, attempts) {
     var w = windowRange || {};
     var qs = new URLSearchParams({
       action: 'report',
+      report_id: String(reportId || ''),
       window_start_ms: String(w.startMs),
       window_end_ms: String(w.endMs)
     });
-    return fetch('/api/delta?' + qs.toString(), {
-      method: 'GET', cache: 'no-store', credentials: 'same-origin'
-    }).then(function (response) {
-      return plainBody(response);
-    }).then(inflateEvents);
+    var tries = Math.max(1, Number(attempts) || 2);
+    var used = 0;
+
+    function once() {
+      used++;
+      return fetch('/api/delta?' + qs.toString(), {
+        method: 'GET', cache: 'no-store', credentials: 'same-origin'
+      }).then(function (response) {
+        return plainBody(response);
+      }).then(inflateEvents).catch(function (e) {
+        var transport = e && e.status === undefined &&
+          (e.transport === true || e.name === 'TypeError');
+        if (transport && used < tries) return once();
+        throw e;
+      });
+    }
+    return once();
   }
 
   var run = null;   // the single acquisition this page performed
@@ -402,10 +415,13 @@
     isHidden: isHidden,
     whenVisible: whenVisible,
     begin: function (windowRange, accounts) {
+      var S = pageState();
+      var reportId = (S && S.reportId) || (S && S.seal && S.seal.report_id) || null;
+      if (!reportId) throw new Error('DELTA_REPORT_ID_REQUIRED');
       if (typeof log === 'function') {
         log('Evidence: reading the last verified checkpoint and compact stored window...');
       }
-      return getStoredReport(windowRange).then(function (result) {
+      return getStoredReport(windowRange, reportId, 2).then(function (result) {
         if (!result || result.stored_checkpoint !== true) {
           throw new Error((result && result.error) || 'STORED_REPORT_UNAVAILABLE');
         }
