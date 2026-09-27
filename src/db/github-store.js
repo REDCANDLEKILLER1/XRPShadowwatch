@@ -127,7 +127,7 @@ async function readState(deps) {
   const d = deps || {};
   const { token, repo, branch } = target(d.env);
   const gh = d.gh || A.client(token, repo, d.fetch || fetch);
-  const text = await readFile(gh, branch, STATE_PATH);
+  const text = await readFile(gh, branch, STATE_PATH, d.ref || null);
   if (text === null) return { state: null, missing: true, branch };
   let state;
   try { state = JSON.parse(text); }
@@ -547,7 +547,8 @@ async function resolveDayManifests(days, deps) {
   const d = deps || {};
   const { token, repo, branch } = target(d.env);
   const gh = d.gh || A.client(token, repo, d.fetch || fetch);
-  const loaded = await readState({ ...d, gh });
+  const pinnedRef = d.ref || (await A.archiveRef(gh, branch)).object.sha;
+  const loaded = await readState({ ...d, gh, ref: pinnedRef });
   if (loaded.missing || !loaded.state) throw new Error('EVIDENCE_STATE_MISSING');
   const wanted = new Set((days || []).map(String));
   const byDay = {};
@@ -573,7 +574,7 @@ async function resolveDayManifests(days, deps) {
     if (!wanted.size || Number(current.state_version) <= 1) break;
 
     const previousVersion = Number(current.state_version) - 1;
-    const text = await readFile(gh, branch, historyPath(previousVersion));
+    const text = await readFile(gh, branch, historyPath(previousVersion), pinnedRef);
     if (text === null) throw new Error('EVIDENCE_STATE_HISTORY_MISSING: v' + previousVersion);
     let previous;
     try { previous = JSON.parse(text); }
@@ -588,7 +589,7 @@ async function resolveDayManifests(days, deps) {
   }
 
   if (wanted.size) throw new Error('EVIDENCE_DAY_MANIFEST_MISSING: ' + [...wanted].sort().join(','));
-  return { byDay, state: loaded.state, states_walked: walked, branch };
+  return { byDay, state: loaded.state, states_walked: walked, branch, ref: pinnedRef };
 }
 
 // ── Reading back the evidence we already own ───────────────────────────────
@@ -643,7 +644,7 @@ async function readDays(days, deps, kind, opts) {
       const path = base + suffix;
       // Day shards are routinely larger than a megabyte — a busy day can hold
       // tens of thousands of events — so they go through the same path.
-      const packed = await readBytes(gh, branch, path);
+      const packed = await readBytes(gh, branch, path, opts && opts.ref);
       if (packed === null) { if (suffix === '/' + name + '.ndjson.gz') continue; break; }
       if (verifyManifest) {
         const expectedShard = dayManifest.shards[path];
