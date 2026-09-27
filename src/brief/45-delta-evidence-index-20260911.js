@@ -390,14 +390,39 @@
       window_start_ms: String(w.startMs),
       window_end_ms: String(w.endMs)
     });
-    var tries = Math.max(1, Number(attempts) || 2);
-    var used = 0;
+    var maxStrikes = Math.max(1, Number(attempts) || 3);
+    var strikes = 0, hiddenWaits = 0;
 
     function once() {
-      used++;
+      var controller = new AbortController();
+      var timer = null;
+      var sawHidden = isHidden();
       var streamed = [];
+
+      function idle() {
+        if (timer) { clearTimeout(timer); timer = null; }
+        if (isHidden()) return;
+        timer = setTimeout(function () { controller.abort(); }, IDLE_LIMIT_MS);
+      }
+      function onVis() {
+        if (isHidden()) {
+          sawHidden = true;
+          if (timer) { clearTimeout(timer); timer = null; }
+        } else {
+          idle();
+        }
+      }
+      function cleanup() {
+        if (timer) { clearTimeout(timer); timer = null; }
+        try { document.removeEventListener('visibilitychange', onVis); } catch (_) {}
+      }
+
+      try { document.addEventListener('visibilitychange', onVis); } catch (_) {}
+      idle();
+
       return fetch('/api/delta?' + qs.toString(), {
-        method: 'GET', cache: 'no-store', credentials: 'same-origin'
+        method: 'GET', cache: 'no-store', credentials: 'same-origin',
+        signal: controller.signal
       }).then(function (response) {
         var type = String(response.headers && response.headers.get &&
           response.headers.get('content-type') || '');
@@ -407,20 +432,47 @@
             if (value && value.t === 'events' && Array.isArray(value.events)) {
               for (var i = 0; i < value.events.length; i++) streamed.push(value.events[i]);
             }
-          }, function () {}).then(function (final) {
+          }, idle).then(function (final) {
             final.events = streamed;
             final.events_count = streamed.length;
             return final;
           });
         }
         return plainBody(response);
-      }).then(inflateEvents).catch(function (e) {
-        var transport = e && e.status === undefined &&
-          (e.transport === true || e.name === 'TypeError');
-        if (transport && used < tries) return once();
-        throw e;
+      }).then(function (value) {
+        cleanup();
+        return inflateEvents(value);
+      }, function (e) {
+        cleanup();
+        var err = e;
+        if (e && e.name === 'AbortError') {
+          err = new Error('STORED_REPORT_SILENT');
+          err.transport = true;
+        } else if (err && err.status === undefined && err.transport === undefined &&
+                   err.name === 'TypeError') {
+          err.transport = true;
+        }
+
+        var transport = err && err.transport === true && err.status === undefined;
+        if (!transport) throw err;
+
+        // Browser suspension is not evidence-store failure. Hold the request
+        // until the screen is back and do not spend a transport strike.
+        if (sawHidden || isHidden()) {
+          if (hiddenWaits >= HIDDEN_RETRY_MAX) throw err;
+          hiddenWaits++;
+          return whenVisible(HIDDEN_WAIT_MAX_MS).then(function (returned) {
+            if (!returned) throw err;
+            return once();
+          });
+        }
+
+        strikes++;
+        if (strikes >= maxStrikes) throw err;
+        return new Promise(function (resolve) { setTimeout(resolve, 2000); }).then(once);
       });
     }
+
     return once();
   }
 
@@ -440,7 +492,7 @@
       if (typeof log === 'function') {
         log('Evidence: reading the last verified checkpoint and compact stored window...');
       }
-      return getStoredReport(windowRange, reportId, 2).then(function (result) {
+      return getStoredReport(windowRange, reportId, 3).then(function (result) {
         if (!result || result.stored_checkpoint !== true) {
           throw new Error((result && result.error) || 'STORED_REPORT_UNAVAILABLE');
         }
