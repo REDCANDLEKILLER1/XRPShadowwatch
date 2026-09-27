@@ -15,6 +15,8 @@
 
   if (typeof window === 'undefined' || window.SW_PREVIEW_SUNDAY_FAILOPEN_20260927) return;
 
+  var LONG_WINDOW_BALANCE_BUDGET_MS = 45000;
+
   function sref() {
     try { if (typeof state === 'object' && state) return state; } catch (_) {}
     try { return window.state || window.__SHADOWWATCH_STATE__ || null; } catch (_) { return null; }
@@ -215,7 +217,13 @@
         var args = arguments;
         return Promise.resolve(originalBegin.apply(this, args)).then(function (ir) {
           var s = sref();
-          if (s && isPreviewStored() && txHours() > 48) s._previewLongWindowBalancePhase = true;
+          if (s && isPreviewStored() && txHours() > 48) {
+            s._previewLongWindowBalancePhase = true;
+            s._previewLongWindowBalanceStartedAt = Date.now();
+            s._previewLongWindowBalanceBudgetMs =
+              partialReason() === 'WINDOW_BEYOND_SNAPSHOT' ? 0 : LONG_WINDOW_BALANCE_BUDGET_MS;
+            s._previewLongWindowBalanceBudgetLogged = false;
+          }
           return ir;
         });
       };
@@ -230,7 +238,43 @@
       xrpl = function (ws, req) {
         var s = sref();
         if (s && s._previewLongWindowBalancePhase === true && req && req.command === 'account_info') {
-          return Promise.reject(new Error('PREVIEW_LEDGER_ONLY_BALANCE_SKIPPED'));
+          var started = Number(s._previewLongWindowBalanceStartedAt || Date.now());
+          var budget = Math.max(0, Number(s._previewLongWindowBalanceBudgetMs || 0));
+          var elapsed = Math.max(0, Date.now() - started);
+          var remaining = Math.max(0, budget - elapsed);
+
+          if (remaining <= 0) {
+            if (!s._previewLongWindowBalanceBudgetLogged) {
+              s._previewLongWindowBalanceBudgetLogged = true;
+              try {
+                if (typeof log === 'function') {
+                  log(partialReason() === 'WINDOW_BEYOND_SNAPSHOT'
+                    ? 'Preview 60h window exceeds stored snapshot — skipping live balance sweep and sealing ledger-only.'
+                    : 'Preview 60h balance budget exhausted — sealing from stored transaction evidence instead of waiting.');
+                }
+              } catch (_) {}
+            }
+            return Promise.reject(new Error(
+              partialReason() === 'WINDOW_BEYOND_SNAPSHOT'
+                ? 'PREVIEW_WINDOW_BEYOND_SNAPSHOT_BALANCE_SKIPPED'
+                : 'PREVIEW_LONG_WINDOW_BALANCE_BUDGET_EXPIRED'
+            ));
+          }
+
+          // Healthy phones have completed the full balance board in ~20s. Give
+          // that path a bounded chance. If the transport stalls, the caller is
+          // released at the shared 45s ceiling; at most the already-admitted
+          // reads remain in flight, and no new balance chunk is admitted.
+          var callArgs = arguments;
+          var live = Promise.resolve().then(function () {
+            return originalXrpl.apply(null, callArgs);
+          });
+          var ceiling = new Promise(function (_, reject) {
+            setTimeout(function () {
+              reject(new Error('PREVIEW_LONG_WINDOW_BALANCE_BUDGET_EXPIRED'));
+            }, remaining);
+          });
+          return Promise.race([live, ceiling]);
         }
         return originalXrpl.apply(this, arguments);
       };
@@ -246,7 +290,11 @@
         try { return await originalScanWallets.apply(this, arguments); }
         finally {
           var s = sref();
-          if (s) s._previewLongWindowBalancePhase = false;
+          if (s) {
+            s._previewLongWindowBalancePhase = false;
+            s._previewLongWindowBalanceStartedAt = 0;
+            s._previewLongWindowBalanceBudgetMs = 0;
+          }
         }
       };
       scanWallets.__swSundayFailOpen = true;
@@ -269,7 +317,8 @@
   } catch (_) {}
 
   window.SW_PREVIEW_SUNDAY_FAILOPEN_20260927 = {
-    version: '2026.09.27.1',
+    version: '2026.09.27.2',
+    long_window_balance_budget_ms: LONG_WINDOW_BALANCE_BUDGET_MS,
     read_only: true,
     partialReason: partialReason,
     balanceCoverage: balanceCoverage,
