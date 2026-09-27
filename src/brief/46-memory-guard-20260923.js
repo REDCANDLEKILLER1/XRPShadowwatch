@@ -412,3 +412,15 @@
     document.body.appendChild(g);
   } catch (_) {}
 })();
+
+
+(function loadPreviewSundayFailOpen() {
+  try {
+    if (document.querySelector('script[data-sw-preview-sunday-failopen]')) return;
+    var g = document.createElement('script');
+    g.src = '/src/brief/49-preview-sunday-failopen-20260927.js';
+    g.async = false;
+    g.setAttribute('data-sw-preview-sunday-failopen', '2026-09-27.1');
+    document.body.appendChild(g);
+  } catch (_) {}
+})();
