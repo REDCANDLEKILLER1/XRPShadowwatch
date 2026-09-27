@@ -10,6 +10,7 @@
     "serve": "python3 -m http.server 5173",
     "check": "node scripts/check-syntax.js",
     "test": "node scripts/run-tests.js",
+    "test:memory-guard": "node scripts/memory-guard.test.js",
     "test:smoke-baseline": "node scripts/in-page-smoke.test.js --write-baseline"
   },
   "repository": {
