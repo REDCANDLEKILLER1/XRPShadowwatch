@@ -50,6 +50,12 @@ async function main() {
     assert.deepEqual(S.classify({committed:false,reason:'RUN_INCOMPLETE'}), {status:'RESUMABLE_INCOMPLETE',httpStatus:202,ok:true});
     assert.deepEqual(S.classify({committed:false,reason:'RUN_CONTRADICTED'}), {status:'BLOCKED',httpStatus:503,ok:false});
   });
+  check('scheduler retries only resumable or transient failures', () => {
+    assert.equal(S.retryableResult({committed:false,reason:'RUN_INCOMPLETE'}), true);
+    assert.equal(S.retryableResult({committed:false,reason:'RUN_CONTRADICTED'}), false);
+    assert.equal(S.retryableError(new Error('XRPL connection timeout')), true);
+    assert.equal(S.retryableError(new Error('EVIDENCE_STATE_MISSING')), false);
+  });
 
   let released = false, called = null;
   const reader = { stats:{requests:7}, deadline:0 };
@@ -87,21 +93,79 @@ async function main() {
   });
 
   released = false;
-  const incomplete = await S.runScheduledAcquisition({
-    now: () => Date.UTC(2026,8,23,19,0,0),
+  const retryStart = Date.UTC(2026,8,23,19,0,0);
+  let retryCalls = 0, retryReleases = 0;
+  const retryJobs = [];
+  const retryReaders = [
+    {stats:{requests:3},deadline:0},
+    {stats:{requests:2},deadline:0}
+  ];
+  const retried = await S.runScheduledAcquisition({
+    now: () => retryStart,
+    clockNow: () => retryStart + 60000,
     makeReportId: () => 'SW-20260923-EBBBB',
     selectRoster: () => ({accounts:['rAlice']}),
-    acquireReader: () => ({stats:{requests:3}}),
-    releaseReader: () => { released=true; },
-    acquire: async () => ({committed:false,reason:'RUN_INCOMPLETE',target_wallets:1,complete_wallets:0,
-      failed_wallets:1,transactions:0,xrpl_requests:3,resumed:{adopted:true}}),
+    acquireReader: () => retryReaders[retryCalls],
+    releaseReader: () => { retryReleases++; },
+    acquire: async (job, deps) => {
+      retryJobs.push(job);
+      retryCalls++;
+      if (retryCalls === 1) {
+        deps.onPhase('wallet',{address:'rAlice',status:'FAILED'});
+        return {committed:false,reason:'RUN_INCOMPLETE',target_wallets:1,complete_wallets:0,
+          failed_wallets:1,transactions:0,xrpl_requests:3,resumed:{adopted:false}};
+      }
+      deps.onPhase('journal',{adopted:true,wallets_already_walked:0});
+      return {committed:true,reason:'COMMITTED',anchor_ledger:107200100,
+        anchor_close:'2026-09-23T19:00:00.000Z',state_version:41,target_wallets:1,
+        complete_wallets:1,failed_wallets:0,transactions:4,xrpl_requests:2,
+        resumed:{adopted:true,report_id:'SW-20260923-EBBBB'}};
+    },
     silent:true
   });
-  check('incomplete run is resumable, not reported as success/commit', () => {
+  check('incomplete scheduler run retries once and can advance', () => {
+    assert.equal(retryCalls,2);
+    assert.equal(retryReleases,2);
+    assert.equal(retried.httpStatus,200);
+    assert.equal(retried.body.status,'ADVANCED');
+    assert.equal(retried.body.attempts,2);
+    assert.equal(retried.body.retried,true);
+    assert.equal(retried.body.retry_exhausted,false);
+    assert.equal(retried.body.xrpl_requests,5);
+    assert(retried.body.phases.some(p => p.phase === 'retry' && p.trigger === 'RUN_INCOMPLETE'));
+  });
+  check('retry preserves report id and one absolute read deadline', () => {
+    assert.equal(retryJobs.length,2);
+    assert.strictEqual(retryJobs[0],retryJobs[1]);
+    assert.equal(retryJobs[0].report_id,'SW-20260923-EBBBB');
+    assert.equal(retryReaders[0].deadline,retryStart+S.READ_BUDGET_MS);
+    assert.equal(retryReaders[1].deadline,retryStart+S.READ_BUDGET_MS);
+  });
+
+  let budgetCalls = 0, budgetReleases = 0;
+  const incomplete = await S.runScheduledAcquisition({
+    now: () => retryStart,
+    clockNow: () => retryStart + S.READ_BUDGET_MS - S.RETRY_MIN_REMAINING_MS + 1,
+    makeReportId: () => 'SW-20260923-EDDDD',
+    selectRoster: () => ({accounts:['rAlice']}),
+    acquireReader: () => ({stats:{requests:3},deadline:0}),
+    releaseReader: () => { budgetReleases++; },
+    acquire: async () => {
+      budgetCalls++;
+      return {committed:false,reason:'RUN_INCOMPLETE',target_wallets:1,complete_wallets:0,
+        failed_wallets:1,transactions:0,xrpl_requests:3,resumed:{adopted:true}};
+    },
+    silent:true
+  });
+  check('incomplete run stays resumable when there is not enough safe retry budget', () => {
+    assert.equal(budgetCalls,1);
+    assert.equal(budgetReleases,1);
     assert.equal(incomplete.httpStatus,202);
     assert.equal(incomplete.body.status,'RESUMABLE_INCOMPLETE');
     assert.equal(incomplete.body.committed,false);
-    assert.equal(released,true);
+    assert.equal(incomplete.body.attempts,1);
+    assert.equal(incomplete.body.retried,false);
+    assert.equal(incomplete.body.retry_skipped,'INSUFFICIENT_BUDGET');
   });
 
   released = false;
