@@ -48,7 +48,9 @@
   }
 
   function isCompletedEvidencePack(p) {
-    return !!(p && p.tx_scan_coverage &&
+    return !!(p &&
+      !(p.partial_report && p.partial_report.persist_brief_memory === false) &&
+      p.tx_scan_coverage &&
       p.tx_scan_coverage.full_window_complete === true);
   }
 
