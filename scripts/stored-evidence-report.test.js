@@ -46,7 +46,7 @@ async function main() {
   });
   check('large stored windows use GET streaming instead of one buffered JSON body', () => {
     assert(/stream:\s*['"]1['"]/.test(layer45));
-    assert(/application\\\/x-ndjson/.test(apiSrc));
+    assert(/application\/x-ndjson/.test(apiSrc));
     assert(/t:\s*['"]events['"]/.test(apiSrc));
     assert(/events\.slice\(i, i \+ chunkSize\)/.test(apiSrc));
   });
