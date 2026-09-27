@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "analysis_id": "XRP-PRICE-ONLY-BLIND-BAND-2026-01-01_2026-09-22",
+  "status": "PRICE_ONLY_FINDING_NO_CAUSAL_INFERENCE",
+  "source": {
+    "provider": "Coinbase Exchange",
+    "product_id": "XRP-USD",
+    "granularity_seconds": 3600,
+    "timestamp_convention": "06:00 America/Chicago",
+    "selected_field": "open",
+    "dst_rule_2026": "CST UTC-6 through 2026-03-07; CDT UTC-5 beginning 2026-03-08 through dataset end.",
+    "documentation": "https://docs.cdp.coinbase.com/api-reference/exchange-api/rest-api/products/get-product-candles",
+    "row_count": 265
+  },
+  "observed_range": {
+    "min": 0.9952,
+    "max": 2.3769,
+    "mean": 1.3776788679245275,
+    "median": 1.3733
+  },
+  "predeclared_hypothesis_band": {
+    "low": 1.35,
+    "high": 1.45,
+    "days": 97,
+    "share": 0.3660377358490566,
+    "state_counts": {
+      "below": 111,
+      "inside": 97,
+      "above": 57
+    },
+    "longest_consecutive_days": 13,
+    "reentries": 23,
+    "longest_episodes": [
+      {
+        "start": "2026-04-23",
+        "end": "2026-05-05",
+        "days": 13
+      },
+      {
+        "start": "2026-03-01",
+        "end": "2026-03-08",
+        "days": 8
+      },
+      {
+        "start": "2026-04-14",
+        "end": "2026-04-21",
+        "days": 8
+      },
+      {
+        "start": "2026-09-03",
+        "end": "2026-09-10",
+        "days": 8
+      },
+      {
+        "start": "2026-05-16",
+        "end": "2026-05-22",
+        "days": 7
+      }
+    ]
+  },
+  "blind_scan": {
+    "method": "Inclusive $0.10-wide bands; lower edge stepped by $0.01 across the observed search range. The scan did not privilege the predeclared $1.40 hypothesis.",
+    "best": {
+      "low": 1.33,
+      "high": 1.43,
+      "days": 98
+    },
+    "top_distinct": [
+      {
+        "low": 1.33,
+        "high": 1.43,
+        "days": 98
+      },
+      {
+        "low": 1.39,
+        "high": 1.49,
+        "days": 70
+      },
+      {
+        "low": 1.28,
+        "high": 1.38,
+        "days": 62
+      },
+      {
+        "low": 1.05,
+        "high": 1.15,
+        "days": 54
+      },
+      {
+        "low": 1,
+        "high": 1.1,
+        "days": 42
+      },
+      {
+        "low": 1.1,
+        "high": 1.2,
+        "days": 33
+      },
+      {
+        "low": 1.44,
+        "high": 1.54,
+        "days": 25
+      },
+      {
+        "low": 1.23,
+        "high": 1.33,
+        "days": 19
+      }
+    ]
+  },
+  "monthly": {
+    "2026-01": {
+      "days": 31,
+      "inside_hypothesis": 0,
+      "avg_price": 1.9995516129032258
+    },
+    "2026-02": {
+      "days": 28,
+      "inside_hypothesis": 16,
+      "avg_price": 1.4399035714285717
+    },
+    "2026-03": {
+      "days": 31,
+      "inside_hypothesis": 20,
+      "avg_price": 1.3966741935483877
+    },
+    "2026-04": {
+      "days": 30,
+      "inside_hypothesis": 19,
+      "avg_price": 1.377816666666667
+    },
+    "2026-05": {
+      "days": 31,
+      "inside_hypothesis": 21,
+      "avg_price": 1.387083870967742
+    },
+    "2026-06": {
+      "days": 30,
+      "inside_hypothesis": 0,
+      "avg_price": 1.1369333333333331
+    },
+    "2026-07": {
+      "days": 31,
+      "inside_hypothesis": 0,
+      "avg_price": 1.0990419354838716
+    },
+    "2026-08": {
+      "days": 31,
+      "inside_hypothesis": 7,
+      "avg_price": 1.1764322580645161
+    },
+    "2026-09": {
+      "days": 22,
+      "inside_hypothesis": 14,
+      "avg_price": 1.3864909090909092
+    }
+  },
+  "interpretation_limits": [
+    "This establishes a concentration in sampled morning prices, not a defended price or intentional control.",
+    "The blind-band result can be influenced by persistence within broad market regimes; significance testing and control procedures are still required.",
+    "Wallet-flow evidence must be analyzed independently before linking actor behavior to this price concentration."
+  ]
+}
