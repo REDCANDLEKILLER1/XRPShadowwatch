@@ -44,6 +44,12 @@ async function main() {
     assert(/req\.method === ['"]GET['"] \? \[['"]state['"], ['"]health['"], ['"]report['"]\]/.test(apiSrc));
     assert(/input\.action === ['"]report['"]/.test(apiSrc));
   });
+  check('large stored windows use GET streaming instead of one buffered JSON body', () => {
+    assert(/stream:\s*['"]1['"]/.test(layer45));
+    assert(/application\\\/x-ndjson/.test(apiSrc));
+    assert(/t:\s*['"]events['"]/.test(apiSrc));
+    assert(/events\.slice\(i, i \+ chunkSize\)/.test(apiSrc));
+  });
   check('the stored response reports zero acquisition XRPL reads', () => {
     assert(/xrpl_requests:\s*0/.test(apiSrc));
     assert(/stored_checkpoint:\s*true/.test(apiSrc));
