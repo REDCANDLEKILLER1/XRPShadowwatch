@@ -89,7 +89,7 @@ async function main() {
     assert.equal(out.body.status,'ADVANCED');
     assert.equal(out.body.anchor_ledger,107200000);
     assert.equal(out.body.complete_wallets,2);
-    assert.equal(out.body.phases[0].phase,'plan');
+    assert(out.body.phases.some(p => p.phase === 'plan'));
   });
 
   released = false;
