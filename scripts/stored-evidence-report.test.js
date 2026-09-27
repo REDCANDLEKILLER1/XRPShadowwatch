@@ -37,7 +37,7 @@ async function main() {
   const metricsAt = layer45.indexOf('metrics: function ()', beginAt);
   const beginSrc = layer45.slice(beginAt, metricsAt);
   check('begin uses the GET-only stored report reader', () => {
-    assert(/getStoredReport\(windowRange, reportId, 2\)/.test(beginSrc));
+    assert(/getStoredReport\\(windowRange, reportId, 3\\)/.test(beginSrc));
     assert(!/postWithRetry\(\s*['"]run/.test(beginSrc));
   });
   check('stored report is allowed only on the GET action list', () => {
