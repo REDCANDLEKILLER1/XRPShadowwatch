@@ -133,6 +133,20 @@ function server() {
         return res.end(JSON.stringify({ error:'METHOD_NOT_ALLOWED' }));
       }
       const out = body.action === 'report' ? stubbed(body) : {};
+      if (body.stream === '1') {
+        res.writeHead(200, { 'Content-Type':'application/x-ndjson; charset=utf-8' });
+        const line = v => res.write(JSON.stringify(v) + '\n');
+        const events = Array.isArray(out.events) ? out.events : [];
+        const meta = { ...out }; delete meta.events;
+        line({t:'meta',events_count:events.length,state_version:out.state_version,
+          anchor_ledger:out.anchor_ledger});
+        for (let i = 0; i < events.length; i += 75) {
+          line({t:'events',events:events.slice(i,i+75)});
+        }
+        line({t:'done',...meta,events_streamed:events.length});
+        res.end();
+        return;
+      }
       require(path.join(ROOT, 'api/delta.js')).packEvents(out);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(out));
@@ -651,8 +665,8 @@ async function main() {
     streamed.evTotal === 2, streamed.evTotal);
   check('and the run is showing as the EVIDENCE phase while it walks',
     streamed.phase === 'EVIDENCE', streamed.phase);
-  check('the request is GET-only stored evidence, not an acquisition stream',
-    lastRequest && lastRequest.action === 'report' && lastRequest.stream === undefined,
+  check('the request is a GET-only stored-evidence stream, not an acquisition POST',
+    lastRequest && lastRequest.action === 'report' && lastRequest.stream === '1',
     lastRequest);
   // The whole point of streaming is the window still comes back with it.
   const streamedWindow = await page.evaluate(async () => {
@@ -665,7 +679,8 @@ async function main() {
   // the real done-line builder attached a window rather than the fixture
   // inventing one.
   check('the stored reader bypasses the acquisition done-line builder entirely',
-    builderAttached === null, builderAttached);
+    builderAttached === null && lastRequest && lastRequest.action === 'report',
+    { builderAttached, lastRequest });
 
   // ── SILENCE, NOT DURATION ───────────────────────────────────────────────
   // The old timeout fired at a flat 290 seconds whether or not the server was
