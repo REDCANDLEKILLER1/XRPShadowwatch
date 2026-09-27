@@ -93,7 +93,7 @@ function domStub() {
     assert(SRC48.includes("!(p.partial_report && p.partial_report.persist_brief_memory === false)"));
   });
 
-  await test('60h preview skips full-roster account_info after stored evidence arrives', async () => {
+  await test('60h WINDOW_BEYOND_SNAPSHOT skips live account_info immediately', async () => {
     const document = domStub();
     const state = { failedPack: null, seal: null };
     let nativeXrplCalls = 0;
@@ -103,9 +103,10 @@ function domStub() {
       metrics: () => ({
         scan_id:'preview-1', target_wallets:418, indexed_wallets:418,
         preview_read_only:true, live_acquisition_disabled:true,
-        reason:'PREVIEW_READ_ONLY_SNAPSHOT',
+        reason:'WINDOW_BEYOND_SNAPSHOT',
         report_window:{ from:'2026-09-24T12:00:00Z', to:'2026-09-27T00:00:00Z',
-          days_without_shards:[] }
+          partial:true, partial_reason:'WINDOW_BEYOND_SNAPSHOT',
+          days_without_shards:['2026-09-24'] }
       })
     };
     const sandbox = {
@@ -123,12 +124,45 @@ function domStub() {
     await sandbox.SW_EVIDENCE_INDEX.begin({});
     await assert.rejects(
       sandbox.xrpl({}, { command:'account_info', account:'rA' }),
-      /PREVIEW_LEDGER_ONLY_BALANCE_SKIPPED/
+      /PREVIEW_WINDOW_BEYOND_SNAPSHOT_BALANCE_SKIPPED/
     );
     assert.strictEqual(nativeXrplCalls, 0);
     assert.strictEqual(beginCalls, 1);
     await sandbox.xrpl({}, { command:'account_tx', account:'rA' });
     assert.strictEqual(nativeXrplCalls, 1, 'only account_info is skipped by this guard');
+  });
+
+  await test('healthy 60h stored window still permits bounded current balance reads', async () => {
+    const document = domStub();
+    const state = { failedPack: null, seal: null };
+    let nativeXrplCalls = 0;
+    const api = {
+      begin: async () => ({ scan_id:'preview-healthy' }),
+      metrics: () => ({
+        scan_id:'preview-healthy', target_wallets:418, indexed_wallets:418,
+        preview_read_only:true, live_acquisition_disabled:true,
+        reason:'PREVIEW_READ_ONLY_SNAPSHOT',
+        report_window:{ from:'2026-09-24T12:00:00Z', to:'2026-09-27T00:00:00Z',
+          days_without_shards:[] }
+      })
+    };
+    const sandbox = {
+      window:null, state, document, console, Date, Promise, Error,
+      getTxWindow: () => ({ hours:60 }),
+      SW_EVIDENCE_INDEX: api,
+      xrpl: async () => { nativeXrplCalls++; return { account_data:{ Balance:'1000000' } }; },
+      scanWallets: async () => {},
+      run: async () => {},
+      log() {}
+    };
+    sandbox.window = sandbox;
+    vm.createContext(sandbox);
+    vm.runInContext(SRC49, sandbox);
+    await sandbox.SW_EVIDENCE_INDEX.begin({});
+    const result = await sandbox.xrpl({}, { command:'account_info', account:'rA' });
+    assert(result && result.account_data);
+    assert.strictEqual(nativeXrplCalls, 1);
+    assert.strictEqual(sandbox.SW_PREVIEW_SUNDAY_FAILOPEN_20260927.long_window_balance_budget_ms, 45000);
   });
 
   await test('ULDLY shape seals partial ledger-only instead of leaving sections empty', async () => {
