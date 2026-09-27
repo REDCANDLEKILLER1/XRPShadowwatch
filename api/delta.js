@@ -236,6 +236,11 @@ async function buildPreviewReadOnlyRun(input, deps) {
     rows: []
   }, {});
 
+  const missingSnapshotDays = Array.isArray(assembled.days_without_shards)
+    ? assembled.days_without_shards.filter(Boolean)
+    : [];
+  const windowBeyondSnapshot = missingSnapshotDays.length > 0;
+
   const body = {
     scan_id: 'preview-' + anchorLedger,
     report_id: input.report_id || null,
@@ -250,7 +255,7 @@ async function buildPreviewReadOnlyRun(input, deps) {
     failures: wallets.filter(w => !w.proven).map(w => ({ address: w.address, error: w.error })),
     wallets,
     committed: false,
-    reason: 'PREVIEW_READ_ONLY_SNAPSHOT',
+    reason: windowBeyondSnapshot ? 'WINDOW_BEYOND_SNAPSHOT' : 'PREVIEW_READ_ONLY_SNAPSHOT',
     preview_read_only: true,
     live_acquisition_disabled: true,
     checkpoint_advanced: false,
@@ -261,7 +266,9 @@ async function buildPreviewReadOnlyRun(input, deps) {
       anchor_close: new Date(anchorCloseMs).toISOString(),
       requested_end: new Date(requestedEnd).toISOString(),
       capped_to_checkpoint: requestedEnd > anchorCloseMs,
-      claimed_beyond_checkpoint_ms: Math.max(0, requestedEnd - anchorCloseMs)
+      claimed_beyond_checkpoint_ms: Math.max(0, requestedEnd - anchorCloseMs),
+      window_beyond_snapshot: windowBeyondSnapshot,
+      missing_snapshot_days: missingSnapshotDays
     },
     events: assembled.events.map(slim),
     window: {
@@ -274,6 +281,8 @@ async function buildPreviewReadOnlyRun(input, deps) {
       from_stored: assembled.from_stored,
       from_this_run: 0,
       days_without_shards: assembled.days_without_shards,
+      partial: windowBeyondSnapshot,
+      partial_reason: windowBeyondSnapshot ? 'WINDOW_BEYOND_SNAPSHOT' : null,
       unattributed: assembled.unattributed,
       attributed_derived_only: assembled.attributed_derived_only,
       provenance: assembled.provenance
