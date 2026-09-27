@@ -192,7 +192,7 @@ async function storedReport(input, deps) {
     window_start_ms: startMs,
     window_end_ms: endMs,
     rows: []
-  }, { ...d, day_manifests: manifests.byDay });
+  }, { ...d, day_manifests: manifests.byDay, evidence_ref: manifests.ref });
 
   let pending = null;
   try {
