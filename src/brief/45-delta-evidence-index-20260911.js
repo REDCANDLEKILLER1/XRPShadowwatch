@@ -418,6 +418,9 @@
       var S = pageState();
       var reportId = (S && S.reportId) || (S && S.seal && S.seal.report_id) || null;
       if (!reportId) throw new Error('DELTA_REPORT_ID_REQUIRED');
+      resetProgress();
+      onProgress('start', { total: (accounts || []).length, done: 0, waiting_on: 'stored-evidence' });
+      onProgress('phase', { phase: 'stored-window', total: (accounts || []).length, done: 0 });
       if (typeof log === 'function') {
         log('Evidence: reading the last verified checkpoint and compact stored window...');
       }
@@ -427,7 +430,14 @@
         }
         run = result;
         run.byAddress = Object.create(null);
-        (result.wallets || []).forEach(function (w) { run.byAddress[w.address] = w; });
+        (result.wallets || []).forEach(function (w, i) {
+          run.byAddress[w.address] = w;
+          onProgress('wallet', { done: i + 1, total: result.wallets.length,
+            waiting_on: 'stored-evidence', stored: true });
+        });
+        onProgress('phase', { phase: 'stored-window-ready',
+          done: (result.wallets || []).length, total: (result.wallets || []).length,
+          rows: result.window && result.window.in_window });
 
         try {
           window.dispatchEvent(new CustomEvent('shadowwatch:evidence-freshness', {
