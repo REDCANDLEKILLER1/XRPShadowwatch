@@ -52,123 +52,93 @@ let dropNext = 0;          // simulate a browser killing an in-flight fetch
 let builderAttached = null; // did the REAL done-line builder attach a window?
 let requestCount = 0;
 function stubbed(body) {
+  const validWindow = Number.isFinite(Number(body.window_start_ms)) &&
+    Number.isFinite(Number(body.window_end_ms));
+  const events = /BIGWN|DROPD/.test(String(body.report_id || ''))
+    ? Array.from({ length: 260 }, (_, i) => event(i))
+    : [event(0), event(1), event(2)];
   return {
-    report_id: body.report_id, scan_id: body.scan_id || null,
-    anchor_ledger: 106968575, anchor_close: '2026-09-14T00:25:20.000Z',
-    state_sha256: 'f'.repeat(64), state_version_read: 3,
-    target_wallets: 2, complete_wallets: 2, failed_wallets: 0,
-    wallets_walked_this_attempt: 2, wallets_recovered_from_journal: 0,
-    balance_contradictions: 0, balance_contradiction_addresses: [],
-    balance_reconciled: 2, transactions: 3, transactions_walked: 3,
-    xrpl_requests: 6, failures: [], committed: true,
-    // A RESUMED run: every wallet came back from the journal, so the server
-    // labels each one RECOVERED and marks it proven. This is the exact shape
-    // the live server sent on 2026-09-14, when the report refused all 408.
+    source: 'STORED_VERIFIED_EVIDENCE',
+    stored_checkpoint: true,
+    report_id: body.report_id || 'SW-20260914-STORD',
+    scan_id: 'stored-v105-' + 'f'.repeat(12),
+    anchor_ledger: 106968575,
+    anchor_close: '2026-09-14T00:25:20.000Z',
+    state_sha256: 'f'.repeat(64),
+    state_version: 105,
+    target_wallets: 2,
+    complete_wallets: 2,
+    failed_wallets: 0,
+    balance_contradictions: 0,
+    balance_contradiction_addresses: [],
+    transactions: 0,
+    xrpl_requests: 0,
+    committed: false,
+    reason: 'STORED_CHECKPOINT_READ',
     wallets: /LEGCY/.test(String(body.report_id || ''))
-      // The LEGACY shape, and the one the incident actually arrived in: the
-      // label RECOVERED, no explicit `proven`, journal rows that could not be
-      // read. The bridge must refuse it rather than infer proof from the label.
       ? WALLETS.map(a => ({ address: a, status: 'RECOVERED',
-          proven_through: 106968575, rows: 2, reconciliation: 'RECONCILED',
-          attempts: 0, error: null }))
+          proven_through: 106968575, balance_drops:'1000000', balance_ledger:106968575,
+          reconciliation: 'RECONCILED', attempts: 0, error: null }))
       : /RESUM/.test(String(body.report_id || ''))
       ? WALLETS.map(a => ({ address: a, status: 'RECOVERED', proven: true,
-          proven_through: 106968575, rows: 2, reconciliation: 'RECONCILED',
-          attempts: 0, error: null }))
+          proven_through: 106968575, balance_drops:'1000000', balance_ledger:106968575,
+          reconciliation: 'RECONCILED', attempts: 0, error: null }))
       : WALLETS.map(a => ({ address: a, status: 'COMPLETE', proven: true,
-          proven_through: 106968575, rows: 2, reconciliation: 'RECONCILED',
-          attempts: 1, error: null })),
-    // A run asked WITHOUT a window gets no events, exactly as the server sends
-    // when it could not assemble one. That is the case section 6 drives.
-    ...(Number.isFinite(Number(body.window_start_ms)) && Number.isFinite(Number(body.window_end_ms))
-      ? { // THE POINT: stored evidence from earlier today, plus this run's delta.
-          // Keyed off the report id, not the window size: the compressed path
-          // belongs to the checks that ask for it, and nothing else should
-          // silently change shape underneath the other sections.
-          events: /BIGWN|DROPD/.test(String(body.report_id || ''))
-            ? Array.from({ length: 260 }, (_, i) => event(i))
-            : [event(0), event(1), event(2)],
-          window: { from: new Date(Number(body.window_start_ms)).toISOString(),
+          proven_through: 106968575, balance_drops:'1000000', balance_ledger:106968575,
+          reconciliation: 'RECONCILED', attempts: 0, error: null })),
+    ...(validWindow
+      ? { events,
+          window: {
+            from: new Date(Number(body.window_start_ms)).toISOString(),
             to: new Date(Number(body.window_end_ms)).toISOString(),
-            days: ['2026-09-13', '2026-09-14'], in_window: 3,
-            from_stored: 2, from_this_run: 1, days_without_shards: [], unattributed: 0,
-            // A repaired window, when the report asks for one.
+            days: ['2026-09-13','2026-09-14'],
+            in_window: events.length,
+            from_stored: events.length,
+            from_this_run: 0,
+            days_without_shards: [],
+            unattributed: 0,
+            shards_verified: 4,
             ...(/DERIV/.test(String(body.report_id || ''))
               ? { attributed_derived_only: 2, provenance: 'PARTIAL_RECONSTRUCTED' }
-              : { attributed_derived_only: 0, provenance: 'OBSERVED' }) } }
-      : { events: null, window: { error: 'REPORT_WINDOW_NOT_REQUESTED' } })
+              : { attributed_derived_only: 0, provenance: 'OBSERVED' })
+          } }
+      : { events: null, window: { error: 'REPORT_WINDOW_NOT_REQUESTED' } }),
+    freshness: {
+      evidence_time:'2026-09-14T00:25:20.000Z',
+      anchor_ledger:106968575,
+      state_version:105,
+      next_slot_start:'2026-09-14T02:00:00.000Z',
+      next_slot_end:'2026-09-14T02:59:59.999Z',
+      schedule_precision:'HOUR_BUCKET',
+      stale:false,
+      last_good_after_fail:false,
+      pending_refresh:null,
+      status:'CURRENT'
+    }
   };
 }
 
 function server() {
   return http.createServer((req, res) => {
-    if (req.url.split('?')[0] === '/api/delta') {
-      let raw = '';
-      req.on('data', c => { raw += c; });
-      req.on('end', () => {
-        let body = {}; try { body = JSON.parse(raw || '{}'); } catch (_) {}
-        lastRequest = body; requestCount++;
-        // A dropped connection, which is what a backgrounded tab produces: no
-        // status, no body, just a socket that stops.
-        if (dropNext > 0) { dropNext--; req.socket.destroy(); return; }
-        const out = body.action === 'run' ? stubbed(body) : {};
-        // The REAL packer, not a copy of it. A fake that gzips the same way by
-        // hand would let the two drift apart silently, and the browser half of
-        // this exchange would then be testing a compression the server no
-        // longer performs.
-        require(path.join(ROOT, 'api/delta.js')).packEvents(out);
-        // ── THE STREAMING SHAPE, BECAUSE THAT IS WHAT THE REPORT NOW ASKS FOR ──
-        //
-        // The report path sends `stream: true` and reads NDJSON: progress lines
-        // first, then one final line carrying exactly what the plain response
-        // carried. A fake that answered plain JSON to a streaming request would
-        // let the client's parser go untested against the shape it actually
-        // meets in production.
-        if (body.stream) {
-          res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8' });
-          const line = v => res.write(JSON.stringify(v) + '\n');
-          line({ t: 'start', report_id: body.report_id, roster_wallets: WALLETS.length });
-          line({ t: 'phase', phase: 'anchor', ledger: 106968575 });
-          WALLETS.forEach((a, i) => line({ t: 'wallet', n: i + 1, total: WALLETS.length,
-            address: a, status: 'COMPLETE', rows: 2 }));
-          line({ t: 'tick', waiting_on: 'wallets', wallets_done: WALLETS.length, xrpl_requests: 6 });
-          line({ t: 'phase', phase: 'window' });
-          // The REAL builder, for the same reason the plain path uses the real
-          // packer: a fixture that assembles its own done line would pass over
-          // a server that had stopped attaching the report window, and the
-          // report cannot be rendered without it.
-          // The summary the REAL server hands the builder is the acquisition
-          // result: it has no events and no window, because attaching those is
-          // the builder's whole job. Passing the stub's copy in would make the
-          // keys present whether or not the builder ran, which is precisely the
-          // thing being checked.
-          const { rows, wallets, events, events_gz, events_count, window: _w,
-            ...summary } = out;
-          return require(path.join(ROOT, 'api/delta.js'))
-            .buildStreamDone(summary, wallets, { rows: [] }, body)
-            .then(done => {
-              // The builder re-derives the window from the evidence store,
-              // which this fixture does not have — so it comes back as an
-              // error window. What matters is that it came back AT ALL: a
-              // builder that stopped attaching one leaves these keys undefined,
-              // and that is the defect this records rather than papers over.
-              builderAttached = ('window' in done) && ('events' in done);
-              // Having proved the builder ran, substitute the stub's window so
-              // the rest of the exchange has something to render.
-              if (out.events_gz !== undefined) { done.events_gz = out.events_gz;
-                done.events_count = out.events_count; done.events = null; }
-              else { done.events = out.events; }
-              done.window = out.window;
-              line(done);
-              res.end();
-            });
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(out));
-      });
+    const parsedUrl = new URL(req.url, 'http://127.0.0.1:' + PORT);
+    if (parsedUrl.pathname === '/api/delta') {
+      const body = Object.fromEntries(parsedUrl.searchParams.entries());
+      if (body.window_start_ms !== undefined) body.window_start_ms = Number(body.window_start_ms);
+      if (body.window_end_ms !== undefined) body.window_end_ms = Number(body.window_end_ms);
+      lastRequest = body; requestCount++;
+
+      if (dropNext > 0) { dropNext--; req.socket.destroy(); return; }
+      if (req.method !== 'GET') {
+        res.writeHead(405, { 'Content-Type':'application/json' });
+        return res.end(JSON.stringify({ error:'METHOD_NOT_ALLOWED' }));
+      }
+      const out = body.action === 'report' ? stubbed(body) : {};
+      require(path.join(ROOT, 'api/delta.js')).packEvents(out);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(out));
       return;
     }
-    const file = path.join(ROOT, decodeURIComponent(req.url.split('?')[0]));
+    const file = path.join(ROOT, decodeURIComponent(parsedUrl.pathname));
     if (!file.startsWith(ROOT + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       res.writeHead(404); return res.end();
     }
@@ -288,16 +258,17 @@ async function main() {
       ['rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh', 'rw2ciyaNshpHe7bCHo4bRWq6pqqynnWKQg']);
     return state.indexRun;
   });
-  check('the call went to the delta endpoint, and nothing went to the database one',
-    hits.includes('/api/delta') && !hits.includes('/api/evidence'), hits);
+  check('the call went to the GET-only delta report endpoint, and nothing went to the database one',
+    hits.includes('/api/delta') && !hits.includes('/api/evidence') &&
+    lastRequest && lastRequest.action === 'report', { hits, lastRequest });
   // The defect this catches: without the window the server can only return the
   // run's delta, which on a second run of a day is nearly empty.
   check('the window travels with the request',
     Number.isFinite(lastRequest.window_start_ms) && Number.isFinite(lastRequest.window_end_ms),
     lastRequest);
   check('and it is the window the report asked for',
-    lastRequest.window_start_ms === Date.UTC(2026, 8, 13, 0, 0) &&
-    lastRequest.window_end_ms === Date.UTC(2026, 8, 14, 0, 0));
+    Number(lastRequest.window_start_ms) === Date.UTC(2026, 8, 13, 0, 0) &&
+    Number(lastRequest.window_end_ms) === Date.UTC(2026, 8, 14, 0, 0));
   check('begin returns the anchor and roster the run proved',
     began.anchor_ledger === 106968575 && began.accounts.length === 2, began);
 
@@ -318,16 +289,19 @@ async function main() {
 
   console.log('\n5. the run\'s own account of itself');
   const metrics = await page.evaluate(() => window.SW_EVIDENCE_INDEX.metrics());
-  check('metrics name the window, separately from the delta',
+  check('metrics name the verified stored window',
     metrics.report_window && metrics.report_window.in_window === 3 &&
-    metrics.report_window.from_stored === 2, metrics.report_window);
+    metrics.report_window.from_stored === 3 &&
+    metrics.report_window.from_this_run === 0, metrics.report_window);
   check('stored evidence is counted as stored, not as freshly walked',
-    metrics.stored_transactions_loaded === 2, metrics.stored_transactions_loaded);
+    metrics.stored_transactions_loaded === 3 && metrics.requests === 0,
+    { stored: metrics.stored_transactions_loaded, requests: metrics.requests });
   check('balance contradictions are carried through to the report',
     metrics.balance_contradictions === 0 && Array.isArray(metrics.balance_contradiction_addresses));
   const finished = await page.evaluate(() => window.SW_EVIDENCE_INDEX.finish(state.indexRun));
-  check('finish reports COMPLETE when the checkpoint advanced',
-    finished.status === 'COMPLETE' && finished.checkpoint_advanced === true, finished);
+  check('finish reports COMPLETE from the stored checkpoint without advancing it',
+    finished.status === 'COMPLETE' && finished.checkpoint_advanced === false &&
+    finished.stored_checkpoint === true, finished);
 
   console.log('\n6. a proven wallet, and one that was not');
   const proof = await page.evaluate(() =>
@@ -677,8 +651,9 @@ async function main() {
     streamed.evTotal === 2, streamed.evTotal);
   check('and the run is showing as the EVIDENCE phase while it walks',
     streamed.phase === 'EVIDENCE', streamed.phase);
-  check('the request actually asked the server to stream',
-    lastRequest && lastRequest.stream === true, lastRequest && lastRequest.stream);
+  check('the request is GET-only stored evidence, not an acquisition stream',
+    lastRequest && lastRequest.action === 'report' && lastRequest.stream === undefined,
+    lastRequest);
   // The whole point of streaming is the window still comes back with it.
   const streamedWindow = await page.evaluate(async () => {
     var rows = await window.SW_EVIDENCE_INDEX.readRun();
@@ -689,8 +664,8 @@ async function main() {
   // Observed on the SERVER side of the exchange, not inferred from the client:
   // the real done-line builder attached a window rather than the fixture
   // inventing one.
-  check('the server\'s own done-line builder attached the window',
-    builderAttached === true, builderAttached);
+  check('the stored reader bypasses the acquisition done-line builder entirely',
+    builderAttached === null, builderAttached);
 
   // ── SILENCE, NOT DURATION ───────────────────────────────────────────────
   // The old timeout fired at a flat 290 seconds whether or not the server was
