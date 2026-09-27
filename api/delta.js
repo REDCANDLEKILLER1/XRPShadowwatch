@@ -267,7 +267,7 @@ async function storedReport(input, deps) {
       status: pending ? 'LAST_GOOD_RECOVERY_PENDING' : (slot.overdue ? 'LAST_GOOD_STALE' : 'CURRENT')
     }
   };
-  packEvents(body);
+  if (d.pack !== false) packEvents(body);
   return body;
 }
 
@@ -303,8 +303,29 @@ module.exports = async function handler(req, res) {
   try {
     if (input.action === 'report') {
       try {
-        const body = await storedReport(input, {});
-        return res.json(body);
+        const wantsStream = /^(1|true)$/i.test(String(input.stream || ''));
+        const body = await storedReport(input, { pack: !wantsStream });
+        if (!wantsStream) return res.json(body);
+
+        // Compact report windows can exceed Vercel's normal 4.5 MB response
+        // ceiling even after gzip. Stream NDJSON chunks instead of forcing the
+        // whole 24/48/60/72h window through one buffered JSON response.
+        res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+        res.setHeader('X-Accel-Buffering', 'no');
+        const events = Array.isArray(body.events) ? body.events : [];
+        const meta = { ...body };
+        delete meta.events;
+        delete meta.events_gz;
+        delete meta.events_count;
+        const line = value => { try { res.write(JSON.stringify(value) + '\n'); } catch (_) {} };
+        const chunkSize = 750;
+        line({ t:'meta', events_count:events.length,
+          state_version:body.state_version, anchor_ledger:body.anchor_ledger });
+        for (let i = 0; i < events.length; i += chunkSize) {
+          line({ t:'events', events:events.slice(i, i + chunkSize) });
+        }
+        line({ t:'done', ...meta, events_streamed:events.length });
+        return res.end();
       } catch (e) {
         const status = Number(e && e.httpStatus) || 503;
         return res.status(status).json({
