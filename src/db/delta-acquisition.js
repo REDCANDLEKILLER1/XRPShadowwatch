@@ -1561,7 +1561,7 @@ async function readReportWindow(input, deps) {
   // Events and their provenance, read together. Nothing else in the archive is
   // touched: two small file sets for the one or two days the window covers.
   const verifiedOpts = d.day_manifests
-    ? { manifest: d.day_manifests, requireManifest: true }
+    ? { manifest: d.day_manifests, requireManifest: true, ref: d.evidence_ref || null }
     : undefined;
   const [stored, seen] = await Promise.all([
     Store.readDays(days, d, undefined, verifiedOpts),
