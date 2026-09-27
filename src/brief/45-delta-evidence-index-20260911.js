@@ -492,7 +492,39 @@
         attributed_derived_only: (run.window && run.window.attributed_derived_only) || 0,
         balance_contradictions: run.balance_contradictions,
         balance_contradiction_addresses: run.balance_contradiction_addresses || [],
-        checkpoint_advanced: !!run.committed, freshness: run.freshness };
+        checkpoint_advanced: !!run.committed, freshness: run.freshness,
+        preview_read_only: run.preview_read_only === true,
+        live_acquisition_disabled: run.live_acquisition_disabled === true,
+        reason: run.reason || null };
+    },
+
+    // Synchronous proof snapshot for downstream coverage accounting. The full
+    // event payload stays private to this module; consumers only get the server's
+    // per-wallet verdicts and window metadata.
+    currentRunEvidence: function () {
+      if (!run) return null;
+      return {
+        scan_id: run.scan_id,
+        anchor_ledger: run.anchor_ledger,
+        anchor_close: run.anchor_close,
+        target_wallets: run.target_wallets,
+        complete_wallets: run.complete_wallets,
+        preview_read_only: run.preview_read_only === true,
+        live_acquisition_disabled: run.live_acquisition_disabled === true,
+        reason: run.reason || null,
+        window: run.window || null,
+        wallets: (run.wallets || []).map(function (w) {
+          return {
+            address: w.address,
+            status: w.status,
+            proven: w.proven,
+            proven_through: w.proven_through,
+            attempts: w.attempts,
+            reconciliation: w.reconciliation,
+            error: w.error || null
+          };
+        })
+      };
     },
 
     // Per-wallet, served from the run that already happened. A wallet that did
