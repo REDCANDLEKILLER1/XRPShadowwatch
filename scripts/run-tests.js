@@ -74,6 +74,7 @@ const SUITES = [
   ['memory-guard',          'memory-guard.test.js', null],
   ['compact-memory-flow',   'compact-memory-flow.test.js', null],
   ['coordination-render',    'coordination-render-memory.test.js', null],
+  ['preview-sunday-failopen','preview-sunday-failopen.test.js', null],
   // A morning run with no database: GitHub in, XRPL delta, GitHub out.
   ['delta-report-path',      'delta-report-path.test.js',        8213],
   ['run-journal',            'run-journal.test.js',              null],
