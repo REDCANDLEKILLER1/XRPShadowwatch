@@ -87,6 +87,36 @@
     }
   }
 
+  function installHeavyEnrichmentFence() {
+    try {
+      if (typeof scanOffers === 'function' && !scanOffers.__swStoredEvidenceFence) {
+        var originalOffers = scanOffers;
+        scanOffers = async function () {
+          if (!storedActive()) return originalOffers.apply(this, arguments);
+          try { if (typeof state !== 'undefined') state.offers = []; } catch (_) {}
+          try { if (typeof log === 'function') log('OFFERS: watched-wallet sweep skipped — stored RUN coverage does not depend on live offers.'); } catch (_) {}
+          return 0;
+        };
+        scanOffers.__swStoredEvidenceFence = true;
+        scanOffers.__swOriginal = originalOffers;
+      }
+    } catch (_) {}
+
+    try {
+      if (typeof runRelatedOfferScan === 'function' && !runRelatedOfferScan.__swStoredEvidenceFence) {
+        var originalRelatedOffers = runRelatedOfferScan;
+        runRelatedOfferScan = async function () {
+          if (!storedActive()) return originalRelatedOffers.apply(this, arguments);
+          try { if (typeof state !== 'undefined') state.relatedOffers = []; } catch (_) {}
+          try { if (typeof log === 'function') log('RELATED OFFERS: phone sweep skipped — optional live enrichment is outside stored coverage.'); } catch (_) {}
+          return [];
+        };
+        runRelatedOfferScan.__swStoredEvidenceFence = true;
+        runRelatedOfferScan.__swOriginal = originalRelatedOffers;
+      }
+    } catch (_) {}
+  }
+
   function formatTime(value) {
     if (!value) return 'unknown';
     var d = new Date(value);
@@ -138,9 +168,11 @@
   } catch (_) {}
 
   installXrplFence();
+  installHeavyEnrichmentFence();
 
   window.SW_STORED_EVIDENCE_CLIENT_20260927 = {
     installXrplFence: installXrplFence,
+    installHeavyEnrichmentFence: installHeavyEnrichmentFence,
     checkpointWallet: checkpointWallet,
     storedActive: storedActive,
     watched: watched,
