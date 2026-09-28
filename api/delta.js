@@ -177,6 +177,45 @@ function nextScheduledSlot(anchorClose, nowMs) {
   };
 }
 
+function capWindowToAnchor(startMs, endMs, anchorClose) {
+  const start = Number(startMs), end = Number(endMs), anchor = Date.parse(anchorClose || '');
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    const e = new Error('INVALID_REPORT_WINDOW'); e.httpStatus = 400; throw e;
+  }
+  if (!Number.isFinite(anchor)) {
+    const e = new Error('EVIDENCE_ANCHOR_CLOSE_INVALID'); e.httpStatus = 503; throw e;
+  }
+  if (start > anchor) {
+    const e = new Error('WINDOW_BEYOND_SNAPSHOT'); e.httpStatus = 409; throw e;
+  }
+  const effectiveEnd = Math.min(end, anchor);
+  return {
+    start_ms:start, requested_end_ms:end, effective_end_ms:effectiveEnd,
+    capped:effectiveEnd < end, overshoot_ms:effectiveEnd < end ? end - anchor : 0
+  };
+}
+
+function streamStoredReport(res, body, chunkSize) {
+  const events = Array.isArray(body && body.events) ? body.events : [];
+  const meta = { ...(body || {}) };
+  delete meta.events; delete meta.events_gz; delete meta.events_count;
+  const lines = [];
+  lines.push({ t:'meta', events_count:events.length,
+    state_version:body && body.state_version, anchor_ledger:body && body.anchor_ledger });
+  const size = Math.max(1, Number(chunkSize) || 750);
+  for (let i = 0; i < events.length; i += size) {
+    lines.push({ t:'events', events:events.slice(i, i + size) });
+  }
+  lines.push({ t:'done', ...meta, events_streamed:events.length });
+  if (res) {
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('X-Accel-Buffering', 'no');
+    for (const line of lines) res.write(JSON.stringify(line) + '\n');
+    res.end();
+  }
+  return lines;
+}
+
 async function storedReport(input, deps) {
   const d = deps || {};
   const startMs = Number(input && input.window_start_ms);
@@ -192,15 +231,10 @@ async function storedReport(input, deps) {
   if (loaded.missing || !loaded.state) {
     const e = new Error('EVIDENCE_STATE_MISSING'); e.httpStatus = 503; throw e;
   }
-  const anchorMs = Date.parse(loaded.state.anchor_close || '');
-  if (!Number.isFinite(anchorMs)) {
-    const e = new Error('EVIDENCE_ANCHOR_CLOSE_INVALID'); e.httpStatus = 503; throw e;
-  }
-  if (startMs > anchorMs) {
-    const e = new Error('WINDOW_BEYOND_SNAPSHOT'); e.httpStatus = 409; throw e;
-  }
-  const effectiveEndMs = Math.min(endMs, anchorMs);
-  const cappedToAnchor = effectiveEndMs < endMs;
+  const capped = capWindowToAnchor(startMs, endMs, loaded.state.anchor_close);
+  const anchorMs = Date.parse(loaded.state.anchor_close);
+  const effectiveEndMs = capped.effective_end_ms;
+  const cappedToAnchor = capped.capped;
   const days = D.windowDays({ window_start_ms: startMs, window_end_ms: effectiveEndMs });
   const manifests = await Store.resolveDayManifests(days, { ...d, loaded_state: loaded });
   const state = manifests.state;
@@ -271,7 +305,7 @@ async function storedReport(input, deps) {
       to: new Date(effectiveEndMs).toISOString(),
       effective_to: new Date(effectiveEndMs).toISOString(),
       capped_to_anchor: cappedToAnchor,
-      overshoot_ms: cappedToAnchor ? Math.max(0, endMs - anchorMs) : 0,
+      overshoot_ms: capped.overshoot_ms,
       proof_ceiling: state.anchor_close,
       days: assembled.days,
       in_window: assembled.in_window,
@@ -349,22 +383,8 @@ module.exports = async function handler(req, res) {
         // Compact report windows can exceed Vercel's normal 4.5 MB response
         // ceiling even after gzip. Stream NDJSON chunks instead of forcing the
         // whole 24/48/60/72h window through one buffered JSON response.
-        res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-        res.setHeader('X-Accel-Buffering', 'no');
-        const events = Array.isArray(body.events) ? body.events : [];
-        const meta = { ...body };
-        delete meta.events;
-        delete meta.events_gz;
-        delete meta.events_count;
-        const line = value => { try { res.write(JSON.stringify(value) + '\n'); } catch (_) {} };
-        const chunkSize = 750;
-        line({ t:'meta', events_count:events.length,
-          state_version:body.state_version, anchor_ledger:body.anchor_ledger });
-        for (let i = 0; i < events.length; i += chunkSize) {
-          line({ t:'events', events:events.slice(i, i + chunkSize) });
-        }
-        line({ t:'done', ...meta, events_streamed:events.length });
-        return res.end();
+        streamStoredReport(res, body, 750);
+        return;
       } catch (e) {
         const status = Number(e && e.httpStatus) || 503;
         return res.status(status).json({
@@ -635,3 +655,5 @@ module.exports.buildStreamDone = buildStreamDone;
 module.exports.GZIP_EVENTS_ABOVE = GZIP_EVENTS_ABOVE;
 module.exports.storedReport = storedReport;
 module.exports.nextScheduledSlot = nextScheduledSlot;
+module.exports.capWindowToAnchor = capWindowToAnchor;
+module.exports.streamStoredReport = streamStoredReport;
