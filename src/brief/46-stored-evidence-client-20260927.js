@@ -87,6 +87,39 @@
     }
   }
 
+  function installFailClosedPreflight() {
+    try {
+      if (typeof scanWallets !== 'function' || scanWallets.__swStoredPreflight) return;
+      var originalScanWallets = scanWallets;
+      scanWallets = async function () {
+        var index = window.SW_EVIDENCE_INDEX;
+        if (!index || typeof index.prefetch !== 'function') {
+          throw new Error('STORED_EVIDENCE_READER_UNAVAILABLE');
+        }
+        var range = (typeof getTxWindow === 'function') ? getTxWindow() : null;
+        var accounts = [];
+        try {
+          accounts = (typeof getActiveWatchlist === 'function' ? getActiveWatchlist() : [])
+            .map(function (w) { return w && w.address; }).filter(Boolean);
+        } catch (_) {}
+        try {
+          await index.prefetch(range, accounts);
+        } catch (e) {
+          try {
+            if (typeof log === 'function') {
+              log('STORED EVIDENCE UNAVAILABLE — report stopped before watched-wallet acquisition: ' +
+                String(e && e.message || e));
+            }
+          } catch (_) {}
+          throw e;
+        }
+        return originalScanWallets.apply(this, arguments);
+      };
+      scanWallets.__swStoredPreflight = true;
+      scanWallets.__swOriginal = originalScanWallets;
+    } catch (_) {}
+  }
+
   function installHeavyEnrichmentFence() {
     try {
       if (typeof scanOffers === 'function' && !scanOffers.__swStoredEvidenceFence) {
@@ -222,11 +255,13 @@
   } catch (_) {}
 
   installXrplFence();
+  installFailClosedPreflight();
   installHeavyEnrichmentFence();
   installReportFreshness();
 
   window.SW_STORED_EVIDENCE_CLIENT_20260927 = {
     installXrplFence: installXrplFence,
+    installFailClosedPreflight: installFailClosedPreflight,
     installHeavyEnrichmentFence: installHeavyEnrichmentFence,
     installReportFreshness: installReportFreshness,
     freshnessText: freshnessText,
