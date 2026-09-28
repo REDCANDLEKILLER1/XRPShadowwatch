@@ -522,6 +522,12 @@
             ' · ' + ((result.window && result.window.shards_verified) || 0) + ' shards hash-verified' +
             ' · 0 XRPL acquisition reads' +
             (fresh.status ? ' · ' + fresh.status : ''));
+          if (result.window && result.window.provenance === 'PARTIAL_RECONSTRUCTED') {
+            log('Evidence: PROVENANCE PARTIALLY RECONSTRUCTED — ' +
+              String(result.window.attributed_derived_only || 0) + ' of ' +
+              String(result.window.in_window || 0) +
+              ' events use derived attribution; transaction facts remain hash-verified.');
+          }
         }
 
         return {
@@ -647,6 +653,10 @@
 
     freshness: function () {
       return run && run.freshness ? run.freshness : null;
+    },
+
+    storedActive: function () {
+      return !!(run && run.stored_checkpoint === true);
     },
 
     // Kept so a diagnostic can still reach the database-backed path on a build
