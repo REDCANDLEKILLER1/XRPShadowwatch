@@ -198,6 +198,12 @@ async function main() {
   ctx.SW_EVIDENCE_INDEX = {
     storedActive() { return true; },
     prefetch() { return Promise.resolve({scan_id:'stored'}); },
+    freshness() { return {
+      status:'CURRENT', evidence_time:'2026-09-27T18:07:20.000Z',
+      anchor_ledger:107275618, state_version:105,
+      next_slot_start:'2026-09-27T20:00:00.000Z',
+      next_slot_end:'2026-09-27T20:59:59.999Z', schedule_precision:'HOUR_BUCKET'
+    }; },
     checkpointWallet(address) {
       return address === 'rWatched'
         ? { address, balance_drops:'12345000000', balance_ledger:107275618, proven:true }
