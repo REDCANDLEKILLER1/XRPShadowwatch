@@ -588,7 +588,9 @@ async function resolveDayManifests(days, deps) {
   const { token, repo, branch } = target(d.env);
   const gh = d.gh || A.client(token, repo, d.fetch || fetch);
   const pinnedRef = d.ref || (await A.archiveRef(gh, branch)).object.sha;
-  const loaded = await readState({ ...d, gh, ref: pinnedRef });
+  const loaded = d.loaded_state
+    ? { state:d.loaded_state, missing:false, branch }
+    : await readState({ ...d, gh, ref:pinnedRef });
   if (loaded.missing || !loaded.state) throw new Error('EVIDENCE_STATE_MISSING');
   const wanted = new Set((days || []).map(String));
   const byDay = {};
