@@ -131,6 +131,60 @@
     }
   }
 
+  function freshnessText() {
+    var f = null;
+    try {
+      var index = window.SW_EVIDENCE_INDEX;
+      f = index && typeof index.freshness === 'function' ? index.freshness() : null;
+    } catch (_) {}
+    if (!f) return '';
+    return 'EVIDENCE FRESHNESS\n' +
+      'Evidence current through: ' + formatTime(f.evidence_time) +
+      ' · ledger ' + String(f.anchor_ledger == null ? 'unknown' : f.anchor_ledger) +
+      ' · state v' + String(f.state_version == null ? 'unknown' : f.state_version) + '\n' +
+      'Next collection window: ' + formatTime(f.next_slot_start) + '–' +
+      formatTime(f.next_slot_end) + ' (' + String(f.schedule_precision || 'HOUR_BUCKET').replace(/_/g, ' ') + ')\n' +
+      'Status: ' + String(f.status || 'UNKNOWN').replace(/_/g, ' ');
+  }
+
+  function addFreshnessToText(text) {
+    var block = freshnessText();
+    if (!block || String(text || '').indexOf('EVIDENCE FRESHNESS') >= 0) return text;
+    var out = String(text == null ? '' : text);
+    var lines = out.split('\n');
+    var insertAt = 0;
+    for (var i = 0; i < Math.min(lines.length, 20); i++) {
+      if (/^(DATE:|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4})/.test(lines[i].trim())) {
+        insertAt = i + 1; break;
+      }
+    }
+    lines.splice(insertAt, 0, '', block, '');
+    return lines.join('\n');
+  }
+
+  function installReportFreshness() {
+    try {
+      if (typeof buildMorningStoryText === 'function' && !buildMorningStoryText.__swFreshness) {
+        var originalMorning = buildMorningStoryText;
+        buildMorningStoryText = function () {
+          var text = originalMorning.apply(this, arguments);
+          return storedActive() ? addFreshnessToText(text) : text;
+        };
+        buildMorningStoryText.__swFreshness = true;
+      }
+    } catch (_) {}
+    try {
+      if (typeof buildPublicReport === 'function' && !buildPublicReport.__swFreshness) {
+        var originalStructured = buildPublicReport;
+        buildPublicReport = function () {
+          var text = originalStructured.apply(this, arguments);
+          return storedActive() ? addFreshnessToText(text) : text;
+        };
+        buildPublicReport.__swFreshness = true;
+      }
+    } catch (_) {}
+  }
+
   function renderFreshness(f) {
     if (!f) return;
     var bar = document.getElementById('swEvidenceFreshness');
@@ -169,10 +223,14 @@
 
   installXrplFence();
   installHeavyEnrichmentFence();
+  installReportFreshness();
 
   window.SW_STORED_EVIDENCE_CLIENT_20260927 = {
     installXrplFence: installXrplFence,
     installHeavyEnrichmentFence: installHeavyEnrichmentFence,
+    installReportFreshness: installReportFreshness,
+    freshnessText: freshnessText,
+    addFreshnessToText: addFreshnessToText,
     checkpointWallet: checkpointWallet,
     storedActive: storedActive,
     watched: watched,
