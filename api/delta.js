@@ -185,12 +185,28 @@ async function storedReport(input, deps) {
     const e = new Error('INVALID_REPORT_WINDOW'); e.httpStatus = 400; throw e;
   }
 
-  const days = D.windowDays({ window_start_ms: startMs, window_end_ms: endMs });
-  const manifests = await Store.resolveDayManifests(days, d);
+  // Read the checkpoint first because its close time is the proof ceiling.
+  // A report may ASK for wall-clock "now", but it may only CLAIM through the
+  // last verified anchor. Never manufacture a quiet tail after that anchor.
+  const loaded = await Store.readState(d);
+  if (loaded.missing || !loaded.state) {
+    const e = new Error('EVIDENCE_STATE_MISSING'); e.httpStatus = 503; throw e;
+  }
+  const anchorMs = Date.parse(loaded.state.anchor_close || '');
+  if (!Number.isFinite(anchorMs)) {
+    const e = new Error('EVIDENCE_ANCHOR_CLOSE_INVALID'); e.httpStatus = 503; throw e;
+  }
+  if (startMs > anchorMs) {
+    const e = new Error('WINDOW_BEYOND_SNAPSHOT'); e.httpStatus = 409; throw e;
+  }
+  const effectiveEndMs = Math.min(endMs, anchorMs);
+  const cappedToAnchor = effectiveEndMs < endMs;
+  const days = D.windowDays({ window_start_ms: startMs, window_end_ms: effectiveEndMs });
+  const manifests = await Store.resolveDayManifests(days, { ...d, loaded_state: loaded });
   const state = manifests.state;
   const assembled = await D.readReportWindow({
     window_start_ms: startMs,
-    window_end_ms: endMs,
+    window_end_ms: effectiveEndMs,
     rows: []
   }, { ...d, day_manifests: manifests.byDay, evidence_ref: manifests.ref });
 
@@ -242,7 +258,12 @@ async function storedReport(input, deps) {
     events: assembled.events.map(slim),
     window: {
       from: new Date(startMs).toISOString(),
-      to: new Date(endMs).toISOString(),
+      requested_to: new Date(endMs).toISOString(),
+      to: new Date(effectiveEndMs).toISOString(),
+      effective_to: new Date(effectiveEndMs).toISOString(),
+      capped_to_anchor: cappedToAnchor,
+      overshoot_ms: cappedToAnchor ? Math.max(0, endMs - anchorMs) : 0,
+      proof_ceiling: state.anchor_close,
       days: assembled.days,
       in_window: assembled.in_window,
       from_stored: assembled.from_stored,
