@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20260928-4NDSF",
+  "generated_at": "2026-09-28T12:13:32.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107292386,
+  "transactions_in_window": null,
+  "new_observations": null,
+  "xrpl_requests": null,
+  "report_hash": "d25c19c3a31ab73fcbbfe9739c14eb936e901f67e8d72493dc093646ac1e677a"
+}

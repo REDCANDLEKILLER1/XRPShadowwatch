@@ -1,0 +1,11 @@
+[
+  {
+    "report_id": "SW-20260928-4NDSF",
+    "scan_id": "SC-MUL88JVW",
+    "generated_at": "2026-09-28T12:13:32.000Z",
+    "coverage_complete": true,
+    "anchor": 107292386,
+    "transactions": null,
+    "report_hash": "d25c19c3a31ab73fcbbfe9739c14eb936e901f67e8d72493dc093646ac1e677a"
+  }
+]
