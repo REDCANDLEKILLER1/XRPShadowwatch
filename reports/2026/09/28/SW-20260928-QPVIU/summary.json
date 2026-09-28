@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20260928-QPVIU",
+  "generated_at": "2026-09-28T13:04:11.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107293165,
+  "transactions_in_window": null,
+  "new_observations": null,
+  "xrpl_requests": null,
+  "report_hash": "7b6868a5bc28ab8bef58c5ca3ee8cfd9cfe8701200a094baa5461b3a671b9a3c"
+}
