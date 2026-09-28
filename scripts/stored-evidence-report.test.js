@@ -190,6 +190,7 @@ async function main() {
   ctx.window = ctx;
   ctx.addEventListener = (name, fn) => { listeners[name] = fn; };
   ctx.SW_EVIDENCE_INDEX = {
+    storedActive() { return true; },
     checkpointWallet(address) {
       return address === 'rWatched'
         ? { address, balance_drops:'12345000000', balance_ledger:107275618, proven:true }
