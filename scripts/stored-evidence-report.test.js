@@ -255,7 +255,52 @@ async function main() {
     assert.equal(slot.overdue,false);
   });
 
-  console.log('\n7. preview stays read-capable while writes remain guarded elsewhere');
+  console.log('\n7. requested wall-clock windows are capped to the verified anchor');
+  check('a request past the anchor is capped and its overshoot is explicit', () => {
+    const start = Date.parse('2026-09-28T08:00:00.000Z');
+    const end = Date.parse('2026-09-28T13:00:00.000Z');
+    const cap = DeltaApi.capWindowToAnchor(start,end,'2026-09-28T12:17:00.000Z');
+    assert.equal(cap.effective_end_ms,Date.parse('2026-09-28T12:17:00.000Z'));
+    assert.equal(cap.capped,true);
+    assert.equal(cap.overshoot_ms,43*60*1000);
+  });
+  check('a window beginning after the anchor is refused, not rendered quiet', () => {
+    assert.throws(() => DeltaApi.capWindowToAnchor(
+      Date.parse('2026-09-28T12:18:00.000Z'),
+      Date.parse('2026-09-28T13:00:00.000Z'),
+      '2026-09-28T12:17:00.000Z'), /WINDOW_BEYOND_SNAPSHOT/);
+  });
+
+  console.log('\n8. streamed NDJSON is event-equivalent to the compact JSON body');
+  check('meta/events/done reassemble to exactly the original event count', () => {
+    const events = Array.from({length:1601},(_,i)=>({hash:'H'+i,ledger_index:1000+i}));
+    const body = {source:'STORED_VERIFIED_EVIDENCE',state_version:105,
+      anchor_ledger:107292386,events,window:{in_window:events.length}};
+    const lines = DeltaApi.streamStoredReport(null,body,750);
+    const rebuilt = [];
+    lines.filter(x=>x.t==='events').forEach(x=>rebuilt.push(...x.events));
+    const done = lines[lines.length-1];
+    assert.equal(lines[0].events_count,events.length);
+    assert.equal(done.t,'done');
+    assert.equal(done.events_streamed,events.length);
+    assert.equal(rebuilt.length,events.length);
+    assert.deepEqual(rebuilt,events);
+    assert.equal(done.events,undefined);
+  });
+
+  console.log('\n9. store-backed net flow has a checkpoint baseline, not a device baseline');
+  check('the server response carries baseline balance fields and baseline checkpoint metadata', () => {
+    assert(/baseline_balance_drops/.test(apiSrc));
+    assert(/balance_baseline/.test(apiSrc));
+    assert(/resolveStateAtOrBefore/.test(apiSrc));
+  });
+  check('layer 17 prefers the stored baseline over the local snapshot', () => {
+    const l17 = fs.readFileSync(path.join(ROOT,'src/brief/17-report-scan-tuning-20260816.js'),'utf8');
+    assert(/balance_baseline_by_address/.test(l17));
+    assert(/storeBaseline\s*&&\s*storeBaseline\[w\.address\]/.test(l17));
+  });
+
+  console.log('\n10. preview stays read-capable while writes remain guarded elsewhere');
   check('the GET report path contains no acquisition call', () => {
     const reportAt = apiSrc.indexOf("if (input.action === 'report')");
     const stateAt = apiSrc.indexOf("if (input.action === 'health'", reportAt);
