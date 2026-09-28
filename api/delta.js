@@ -236,14 +236,14 @@ async function storedReport(input, deps) {
   const effectiveEndMs = capped.effective_end_ms;
   const cappedToAnchor = capped.capped;
   const days = D.windowDays({ window_start_ms: startMs, window_end_ms: effectiveEndMs });
-  const manifests = await Store.resolveDayManifests(days, { ...d, loaded_state: loaded });
-  const state = manifests.state;
-  const baseline = await Store.resolveStateAtOrBefore(startMs, {
-    ...d, ref:manifests.ref, loaded_state:state
+  const manifests = await Store.resolveDayManifests(days, {
+    ...d, loaded_state:loaded, baseline_ms:startMs
   });
+  const state = manifests.state;
+  const baselineState = manifests.baseline_state || null;
   const baselineByAddress = Object.create(null);
-  if (baseline.state && Array.isArray(baseline.state.wallets)) {
-    for (const w of baseline.state.wallets) if (w && w.address) baselineByAddress[w.address] = w;
+  if (baselineState && Array.isArray(baselineState.wallets)) {
+    for (const w of baselineState.wallets) if (w && w.address) baselineByAddress[w.address] = w;
   }
   const assembled = await D.readReportWindow({
     window_start_ms: startMs,
@@ -317,14 +317,15 @@ async function storedReport(input, deps) {
       provenance: assembled.provenance,
       shards_verified: (assembled.shards_verified || []).length,
       manifest_states_walked: manifests.states_walked,
-      balance_baseline: baseline.state ? {
-        state_version: baseline.state.state_version,
-        anchor_ledger: baseline.state.anchor_ledger,
-        anchor_close: baseline.state.anchor_close,
-        states_walked: baseline.states_walked
+      balance_baseline: baselineState ? {
+        state_version: baselineState.state_version,
+        anchor_ledger: baselineState.anchor_ledger,
+        anchor_close: baselineState.anchor_close,
+        states_walked: manifests.states_walked
       } : {
         state_version: null, anchor_ledger: null, anchor_close: null,
-        states_walked: baseline.states_walked, unavailable_reason: baseline.reason || 'UNAVAILABLE'
+        states_walked: manifests.states_walked,
+        unavailable_reason: manifests.baseline_unavailable_reason || 'UNAVAILABLE'
       }
     },
     freshness: {
