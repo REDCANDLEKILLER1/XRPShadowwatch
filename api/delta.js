@@ -227,7 +227,7 @@ async function storedReport(input, deps) {
   // Read the checkpoint first because its close time is the proof ceiling.
   // A report may ASK for wall-clock "now", but it may only CLAIM through the
   // last verified anchor. Never manufacture a quiet tail after that anchor.
-  const loaded = await Store.readState(d);
+  const loaded = await Store.readPinnedState(d);
   if (loaded.missing || !loaded.state) {
     const e = new Error('EVIDENCE_STATE_MISSING'); e.httpStatus = 503; throw e;
   }
@@ -237,7 +237,7 @@ async function storedReport(input, deps) {
   const cappedToAnchor = capped.capped;
   const days = D.windowDays({ window_start_ms: startMs, window_end_ms: effectiveEndMs });
   const manifests = await Store.resolveDayManifests(days, {
-    ...d, loaded_state:loaded, baseline_ms:startMs
+    ...d, gh:loaded.gh, ref:loaded.ref, loaded_state:loaded.state, baseline_ms:startMs
   });
   const state = manifests.state;
   const baselineState = manifests.baseline_state || null;
@@ -249,11 +249,12 @@ async function storedReport(input, deps) {
     window_start_ms: startMs,
     window_end_ms: effectiveEndMs,
     rows: []
-  }, { ...d, day_manifests: manifests.byDay, evidence_ref: manifests.ref });
+  }, { ...d, gh:loaded.gh, ref:loaded.ref,
+    day_manifests: manifests.byDay, evidence_ref: manifests.ref });
 
   let pending = null;
   try {
-    const jr = await Store.readJournal(d);
+    const jr = await Store.readJournal({ ...d, gh:loaded.gh, ref:loaded.ref });
     if (jr && jr.journal && !jr.unreadable) {
       const usable = Journal.usable(jr.journal, state);
       if (usable && usable.ok && jr.journal.report_id !== (state.sealed_run && state.sealed_run.report_id)) {
