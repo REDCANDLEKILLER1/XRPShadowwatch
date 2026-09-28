@@ -383,6 +383,13 @@
 
   function getStoredReport(windowRange, reportId, attempts) {
     var w = windowRange || {};
+    if (!Number.isFinite(Number(w.startMs)) || !Number.isFinite(Number(w.endMs)) ||
+        Number(w.endMs) < Number(w.startMs)) {
+      var invalid = new Error('INVALID_REPORT_WINDOW');
+      invalid.status = 400;
+      invalid.transport = false;
+      return Promise.reject(invalid);
+    }
     var qs = new URLSearchParams({
       action: 'report',
       stream: '1',
