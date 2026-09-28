@@ -137,6 +137,18 @@ async function readState(deps) {
   return { state, missing: false, branch };
 }
 
+// A report is a proof read, so every file in one report must come from one
+// immutable evidence commit. Resolve the branch once, then read latest.json and
+// every history/shard path through that SHA.
+async function readPinnedState(deps) {
+  const d = deps || {};
+  const { token, repo, branch } = target(d.env);
+  const gh = d.gh || A.client(token, repo, d.fetch || fetch);
+  const ref = d.ref || (await A.archiveRef(gh, branch)).object.sha;
+  const loaded = await readState({ ...d, gh, ref });
+  return { ...loaded, ref, gh };
+}
+
 // ── THE RESUME JOURNAL ─────────────────────────────────────────────────────
 //
 // Read at the start of a run, appended as the run goes, and deleted by the
@@ -727,5 +739,5 @@ async function readDays(days, deps, kind, opts) {
 }
 
 module.exports = { STATE_PATH, JOURNAL_PATH, historyPath, runPath, journalRowPath, readBytes, readFile,
-  readState, commitRun, seedGenesis, uploadBlob, readDays, resolveDayManifests, resolveStateAtOrBefore,
+  readState, readPinnedState, commitRun, seedGenesis, uploadBlob, readDays, resolveDayManifests, resolveStateAtOrBefore,
   readJournal, readJournalRows, readJournalRowsEach, appendJournal, clearJournal, missingJournalShards };
