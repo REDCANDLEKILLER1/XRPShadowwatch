@@ -292,7 +292,8 @@ async function main() {
   check('the server response carries baseline balance fields and baseline checkpoint metadata', () => {
     assert(/baseline_balance_drops/.test(apiSrc));
     assert(/balance_baseline/.test(apiSrc));
-    assert(/resolveStateAtOrBefore/.test(apiSrc));
+    assert(/baseline_ms\s*:\s*startMs/.test(apiSrc));
+    assert(/baseline_state/.test(apiSrc));
   });
   check('layer 17 prefers the stored baseline over the local snapshot', () => {
     const l17 = fs.readFileSync(path.join(ROOT,'src/brief/17-report-scan-tuning-20260816.js'),'utf8');
