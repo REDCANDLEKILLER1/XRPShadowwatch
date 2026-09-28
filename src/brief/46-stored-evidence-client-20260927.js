@@ -32,6 +32,15 @@
     return null;
   }
 
+  function storedActive() {
+    try {
+      var index = window.SW_EVIDENCE_INDEX;
+      return !!(index && typeof index.storedActive === 'function' && index.storedActive());
+    } catch (_) {
+      return false;
+    }
+  }
+
   function installXrplFence() {
     try {
       if (typeof xrpl !== 'function' || xrpl.__swStoredEvidenceFence) return false;
@@ -42,7 +51,7 @@
         var command = String(req.command || '');
         var address = req.account ? String(req.account) : '';
 
-        if (address && watched(address) && command === 'account_info') {
+        if (storedActive() && address && watched(address) && command === 'account_info') {
           var cp = checkpointWallet(address);
           if (!cp || cp.balance_drops === null || cp.balance_drops === undefined ||
               !Number.isFinite(Number(cp.balance_ledger))) {
@@ -61,7 +70,7 @@
           };
         }
 
-        if (address && watched(address) && command === 'account_tx') {
+        if (storedActive() && address && watched(address) && command === 'account_tx') {
           var fenced = new Error('WATCHED_ACCOUNT_TX_NETWORK_FENCED: stored evidence is authoritative for ' + address);
           fenced.storedEvidence = true;
           throw fenced;
@@ -133,6 +142,7 @@
   window.SW_STORED_EVIDENCE_CLIENT_20260927 = {
     installXrplFence: installXrplFence,
     checkpointWallet: checkpointWallet,
+    storedActive: storedActive,
     watched: watched,
     renderFreshness: renderFreshness
   };
