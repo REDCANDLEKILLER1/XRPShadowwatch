@@ -337,15 +337,18 @@ async function main() {
   // the quiet understatement this project exists to prevent.
   const refusal = await page.evaluate(async () => {
     state.reportId = 'SW-20260914-TEST2';
-    const run = await window.SW_EVIDENCE_INDEX.begin({}, []);
-    try { await window.SW_EVIDENCE_INDEX.readRun(run); return { threw: null }; }
-    catch (e) { return { threw: e.message }; }
+    try {
+      await window.SW_EVIDENCE_INDEX.begin({}, []);
+      return { threw: null };
+    } catch (e) {
+      return { threw: e.message, status: e.status };
+    }
   });
-  check('a run with no window makes readRun refuse, not substitute',
-    /REPORT_WINDOW_UNAVAILABLE/.test(refusal.threw || ''), refusal);
+  check('a run with no window is refused before transport, never substituted',
+    /INVALID_REPORT_WINDOW/.test(refusal.threw || '') && refusal.status === 400, refusal);
   const guarded = fs.readFileSync(path.join(ROOT, 'src/brief/45-delta-evidence-index-20260911.js'), 'utf8');
-  check('readRun refuses when the window is absent',
-    /REPORT_WINDOW_UNAVAILABLE/.test(guarded) && /if \(!run\.events\)/.test(guarded));
+  check('the stored reader validates the requested window before fetch',
+    /INVALID_REPORT_WINDOW/.test(guarded) && /Number\.isFinite\(Number\(w\.startMs\)\)/.test(guarded));
   check('and it does not fall back to the run\'s rows',
     !/run\.rows/.test(guarded), 'readRun still reads run.rows');
 
