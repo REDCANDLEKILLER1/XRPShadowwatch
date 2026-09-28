@@ -484,12 +484,22 @@
   }
 
   var run = null;   // the single acquisition this page performed
+  var prefetched = null; // fail-closed preflight consumed by core begin()
 
   window.SW_EVIDENCE_INDEX = {
     // Everything happens here. The name is kept because layer 17 calls it.
     isHidden: isHidden,
     whenVisible: whenVisible,
     begin: function (windowRange, accounts) {
+      if (prefetched) {
+        var cached = prefetched;
+        prefetched = null;
+        if (Number(cached.startMs) === Number(windowRange && windowRange.startMs) &&
+            Number(cached.endMs) === Number(windowRange && windowRange.endMs)) {
+          return Promise.resolve(cached.run);
+        }
+        throw new Error('STORED_PREFLIGHT_WINDOW_MISMATCH');
+      }
       var S = pageState();
       var reportId = (S && S.reportId) || (S && S.seal && S.seal.report_id) || null;
       if (!reportId) throw new Error('DELTA_REPORT_ID_REQUIRED');
@@ -556,6 +566,18 @@
           balance_baseline_by_address: run.balance_baseline_by_address,
           balance_baseline: result.window && result.window.balance_baseline
         };
+      });
+    },
+
+    prefetch: function (windowRange, accounts) {
+      var self = this;
+      return self.begin(windowRange, accounts).then(function (ir) {
+        prefetched = {
+          startMs: Number(windowRange && windowRange.startMs),
+          endMs: Number(windowRange && windowRange.endMs),
+          run: ir
+        };
+        return ir;
       });
     },
 
