@@ -592,11 +592,19 @@ async function resolveDayManifests(days, deps) {
   if (loaded.missing || !loaded.state) throw new Error('EVIDENCE_STATE_MISSING');
   const wanted = new Set((days || []).map(String));
   const byDay = {};
+  const baselineMs = Number(d.baseline_ms);
+  const needBaseline = Number.isFinite(baselineMs);
+  let baselineState = null;
   let current = loaded.state;
   let walked = 0;
 
-  while (wanted.size && current && Number(current.state_version) >= 1) {
+  while ((wanted.size || (needBaseline && !baselineState)) &&
+         current && Number(current.state_version) >= 1) {
     walked++;
+    if (needBaseline && !baselineState) {
+      const closeMs = Date.parse(current.anchor_close || '');
+      if (Number.isFinite(closeMs) && closeMs <= baselineMs) baselineState = current;
+    }
     const shards = Array.isArray(current.evidence_shards) ? current.evidence_shards : [];
     for (const day of [...wanted]) {
       const prefix = 'evidence/' + day.replace(/-/g, '/') + '/';
@@ -611,7 +619,7 @@ async function resolveDayManifests(days, deps) {
       };
       wanted.delete(day);
     }
-    if (!wanted.size || Number(current.state_version) <= 1) break;
+    if ((!wanted.size && (!needBaseline || baselineState)) || Number(current.state_version) <= 1) break;
 
     const previousVersion = Number(current.state_version) - 1;
     const text = await readFile(gh, branch, historyPath(previousVersion), pinnedRef);
@@ -629,7 +637,9 @@ async function resolveDayManifests(days, deps) {
   }
 
   if (wanted.size) throw new Error('EVIDENCE_DAY_MANIFEST_MISSING: ' + [...wanted].sort().join(','));
-  return { byDay, state: loaded.state, states_walked: walked, branch, ref: pinnedRef };
+  return { byDay, state: loaded.state, states_walked: walked, branch, ref: pinnedRef,
+    baseline_state: baselineState,
+    baseline_unavailable_reason: needBaseline && !baselineState ? 'NO_CHECKPOINT_AT_OR_BEFORE_WINDOW' : null };
 }
 
 // ── Reading back the evidence we already own ───────────────────────────────
