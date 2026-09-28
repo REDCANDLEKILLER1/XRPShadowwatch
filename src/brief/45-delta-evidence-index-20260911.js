@@ -498,8 +498,15 @@
         }
         run = result;
         run.byAddress = Object.create(null);
+        run.balance_baseline_by_address = Object.create(null);
         (result.wallets || []).forEach(function (w, i) {
           run.byAddress[w.address] = w;
+          if (w.baseline_balance_drops !== null && w.baseline_balance_drops !== undefined) {
+            run.balance_baseline_by_address[w.address] = {
+              balance_xrp: Number(w.baseline_balance_drops) / 1000000,
+              balance_ledger: w.baseline_balance_ledger
+            };
+          }
           onProgress('wallet', { done: i + 1, total: result.wallets.length,
             waiting_on: 'stored-evidence', stored: true });
         });
@@ -538,7 +545,9 @@
           roster_hash: result.state_sha256 || 'github-state',
           committed: false,
           stored_checkpoint: true,
-          freshness: result.freshness
+          freshness: result.freshness,
+          balance_baseline_by_address: run.balance_baseline_by_address,
+          balance_baseline: result.window && result.window.balance_baseline
         };
       });
     },
