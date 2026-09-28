@@ -536,6 +536,46 @@ async function seedGenesis(input, deps) {
     state_version: state.state_version, state_sha256: state.state_sha256, wallets: state.wallet_count };
 }
 
+// Resolve the newest verified checkpoint at or before a report window start.
+// This is the report's balance baseline. It replaces browser-local snapshots:
+// the same stored window must produce the same net-flow baseline on every device.
+async function resolveStateAtOrBefore(targetMs, deps) {
+  const d = deps || {};
+  const { token, repo, branch } = target(d.env);
+  const gh = d.gh || A.client(token, repo, d.fetch || fetch);
+  const pinnedRef = d.ref || (await A.archiveRef(gh, branch)).object.sha;
+  const loaded = d.loaded_state
+    ? { state:d.loaded_state, missing:false, branch }
+    : await readState({ ...d, gh, ref:pinnedRef });
+  if (loaded.missing || !loaded.state) throw new Error('EVIDENCE_STATE_MISSING');
+  const targetMsNum = Number(targetMs);
+  if (!Number.isFinite(targetMsNum)) throw new Error('INVALID_BASELINE_TIME');
+
+  let current = loaded.state, walked = 0;
+  while (current && Number(current.state_version) >= 1) {
+    const closeMs = Date.parse(current.anchor_close || '');
+    if (Number.isFinite(closeMs) && closeMs <= targetMsNum) {
+      return { state:current, states_walked:walked, branch, ref:pinnedRef };
+    }
+    if (Number(current.state_version) <= 1) break;
+    const previousVersion = Number(current.state_version) - 1;
+    const text = await readFile(gh, branch, historyPath(previousVersion), pinnedRef);
+    if (text === null) throw new Error('EVIDENCE_STATE_HISTORY_MISSING: v' + previousVersion);
+    let previous;
+    try { previous = JSON.parse(text); }
+    catch (_) { throw new Error('EVIDENCE_STATE_HISTORY_UNREADABLE: v' + previousVersion); }
+    const verdict = State.verify(current, previous);
+    if (!verdict.ok) {
+      throw new Error('EVIDENCE_STATE_HISTORY_UNVERIFIED: v' + current.state_version +
+        ' <- v' + previousVersion + ' ' + verdict.problems.join(','));
+    }
+    current = previous;
+    walked++;
+    if (walked > 500) throw new Error('EVIDENCE_BASELINE_HISTORY_LIMIT');
+  }
+  return { state:null, states_walked:walked, branch, ref:pinnedRef, reason:'NO_CHECKPOINT_AT_OR_BEFORE_WINDOW' };
+}
+
 // ── VERIFIED REPORT MANIFESTS ───────────────────────────────────────────────
 //
 // latest.json names the shards written by the LATEST successful acquisition,
@@ -675,5 +715,5 @@ async function readDays(days, deps, kind, opts) {
 }
 
 module.exports = { STATE_PATH, JOURNAL_PATH, historyPath, runPath, journalRowPath, readBytes, readFile,
-  readState, commitRun, seedGenesis, uploadBlob, readDays, resolveDayManifests,
+  readState, commitRun, seedGenesis, uploadBlob, readDays, resolveDayManifests, resolveStateAtOrBefore,
   readJournal, readJournalRows, readJournalRowsEach, appendJournal, clearJournal, missingJournalShards };
