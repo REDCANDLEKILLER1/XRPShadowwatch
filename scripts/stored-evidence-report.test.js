@@ -180,17 +180,24 @@ async function main() {
     body:{ firstChild:null, insertBefore(el){ elements[el.id] = el; } }
   };
   const listeners = {};
+  let offerCalls = 0, relatedOfferCalls = 0, scanCalls = 0;
   const ctx = {
     console, Promise, Error, Date, Number, String, Array, Object,
     document,
     window:null,
+    state:{reportId:null,offers:[{old:true}],relatedOffers:[{old:true}]},
+    getTxWindow:() => ({startMs:1,endMs:2}),
     getActiveWatchlist:() => [{address:'rWatched'}],
-    xrpl:async (ws, req) => { networkCalls++; return { live:true, request:req }; }
+    xrpl:async (ws, req) => { networkCalls++; return { live:true, request:req }; },
+    scanOffers:async () => { offerCalls++; return 7; },
+    runRelatedOfferScan:async () => { relatedOfferCalls++; return [{live:true}]; },
+    scanWallets:async () => { scanCalls++; return 'live-scan'; }
   };
   ctx.window = ctx;
   ctx.addEventListener = (name, fn) => { listeners[name] = fn; };
   ctx.SW_EVIDENCE_INDEX = {
     storedActive() { return true; },
+    prefetch() { return Promise.resolve({scan_id:'stored'}); },
     checkpointWallet(address) {
       return address === 'rWatched'
         ? { address, balance_drops:'12345000000', balance_ledger:107275618, proven:true }
@@ -221,6 +228,29 @@ async function main() {
     assert.equal(r.live,true);
   });
 
+  await checkAsync('stored RUN skips the 423 watched-wallet offer sweep', async () => {
+    offerCalls = 0; ctx.state.offers = [{old:true}];
+    const r = await ctx.scanOffers();
+    assert.equal(offerCalls,0);
+    assert.equal(r,0);
+    assert.deepEqual(ctx.state.offers,[]);
+  });
+  await checkAsync('stored RUN skips related-offer phone sweep', async () => {
+    relatedOfferCalls = 0; ctx.state.relatedOffers = [{old:true}];
+    const r = await ctx.runRelatedOfferScan();
+    assert.equal(relatedOfferCalls,0);
+    assert.deepEqual(r,[]);
+    assert.deepEqual(ctx.state.relatedOffers,[]);
+  });
+  await checkAsync('stored preflight failure stops before the legacy scanner can run', async () => {
+    scanCalls = 0; ctx.state.reportId = 'SW-TEST-PREFLIGHT';
+    ctx.SW_EVIDENCE_INDEX.prefetch = () => Promise.reject(new Error('STORE_DOWN'));
+    const msg = await refused(() => ctx.scanWallets());
+    assert.equal(scanCalls,0);
+    assert(/STORE_DOWN/.test(msg),msg);
+    ctx.state.reportId = null;
+  });
+
   console.log('\n5. freshness is visible and names the checkpoint rather than device time');
   check('the client layer is loaded after core', () => {
     const coreAt = html.indexOf('/src/brief/02-core.js');
@@ -243,6 +273,14 @@ async function main() {
     assert(/Ledger 107275618/.test(text),text);
     assert(/State v105/.test(text),text);
     assert(/Next collection window/.test(text),text);
+  });
+
+  check('freshness is injected into Morning/Structured text without replacing the report', () => {
+    const out = ctx.SW_STORED_EVIDENCE_CLIENT_20260927.addFreshnessToText(
+      'SHADOW WATCH\nSeptember 28, 2026\n\nExecutive Summary\nkept body');
+    assert(/EVIDENCE FRESHNESS/.test(out),out);
+    assert(/ledger 107275618/.test(out),out);
+    assert(/Executive Summary\nkept body/.test(out),out);
   });
 
   console.log('\n6. scheduler timing is presented as an hour bucket, not a fake exact minute');
