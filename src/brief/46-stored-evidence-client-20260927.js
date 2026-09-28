@@ -92,6 +92,15 @@
       if (typeof scanWallets !== 'function' || scanWallets.__swStoredPreflight) return;
       var originalScanWallets = scanWallets;
       scanWallets = async function () {
+        // Direct diagnostic calls to scanWallets (the XRPL resilience suites)
+        // are not report RUNs. The report path always mints state.reportId first.
+        try {
+          if (typeof state === 'undefined' || !state || !state.reportId) {
+            return originalScanWallets.apply(this, arguments);
+          }
+        } catch (_) {
+          return originalScanWallets.apply(this, arguments);
+        }
         var index = window.SW_EVIDENCE_INDEX;
         if (!index || typeof index.prefetch !== 'function') {
           throw new Error('STORED_EVIDENCE_READER_UNAVAILABLE');
