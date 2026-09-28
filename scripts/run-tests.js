@@ -72,6 +72,8 @@ const SUITES = [
   ['evidence-write-isolation','evidence-write-isolation.test.js',  null],
   // A morning run with no database: GitHub in, XRPL delta, GitHub out.
   ['delta-report-path',      'delta-report-path.test.js',        8213],
+  // Step 2: phones consume the verified store; no watched-wallet recrawl.
+  ['stored-evidence-report', 'stored-evidence-report.test.js',     null],
   ['run-journal',            'run-journal.test.js',              null],
   ['delta-acquisition',      'delta-acquisition.test.js',          null],
   // Server-owned evidence stays fresh even when no phone/report is open.

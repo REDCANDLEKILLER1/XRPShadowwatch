@@ -175,12 +175,14 @@ const writers = [
   const L45 = fs.readFileSync(path.join(ROOT, 'src/brief/45-delta-evidence-index-20260911.js'), 'utf8');
   const ACQ = fs.readFileSync(path.join(ROOT, 'src/db/delta-acquisition.js'), 'utf8');
   check('the server still reports the gap', /watched_not_in_roster: rosterAbsent/.test(ACQ));
-  check('the browser now reads it', /result\.watched_not_in_roster/.test(L45));
-  check('and logs it only when there IS a gap', /if \(absent\.length\) \{/.test(L45));
-  check('the line says the wallets are still walked and counted',
-        /still walked and counted/.test(L45));
-  check('it names the first few rather than dumping all of them',
-        /absent\.slice\(0, 3\)/.test(L45) && /and ' \+ \(absent\.length - 3\) \+ ' more/.test(L45));
+  check('the stored browser path no longer consumes acquisition-only roster-gap metadata',
+        !/result\.watched_not_in_roster/.test(L45));
+  check('the browser identifies the verified stored checkpoint as its authority',
+        /stored_checkpoint/.test(L45) && /STORED_VERIFIED_EVIDENCE|stored checkpoint/.test(L45));
+  check('the browser reports zero acquisition reads for a stored RUN',
+        /0 XRPL acquisition reads/.test(L45));
+  check('the browser does not describe omitted roster wallets as still walked by the phone',
+        !/still walked and counted/.test(L45));
   check('the state still refuses to drop a wallet the roster omits',
         /is NOT dropped/.test(ACQ) && /does not infer a decision from a list it was handed/.test(ACQ),
         'that behaviour is deliberate and must stay');

@@ -1560,9 +1560,12 @@ async function readReportWindow(input, deps) {
   }
   // Events and their provenance, read together. Nothing else in the archive is
   // touched: two small file sets for the one or two days the window covers.
+  const verifiedOpts = d.day_manifests
+    ? { manifest: d.day_manifests, requireManifest: true, ref: d.evidence_ref || null }
+    : undefined;
   const [stored, seen] = await Promise.all([
-    Store.readDays(days, d),
-    Store.readDays(days, d, 'participants')
+    Store.readDays(days, d, undefined, verifiedOpts),
+    Store.readDays(days, d, 'participants', verifiedOpts)
   ]);
   const fresh = (input.rows || []).map(r => X.eventOf({ ...r, close_time: r.close_time_iso || r.close_time }));
   const byHash = new Map();
@@ -1616,6 +1619,7 @@ async function readReportWindow(input, deps) {
     .map(e => ({ ...e, observed_via: observers.get(e.hash) || [] }))
     .sort(X.orderEvents);
   return { events, days, shards_read: stored.files.concat(seen.files),
+    shards_verified: (stored.verified || []).concat(seen.verified || []),
     days_without_shards: stored.missing,
     from_stored: stored.events.length, from_this_run: fresh.length, in_window: events.length,
     unattributed: events.filter(e => !e.observed_via.length).length,
