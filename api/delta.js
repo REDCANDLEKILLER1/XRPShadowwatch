@@ -204,6 +204,13 @@ async function storedReport(input, deps) {
   const days = D.windowDays({ window_start_ms: startMs, window_end_ms: effectiveEndMs });
   const manifests = await Store.resolveDayManifests(days, { ...d, loaded_state: loaded });
   const state = manifests.state;
+  const baseline = await Store.resolveStateAtOrBefore(startMs, {
+    ...d, ref:manifests.ref, loaded_state:state
+  });
+  const baselineByAddress = Object.create(null);
+  if (baseline.state && Array.isArray(baseline.state.wallets)) {
+    for (const w of baseline.state.wallets) if (w && w.address) baselineByAddress[w.address] = w;
+  }
   const assembled = await D.readReportWindow({
     window_start_ms: startMs,
     window_end_ms: effectiveEndMs,
@@ -235,6 +242,8 @@ async function storedReport(input, deps) {
     proven_through: w.last_proven_ledger,
     balance_drops: w.balance_drops,
     balance_ledger: w.balance_ledger,
+    baseline_balance_drops: baselineByAddress[w.address] ? baselineByAddress[w.address].balance_drops : null,
+    baseline_balance_ledger: baselineByAddress[w.address] ? baselineByAddress[w.address].balance_ledger : null,
     reconciliation: w.reconciliation
   }));
 
@@ -273,7 +282,16 @@ async function storedReport(input, deps) {
       attributed_derived_only: assembled.attributed_derived_only,
       provenance: assembled.provenance,
       shards_verified: (assembled.shards_verified || []).length,
-      manifest_states_walked: manifests.states_walked
+      manifest_states_walked: manifests.states_walked,
+      balance_baseline: baseline.state ? {
+        state_version: baseline.state.state_version,
+        anchor_ledger: baseline.state.anchor_ledger,
+        anchor_close: baseline.state.anchor_close,
+        states_walked: baseline.states_walked
+      } : {
+        state_version: null, anchor_ledger: null, anchor_close: null,
+        states_walked: baseline.states_walked, unavailable_reason: baseline.reason || 'UNAVAILABLE'
+      }
     },
     freshness: {
       evidence_time: state.anchor_close,
