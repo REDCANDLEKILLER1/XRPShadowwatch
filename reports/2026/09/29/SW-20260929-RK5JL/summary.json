@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20260929-RK5JL",
+  "generated_at": "2026-09-29T12:56:22.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107315267,
+  "transactions_in_window": null,
+  "new_observations": null,
+  "xrpl_requests": null,
+  "report_hash": "3c2d2b441cddbbd75ae40e8c65f1ef0f80e0e99527a7c0e1aabc5ca84f7e6faf"
+}

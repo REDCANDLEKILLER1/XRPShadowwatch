@@ -1,0 +1,84 @@
+🩸 ℜᴇᴅᴄᴀɴᴅʟᴇᴋɪʟʟᴇR 🩸
+ＳＨＡＤＯＷ ＷＡＴＣＨ
+✨ 𝐹𝑒𝑎𝑡𝑢𝑟𝑖𝑛𝑔 ✨
+𝓛𝓪𝓭𝔂 𝓚'𝓼
+🄴🅇🄲🄴🄻🄻🄴🄽🅃!
+𝖂𝖍𝖎𝖑𝖊 𝖄𝖔𝖚 𝖂ᴇʀᴇ 𝕾𝖑𝖊𝖊𝔭𝖎𝖓𝖌
+𝗫𝗥𝗣𝗟  𝕌ℙ𝔻𝔸𝕋𝔼 ✨✨ on
+☕ COFFEE & CRYPTO with 𝐒𝐓ΟΝΕ
+September 29, 2026
+
+Executive Summary
+─────────────────
+552.43M XRP moved across 135 large transfers in the window. Binance ×26 and Coinbase ×12 and +6 more absorbed 162.52M XRP this scan. The standout individual anomaly was 50.29M XRP moved from Bitget to an unidentified wallet in the scanned window. That recipient was still holding about 50.87M XRP at the follow-through check — observable behavior, not proof of intent. These classifications describe observed movement only; they do not prove intent.
+
+What Mattered Most
+──────────────────
+The part I couldn’t look away from: Binance ×26 and Coinbase ×12 and +6 more absorbed 162.52M XRP this scan, and can XRP price reach $1.80 after recent ETF inflows?. Keep that name in your head; it tends to come back.
+
+Evidence
+────────
+The evidence, plain and on-chain: 50.29M XRP moved from Bitget to an unidentified wallet in the scanned window. A second transfer of 25.93M XRP reached a large XRP holder. The discovery queue is carrying 67 flagged candidates — 8 found this scan, 6 recommended for review, separate from the 423 wallets on the permanent watch list — all of them flagged, none of them accused; behavioral evidence only, and not ownership proof. Up in the headlines, published news context: Can XRP price reach $1.80 after recent ETF inflows? · Bitwise files amendment for XRP ETF; no confirmed September launch yet · Bitwise CIO Explains XRP’s Institutional Appeal After 80% ETF Jump. No thesis first. Evidence first, every morning, no exceptions.
+
+
+Escrow Watch
+────────────
+Ripple escrow: 31.70B XRP locked now across 100 active validated-ledger escrow objects · registry check 20/20 known Ripple-labeled addresses.
+No Ripple escrow events are present in the acquired record for the last 36h; this alone does not prove an event-free window.
+Other XRPL escrow, last 36h: 1 new lock totalling 10.00M XRP · 0 releases, across 1 owner wallet.
+• Flare Core Vault: 1 lock 10.00M XRP
+Ripple and non-Ripple escrow are separate. Active escrow objects are ledger objects, not owner wallets. Scope is escrow observed by this scan, not every escrow on the XRPL.
+
+Under the Surface
+─────────────────
+Here’s the part the ≥1M whale counter can miss. Shadow Volume is the big-move spotlight: 552.43M XRP in 135 individual moves of at least 1M. Another 218.84M XRP moved in 773 payments from 100K to under 1M. 199.24M XRP across 710 of those payments matched 97 repeat-route, fan-in, or fan-out patterns. That is a signal to trace, not proof somebody was hiding funds.
+
+How to Read It
+──────────────
+New here? Shadow Volume shows the obvious ≥1M moves. Mid-size Flow catches 100K–<1M moves. Clustered Flow asks whether those smaller high-value payments keep using common routes. Net watched flow tells whether the tracked wallet board gained or lost XRP versus its prior snapshot.
+
+What To Watch Next
+──────────────────
+• Watch the absorbing wallets — are they stacking it, or handing it back out?
+• Check whether the largest recipient in this window makes another move.
+• Watch the exchanges around the open — that’s when the banks like to move.
+
+Verdict
+───────
+My call this morning: the board’s warm; something’s in play. (63/100). What earned the score: large transfer count, shadow volume, receiver forwarding. They call it noise. I call it evidence. Not financial advice. XRP-only forensic watch.
+
+I’m XRPMan, and I tell on the banks.
+
+LEDGER DIAGNOSTICS
+──────────────────
+• XRP price: ~$1.5510 (24h firm)
+• Market volume (exchanges, 24h): $3B
+• Native XRPL DEX reported volume (third-party aggregator, 24h): ~$10M
+• XRPL EVM: $34.9K TVL
+• RLUSD on XRPL (issuer obligations): 1.12B tokens
+• New funded XRPL accounts (2026-09-28): +3,129
+• Watched wallets: 423
+• Watched activity (all sizes, LAST 24H): 73820 transactions · 885.19M XRP moved · 209 wallets active
+• Shadow volume (whale moves ≥1M, LAST 24H): 552.43M XRP · 135 transfers
+• Net watched flow: 102.7K XRP outward
+
+🙏 THE DAILY PRAYER
+───────────────────
+God, let us be honest about what we did not see. An empty finding reported plainly is worth more than a full one we invented.
+
+📖 THE DAILY SCRIPTURE
+──────────────────────
+Proverbs 28:20 (KJV)
+“A faithful man shall abound with blessings: but he that maketh haste to be rich shall not be innocent.”
+
+Sources
+───────
+[1] Can XRP price reach $1.80 after recent ETF inflows? — https://news.google.com/rss/articles/CBMiekFVX3lxTE5SMzBFLVdrNHJvUXVxdFBZNEItZU9QdUVsYTUtUWZuMmt5NUs4UnhXZTlHOXNjTWtESGh2aVl4d1U0NGNKX1ppOWVISFB6dG84REY1N2d2c19PSms1b3hfY2hFMHVTNmQxSGZ1VnRZVk9sUTZpVHVXSTh3?oc=5
+[2] Bitwise files amendment for XRP ETF; no confirmed September launch yet — https://news.google.com/rss/articles/CBMinAFBVV95cUxPcklkRi1MWVlNdDRaaFoyUFhKM09veGNDaUszbFlxcjBOWkprN3JSQXJUT0U4NllseTlfN0g4cGFBMmEyTk9HSGdvbHNrNkhTRjA4X1FTQzA3MHhxSUJHVGo1UjRtVUtMSkcyT2JjSE1vM1poSktTbDlXQWtYVzAyNkNISzRqdWFBT293R1lwbDdMT0tnNEJWWlBBRXA?oc=5
+[3] Bitwise CIO Explains XRP’s Institutional Appeal After 80% ETF Jump — https://news.google.com/rss/articles/CBMilAFBVV95cUxNc3pnOTRvWEFtZi1pRFZuYldQQ2NsTV94NjdvVHVGeTg0dTY3WnhqMzF0MXg0cmc1ZFA2WTRiZFlFN0luUG9LT1FRNkVFTkNXbVQ5MkJ3S0RSTXJVaFlVSlA4WS1kTmxTSDVQQURqNjhtSHp0cldiQnE1dnB1dEtLdDdxbzYtcXFKbVZVZVMzRjhLZXlN?oc=5
+
+
+NEWS USED:
+[1] google_news@self — Can XRP price reach $1.80 after recent ETF inflows?
+[2] google_news@self — Bitwise files amendment for XRP ETF; no confirmed September launch yet
+[3] google_news@self — Bitwise CIO Explains XRP’s Institutional Appeal After 80% ETF Jump
