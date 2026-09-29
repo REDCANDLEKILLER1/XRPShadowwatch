@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20260929-DJX3T",
+  "generated_at": "2026-09-29T12:36:30.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107314959,
+  "transactions_in_window": null,
+  "new_observations": null,
+  "xrpl_requests": null,
+  "report_hash": "10b0d14d49fc5a0f5d1df14473240dda3a3e992b319db879710464e0fa6c1d3a"
+}
