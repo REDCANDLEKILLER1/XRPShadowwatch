@@ -1,0 +1,83 @@
+🩸 ℜᴇᴅᴄᴀɴᴅʟᴇᴋɪʟʟᴇR 🩸
+ＳＨＡＤＯＷ ＷＡＴＣＨ
+✨ 𝐹𝑒𝑎𝑡𝑢𝑟𝑖𝑛𝑔 ✨
+𝓛𝓪𝓭𝔂 𝓚'𝓼
+🄴🅇🄲🄴🄻🄻🄴🄽🅃!
+𝖂𝖍𝖎𝖑𝖊 𝖄𝖔𝖚 𝖂ᴇʀᴇ 𝕾𝖑𝖊𝖊𝔭𝖎𝖓𝖌
+𝗫𝗥𝗣𝗟  𝕌ℙ𝔻𝔸𝕋𝔼 ✨✨ on
+☕ COFFEE & CRYPTO with 𝐒𝐓ΟΝΕ
+September 29, 2026
+
+Executive Summary
+─────────────────
+554.61M XRP moved across 136 large transfers in the window. Binance ×19 and Coinbase and +6 more absorbed 137.06M XRP this scan. The standout individual anomaly was 50.29M XRP moved from a tracked high-value wallet to an unidentified wallet in the scanned window. That recipient was still holding about 50.87M XRP at the follow-through check — observable behavior, not proof of intent. These classifications describe observed movement only; they do not prove intent.
+
+What Mattered Most
+──────────────────
+Cut through the noise, here’s the signal: Binance ×19 and Coinbase and +6 more absorbed 137.06M XRP this scan, and XRP ETF Records $3.96M Inflow as Canary Capital Buys It All. That is the sort of move that only reads as odd in hindsight.
+
+Evidence
+────────
+Here’s exactly what the Ledger logged: 50.29M XRP moved from a tracked high-value wallet to an unidentified wallet in the scanned window. A second transfer of 25.93M XRP reached a large XRP holder. The discovery queue is holding 8 flagged candidates — 8 found this scan, 3 recommended for review, separate from the 423 wallets on the permanent watch list — all of them flagged, none of them accused; behavioral evidence only, and not ownership proof. And out in the daylight world, published news context: XRP ETF Records $3.96M Inflow as Canary Capital Buys It All · Canary XRP ETF Clients Buy $3.96 Million Worth of XRP · Can XRP price reach $1.80 after recent ETF inflows?. If it moved, it’s written down. If it’s written down, I found it.
+
+
+Escrow Watch
+────────────
+Ripple escrow: 31.70B XRP locked now across 100 active validated-ledger escrow objects · registry check 20/20 known Ripple-labeled addresses.
+No Ripple escrow events are present in the acquired record for the last 36h; this alone does not prove an event-free window.
+Other XRPL escrow, last 36h: 1 new lock totalling 10.00M XRP · 0 releases, across 1 owner wallet.
+• Flare Core Vault: 1 lock 10.00M XRP
+Ripple and non-Ripple escrow are separate. Active escrow objects are ledger objects, not owner wallets. Scope is escrow observed by this scan, not every escrow on the XRPL.
+
+Under the Surface
+─────────────────
+Here’s the part the ≥1M whale counter can miss. Shadow Volume is the big-move spotlight: 554.61M XRP in 136 individual moves of at least 1M. Another 219.08M XRP moved in 778 payments from 100K to under 1M. 198.45M XRP across 713 of those payments matched 96 repeat-route, fan-in, or fan-out patterns. That is a signal to trace, not proof somebody was hiding funds.
+
+How to Read It
+──────────────
+New here? Shadow Volume shows the obvious ≥1M moves. Mid-size Flow catches 100K–<1M moves. Clustered Flow asks whether those smaller high-value payments keep using common routes. Net watched flow tells whether the tracked wallet board gained or lost XRP versus its prior snapshot.
+
+What To Watch Next
+──────────────────
+• Watch the absorbing wallets — are they stacking it, or handing it back out?
+• Check whether the largest recipient in this window makes another move.
+• Track whether today’s quiet is the calm before a repositioning.
+
+Verdict
+───────
+My call this morning: the Ledger is restless, and I’m watching close. (63/100). What earned the score: large transfer count, shadow volume, receiver forwarding. Big money leaves small tracks. That’s the whole trick. Not financial advice. XRP-only forensic watch.
+
+I’m XRPMan, and I tell on the banks.
+
+LEDGER DIAGNOSTICS
+──────────────────
+• XRP price: ~$1.5476 (24h firm)
+• Market volume (exchanges, 24h): $3B
+• Native XRPL DEX observed volume (top 200-token index, 24h): ~$8M (~5.29M XRP, ledger-derived estimate)
+• XRPL EVM: $34.9K TVL
+• RLUSD on XRPL (issuer obligations): 1.12B tokens
+• New funded XRPL accounts (2026-09-28): +3,129
+• Watched wallets: 423
+• Watched activity (all sizes, LAST 24H): 73802 transactions · 887.95M XRP moved · 210 wallets active
+• Shadow volume (whale moves ≥1M, LAST 24H): 554.61M XRP · 136 transfers
+
+🙏 THE DAILY PRAYER
+───────────────────
+God, let us be honest about what we did not see. An empty finding reported plainly is worth more than a full one we invented.
+
+📖 THE DAILY SCRIPTURE
+──────────────────────
+Proverbs 28:20 (KJV)
+“A faithful man shall abound with blessings: but he that maketh haste to be rich shall not be innocent.”
+
+Sources
+───────
+[1] XRP ETF Records $3.96M Inflow as Canary Capital Buys It All — https://news.google.com/rss/articles/CBMinAFBVV95cUxOUmRsaFFBSGxLYWpOV2c0eTVBbllBSi1LRmZuakV0XzRvOXdfUTdEZDBwOGVHcFF4M3RVaWFJNW9BcUk1M082YWNRalZXUXlaSGdwREo2d25ENVZubHNvbV9TT1dQMV91TllOa0F6SXlxVWNkYUNZZWpHQkxNWnBTZVBXbV9oX1F4cFZEUmlUazNfeTZ1NlRlSlA5LXM?oc=5
+[2] Canary XRP ETF Clients Buy $3.96 Million Worth of XRP — https://news.google.com/rss/articles/CBMiWkFVX3lxTFBoUzNLeExvbDFMbldMSGRaalF5eGpkV3FKNUJvV0tjYmIzMnJNR0RxdXV6Y3BKanhqaldqREt3LUllbTdlc3IxMmE5OWk3M050UE93b0dJMFFCQQ?oc=5
+[3] Can XRP price reach $1.80 after recent ETF inflows? — https://news.google.com/rss/articles/CBMiekFVX3lxTE5SMzBFLVdrNHJvUXVxdFBZNEItZU9QdUVsYTUtUWZuMmt5NUs4UnhXZTlHOXNjTWtESGh2aVl4d1U0NGNKX1ppOWVISFB6dG84REY1N2d2c19PSms1b3hfY2hFMHVTNmQxSGZ1VnRZVk9sUTZpVHVXSTh3?oc=5
+
+
+NEWS USED:
+[1] google_news@self — XRP ETF Records $3.96M Inflow as Canary Capital Buys It All
+[2] google_news@self — Canary XRP ETF Clients Buy $3.96 Million Worth of XRP
+[3] google_news@self — Can XRP price reach $1.80 after recent ETF inflows?
