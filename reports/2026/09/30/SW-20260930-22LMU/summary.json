@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20260930-22LMU",
+  "generated_at": "2026-09-30T12:52:02.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107337472,
+  "transactions_in_window": null,
+  "new_observations": null,
+  "xrpl_requests": null,
+  "report_hash": "69c8b713aafaee3d7b8b5710aaa0a07560a36be0ef38a263732192d56a9118fe"
+}
