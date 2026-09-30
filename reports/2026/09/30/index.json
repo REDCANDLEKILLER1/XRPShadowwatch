@@ -1,0 +1,11 @@
+[
+  {
+    "report_id": "SW-20260930-4UCFC",
+    "scan_id": "SC-MUNWNF4T",
+    "generated_at": "2026-09-30T09:25:40.000Z",
+    "coverage_complete": true,
+    "anchor": 107334278,
+    "transactions": null,
+    "report_hash": "d497dfb8a7d8b77dc4635d8ea7ffbe783d7aa76ab6086240a7921c99bac31091"
+  }
+]
