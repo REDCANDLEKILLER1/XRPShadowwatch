@@ -7,5 +7,14 @@
     "anchor": 107334278,
     "transactions": null,
     "report_hash": "d497dfb8a7d8b77dc4635d8ea7ffbe783d7aa76ab6086240a7921c99bac31091"
+  },
+  {
+    "report_id": "SW-20260930-J6VG8",
+    "scan_id": "SC-MUO2AA6O",
+    "generated_at": "2026-09-30T12:03:31.000Z",
+    "coverage_complete": true,
+    "anchor": 107336724,
+    "transactions": null,
+    "report_hash": "de0de384efbabe6aec50a152f22093f82991fb64192148a1fdb95fd4404b37c8"
   }
 ]
