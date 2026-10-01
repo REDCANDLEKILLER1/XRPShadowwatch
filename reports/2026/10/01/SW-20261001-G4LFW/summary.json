@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20261001-G4LFW",
+  "generated_at": "2026-10-01T12:23:50.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107359386,
+  "transactions_in_window": null,
+  "new_observations": null,
+  "xrpl_requests": null,
+  "report_hash": "49386719f5b764b51dcc7f691ac93b761945745182fbd5808da84bf0934eec5d"
+}
