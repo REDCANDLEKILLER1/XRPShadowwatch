@@ -1,0 +1,11 @@
+[
+  {
+    "report_id": "SW-20261002-E383Q",
+    "scan_id": "SC-MUQZKSWB",
+    "generated_at": "2026-10-02T13:11:52.000Z",
+    "coverage_complete": true,
+    "anchor": 107382401,
+    "transactions": null,
+    "report_hash": "191ac978d0d5daf112384e8800d63cc9a9fd98d44309ccbabed5eeae40472b1c"
+  }
+]
