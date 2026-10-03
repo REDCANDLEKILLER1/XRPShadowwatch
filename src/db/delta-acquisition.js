@@ -790,18 +790,28 @@ async function acquire(input, deps) {
   // attempting the commit would be asking to re-claim a window we already
   // claimed. Wait for the next ledger and run again.
   if (Number(state.anchor_ledger) && anchor.ledger <= Number(state.anchor_ledger)) {
+    // ALREADY CURRENT IS A PROOF RESULT, NOT AN EMPTY RESULT. Returning zero
+    // wallet rows here used to make the browser conclude that none of the
+    // watched wallets were covered, then fall through to its legacy 423-wallet
+    // account_tx walker. The checkpoint already proves every state wallet
+    // through this anchor, so return those proofs explicitly. attachWindow()
+    // will assemble the requested report window from stored evidence.
+    const currentWallets = state.wallets.map(w => ({
+      address: w.address, status: 'COMPLETE', proven: true,
+      proven_through: Number(w.last_proven_ledger) || Number(state.anchor_ledger),
+      rows: 0, reconciliation: w.reconciliation || 'NOT_APPLICABLE', attempts: 0, error: null
+    }));
     return { report_id: run.report_id, scan_id: run.scan_id || null,
-      anchor_ledger: anchor.ledger, anchor_close: anchor.close_iso,
+      anchor_ledger: Number(state.anchor_ledger), anchor_close: state.anchor_close || anchor.close_iso,
       state_version_read: state.state_version,
-      target_wallets: state.wallets.length, complete_wallets: 0, failed_wallets: 0,
-      // The new wallets have nothing proven and would gladly be walked — but a
-      // state advance requires an anchor ahead of the last one, so admitting
-      // them against this ledger would be re-claiming a window already claimed.
-      // They are admitted on the next ledger, one wait, no work wasted.
+      target_wallets: state.wallets.length, complete_wallets: state.wallets.length, failed_wallets: 0,
+      wallets: currentWallets,
       wallets_pending_admission: waiting.length,
       balance_contradictions: 0, balance_contradiction_addresses: [], balance_reconciled: 0,
       transactions: 0, xrpl_requests: reader.stats.requests, failures: [],
-      committed: false, reason: 'ANCHOR_NOT_ADVANCED',
+      freshness: { wallets_proven: state.wallets.length, wallets_recovered_from_journal: 0,
+        wallets_unavailable: 0 },
+      committed: false, reason: 'ALREADY_CURRENT',
       stored_anchor_ledger: Number(state.anchor_ledger) };
   }
 
@@ -1431,6 +1441,36 @@ async function acquire(input, deps) {
         phase('uploading', { file: n, of: total, path, ms: Date.now() - tCommit }); } } });
     phase('committed', { took_ms: Date.now() - tCommit });
   } catch (e) {
+    // A concurrent run can advance the shared checkpoint after this run pinned
+    // its anchor but before it commits. If the refreshed store is already at
+    // this anchor (or beyond it), that is success-by-another-run: the database
+    // is authoritative and already contains proof through our edge. Returning
+    // a named ALREADY_CURRENT result lets attachWindow() read the committed
+    // evidence instead of turning a harmless race into a browser history walk.
+    if (/RUN_ANCHOR_NOT_AHEAD/.test(String(e && e.message || ''))) {
+      const latest = await Store.readState({ env: d.env, gh: d.gh, fetch: d.fetch });
+      if (latest && !latest.missing && latest.state &&
+          Number(latest.state.anchor_ledger) >= Number(anchor.ledger)) {
+        const latestWallets = (latest.state.wallets || []).map(w => ({
+          address: w.address, status: 'COMPLETE', proven: true,
+          proven_through: Number(w.last_proven_ledger) || Number(latest.state.anchor_ledger),
+          rows: 0, reconciliation: w.reconciliation || 'NOT_APPLICABLE', attempts: 0, error: null
+        }));
+        phase('already-current', { stored_anchor_ledger: Number(latest.state.anchor_ledger),
+          attempted_anchor_ledger: Number(anchor.ledger), concurrent: true });
+        return { ...summary,
+          anchor_ledger: Number(latest.state.anchor_ledger),
+          anchor_close: latest.state.anchor_close || anchor.close_iso,
+          state_version_read: latest.state.state_version,
+          target_wallets: latestWallets.length, complete_wallets: latestWallets.length,
+          failed_wallets: 0, transactions: 0, rows: [], wallets: latestWallets,
+          xrpl_requests: reader.stats.requests, failures: [],
+          committed: false, reason: 'ALREADY_CURRENT_CONCURRENT',
+          stored_anchor_ledger: Number(latest.state.anchor_ledger),
+          freshness: { wallets_proven: latestWallets.length,
+            wallets_recovered_from_journal: 0, wallets_unavailable: 0 } };
+      }
+    }
     // The gate refused, or GitHub did. Either way the walking was real and
     // must not be paid for twice, so it is written down before the failure is
     // reported. The checkpoint is exactly where it was.
