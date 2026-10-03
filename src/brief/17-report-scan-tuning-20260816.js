@@ -404,6 +404,16 @@
     try {
       if (typeof accountTxWindowDepth !== 'function' || accountTxWindowDepth._swTxCompleteness20260819) return;
       var proofByAccount = Object.create(null);
+      // Runtime acceptance meter for the database-first lock. This counts only
+      // calls that reach the legacy browser history walker below. Server-side
+      // delta acquisition, balances, escrow reads, and targeted follow-through
+      // are intentionally outside this counter.
+      if (!Number.isFinite(Number(window.SW_HISTORY_ACCOUNT_TX_COUNT))) {
+        window.SW_HISTORY_ACCOUNT_TX_COUNT = 0;
+      }
+      if (!window.SW_HISTORY_ACCOUNT_TX_WALLETS) {
+        window.SW_HISTORY_ACCOUNT_TX_WALLETS = Object.create(null);
+      }
 
       accountTxWindowDepth = async function (ws, account, startMs, endMs, limit) {
         if (state.indexRun && state.effectiveWindow &&
@@ -501,6 +511,9 @@
             }
             if (marker) req.marker = marker;
             var askedMax = req.ledger_index_max;
+            window.SW_HISTORY_ACCOUNT_TX_COUNT = (Number(window.SW_HISTORY_ACCOUNT_TX_COUNT) || 0) + 1;
+            window.SW_HISTORY_ACCOUNT_TX_WALLETS[account] =
+              (Number(window.SW_HISTORY_ACCOUNT_TX_WALLETS[account]) || 0) + 1;
             var res = await xrpl(ws, req);
 
             // THE POST-CONDITION, on WHAT CAME BACK. Checking the request only
