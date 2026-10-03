@@ -404,10 +404,26 @@
     try {
       if (typeof accountTxWindowDepth !== 'function' || accountTxWindowDepth._swTxCompleteness20260819) return;
       var proofByAccount = Object.create(null);
+      // Runtime acceptance meter for the database-first lock. This counts only
+      // calls that reach the legacy browser history walker below. Server-side
+      // delta acquisition, balances, escrow reads, and targeted follow-through
+      // are intentionally outside this counter.
+      if (!Number.isFinite(Number(window.SW_HISTORY_ACCOUNT_TX_COUNT))) {
+        window.SW_HISTORY_ACCOUNT_TX_COUNT = 0;
+      }
+      if (!window.SW_HISTORY_ACCOUNT_TX_WALLETS) {
+        window.SW_HISTORY_ACCOUNT_TX_WALLETS = Object.create(null);
+      }
 
       accountTxWindowDepth = async function (ws, account, startMs, endMs, limit) {
-        if (state.indexRun && state.indexRun.accounts.indexOf(account) >= 0 && state.effectiveWindow &&
+        if (state.indexRun && state.effectiveWindow &&
             startMs === state.effectiveWindow.start_ms && endMs === state.effectiveWindow.end_ms) {
+          // DATABASE-FIRST INVARIANT: once a server evidence run exists, an
+          // address missing from its proven roster is a coverage failure, not
+          // permission to fall through to the legacy browser account_tx walk.
+          if (state.indexRun.accounts.indexOf(account) < 0) {
+            throw new Error('EVIDENCE_WALLET_NOT_PROVEN: ' + account);
+          }
           try {
             // Prove the new XRPL edge for this wallet without downloading its
             // stored history. Once every wallet is proven, scanWallets loads a
@@ -495,6 +511,9 @@
             }
             if (marker) req.marker = marker;
             var askedMax = req.ledger_index_max;
+            window.SW_HISTORY_ACCOUNT_TX_COUNT = (Number(window.SW_HISTORY_ACCOUNT_TX_COUNT) || 0) + 1;
+            window.SW_HISTORY_ACCOUNT_TX_WALLETS[account] =
+              (Number(window.SW_HISTORY_ACCOUNT_TX_WALLETS[account]) || 0) + 1;
             var res = await xrpl(ws, req);
 
             // THE POST-CONDITION, on WHAT CAME BACK. Checking the request only

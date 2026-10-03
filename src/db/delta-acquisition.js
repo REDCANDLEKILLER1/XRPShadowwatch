@@ -790,19 +790,44 @@ async function acquire(input, deps) {
   // attempting the commit would be asking to re-claim a window we already
   // claimed. Wait for the next ledger and run again.
   if (Number(state.anchor_ledger) && anchor.ledger <= Number(state.anchor_ledger)) {
+    // ALREADY CURRENT IS A PROOF RESULT, NOT AN EMPTY RESULT. Returning zero
+    // wallet rows here used to make the browser conclude that none of the
+    // watched wallets were covered, then fall through to its legacy 423-wallet
+    // account_tx walker. The checkpoint already proves every state wallet
+    // through this anchor, so return those proofs explicitly. attachWindow()
+    // will assemble the requested report window from stored evidence.
+    const coveredAnchor = Number(state.anchor_ledger);
+    const currentWallets = state.wallets.map(w => {
+      const through = Number(w.last_proven_ledger) || 0;
+      const proven = through >= coveredAnchor;
+      return {
+        address: w.address,
+        status: proven ? 'COMPLETE' : 'FAILED',
+        proven,
+        proven_through: through,
+        rows: 0,
+        reconciliation: w.reconciliation || 'NOT_APPLICABLE',
+        attempts: 0,
+        error: proven ? null : 'EVIDENCE_WALLET_BEHIND_CHECKPOINT'
+      };
+    });
+    const currentProven = currentWallets.filter(w => w.proven).length;
+    const currentFailed = currentWallets.length - currentProven;
     return { report_id: run.report_id, scan_id: run.scan_id || null,
-      anchor_ledger: anchor.ledger, anchor_close: anchor.close_iso,
+      anchor_ledger: coveredAnchor, anchor_close: state.anchor_close || anchor.close_iso,
       state_version_read: state.state_version,
-      target_wallets: state.wallets.length, complete_wallets: 0, failed_wallets: 0,
-      // The new wallets have nothing proven and would gladly be walked — but a
-      // state advance requires an anchor ahead of the last one, so admitting
-      // them against this ledger would be re-claiming a window already claimed.
-      // They are admitted on the next ledger, one wait, no work wasted.
+      target_wallets: state.wallets.length, complete_wallets: currentProven, failed_wallets: currentFailed,
+      wallets: currentWallets,
       wallets_pending_admission: waiting.length,
       balance_contradictions: 0, balance_contradiction_addresses: [], balance_reconciled: 0,
-      transactions: 0, xrpl_requests: reader.stats.requests, failures: [],
-      committed: false, reason: 'ANCHOR_NOT_ADVANCED',
-      stored_anchor_ledger: Number(state.anchor_ledger) };
+      transactions: 0, xrpl_requests: reader.stats.requests,
+      failures: currentFailed ? [{ error: 'EVIDENCE_WALLET_BEHIND_CHECKPOINT',
+        wallets: currentFailed,
+        addresses: currentWallets.filter(w => !w.proven).map(w => w.address) }] : [],
+      freshness: { wallets_proven: currentProven, wallets_recovered_from_journal: 0,
+        wallets_unavailable: currentFailed },
+      committed: false, reason: currentFailed ? 'EVIDENCE_COVERAGE_GAP' : 'ALREADY_CURRENT',
+      stored_anchor_ledger: coveredAnchor };
   }
 
   // 3. Every wallet, unconditionally — the proven ones on their own delta, the
@@ -1431,6 +1456,53 @@ async function acquire(input, deps) {
         phase('uploading', { file: n, of: total, path, ms: Date.now() - tCommit }); } } });
     phase('committed', { took_ms: Date.now() - tCommit });
   } catch (e) {
+    // A concurrent run can advance the shared checkpoint after this run pinned
+    // its anchor but before it commits. If the refreshed store is already at
+    // this anchor (or beyond it), that is success-by-another-run: the database
+    // is authoritative and already contains proof through our edge. Returning
+    // a named ALREADY_CURRENT result lets attachWindow() read the committed
+    // evidence instead of turning a harmless race into a browser history walk.
+    if (/RUN_ANCHOR_NOT_AHEAD/.test(String(e && e.message || ''))) {
+      const latest = await Store.readState({ env: d.env, gh: d.gh, fetch: d.fetch });
+      if (latest && !latest.missing && latest.state &&
+          Number(latest.state.anchor_ledger) >= Number(anchor.ledger)) {
+        const coveredAnchor = Number(latest.state.anchor_ledger);
+        const latestWallets = (latest.state.wallets || []).map(w => {
+          const through = Number(w.last_proven_ledger) || 0;
+          const proven = through >= coveredAnchor;
+          return {
+            address: w.address,
+            status: proven ? 'COMPLETE' : 'FAILED',
+            proven,
+            proven_through: through,
+            rows: 0,
+            reconciliation: w.reconciliation || 'NOT_APPLICABLE',
+            attempts: 0,
+            error: proven ? null : 'EVIDENCE_WALLET_BEHIND_CHECKPOINT'
+          };
+        });
+        const latestProven = latestWallets.filter(w => w.proven).length;
+        const latestFailed = latestWallets.length - latestProven;
+        phase('already-current', { stored_anchor_ledger: coveredAnchor,
+          attempted_anchor_ledger: Number(anchor.ledger), concurrent: true,
+          wallets_proven: latestProven, wallets_unavailable: latestFailed });
+        return { ...summary,
+          anchor_ledger: coveredAnchor,
+          anchor_close: latest.state.anchor_close || anchor.close_iso,
+          state_version_read: latest.state.state_version,
+          target_wallets: latestWallets.length, complete_wallets: latestProven,
+          failed_wallets: latestFailed, transactions: 0, rows: [], wallets: latestWallets,
+          xrpl_requests: reader.stats.requests,
+          failures: latestFailed ? [{ error: 'EVIDENCE_WALLET_BEHIND_CHECKPOINT',
+            wallets: latestFailed,
+            addresses: latestWallets.filter(w => !w.proven).map(w => w.address) }] : [],
+          committed: false,
+          reason: latestFailed ? 'EVIDENCE_COVERAGE_GAP' : 'ALREADY_CURRENT_CONCURRENT',
+          stored_anchor_ledger: coveredAnchor,
+          freshness: { wallets_proven: latestProven,
+            wallets_recovered_from_journal: 0, wallets_unavailable: latestFailed } };
+      }
+    }
     // The gate refused, or GitHub did. Either way the walking was real and
     // must not be paid for twice, so it is written down before the failure is
     // reported. The checkpoint is exactly where it was.

@@ -388,6 +388,11 @@
     isHidden: isHidden,
     whenVisible: whenVisible,
     begin: function (windowRange, accounts) {
+      // Runtime acceptance counter for the database-first invariant. A report
+      // starts at zero and may only finish at zero. The counter is incremented
+      // exclusively by the legacy browser account_tx history walker.
+      window.SW_HISTORY_ACCOUNT_TX_COUNT = 0;
+      window.SW_HISTORY_ACCOUNT_TX_WALLETS = Object.create(null);
       var S = pageState();
       var reportId = (S && S.reportId) || (S && S.seal && S.seal.report_id) || null;
       if (!reportId) throw new Error('DELTA_REPORT_ID_REQUIRED');
@@ -477,6 +482,20 @@
             roster_hash: result.state_sha256 || 'github-state',
             committed: result.committed, freshness: result.freshness
           };
+        }).catch(function (e) {
+          // DATABASE-FIRST FAIL-CLOSED BRIDGE. 02-core historically interprets
+          // a rejected begin() as permission to open the legacy direct XRPL
+          // path. Do not reject: install a fatal evidence run that names every
+          // requested account, so layer 17 reaches proveWallet(), which refuses
+          // it, rather than falling through to browser account_tx history.
+          run = { fatal_error: 'EVIDENCE_STORE_REQUIRED: ' + e.message,
+            scan_id: 'evidence-refused-' + Date.now(), target_wallets: (accounts || []).length,
+            complete_wallets: 0, transactions: 0, xrpl_requests: 0, failures: [e.message],
+            committed: false, reason: 'EVIDENCE_STORE_REQUIRED', byAddress: Object.create(null) };
+          if (typeof log === 'function') log('Evidence store unavailable — scan REFUSED; no direct watched-wallet history fallback: ' + e.message);
+          return { scan_id: run.scan_id, anchor_ledger: 1, anchor_close_ms: Date.now(),
+            accounts: (accounts || []).slice(), roster_hash: 'EVIDENCE_STORE_REQUIRED',
+            committed: false, freshness: null, fatal_error: run.fatal_error };
         });
     },
 
@@ -492,7 +511,8 @@
         attributed_derived_only: (run.window && run.window.attributed_derived_only) || 0,
         balance_contradictions: run.balance_contradictions,
         balance_contradiction_addresses: run.balance_contradiction_addresses || [],
-        checkpoint_advanced: !!run.committed, freshness: run.freshness };
+        checkpoint_advanced: !!run.committed, freshness: run.freshness,
+        historical_watched_account_tx_calls: Number(window.SW_HISTORY_ACCOUNT_TX_COUNT) || 0 };
     },
 
     // Per-wallet, served from the run that already happened. A wallet that did
@@ -501,6 +521,7 @@
     proveWallet: function (indexRun, address) {
       return Promise.resolve().then(function () {
         if (!run) throw new Error('DELTA_RUN_NOT_STARTED');
+        if (run.fatal_error) throw new Error(run.fatal_error);
         var w = run.byAddress[address];
         if (!w) throw new Error('WALLET_NOT_IN_STATE: ' + address);
         // The SERVER decides whether a wallet is proven; this line only reads
@@ -567,12 +588,24 @@
     finish: function () {
       return Promise.resolve().then(function () {
         if (!run) throw new Error('DELTA_RUN_NOT_STARTED');
+        var historicalCalls = Number(window.SW_HISTORY_ACCOUNT_TX_COUNT) || 0;
+        if (typeof log === 'function') {
+          log('Database-first runtime gate: historical watched-wallet account_tx calls = ' +
+            historicalCalls + (historicalCalls === 0 ? ' · PASS' : ' · FAIL'));
+        }
+        if (historicalCalls > 0) {
+          var touched = Object.keys(window.SW_HISTORY_ACCOUNT_TX_WALLETS || {});
+          throw new Error('HISTORICAL_ACCOUNT_TX_GATE_FAILED: ' + historicalCalls +
+            ' call(s) across ' + touched.length + ' wallet(s)');
+        }
         return { status: run.committed ? 'COMPLETE' : 'PARTIAL',
           complete_wallets: run.complete_wallets, target_wallets: run.target_wallets,
           requests: run.xrpl_requests, rows_fetched: run.transactions,
           balance_contradictions: run.balance_contradictions,
           balance_contradiction_addresses: run.balance_contradiction_addresses || [],
-          checkpoint_advanced: !!run.committed, reason: run.reason || null };
+          checkpoint_advanced: !!run.committed, reason: run.reason || null,
+          historical_watched_account_tx_calls: historicalCalls,
+          database_first_runtime_gate: 'PASS' };
       });
     },
 
