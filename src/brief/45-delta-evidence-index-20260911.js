@@ -477,6 +477,20 @@
             roster_hash: result.state_sha256 || 'github-state',
             committed: result.committed, freshness: result.freshness
           };
+        }).catch(function (e) {
+          // DATABASE-FIRST FAIL-CLOSED BRIDGE. 02-core historically interprets
+          // a rejected begin() as permission to open the legacy direct XRPL
+          // path. Do not reject: install a fatal evidence run that names every
+          // requested account, so layer 17 reaches proveWallet(), which refuses
+          // it, rather than falling through to browser account_tx history.
+          run = { fatal_error: 'EVIDENCE_STORE_REQUIRED: ' + e.message,
+            scan_id: 'evidence-refused-' + Date.now(), target_wallets: (accounts || []).length,
+            complete_wallets: 0, transactions: 0, xrpl_requests: 0, failures: [e.message],
+            committed: false, reason: 'EVIDENCE_STORE_REQUIRED', byAddress: Object.create(null) };
+          if (typeof log === 'function') log('Evidence store unavailable — scan REFUSED; no direct watched-wallet history fallback: ' + e.message);
+          return { scan_id: run.scan_id, anchor_ledger: 1, anchor_close_ms: Date.now(),
+            accounts: (accounts || []).slice(), roster_hash: 'EVIDENCE_STORE_REQUIRED',
+            committed: false, freshness: null, fatal_error: run.fatal_error };
         });
     },
 
@@ -501,6 +515,7 @@
     proveWallet: function (indexRun, address) {
       return Promise.resolve().then(function () {
         if (!run) throw new Error('DELTA_RUN_NOT_STARTED');
+        if (run.fatal_error) throw new Error(run.fatal_error);
         var w = run.byAddress[address];
         if (!w) throw new Error('WALLET_NOT_IN_STATE: ' + address);
         // The SERVER decides whether a wallet is proven; this line only reads
