@@ -406,8 +406,14 @@
       var proofByAccount = Object.create(null);
 
       accountTxWindowDepth = async function (ws, account, startMs, endMs, limit) {
-        if (state.indexRun && state.indexRun.accounts.indexOf(account) >= 0 && state.effectiveWindow &&
+        if (state.indexRun && state.effectiveWindow &&
             startMs === state.effectiveWindow.start_ms && endMs === state.effectiveWindow.end_ms) {
+          // DATABASE-FIRST INVARIANT: once a server evidence run exists, an
+          // address missing from its proven roster is a coverage failure, not
+          // permission to fall through to the legacy browser account_tx walk.
+          if (state.indexRun.accounts.indexOf(account) < 0) {
+            throw new Error('EVIDENCE_WALLET_NOT_PROVEN: ' + account);
+          }
           try {
             // Prove the new XRPL edge for this wallet without downloading its
             // stored history. Once every wallet is proven, scanWallets loads a
