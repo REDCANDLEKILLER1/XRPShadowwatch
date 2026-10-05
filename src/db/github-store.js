@@ -699,17 +699,27 @@ async function readDays(days, deps, kind, opts) {
       return file === name + '.ndjson.gz' || file.indexOf(name + '.') === 0;
     }) : [];
     const seenPaths = new Set();
-    // Shards are numbered only when a day had to be split, so try the plain
-    // name first and then the numbered series until one is absent.
-    const candidates = ['/' + name + '.ndjson.gz'];
-    for (let i = 1; i <= 999; i++) candidates.push('/' + name + '.' + String(i).padStart(3, '0') + '.ndjson.gz');
+    // A verified manifest is the complete shard set for this day and kind.
+    // When a growing day switches from a plain file to numbered shards, the
+    // older plain file can remain in Git. It is not part of the new snapshot.
+    // Read exactly the manifest's paths, never discover extra evidence by name.
+    const candidates = verifyManifest
+      ? expected.sort().map(path => path.slice(base.length))
+      : ['/' + name + '.ndjson.gz'];
+    if (!verifyManifest) {
+      for (let i = 1; i <= 999; i++) candidates.push('/' + name + '.' + String(i).padStart(3, '0') + '.ndjson.gz');
+    }
     let found = 0;
     for (const suffix of candidates) {
       const path = base + suffix;
       // Day shards are routinely larger than a megabyte — a busy day can hold
       // tens of thousands of events — so they go through the same path.
       const packed = await readBytes(gh, branch, path, opts && opts.ref);
-      if (packed === null) { if (suffix === '/' + name + '.ndjson.gz') continue; break; }
+      if (packed === null) {
+        if (verifyManifest) throw new Error('EVIDENCE_SHARD_MISSING: ' + path);
+        if (suffix === '/' + name + '.ndjson.gz') continue;
+        break;
+      }
       if (verifyManifest) {
         const expectedShard = dayManifest.shards[path];
         if (!expectedShard) throw new Error('EVIDENCE_SHARD_UNMANIFESTED: ' + path);

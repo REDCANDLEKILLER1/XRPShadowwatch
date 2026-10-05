@@ -124,6 +124,29 @@ async function main() {
     assert(/EVIDENCE_DAY_MANIFEST_MISSING/.test(msg),msg);
   });
 
+  await checkAsync('numbered manifest shards supersede a leftover plain file without reading it', async () => {
+    const first = eventPath.replace('events.', 'events.001.');
+    const second = eventPath.replace('events.', 'events.002.');
+    const packed2 = zlib.gzipSync(Buffer.from('{"hash":"B"}\n'));
+    files.set(first,eventPacked); files.set(second,packed2);
+    const split = { [day]:{state_version:106,shards:{
+      [first]:{path:first,sha256:State.sha256(eventPacked),rows:1},
+      [second]:{path:second,sha256:State.sha256(packed2),rows:1}
+    }} };
+    const reads = [];
+    const trackingGh = (...args) => { reads.push(args[1].split('?')[0]); return gh(...args); };
+    const r = await Store.readDays([day],{env:ENV,gh:trackingGh},undefined,
+      {manifest:split,requireManifest:true,ref:'pinned'});
+    assert.deepEqual(r.events.map(e=>e.hash),['A','B']);
+    assert.equal(r.verified.length,2);
+    assert.deepEqual(reads,['/contents/'+first,'/contents/'+second]);
+    files.delete(second);
+    const msg = await refused(() => Store.readDays([day],{env:ENV,gh},undefined,
+      {manifest:split,requireManifest:true}));
+    assert(/EVIDENCE_SHARD_MISSING/.test(msg),msg);
+    files.delete(first);
+  });
+
   console.log('\n3b. older report days resolve through the verified state-history chain');
   const baseState = State.genesis([{ address:'rWatched', scan_coverage_through:100 }], {
     anchor_ledger:100, anchor_close:'2026-09-25T00:00:00.000Z'
