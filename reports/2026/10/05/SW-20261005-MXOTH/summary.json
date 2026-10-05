@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20261005-MXOTH",
+  "generated_at": "2026-10-05T13:01:21.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107449996,
+  "transactions_in_window": null,
+  "new_observations": 0,
+  "xrpl_requests": 0,
+  "report_hash": "db87f26159ae066a0c2a0d1ebf80dc0852591e93e48839404d19ea458fb120fe"
+}
