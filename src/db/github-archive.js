@@ -19,6 +19,7 @@ const b64=text=>Buffer.from(text,'utf8').toString('base64');
 
 const IDX_RUN=/^idx-[a-f0-9-]{36}$/;   // a Neon acquisition run
 const GH_RUN=/^gh-\d+$/;               // a GitHub-backed run, named for its anchor
+const STORED_RUN=/^stored-v([1-9]\d*)-([a-f0-9]{12})$/;
 
 // ── THE RECEIPT'S FACTS COME FROM THE CHECKPOINT, NOT FROM THE CALLER ──────
 //
@@ -56,7 +57,7 @@ async function archiveFactsFromEvidence(runId,reportId,deps={}){
   const Store=deps.store||require('./github-store');
   const {token,repo,branch}=evidenceTarget(deps.env||process.env);
   const gh=deps.gh||client(token,repo,deps.fetch||fetch);
-  const manifestText=await Store.readFile(gh,branch,Store.runPath(reportId));
+  const manifestText=await Store.readFile(gh,branch,Store.runPath(reportId),deps.ref);
   // No manifest means this report never committed a run. That is a stronger
   // refusal than the old one: it does not depend on what the checkpoint
   // happens to say right now.
@@ -70,7 +71,7 @@ async function archiveFactsFromEvidence(runId,reportId,deps={}){
   // The state AS THIS RUN SEALED IT, by version, checked against the hash the
   // manifest recorded. A rewritten history file disagrees with the manifest and
   // is refused rather than believed.
-  const stateText=await Store.readFile(gh,branch,Store.historyPath(manifest.state_version));
+  const stateText=await Store.readFile(gh,branch,Store.historyPath(manifest.state_version),deps.ref);
   if(stateText===null)
     throw new Error('ARCHIVE_STATE_HISTORY_MISSING: v'+manifest.state_version);
   let state;
@@ -119,12 +120,45 @@ async function archiveFactsFromEvidence(runId,reportId,deps={}){
   };
 }
 
+// A snapshot report has its own report/scan identity. Its collector may have
+// run hours earlier, so it must not impersonate that acquisition to archive.
+// Resolve the named immutable checkpoint, then use the existing manifest/state
+// checks to derive its facts. No coverage claims are accepted from the caller.
+async function archiveFactsFromStoredEvidence(runId,deps={}){
+  const match=STORED_RUN.exec(runId||'');
+  if(!match)throw new Error('INVALID_EVIDENCE_SCAN_ID');
+  const version=Number(match[1]);
+  if(!Number.isSafeInteger(version))throw new Error('INVALID_EVIDENCE_SCAN_ID');
+  const Store=deps.store||require('./github-store');
+  const {token,repo,branch}=evidenceTarget(deps.env||process.env);
+  const gh=deps.gh||client(token,repo,deps.fetch||fetch);
+  const ref=deps.ref||(await gh('GET','/git/ref/heads/'+branch)).object.sha;
+  const text=await Store.readFile(gh,branch,Store.historyPath(version),ref);
+  if(text===null)throw new Error('ARCHIVE_STATE_HISTORY_MISSING: v'+version);
+  let state;
+  try{state=JSON.parse(text);}catch(_){throw new Error('ARCHIVE_STATE_HISTORY_UNREADABLE');}
+  const verdict=require('./evidence-state').verify(state);
+  if(!verdict.ok)throw new Error('ARCHIVE_STATE_HISTORY_UNVERIFIED: '+verdict.problems.join(','));
+  if(state.state_version!==version||state.state_sha256.slice(0,12)!==match[2])
+    throw new Error('ARCHIVE_STORED_CHECKPOINT_MISMATCH');
+  const acquisition=state.sealed_run&&state.sealed_run.report_id;
+  if(!/^SW-\d{8}-[A-Z0-9]{5}$/.test(acquisition||''))
+    throw new Error('ARCHIVE_RUN_NOT_COMMITTED: checkpoint has no acquisition');
+  const facts=await archiveFactsFromEvidence('gh-'+state.anchor_ledger,acquisition,{...deps,gh,ref});
+  if(facts.state_version!==version||facts.state_sha256!==state.state_sha256)
+    throw new Error('ARCHIVE_STORED_CHECKPOINT_MISMATCH');
+  const {report_id:acquisition_report_id,scan_id:acquisition_scan_id,...checkpointFacts}=facts;
+  return {...checkpointFacts,evidence_scan_id:runId,evidence_source:'GITHUB_STORED_VERIFIED_EVIDENCE',
+    acquisition_report_id,acquisition_scan_id:acquisition_scan_id||null,
+    stored_history_reused:true,new_observations:0,xrpl_requests:0};
+}
+
 function validate(input){
   if(!input||typeof input!=='object'||Array.isArray(input))throw new Error('INVALID_ARCHIVE_REQUEST');
   for(const key of Object.keys(input))if(!ALLOWED.has(key))throw new Error('ARCHIVE_FIELD_NOT_ALLOWED: '+key);
   if(!/^SW-\d{8}-[A-Z0-9]{5}$/.test(input.report_id||''))throw new Error('INVALID_REPORT_ID');
   if(!/^SC-[A-Z0-9]+$/.test(input.scan_id||''))throw new Error('INVALID_SCAN_ID');
-  // TWO run identities, because there are two evidence stores and one of them
+  // Acquisition identities, because there are two evidence stores and one of them
   // is being retired. `idx-<uuid>` is a Neon acquisition run; `gh-<ledger>` is
   // a GitHub-backed one, named for the anchor it proved. Every report produced
   // since the delta migration carries the second shape, and this line rejecting
@@ -133,7 +167,9 @@ function validate(input){
   //
   // The legacy pattern is not loosened to admit the new one; they are separate
   // and each is exact.
-  if(!GH_RUN.test(input.evidence_scan_id||'')&&!IDX_RUN.test(input.evidence_scan_id||''))
+  // Snapshot readers additionally name an immutable state version and hash.
+  if(!GH_RUN.test(input.evidence_scan_id||'')&&!IDX_RUN.test(input.evidence_scan_id||'')&&
+     !STORED_RUN.test(input.evidence_scan_id||''))
     throw new Error('INVALID_EVIDENCE_SCAN_ID');
   if(typeof input.morning_report!=='string'||!input.morning_report.trim())throw new Error('MORNING_REPORT_REQUIRED');
   if(Buffer.byteLength(input.morning_report,'utf8')>MAX_REPORT_BYTES)throw new Error('ARCHIVE_PAYLOAD_TOO_LARGE');
@@ -339,7 +375,9 @@ async function archiveReport(raw,deps={}){
   // Neon, which is what keeps the runtime free of it.
   const facts=deps.archiveFacts
     ? await deps.archiveFacts(input.evidence_scan_id)
-    : (GH_RUN.test(input.evidence_scan_id)
+    : (STORED_RUN.test(input.evidence_scan_id)
+        ? await archiveFactsFromStoredEvidence(input.evidence_scan_id,deps)
+        : GH_RUN.test(input.evidence_scan_id)
         ? await archiveFactsFromEvidence(input.evidence_scan_id,input.report_id,deps)
         : await E.archiveFacts(input.evidence_scan_id));
   if(!facts||!facts.target_wallets)throw new Error('ARCHIVE_RUN_NOT_FOUND');
@@ -419,5 +457,5 @@ async function archiveReport(raw,deps={}){
 }
 
 module.exports={archiveReport,validate,sha,client,commitFiles,archiveRef,archiveTarget,archiveReadTarget,evidenceTarget,evidenceWriteTarget,
-  archiveFactsFromEvidence,IDX_RUN,GH_RUN,
+  archiveFactsFromEvidence,archiveFactsFromStoredEvidence,IDX_RUN,GH_RUN,STORED_RUN,
   BRANCH,REPO,EVIDENCE_BRANCH,EVIDENCE_REPO,MAX_REPORT_BYTES};
