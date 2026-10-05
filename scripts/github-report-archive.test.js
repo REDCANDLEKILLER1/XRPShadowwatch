@@ -231,6 +231,70 @@ async function main(){
     {env,fetch:gh.fetch,archiveFacts}),/INVALID_EVIDENCE_SCAN_ID/);
   console.log('PASS an unsealed report, a stale run and a nonsense identity are all refused');
 
+  // A report READ from a checkpoint is a new report, not the collector's run.
+  // Exercise real store selection and server-derived facts, without injecting
+  // archiveFacts or rewriting the report to borrow the collector's identities.
+  const storedState=State.advance(secondState,{
+    report_id:'SW-20260915-COLLE',scan_id:'SC-COLLECTOR',
+    anchor_ledger:SECOND+500,anchor_close:'2026-09-15T08:00:00.000Z',
+    target_wallets:3,complete_wallets:3,balance_contradictions:0,
+    evidence_shards:[{path:'evidence/2026/09/15/events.ndjson.gz',sha256:'f'.repeat(64),rows:1000}],
+    wallets:WALLETS.map(address=>({address,last_proven_ledger:SECOND+500,
+      balance_drops:'1000000',balance_ledger:SECOND+500,reconciliation:'RECONCILED'}))});
+  publish(storedState,'SW-20260915-COLLE');
+  const storedId='stored-v'+storedState.state_version+'-'+storedState.state_sha256.slice(0,12);
+  const storedInput={...ghInput,report_id:'SW-20260915-STOR1',scan_id:'SC-READER',evidence_scan_id:storedId};
+  const storedArchive=fakeGithub(),evidenceReads=[];
+  let evidenceRef='snapshot-a';
+  const pinnedGh=async(method,path,...args)=>{
+    assert.equal(method,'GET','archiving a snapshot must not write the evidence store');
+    if(path.startsWith('/git/ref/heads/'))return {object:{sha:evidenceRef}};
+    evidenceReads.push(path);
+    assert.equal(new URL('https://test'+path).searchParams.get('ref'),evidenceRef);
+    return evidenceGh(method,path,...args);
+  };
+  const storedDeps={env:{...env,SHADOWWATCH_EVIDENCE_TOKEN:'t'},fetch:storedArchive.fetch,gh:pinnedGh};
+  const storedResult=await A.archiveReport(storedInput,storedDeps);
+  assert.equal(storedResult.status,'ARCHIVED');
+  const storedRoot='reports/2026/09/15/'+storedInput.report_id;
+  const storedReceipt=JSON.parse(storedArchive.file(storedRoot+'/receipt.json'));
+  assert.equal(storedReceipt.report_id,storedInput.report_id);
+  assert.equal(storedReceipt.scan_id,'SC-READER');
+  assert.equal(storedReceipt.acquisition_report_id,'SW-20260915-COLLE');
+  assert.equal(storedReceipt.acquisition_scan_id,'SC-COLLECTOR');
+  assert.equal(storedReceipt.evidence_source,'GITHUB_STORED_VERIFIED_EVIDENCE');
+  assert.equal(storedReceipt.evidence_scan_id,storedId);
+  assert.equal(storedReceipt.state_sha256,storedState.state_sha256);
+  assert.equal(storedReceipt.transaction_windows_proved,3);
+  assert.equal(storedReceipt.coverage_complete,true);
+  assert.equal(storedReceipt.transactions_in_window,null);
+  assert.equal(storedReceipt.xrpl_requests,0);
+  assert.equal(storedArchive.file(storedRoot+'/morning-report.txt'),storedInput.morning_report);
+  assert.ok(!evidenceReads.some(p=>p.includes('latest.json')));
+  console.log('PASS a stored reader archives exact report bytes with separate report and collector identities');
+
+  // A moving branch must not change the receipt hash on an archive retry.
+  evidenceRef='snapshot-b';
+  assert.equal((await A.archiveReport(storedInput,storedDeps)).status,'ALREADY_ARCHIVED');
+  const changed={...storedInput,morning_report:'changed',morning_hash:A.sha('changed')};
+  await assert.rejects(()=>A.archiveReport(changed,storedDeps),/ARCHIVE_CONFLICT/);
+  const badId=storedId.slice(0,-12)+'0'.repeat(12);
+  await assert.rejects(()=>A.archiveReport({...storedInput,evidence_scan_id:badId},storedDeps),
+    /ARCHIVE_STORED_CHECKPOINT_MISMATCH/);
+  const storedPath=Store.historyPath(storedState.state_version),storedText=evidenceFiles[storedPath];
+  delete evidenceFiles[storedPath];
+  await assert.rejects(()=>A.archiveReport(storedInput,storedDeps),/ARCHIVE_STATE_HISTORY_MISSING/);
+  evidenceFiles[storedPath]=storedText.replace('1000000','2000000');
+  await assert.rejects(()=>A.archiveReport(storedInput,storedDeps),/ARCHIVE_STATE_HISTORY_UNVERIFIED/);
+  evidenceFiles[storedPath]=storedText;
+  const manifestPath=Store.runPath('SW-20260915-COLLE'),manifestText=evidenceFiles[manifestPath];
+  evidenceFiles[manifestPath]=manifestText.replace(storedState.state_sha256,'0'.repeat(64));
+  await assert.rejects(()=>A.archiveReport(storedInput,storedDeps),/ARCHIVE_STATE_HISTORY_MISMATCH/);
+  evidenceFiles[manifestPath]=manifestText;
+  for(const id of ['stored-v0-aaaaaaaaaaaa','stored-v1-../manifest','stored-v1-AAAAAAAABBBB','stored-v1-abc'])
+    assert.throws(()=>A.validate({...storedInput,evidence_scan_id:id}),/INVALID_EVIDENCE_SCAN_ID/);
+  console.log('PASS stored archive retries are stable; forged, missing, tampered and conflicting evidence is refused');
+
   // ── A MISSING SECRET MUST NAME ITSELF ───────────────────────────────────
   // Two runs failed with a bare "GITHUB_ARCHIVE_NOT_CONFIGURED", which names
   // neither the setting nor the environment — and the obvious guess is wrong,
