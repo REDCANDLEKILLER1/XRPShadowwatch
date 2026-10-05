@@ -2049,9 +2049,11 @@ async function scanWallets(ws) {
         getTxWindow(), getActiveWatchlist().map(w => w.address)));
     } catch(e) {
       state.anchorAttempts[state.anchorAttempts.length-1].error=e.message;
+      if (state._storedReportRun) throw new Error('STORED_EVIDENCE_REQUIRED: ' + e.message);
       log('Evidence index unavailable — direct XRPL acquisition: ' + e.message);
     }
   }
+  if (state._storedReportRun && !state.indexRun) throw new Error('STORED_EVIDENCE_READER_UNAVAILABLE');
   const RA = (typeof window !== 'undefined') && window.SW_RUN_ANCHOR;
   if (RA && !state.indexRun) {
     let ledgerRes = null, infoRes = null;
@@ -2130,6 +2132,10 @@ async function scanWallets(ws) {
     try {
       const info = await xrpl(ws, { command: 'account_info', account: row.address, ledger_index: 'validated' });
       row.balance_xrp = drops(info.account_data.Balance);
+      if (info.stored_evidence) {
+        row.balance_as_of_ledger = info.ledger_index;
+        row.balance_current = Number(info.ledger_index) === Number(state.runAnchor && state.runAnchor.anchor_ledger);
+      }
       if (row.prev_balance_xrp !== null) {
         row.delta_xrp = row.balance_xrp - row.prev_balance_xrp;
       }
@@ -22016,6 +22022,8 @@ function playScanCompleteSound() {
 // ── MAIN RUN ──────────────────────────────────────────────────
 async function run() {
   if (state.scanning) { log('Scan already in progress.'); return; }
+  state._storedReportRun = true;
+  state._storedEnrichment = { deadline:0, requests:0, unavailable:0 };
   state._balanceFailLogged = 0;
   state._silentReplacements = 0;
   state._runAbortReason = null;
@@ -22059,7 +22067,20 @@ async function run() {
       try { (await market()).forEach(log); }
       catch (e) { log('Market fill issue: ' + e.message); elog('market()', e); }
     })();
-    const wsPromise = connectXRPL();
+    // Stored reports do not need a live socket to prove the watched roster.
+    // Give optional enrichment one bounded connection attempt, with no retry
+    // chain able to hold the report hostage before its evidence is read.
+    const wsPromise = new Promise(resolve => {
+      const server = $('xrplServer') ? $('xrplServer').value : XRPL_SERVERS[0];
+      let socket, done = false;
+      const finish = value => { if (done) return; done = true; clearTimeout(timer); resolve(value); };
+      const timer = setTimeout(() => { try { if (socket) socket.close(); } catch (_) {} finish(null); }, 6000);
+      try {
+        socket = new WebSocket(server);
+        socket.onopen = () => finish(socket);
+        socket.onerror = () => { try { socket.close(); } catch (_) {} finish(null); };
+      } catch (_) { finish(null); }
+    });
     shadowProgress(8, 28, 0.5);
     // Outer ceiling — Promise.race ensures boot never blocks > 15s total
     const bootCeiling = new Promise((_, reject) =>
@@ -22076,15 +22097,8 @@ async function run() {
       elog('boot ceiling', e);
       // Try to read whatever the ws connection resolved to (may be null)
       try { ws = await wsPromise; } catch (_) { ws = null; }
-      if (!ws) {
-        // If we got nothing at all, give it one more chance with a short fallback
-        try { ws = await Promise.race([connectXRPL(), new Promise((_, r) => setTimeout(() => r(new Error('fallback timeout')), 6000))]); }
-        catch (_) { ws = null; }
-      }
     }
-    if (!ws) {
-      throw new Error('XRPL connection unavailable — cannot scan ledger. Check network or XRPL server settings.');
-    }
+    if (!ws) log('Live enrichment unavailable — continuing from verified stored evidence.');
     // Hand the socket to state so a mid-scan reconnect can replace it without
     // any of the scan's call sites holding a stale reference.
     state._sock = ws;
@@ -22095,9 +22109,10 @@ async function run() {
     state.linkLostDuringScan = false;
     state.linkLostAt = null;
     shadowSay('Reading watched wallets…', 'WALLETS', 30);
-    log('Scanning ' + getActiveWatchlist().length + ' wallets (parallel x' + SCAN_PARALLEL + ', tier-based pages, smart skip)...');
+    log('Reading verified stored evidence for ' + getActiveWatchlist().length + ' watched wallets...');
     await scanWallets(ws);
     analyzeFlags();
+    state._storedEnrichment.deadline = Date.now() + 20000;
 
     shadowSay('Escrow watch — treasury movements…', 'ESCROW', 78);
     try { await escrowBackfill(ws); } catch (e) { elog('escrowBackfill', e); log('escrow backfill failed: ' + e.message); }
@@ -22421,6 +22436,7 @@ async function run() {
     document.body.classList.add('error');
     if ($('report4k')) $('report4k').textContent = 'REPORT NOT CREATED\n' + e.message + '\n\nRerun the scan.';
   } finally {
+    state._storedReportRun = false;
     try { if (ws) ws.close(); } catch {}
     try { if (state._sock && state._sock !== ws) state._sock.close(); } catch {}
     $('scanBtn').disabled = false;

@@ -42,6 +42,8 @@ const SUITES = [
   ['in-page-smoke',          'in-page-smoke.test.js',            8210],
   ['morning-story-canonical','morning-story-canonical.test.js',  8211],
   ['morning-news-sources',   'morning-news-source-handoff.test.js', 8233],
+  ['post-news-stack',      'post-news-stack-overflow.test.js', 8234],
+  ['stored-run-completion', 'stored-run-completion.test.js', 8235],
   // A report that cannot be posted was not published. The field holds 4,000.
   ['public-morning-4k',      'public-morning-4k.test.js',           null],
   // A working scan that says nothing is indistinguishable from a hung one.
@@ -72,6 +74,8 @@ const SUITES = [
   ['evidence-write-isolation','evidence-write-isolation.test.js',  null],
   // A morning run with no database: GitHub in, XRPL delta, GitHub out.
   ['delta-report-path',      'delta-report-path.test.js',        8213],
+  // Step 2: phones consume the verified store; no watched-wallet recrawl.
+  ['stored-evidence-report', 'stored-evidence-report.test.js',     null],
   ['run-journal',            'run-journal.test.js',              null],
   ['delta-acquisition',      'delta-acquisition.test.js',          null],
   // Server-owned evidence stays fresh even when no phone/report is open.

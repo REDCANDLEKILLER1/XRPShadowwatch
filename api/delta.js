@@ -14,6 +14,7 @@ const zlib = require('zlib');
 const D = require('../src/db/delta-acquisition');
 const Store = require('../src/db/github-store');
 const State = require('../src/db/evidence-state');
+const Journal = require('../src/db/run-journal');
 const A = require('../src/db/github-archive');
 const roster = require('../src/db/roster');
 const { acquireReader, releaseReader } = require('../src/db/xrpl-reader');
@@ -155,6 +156,196 @@ async function respondWithWindow(res, result, input, reader) {
 // Pulled out and exported so the DECISION is testable rather than only its
 // spelling. A source check can see the word "gzip" in a file whose compression
 // never runs — one did, and passed while the feature was disabled.
+function nextScheduledSlot(anchorClose, nowMs) {
+  const anchor = Date.parse(anchorClose || '');
+  const now = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+  const base = Number.isFinite(anchor) ? anchor : now;
+  const d = new Date(base);
+  let hour = d.getUTCHours();
+  let slot = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), hour, 0, 0, 0));
+  if (slot.getTime() <= base || (hour % 2) !== 0) {
+    hour = hour + ((hour % 2) === 0 ? 2 : 1);
+    slot = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), hour, 0, 0, 0));
+  }
+  const start = slot.getTime();
+  const end = start + 60 * 60 * 1000 - 1;
+  return {
+    start: new Date(start).toISOString(),
+    end: new Date(end).toISOString(),
+    precision: 'HOUR_BUCKET',
+    overdue: now > end
+  };
+}
+
+function capWindowToAnchor(startMs, endMs, anchorClose) {
+  const start = Number(startMs), end = Number(endMs), anchor = Date.parse(anchorClose || '');
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    const e = new Error('INVALID_REPORT_WINDOW'); e.httpStatus = 400; throw e;
+  }
+  if (!Number.isFinite(anchor)) {
+    const e = new Error('EVIDENCE_ANCHOR_CLOSE_INVALID'); e.httpStatus = 503; throw e;
+  }
+  if (start > anchor) {
+    const e = new Error('WINDOW_BEYOND_SNAPSHOT'); e.httpStatus = 409; throw e;
+  }
+  const effectiveEnd = Math.min(end, anchor);
+  return {
+    start_ms:start, requested_end_ms:end, effective_end_ms:effectiveEnd,
+    capped:effectiveEnd < end, overshoot_ms:effectiveEnd < end ? end - anchor : 0
+  };
+}
+
+function streamStoredReport(res, body, chunkSize) {
+  const events = Array.isArray(body && body.events) ? body.events : [];
+  const meta = { ...(body || {}) };
+  delete meta.events; delete meta.events_gz; delete meta.events_count;
+  const lines = [];
+  lines.push({ t:'meta', events_count:events.length,
+    state_version:body && body.state_version, anchor_ledger:body && body.anchor_ledger });
+  const size = Math.max(1, Number(chunkSize) || 750);
+  for (let i = 0; i < events.length; i += size) {
+    lines.push({ t:'events', events:events.slice(i, i + size) });
+  }
+  lines.push({ t:'done', ...meta, events_streamed:events.length });
+  if (res) {
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('X-Accel-Buffering', 'no');
+    for (const line of lines) res.write(JSON.stringify(line) + '\n');
+    res.end();
+  }
+  return lines;
+}
+
+async function storedReport(input, deps) {
+  const d = deps || {};
+  const startMs = Number(input && input.window_start_ms);
+  const endMs = Number(input && input.window_end_ms);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+    const e = new Error('INVALID_REPORT_WINDOW'); e.httpStatus = 400; throw e;
+  }
+
+  // Read the checkpoint first because its close time is the proof ceiling.
+  // A report may ASK for wall-clock "now", but it may only CLAIM through the
+  // last verified anchor. Never manufacture a quiet tail after that anchor.
+  const loaded = await Store.readPinnedState(d);
+  if (loaded.missing || !loaded.state) {
+    const e = new Error('EVIDENCE_STATE_MISSING'); e.httpStatus = 503; throw e;
+  }
+  const capped = capWindowToAnchor(startMs, endMs, loaded.state.anchor_close);
+  const anchorMs = Date.parse(loaded.state.anchor_close);
+  const effectiveEndMs = capped.effective_end_ms;
+  const cappedToAnchor = capped.capped;
+  const days = D.windowDays({ window_start_ms: startMs, window_end_ms: effectiveEndMs });
+  const manifests = await Store.resolveDayManifests(days, {
+    ...d, gh:loaded.gh, ref:loaded.ref, loaded_state:loaded.state, baseline_ms:startMs
+  });
+  const state = manifests.state;
+  const baselineState = manifests.baseline_state || null;
+  const baselineByAddress = Object.create(null);
+  if (baselineState && Array.isArray(baselineState.wallets)) {
+    for (const w of baselineState.wallets) if (w && w.address) baselineByAddress[w.address] = w;
+  }
+  const assembled = await D.readReportWindow({
+    window_start_ms: startMs,
+    window_end_ms: effectiveEndMs,
+    rows: []
+  }, { ...d, gh:loaded.gh, ref:loaded.ref,
+    day_manifests: manifests.byDay, evidence_ref: manifests.ref });
+
+  let pending = null;
+  try {
+    const jr = await Store.readJournal({ ...d, gh:loaded.gh, ref:loaded.ref });
+    if (jr && jr.journal && !jr.unreadable) {
+      const usable = Journal.usable(jr.journal, state);
+      if (usable && usable.ok && jr.journal.report_id !== (state.sealed_run && state.sealed_run.report_id)) {
+        pending = {
+          report_id: jr.journal.report_id,
+          started_at: jr.journal.started_at || null,
+          anchor_ledger: jr.journal.anchor_ledger || null,
+          segments: jr.journal.segments || 0
+        };
+      }
+    }
+  } catch (_) {}
+
+  const slot = nextScheduledSlot(state.anchor_close, d.now ? d.now() : Date.now());
+  const scanId = 'stored-v' + state.state_version + '-' + String(state.state_sha256 || '').slice(0, 12);
+  const wallets = (state.wallets || []).map(w => ({
+    address: w.address,
+    status: 'COMPLETE',
+    proven: Number(w.last_proven_ledger) === Number(state.anchor_ledger),
+    proven_through: w.last_proven_ledger,
+    balance_drops: w.balance_drops,
+    balance_ledger: w.balance_ledger,
+    baseline_balance_drops: baselineByAddress[w.address] ? baselineByAddress[w.address].balance_drops : null,
+    baseline_balance_ledger: baselineByAddress[w.address] ? baselineByAddress[w.address].balance_ledger : null,
+    reconciliation: w.reconciliation
+  }));
+
+  const body = {
+    source: 'STORED_VERIFIED_EVIDENCE',
+    stored_checkpoint: true,
+    committed: false,
+    reason: 'STORED_CHECKPOINT_READ',
+    scan_id: scanId,
+    report_id: state.sealed_run && state.sealed_run.report_id || null,
+    state_version: state.state_version,
+    state_sha256: state.state_sha256,
+    anchor_ledger: state.anchor_ledger,
+    anchor_close: state.anchor_close,
+    target_wallets: state.wallet_count,
+    complete_wallets: wallets.filter(w => w.proven).length,
+    failed_wallets: wallets.filter(w => !w.proven).length,
+    wallets,
+    transactions: 0,
+    xrpl_requests: 0,
+    events: assembled.events.map(slim),
+    window: {
+      from: new Date(startMs).toISOString(),
+      requested_to: new Date(endMs).toISOString(),
+      to: new Date(effectiveEndMs).toISOString(),
+      effective_to: new Date(effectiveEndMs).toISOString(),
+      capped_to_anchor: cappedToAnchor,
+      overshoot_ms: capped.overshoot_ms,
+      proof_ceiling: state.anchor_close,
+      days: assembled.days,
+      in_window: assembled.in_window,
+      from_stored: assembled.from_stored,
+      from_this_run: 0,
+      days_without_shards: assembled.days_without_shards,
+      unattributed: assembled.unattributed,
+      attributed_derived_only: assembled.attributed_derived_only,
+      provenance: assembled.provenance,
+      shards_verified: (assembled.shards_verified || []).length,
+      manifest_states_walked: manifests.states_walked,
+      balance_baseline: baselineState ? {
+        state_version: baselineState.state_version,
+        anchor_ledger: baselineState.anchor_ledger,
+        anchor_close: baselineState.anchor_close,
+        states_walked: manifests.states_walked
+      } : {
+        state_version: null, anchor_ledger: null, anchor_close: null,
+        states_walked: manifests.states_walked,
+        unavailable_reason: manifests.baseline_unavailable_reason || 'UNAVAILABLE'
+      }
+    },
+    freshness: {
+      evidence_time: state.anchor_close,
+      anchor_ledger: state.anchor_ledger,
+      state_version: state.state_version,
+      next_slot_start: slot.start,
+      next_slot_end: slot.end,
+      schedule_precision: slot.precision,
+      stale: slot.overdue,
+      last_good_after_fail: !!pending,
+      pending_refresh: pending,
+      status: pending ? 'LAST_GOOD_RECOVERY_PENDING' : (slot.overdue ? 'LAST_GOOD_STALE' : 'CURRENT')
+    }
+  };
+  if (d.pack !== false) packEvents(body);
+  return body;
+}
+
 const GZIP_EVENTS_ABOVE = 200;
 function packEvents(body) {
   if (!body || !Array.isArray(body.events) || body.events.length <= GZIP_EVENTS_ABOVE) return body;
@@ -180,11 +371,32 @@ module.exports = async function handler(req, res) {
     if (origin !== req.headers.host) return res.status(403).json({ error: 'CROSS_ORIGIN_WRITE_REFUSED' });
   }
 
-  const allowed = req.method === 'GET' ? ['state', 'health'] : ['run', 'seed'];
+  const allowed = req.method === 'GET' ? ['state', 'health', 'report'] : ['run', 'seed'];
   if (!allowed.includes(input.action)) return res.status(400).json({ error: 'ACTION_NOT_ALLOWED' });
 
   let reader;
   try {
+    if (input.action === 'report') {
+      try {
+        const wantsStream = /^(1|true)$/i.test(String(input.stream || ''));
+        const body = await storedReport(input, { pack: !wantsStream });
+        if (!wantsStream) return res.json(body);
+
+        // Compact report windows can exceed Vercel's normal 4.5 MB response
+        // ceiling even after gzip. Stream NDJSON chunks instead of forcing the
+        // whole 24/48/60/72h window through one buffered JSON response.
+        streamStoredReport(res, body, 750);
+        return;
+      } catch (e) {
+        const status = Number(e && e.httpStatus) || 503;
+        return res.status(status).json({
+          error: String(e && e.message || e || 'STORED_REPORT_UNAVAILABLE'),
+          stored_report: false,
+          xrpl_fallback_allowed: false
+        });
+      }
+    }
+
     if (input.action === 'health' || input.action === 'state') {
       const loaded = await Store.readState({});
       return res.json({
@@ -443,3 +655,7 @@ module.exports = async function handler(req, res) {
 module.exports.packEvents = packEvents;
 module.exports.buildStreamDone = buildStreamDone;
 module.exports.GZIP_EVENTS_ABOVE = GZIP_EVENTS_ABOVE;
+module.exports.storedReport = storedReport;
+module.exports.nextScheduledSlot = nextScheduledSlot;
+module.exports.capWindowToAnchor = capWindowToAnchor;
+module.exports.streamStoredReport = streamStoredReport;

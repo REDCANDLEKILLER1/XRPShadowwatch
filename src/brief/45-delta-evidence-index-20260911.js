@@ -381,103 +381,204 @@
     catch (_) { return window.state || null; }
   }
 
+  function getStoredReport(windowRange, reportId, attempts) {
+    var w = windowRange || {};
+    if (!Number.isFinite(Number(w.startMs)) || !Number.isFinite(Number(w.endMs)) ||
+        Number(w.endMs) < Number(w.startMs)) {
+      var invalid = new Error('INVALID_REPORT_WINDOW');
+      invalid.status = 400;
+      invalid.transport = false;
+      return Promise.reject(invalid);
+    }
+    var qs = new URLSearchParams({
+      action: 'report',
+      stream: '1',
+      report_id: String(reportId || ''),
+      window_start_ms: String(w.startMs),
+      window_end_ms: String(w.endMs)
+    });
+    var maxStrikes = Math.max(1, Number(attempts) || 3);
+    var strikes = 0, hiddenWaits = 0;
+
+    function once() {
+      var controller = new AbortController();
+      var timer = null;
+      var sawHidden = isHidden();
+      var streamed = [];
+
+      function idle() {
+        if (timer) { clearTimeout(timer); timer = null; }
+        if (isHidden()) return;
+        timer = setTimeout(function () { controller.abort(); }, IDLE_LIMIT_MS);
+      }
+      function onVis() {
+        if (isHidden()) {
+          sawHidden = true;
+          if (timer) { clearTimeout(timer); timer = null; }
+        } else {
+          idle();
+        }
+      }
+      function cleanup() {
+        if (timer) { clearTimeout(timer); timer = null; }
+        try { document.removeEventListener('visibilitychange', onVis); } catch (_) {}
+      }
+
+      try { document.addEventListener('visibilitychange', onVis); } catch (_) {}
+      idle();
+
+      return fetch('/api/delta?' + qs.toString(), {
+        method: 'GET', cache: 'no-store', credentials: 'same-origin',
+        signal: controller.signal
+      }).then(function (response) {
+        var type = String(response.headers && response.headers.get &&
+          response.headers.get('content-type') || '');
+        if (response.ok && response.body && response.body.getReader &&
+            /application\/x-ndjson/i.test(type)) {
+          return readNdjson(response, function (value) {
+            if (value && value.t === 'events' && Array.isArray(value.events)) {
+              for (var i = 0; i < value.events.length; i++) streamed.push(value.events[i]);
+            }
+          }, idle).then(function (final) {
+            final.events = streamed;
+            final.events_count = streamed.length;
+            return final;
+          });
+        }
+        return plainBody(response);
+      }).then(function (value) {
+        cleanup();
+        return inflateEvents(value);
+      }, function (e) {
+        cleanup();
+        var err = e;
+        if (e && e.name === 'AbortError') {
+          err = new Error('STORED_REPORT_SILENT');
+          err.transport = true;
+        } else if (err && err.status === undefined && err.transport === undefined &&
+                   err.name === 'TypeError') {
+          err.transport = true;
+        }
+
+        var transport = err && err.transport === true && err.status === undefined;
+        if (!transport) throw err;
+
+        // Browser suspension is not evidence-store failure. Hold the request
+        // until the screen is back and do not spend a transport strike.
+        if (sawHidden || isHidden()) {
+          if (hiddenWaits >= HIDDEN_RETRY_MAX) throw err;
+          hiddenWaits++;
+          return whenVisible(HIDDEN_WAIT_MAX_MS).then(function (returned) {
+            if (!returned) throw err;
+            return once();
+          });
+        }
+
+        strikes++;
+        if (strikes >= maxStrikes) throw err;
+        return new Promise(function (resolve) { setTimeout(resolve, 2000); }).then(once);
+      });
+    }
+
+    return once();
+  }
+
   var run = null;   // the single acquisition this page performed
+  var prefetched = null; // fail-closed preflight consumed by core begin()
 
   window.SW_EVIDENCE_INDEX = {
     // Everything happens here. The name is kept because layer 17 calls it.
     isHidden: isHidden,
     whenVisible: whenVisible,
     begin: function (windowRange, accounts) {
+      if (prefetched) {
+        var cached = prefetched;
+        prefetched = null;
+        if (Number(cached.startMs) === Number(windowRange && windowRange.startMs) &&
+            Number(cached.endMs) === Number(windowRange && windowRange.endMs)) {
+          return Promise.resolve(cached.run);
+        }
+        throw new Error('STORED_PREFLIGHT_WINDOW_MISMATCH');
+      }
       var S = pageState();
       var reportId = (S && S.reportId) || (S && S.seal && S.seal.report_id) || null;
       if (!reportId) throw new Error('DELTA_REPORT_ID_REQUIRED');
-      if (typeof log === 'function') log('Evidence: reading checkpoint and walking the delta (one server call)...');
-      // The window travels with the request. Without it the server has no way
-      // to know which days the report covers, and can only hand back this run's
-      // delta — which on a second run of the same day is nearly empty while the
-      // morning's transactions sit committed in the evidence repository.
-      var w = windowRange || {};
-      return postWithRetry('run', { report_id: reportId, scan_id: (S && S.scanId) || null,
-        window_start_ms: w.startMs, window_end_ms: w.endMs })
-        .then(function (result) {
-          run = result;
-          run.byAddress = Object.create(null);
-          (result.wallets || []).forEach(function (w) { run.byAddress[w.address] = w; });
-          if (typeof log === 'function') {
-            log('Evidence: anchor ' + result.anchor_ledger + ' · ' + result.complete_wallets + '/' +
-              result.target_wallets + ' proved · ' + (result.transactions || 0) + ' transactions · ' +
-              (result.xrpl_requests || 0) + ' XRPL reads' +
-              (result.window && result.window.in_window !== undefined
-                ? ' · window ' + result.window.in_window + ' events (' +
-                  result.window.from_stored + ' stored + ' + result.window.from_this_run + ' this run)' : '') +
-              (result.committed ? ' · checkpoint advanced'
-                : ' · checkpoint NOT advanced (' + result.reason + ')'));
-            // WHY THE TWO DENOMINATORS DISAGREE, IN THE LOG, NOT ONLY THE JSON.
-            //
-            // The state keeps proving a wallet the roster no longer lists —
-            // deliberately, because retiring a watched wallet is a decision and
-            // a run does not infer one from a list it was handed. So the
-            // evidence line can legitimately read 91/418 while the scan beside
-            // it reads 90/408, and on 2026-09-16 it did: a preview had written
-            // ten extra wallets into the shared checkpoint and production could
-            // not tell why its own numbers no longer matched.
-            //
-            // The server has always reported this as watched_not_in_roster; it
-            // reached the debug export and nowhere an operator was looking.
-            var absent = result.watched_not_in_roster || [];
-            if (absent.length) {
-              log('Evidence: ' + absent.length + ' wallet(s) are in the checkpoint but not on ' +
-                  'this build’s roster, so they are still walked and counted in the ' +
-                  result.target_wallets + ' above — ' +
-                  absent.slice(0, 3).map(function (a) { return a.slice(0, 6) + '…' + a.slice(-4); }).join(', ') +
-                  (absent.length > 3 ? ' and ' + (absent.length - 3) + ' more' : ''));
-            }
-            // WHY, not just WHAT. The reason code alone said
-            // JOURNAL_ROWS_UNREADABLE for two runs straight while the cause —
-            // a manifest naming shards a discard had already deleted — was
-            // only findable by reading the evidence repository by hand. The
-            // server puts the cause in the response; this prints it.
-            if (!result.committed) {
-              if (result.journal_rows_unreadable) {
-                log('Evidence: the resume journal could not be read back — ' +
-                  result.journal_rows_unreadable +
-                  (result.discard_error ? ' · discard FAILED: ' + result.discard_error
-                    : ' · journal discarded, the next run walks these wallets again'));
-              }
-              if (result.resumed && result.resumed.adopted === false) {
-                log('Evidence: resume journal refused (' + result.resumed.reason + ')' +
-                  (result.resumed.missing_shards
-                    ? ' · ' + result.resumed.missing_shards + ' row file(s) missing: ' +
-                      (result.resumed.missing_shard_paths || []).join(', ') : '') +
-                  (result.resumed.discard_error ? ' · discard FAILED: ' + result.resumed.discard_error
-                    : ' · discard ' + (result.resumed.discard_status || 'attempted')));
-              }
-            }
-            // ── SAY IT OUT LOUD WHEN ATTRIBUTION IS INFERRED ───────────
-            // A window attributed on reconstructed rows is a weaker claim than
-            // one whose provenance survived. It is still usable — that is the
-            // point of repairing it — but the operator must not learn the
-            // difference from a commit message.
-            if (result.window && result.window.provenance === 'PARTIAL_RECONSTRUCTED') {
-              log('Evidence: PROVENANCE PARTIALLY RECONSTRUCTED — ' +
-                result.window.attributed_derived_only + ' of ' + result.window.in_window +
-                ' events are attributed from the surviving transaction rather than from a ' +
-                'recorded walk. Wallet attribution in this report is weaker than usual.');
-            }
-            if (result.window && result.window.error) {
-              log('Evidence: REPORT WINDOW UNAVAILABLE — ' + result.window.error +
-                '. The report cannot be assembled from this run alone.');
-            }
+      resetProgress();
+      onProgress('start', { total: (accounts || []).length, done: 0, waiting_on: 'stored-evidence' });
+      onProgress('phase', { phase: 'stored-window', total: (accounts || []).length, done: 0 });
+      if (typeof log === 'function') {
+        log('Evidence: reading the last verified checkpoint and compact stored window...');
+      }
+      return getStoredReport(windowRange, reportId, 3).then(function (result) {
+        if (!result || result.stored_checkpoint !== true) {
+          throw new Error((result && result.error) || 'STORED_REPORT_UNAVAILABLE');
+        }
+        run = result;
+        run.byAddress = Object.create(null);
+        run.balance_baseline_by_address = Object.create(null);
+        (result.wallets || []).forEach(function (w, i) {
+          run.byAddress[w.address] = w;
+          if (w.baseline_balance_drops !== null && w.baseline_balance_drops !== undefined) {
+            run.balance_baseline_by_address[w.address] = {
+              balance_xrp: Number(w.baseline_balance_drops) / 1000000,
+              balance_ledger: w.baseline_balance_ledger
+            };
           }
-          return {
-            scan_id: result.scan_id || ('gh-' + result.anchor_ledger),
-            anchor_ledger: result.anchor_ledger,
-            anchor_close_ms: Date.parse(result.anchor_close),
-            accounts: (result.wallets || []).map(function (w) { return w.address; }),
-            roster_hash: result.state_sha256 || 'github-state',
-            committed: result.committed, freshness: result.freshness
-          };
+          onProgress('wallet', { done: i + 1, total: result.wallets.length,
+            waiting_on: 'stored-evidence', stored: true });
         });
+        onProgress('phase', { phase: 'stored-window-ready',
+          done: (result.wallets || []).length, total: (result.wallets || []).length,
+          rows: result.window && result.window.in_window });
+
+        try {
+          window.dispatchEvent(new CustomEvent('shadowwatch:evidence-freshness', {
+            detail: result.freshness || null
+          }));
+        } catch (_) {}
+
+        if (typeof log === 'function') {
+          var fresh = result.freshness || {};
+          log('Evidence: stored checkpoint v' + result.state_version +
+            ' · ledger ' + result.anchor_ledger +
+            ' · ' + result.complete_wallets + '/' + result.target_wallets + ' proved' +
+            ' · ' + ((result.window && result.window.in_window) || 0) + ' compact events' +
+            ' · ' + ((result.window && result.window.shards_verified) || 0) + ' shards hash-verified' +
+            ' · 0 XRPL acquisition reads' +
+            (fresh.status ? ' · ' + fresh.status : ''));
+          if (result.window && result.window.provenance === 'PARTIAL_RECONSTRUCTED') {
+            log('Evidence: PROVENANCE PARTIALLY RECONSTRUCTED — ' +
+              String(result.window.attributed_derived_only || 0) + ' of ' +
+              String(result.window.in_window || 0) +
+              ' events use derived attribution; transaction facts remain hash-verified.');
+          }
+        }
+
+        return {
+          scan_id: result.scan_id || ('stored-v' + result.state_version),
+          anchor_ledger: result.anchor_ledger,
+          anchor_close_ms: Date.parse(result.anchor_close),
+          accounts: (result.wallets || []).map(function (w) { return w.address; }),
+          roster_hash: result.state_sha256 || 'github-state',
+          committed: false,
+          stored_checkpoint: true,
+          freshness: result.freshness,
+          balance_baseline_by_address: run.balance_baseline_by_address,
+          balance_baseline: result.window && result.window.balance_baseline
+        };
+      });
+    },
+
+    prefetch: function (windowRange, accounts) {
+      var self = this;
+      return self.begin(windowRange, accounts).then(function (ir) {
+        prefetched = {
+          startMs: Number(windowRange && windowRange.startMs),
+          endMs: Number(windowRange && windowRange.endMs),
+          run: ir
+        };
+        return ir;
+      });
     },
 
     metrics: function () {
@@ -492,7 +593,9 @@
         attributed_derived_only: (run.window && run.window.attributed_derived_only) || 0,
         balance_contradictions: run.balance_contradictions,
         balance_contradiction_addresses: run.balance_contradiction_addresses || [],
-        checkpoint_advanced: !!run.committed, freshness: run.freshness };
+        checkpoint_advanced: false, stored_checkpoint: run.stored_checkpoint === true,
+        state_version: run.state_version, anchor_ledger: run.anchor_ledger,
+        freshness: run.freshness };
     },
 
     // Per-wallet, served from the run that already happened. A wallet that did
@@ -522,7 +625,7 @@
           : w.proven === true;
         if (!proven) throw new Error(w.error || w.status || 'WALLET_NOT_PROVEN');
         return { rows: [], proof: {
-          status: 'COMPLETE', source: 'GITHUB_EVIDENCE_STORE', run_id: indexRun.scan_id,
+          status: 'COMPLETE', source: 'GITHUB_STORED_VERIFIED_EVIDENCE', run_id: indexRun.scan_id,
           anchor_ledger: run.anchor_ledger, from_ledger: null, through_ledger: w.proven_through,
           range_bound_proven: true, range_exhausted: true, edge_fetch_complete: true,
           covers_window_start: true, request_bounded: true, transport_consistent: true,
@@ -567,13 +670,31 @@
     finish: function () {
       return Promise.resolve().then(function () {
         if (!run) throw new Error('DELTA_RUN_NOT_STARTED');
-        return { status: run.committed ? 'COMPLETE' : 'PARTIAL',
+        var complete = run.stored_checkpoint === true &&
+          Number(run.complete_wallets) === Number(run.target_wallets);
+        return { status: complete ? 'COMPLETE' : 'PARTIAL',
           complete_wallets: run.complete_wallets, target_wallets: run.target_wallets,
-          requests: run.xrpl_requests, rows_fetched: run.transactions,
-          balance_contradictions: run.balance_contradictions,
-          balance_contradiction_addresses: run.balance_contradiction_addresses || [],
-          checkpoint_advanced: !!run.committed, reason: run.reason || null };
+          requests: 0, rows_fetched: 0,
+          balance_contradictions: 0,
+          balance_contradiction_addresses: [],
+          stored_checkpoint: true,
+          checkpoint_advanced: false,
+          reason: run.reason || 'STORED_CHECKPOINT_READ',
+          freshness: run.freshness };
       });
+    },
+
+    checkpointWallet: function (address) {
+      if (!run || !run.byAddress) return null;
+      return run.byAddress[address] || null;
+    },
+
+    freshness: function () {
+      return run && run.freshness ? run.freshness : null;
+    },
+
+    storedActive: function () {
+      return !!(run && run.stored_checkpoint === true);
     },
 
     // Kept so a diagnostic can still reach the database-backed path on a build
@@ -582,4 +703,5 @@
   };
 
   window.SW_DELTA_EVIDENCE_20260911 = true;
+  window.SW_STORED_EVIDENCE_READER_20260927 = true;
 })();

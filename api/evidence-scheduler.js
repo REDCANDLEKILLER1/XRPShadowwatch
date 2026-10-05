@@ -14,6 +14,8 @@ const { acquireReader, releaseReader } = require('../src/db/xrpl-reader');
 const READ_BUDGET_MS = 210000; // mirrors /api/delta: 300s ceiling - 90s ending reserve
 const CONCURRENCY = 8;
 const MAX_ADMISSIONS = 150;
+const MAX_ATTEMPTS = 2;
+const RETRY_MIN_REMAINING_MS = 45000;
 
 function enabled(env) {
   return String((env || process.env).SHADOWWATCH_EVIDENCE_SCHEDULER_ENABLED || '').toLowerCase() === 'true';
@@ -48,9 +50,19 @@ function classify(result) {
   return { status: 'BLOCKED', httpStatus: 503, ok: false };
 }
 
+function retryableResult(result) {
+  return !!(result && result.committed !== true && result.reason === 'RUN_INCOMPLETE');
+}
+
+function retryableError(error) {
+  const msg = String(error && (error.message || error.code) || error || '');
+  return /timeout|timed out|network|connection|socket|link down|link closed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|too busy|quota|rate.?limit|\b429\b|temporar/i.test(msg);
+}
+
 async function runScheduledAcquisition(deps) {
   const d = deps || {};
   const now = typeof d.now === 'function' ? Number(d.now()) : Date.now();
+  const clockNow = typeof d.clockNow === 'function' ? d.clockNow : Date.now;
   const makeId = d.makeReportId || (ms => schedulerReportId(ms));
   const getRoster = d.selectRoster || (() => roster.select());
   const getReader = d.acquireReader || acquireReader;
@@ -60,56 +72,115 @@ async function runScheduledAcquisition(deps) {
   const accounts = selected && Array.isArray(selected.accounts) ? selected.accounts : [];
   if (!accounts.length) throw new Error('SCHEDULER_ROSTER_EMPTY');
 
-  const reader = getReader();
-  reader.deadline = now + READ_BUDGET_MS;
   const reportId = makeId(now);
+  const deadline = now + READ_BUDGET_MS;
   const phases = [];
   const onPhase = (name, detail) => {
     const record = { phase: name, ...(detail || {}) };
     phases.push(record);
     if (!d.silent) console.log('[evidence-scheduler] phase ' + name + ' ' + JSON.stringify(detail || {}));
   };
+  const job = {
+    report_id: reportId,
+    scan_id: null,
+    sealed_at: null,
+    roster: accounts,
+    max_admissions: MAX_ADMISSIONS,
+    // No report window: scheduler commits ledger evidence only. Interactive
+    // report runs later read whatever current proven window they need.
+    window_start_ms: null,
+    window_end_ms: null
+  };
 
-  try {
-    if (!d.silent) console.log('[evidence-scheduler] start ' + reportId + ' wallets=' + accounts.length);
-    const result = await acquire({
-      report_id: reportId,
-      scan_id: null,
-      sealed_at: null,
-      roster: accounts,
-      max_admissions: MAX_ADMISSIONS,
-      // No report window: scheduler commits ledger evidence only. Interactive
-      // report runs later read whatever current proven window they need.
-      window_start_ms: null,
-      window_end_ms: null
-    }, {
-      reader,
-      concurrency: CONCURRENCY,
-      onPhase
+  let result = null;
+  let attempts = 0;
+  let totalRequests = 0;
+  let retrySkipped = null;
+
+  if (!d.silent) console.log('[evidence-scheduler] start ' + reportId + ' wallets=' + accounts.length);
+
+  while (attempts < MAX_ATTEMPTS) {
+    attempts++;
+    onPhase('attempt', { attempt: attempts, max_attempts: MAX_ATTEMPTS, retry: attempts > 1 });
+    const reader = getReader();
+    reader.deadline = deadline;
+    try {
+      result = await acquire(job, {
+        reader,
+        concurrency: CONCURRENCY,
+        onPhase
+      });
+      totalRequests += Number(result && result.xrpl_requests) ||
+        Number(reader.stats && reader.stats.requests) || 0;
+    } catch (e) {
+      totalRequests += Number(reader.stats && reader.stats.requests) || 0;
+      const remaining = deadline - Number(clockNow());
+      if (attempts < MAX_ATTEMPTS && remaining >= RETRY_MIN_REMAINING_MS && retryableError(e)) {
+        onPhase('retry', {
+          next_attempt: attempts + 1,
+          trigger: 'TRANSIENT_ERROR',
+          remaining_ms: Math.max(0, remaining),
+          error: String(e && e.message || e)
+        });
+        continue;
+      }
+      if (attempts < MAX_ATTEMPTS && retryableError(e) && remaining < RETRY_MIN_REMAINING_MS) {
+        retrySkipped = 'INSUFFICIENT_BUDGET';
+        onPhase('retry-skipped', {
+          trigger: 'TRANSIENT_ERROR',
+          remaining_ms: Math.max(0, remaining),
+          minimum_ms: RETRY_MIN_REMAINING_MS
+        });
+      }
+      throw e;
+    } finally {
+      putReader(reader);
+    }
+
+    if (!retryableResult(result) || attempts >= MAX_ATTEMPTS) break;
+    const remaining = deadline - Number(clockNow());
+    if (remaining < RETRY_MIN_REMAINING_MS) {
+      retrySkipped = 'INSUFFICIENT_BUDGET';
+      onPhase('retry-skipped', {
+        trigger: 'RUN_INCOMPLETE',
+        remaining_ms: Math.max(0, remaining),
+        minimum_ms: RETRY_MIN_REMAINING_MS
+      });
+      break;
+    }
+    onPhase('retry', {
+      next_attempt: attempts + 1,
+      trigger: 'RUN_INCOMPLETE',
+      remaining_ms: Math.max(0, remaining),
+      complete_wallets: Number(result.complete_wallets) || 0,
+      target_wallets: Number(result.target_wallets) || accounts.length
     });
-    const verdict = classify(result);
-    const body = {
-      ok: verdict.ok,
-      status: verdict.status,
-      report_id: reportId,
-      reason: result && result.reason || null,
-      committed: !!(result && result.committed),
-      anchor_ledger: result && result.anchor_ledger || null,
-      anchor_close: result && result.anchor_close || null,
-      state_version: result && (result.state_version || result.state_version_read) || null,
-      target_wallets: result && result.target_wallets || accounts.length,
-      complete_wallets: result && result.complete_wallets || 0,
-      failed_wallets: result && result.failed_wallets || 0,
-      transactions: result && result.transactions || 0,
-      xrpl_requests: result && result.xrpl_requests || (reader.stats && reader.stats.requests) || 0,
-      resumed: result && result.resumed || null,
-      phases: phases.slice(-12)
-    };
-    if (!d.silent) console.log('[evidence-scheduler] done ' + JSON.stringify(body));
-    return { httpStatus: verdict.httpStatus, body };
-  } finally {
-    putReader(reader);
   }
+
+  const verdict = classify(result);
+  const body = {
+    ok: verdict.ok,
+    status: verdict.status,
+    report_id: reportId,
+    reason: result && result.reason || null,
+    committed: !!(result && result.committed),
+    anchor_ledger: result && result.anchor_ledger || null,
+    anchor_close: result && result.anchor_close || null,
+    state_version: result && (result.state_version || result.state_version_read) || null,
+    target_wallets: result && result.target_wallets || accounts.length,
+    complete_wallets: result && result.complete_wallets || 0,
+    failed_wallets: result && result.failed_wallets || 0,
+    transactions: result && result.transactions || 0,
+    xrpl_requests: totalRequests,
+    resumed: result && result.resumed || null,
+    attempts,
+    retried: attempts > 1,
+    retry_skipped: retrySkipped,
+    retry_exhausted: attempts >= MAX_ATTEMPTS && retryableResult(result),
+    phases: phases.slice(-16)
+  };
+  if (!d.silent) console.log('[evidence-scheduler] done ' + JSON.stringify(body));
+  return { httpStatus: verdict.httpStatus, body };
 }
 
 async function handler(req, res) {
@@ -142,6 +213,6 @@ async function handler(req, res) {
 
 module.exports = handler;
 module.exports._test = {
-  READ_BUDGET_MS, CONCURRENCY, MAX_ADMISSIONS,
-  enabled, authorized, schedulerReportId, classify, runScheduledAcquisition
+  READ_BUDGET_MS, CONCURRENCY, MAX_ADMISSIONS, MAX_ATTEMPTS, RETRY_MIN_REMAINING_MS,
+  enabled, authorized, schedulerReportId, classify, retryableResult, retryableError, runScheduledAcquisition
 };

@@ -749,8 +749,12 @@
             if (typeof state !== 'undefined' && Array.isArray(state.wallets)) {
               state.wallets.forEach(function (w) {
                 if (!w || w.status !== 'CHECKED') return;
-                var prior = previous[w.address];
-                if (prior && prior.balance_xrp !== null && prior.balance_xrp !== undefined) {
+                // Stored RUNs use a verified checkpoint at/before the requested
+                // window start. Browser-local history is never allowed to decide
+                // net flow for a store-backed report.
+                var storeBaseline = state.indexRun && state.indexRun.balance_baseline_by_address;
+                var prior = storeBaseline ? storeBaseline[w.address] : previous[w.address];
+                if (w.balance_current !== false && prior && prior.balance_xrp !== null && prior.balance_xrp !== undefined) {
                   w.prev_balance_xrp = num(prior.balance_xrp);
                   w.delta_xrp = num(w.balance_xrp) - num(prior.balance_xrp);
                 } else {

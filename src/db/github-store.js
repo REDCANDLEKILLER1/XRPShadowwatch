@@ -127,7 +127,7 @@ async function readState(deps) {
   const d = deps || {};
   const { token, repo, branch } = target(d.env);
   const gh = d.gh || A.client(token, repo, d.fetch || fetch);
-  const text = await readFile(gh, branch, STATE_PATH);
+  const text = await readFile(gh, branch, STATE_PATH, d.ref || null);
   if (text === null) return { state: null, missing: true, branch };
   let state;
   try { state = JSON.parse(text); }
@@ -135,6 +135,18 @@ async function readState(deps) {
   const verdict = State.verify(state);
   if (!verdict.ok) throw new Error('EVIDENCE_STATE_UNVERIFIED: ' + verdict.problems.join(','));
   return { state, missing: false, branch };
+}
+
+// A report is a proof read, so every file in one report must come from one
+// immutable evidence commit. Resolve the branch once, then read latest.json and
+// every history/shard path through that SHA.
+async function readPinnedState(deps) {
+  const d = deps || {};
+  const { token, repo, branch } = target(d.env);
+  const gh = d.gh || A.client(token, repo, d.fetch || fetch);
+  const ref = d.ref || (await A.archiveRef(gh, branch)).object.sha;
+  const loaded = await readState({ ...d, gh, ref });
+  return { ...loaded, ref, gh };
 }
 
 // ── THE RESUME JOURNAL ─────────────────────────────────────────────────────
@@ -536,6 +548,114 @@ async function seedGenesis(input, deps) {
     state_version: state.state_version, state_sha256: state.state_sha256, wallets: state.wallet_count };
 }
 
+// Resolve the newest verified checkpoint at or before a report window start.
+// This is the report's balance baseline. It replaces browser-local snapshots:
+// the same stored window must produce the same net-flow baseline on every device.
+async function resolveStateAtOrBefore(targetMs, deps) {
+  const d = deps || {};
+  const { token, repo, branch } = target(d.env);
+  const gh = d.gh || A.client(token, repo, d.fetch || fetch);
+  const pinnedRef = d.ref || (await A.archiveRef(gh, branch)).object.sha;
+  const loaded = d.loaded_state
+    ? { state:d.loaded_state, missing:false, branch }
+    : await readState({ ...d, gh, ref:pinnedRef });
+  if (loaded.missing || !loaded.state) throw new Error('EVIDENCE_STATE_MISSING');
+  const targetMsNum = Number(targetMs);
+  if (!Number.isFinite(targetMsNum)) throw new Error('INVALID_BASELINE_TIME');
+
+  let current = loaded.state, walked = 0;
+  while (current && Number(current.state_version) >= 1) {
+    const closeMs = Date.parse(current.anchor_close || '');
+    if (Number.isFinite(closeMs) && closeMs <= targetMsNum) {
+      return { state:current, states_walked:walked, branch, ref:pinnedRef };
+    }
+    if (Number(current.state_version) <= 1) break;
+    const previousVersion = Number(current.state_version) - 1;
+    const text = await readFile(gh, branch, historyPath(previousVersion), pinnedRef);
+    if (text === null) throw new Error('EVIDENCE_STATE_HISTORY_MISSING: v' + previousVersion);
+    let previous;
+    try { previous = JSON.parse(text); }
+    catch (_) { throw new Error('EVIDENCE_STATE_HISTORY_UNREADABLE: v' + previousVersion); }
+    const verdict = State.verify(current, previous);
+    if (!verdict.ok) {
+      throw new Error('EVIDENCE_STATE_HISTORY_UNVERIFIED: v' + current.state_version +
+        ' <- v' + previousVersion + ' ' + verdict.problems.join(','));
+    }
+    current = previous;
+    walked++;
+    if (walked > 500) throw new Error('EVIDENCE_BASELINE_HISTORY_LIMIT');
+  }
+  return { state:null, states_walked:walked, branch, ref:pinnedRef, reason:'NO_CHECKPOINT_AT_OR_BEFORE_WINDOW' };
+}
+
+// ── VERIFIED REPORT MANIFESTS ───────────────────────────────────────────────
+//
+// latest.json names the shards written by the LATEST successful acquisition,
+// not every day a 72-hour report may touch.  A report therefore walks the
+// hash-chained state history backwards until it finds the newest manifest that
+// wrote each requested UTC day.  Every state on that walk is verified against
+// the state after it before any shard hash is trusted.
+async function resolveDayManifests(days, deps) {
+  const d = deps || {};
+  const { token, repo, branch } = target(d.env);
+  const gh = d.gh || A.client(token, repo, d.fetch || fetch);
+  const pinnedRef = d.ref || (await A.archiveRef(gh, branch)).object.sha;
+  const loaded = d.loaded_state
+    ? { state:d.loaded_state, missing:false, branch }
+    : await readState({ ...d, gh, ref:pinnedRef });
+  if (loaded.missing || !loaded.state) throw new Error('EVIDENCE_STATE_MISSING');
+  const wanted = new Set((days || []).map(String));
+  const byDay = {};
+  const baselineMs = Number(d.baseline_ms);
+  const needBaseline = Number.isFinite(baselineMs);
+  let baselineState = null;
+  let current = loaded.state;
+  let walked = 0;
+
+  while ((wanted.size || (needBaseline && !baselineState)) &&
+         current && Number(current.state_version) >= 1) {
+    walked++;
+    if (needBaseline && !baselineState) {
+      const closeMs = Date.parse(current.anchor_close || '');
+      if (Number.isFinite(closeMs) && closeMs <= baselineMs) baselineState = current;
+    }
+    const shards = Array.isArray(current.evidence_shards) ? current.evidence_shards : [];
+    for (const day of [...wanted]) {
+      const prefix = 'evidence/' + day.replace(/-/g, '/') + '/';
+      const matching = shards.filter(s => s && typeof s.path === 'string' && s.path.indexOf(prefix) === 0);
+      if (!matching.length) continue;
+      const map = {};
+      for (const s of matching) map[s.path] = { path: s.path, sha256: s.sha256, rows: s.rows };
+      byDay[day] = {
+        state_version: current.state_version,
+        state_sha256: current.state_sha256,
+        shards: map
+      };
+      wanted.delete(day);
+    }
+    if ((!wanted.size && (!needBaseline || baselineState)) || Number(current.state_version) <= 1) break;
+
+    const previousVersion = Number(current.state_version) - 1;
+    const text = await readFile(gh, branch, historyPath(previousVersion), pinnedRef);
+    if (text === null) throw new Error('EVIDENCE_STATE_HISTORY_MISSING: v' + previousVersion);
+    let previous;
+    try { previous = JSON.parse(text); }
+    catch (_) { throw new Error('EVIDENCE_STATE_HISTORY_UNREADABLE: v' + previousVersion); }
+    const verdict = State.verify(current, previous);
+    if (!verdict.ok) {
+      throw new Error('EVIDENCE_STATE_HISTORY_UNVERIFIED: v' + current.state_version +
+        ' <- v' + previousVersion + ' ' + verdict.problems.join(','));
+    }
+    current = previous;
+    if (walked > 500) throw new Error('EVIDENCE_MANIFEST_HISTORY_LIMIT');
+  }
+
+  if (wanted.size) throw new Error('EVIDENCE_DAY_MANIFEST_MISSING: ' + [...wanted].sort().join(','));
+  return { byDay, state: loaded.state, states_walked: walked, branch, ref: pinnedRef,
+    baseline_state: baselineState,
+    baseline_unavailable_reason: needBaseline && !baselineState ? 'NO_CHECKPOINT_AT_OR_BEFORE_WINDOW' : null };
+}
+
 // ── Reading back the evidence we already own ───────────────────────────────
 //
 // ACQUISITION never calls this: the walk needs the checkpoint and nothing else.
@@ -565,20 +685,51 @@ async function readDays(days, deps, kind, opts) {
   // so parsing forty thousand raw ledger payloads into objects to compare a
   // prefix was memory spent on nothing.
   const asLines = !!(opts && opts.lines);
-  const out = { events: [], lines: [], files: [], missing: [] };
+  const verifyManifest = !!(opts && opts.requireManifest);
+  const manifests = (opts && opts.manifest) || null;
+  const out = { events: [], lines: [], files: [], missing: [], verified: [] };
   for (const day of (days || [])) {
     const base = 'evidence/' + String(day).replace(/-/g, '/');
-    // Shards are numbered only when a day had to be split, so try the plain
-    // name first and then the numbered series until one is absent.
-    const candidates = ['/' + name + '.ndjson.gz'];
-    for (let i = 1; i <= 999; i++) candidates.push('/' + name + '.' + String(i).padStart(3, '0') + '.ndjson.gz');
+    const dayManifest = manifests && manifests[String(day)];
+    if (verifyManifest && (!dayManifest || !dayManifest.shards)) {
+      throw new Error('EVIDENCE_DAY_MANIFEST_MISSING: ' + day);
+    }
+    const expected = dayManifest ? Object.keys(dayManifest.shards || {}).filter(p => {
+      const file = p.slice(p.lastIndexOf('/') + 1);
+      return file === name + '.ndjson.gz' || file.indexOf(name + '.') === 0;
+    }) : [];
+    const seenPaths = new Set();
+    // A verified manifest is the complete shard set for this day and kind.
+    // When a growing day switches from a plain file to numbered shards, the
+    // older plain file can remain in Git. It is not part of the new snapshot.
+    // Read exactly the manifest's paths, never discover extra evidence by name.
+    const candidates = verifyManifest
+      ? expected.sort().map(path => path.slice(base.length))
+      : ['/' + name + '.ndjson.gz'];
+    if (!verifyManifest) {
+      for (let i = 1; i <= 999; i++) candidates.push('/' + name + '.' + String(i).padStart(3, '0') + '.ndjson.gz');
+    }
     let found = 0;
     for (const suffix of candidates) {
       const path = base + suffix;
       // Day shards are routinely larger than a megabyte — a busy day can hold
       // tens of thousands of events — so they go through the same path.
-      const packed = await readBytes(gh, branch, path);
-      if (packed === null) { if (suffix === '/' + name + '.ndjson.gz') continue; break; }
+      const packed = await readBytes(gh, branch, path, opts && opts.ref);
+      if (packed === null) {
+        if (verifyManifest) throw new Error('EVIDENCE_SHARD_MISSING: ' + path);
+        if (suffix === '/' + name + '.ndjson.gz') continue;
+        break;
+      }
+      if (verifyManifest) {
+        const expectedShard = dayManifest.shards[path];
+        if (!expectedShard) throw new Error('EVIDENCE_SHARD_UNMANIFESTED: ' + path);
+        const actual = State.sha256(packed);
+        if (actual !== expectedShard.sha256) {
+          throw new Error('EVIDENCE_SHARD_HASH_MISMATCH: ' + path);
+        }
+        seenPaths.add(path);
+        out.verified.push({ path, sha256: actual, state_version: dayManifest.state_version });
+      }
       const text = zlib.gunzipSync(packed).toString('utf8');
       for (const line of text.split('\n')) {
         if (!line) continue;
@@ -586,11 +737,17 @@ async function readDays(days, deps, kind, opts) {
       }
       out.files.push(path); found++;
     }
+    if (verifyManifest) {
+      for (const path of expected) {
+        if (!seenPaths.has(path)) throw new Error('EVIDENCE_SHARD_MISSING: ' + path);
+      }
+      if (!expected.length) throw new Error('EVIDENCE_KIND_MANIFEST_MISSING: ' + day + ':' + name);
+    }
     if (!found) out.missing.push(day);
   }
   return out;
 }
 
 module.exports = { STATE_PATH, JOURNAL_PATH, historyPath, runPath, journalRowPath, readBytes, readFile,
-  readState, commitRun, seedGenesis, uploadBlob, readDays,
+  readState, readPinnedState, commitRun, seedGenesis, uploadBlob, readDays, resolveDayManifests, resolveStateAtOrBefore,
   readJournal, readJournalRows, readJournalRowsEach, appendJournal, clearJournal, missingJournalShards };

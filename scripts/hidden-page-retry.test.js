@@ -106,6 +106,7 @@ const check = (name, ok, detail) => {
     const realFetch = window.fetch;
     let calls = 0, mode = 'transport-fail';
     const GOOD = {
+      stored_checkpoint: true, state_version: 105,
       scan_id: 'idx-test', anchor_ledger: 107069739,
       anchor_close: '2026-09-18T12:58:01.000Z',
       wallets: [{ address: 'rTEST' }], target_wallets: 1, complete_wallets: 1,
