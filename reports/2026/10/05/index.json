@@ -1,0 +1,11 @@
+[
+  {
+    "report_id": "SW-20261005-ZXHGU",
+    "scan_id": "SC-MUUL29IM",
+    "generated_at": "2026-10-05T00:58:40.000Z",
+    "coverage_complete": true,
+    "anchor": 107438621,
+    "transactions": null,
+    "report_hash": "09b62049059b913c99654731cbc4588818e98c38a4228c4c95819fd74ffc39df"
+  }
+]
