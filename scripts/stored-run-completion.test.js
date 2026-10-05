@@ -23,7 +23,10 @@ const srv = http.createServer((req,res) => {
   if (u.pathname === '/api/delta') {
     if (req.method !== 'GET') { writes++; res.writeHead(405); return res.end(); }
     reads++;
-    if (unavailable) { res.writeHead(503, {'Content-Type':'application/json'}); return res.end('{"error":"STORE_DOWN"}'); }
+    if (unavailable) {
+      require('../api/delta').streamStoredReportRequest(res, {}, {readReport:async()=>{throw new Error('STORE_DOWN');}});
+      return;
+    }
     const body = { source:'STORED_VERIFIED_EVIDENCE', stored_checkpoint:true,
       state_version:204, state_sha256:'f'.repeat(64), scan_id:'stored-v204-test',
       anchor_ledger:anchor, anchor_close:cutoff, target_wallets:roster.length,
@@ -35,7 +38,15 @@ const srv = http.createServer((req,res) => {
         in_window:events.length,from_stored:events.length,from_this_run:0,days_without_shards:[],shards_verified:4,
         provenance:'OBSERVED',balance_baseline:{state_version:190}},
       freshness:{evidence_time:cutoff,anchor_ledger:anchor,state_version:204,status:'CURRENT'} };
-    require('../api/delta').streamStoredReport(res,body,750);
+    require('../api/delta').streamStoredReportRequest(res, {}, {heartbeatMs:100,
+      readReport:async(input,deps)=>{
+        deps.onReportProgress({phase:'history',states_walked:4,days_found:3,days_total:4});
+        await new Promise(r=>setTimeout(r,400));
+        deps.onReportProgress({phase:'verifying',files_verified:2,files_total:4});
+        await new Promise(r=>setTimeout(r,1200));
+        deps.onReportProgress({phase:'assembling'});
+        return body;
+      }});
     return;
   }
   if (u.pathname === '/api/report-archive') {
@@ -64,30 +75,47 @@ const srv = http.createServer((req,res) => {
     await page.goto('http://127.0.0.1:'+PORT+'/brief-console.html');
     await page.waitForFunction(()=>window.SW_STORED_EVIDENCE_READER_20260927);
     await page.waitForTimeout(8500); // roster promotion/load-time wrappers settle
+    await page.waitForFunction(()=>document.getElementById('swReportMonitor').dataset.phase==='ready');
     await page.evaluate(()=>{
       market = async()=>[];
       fetchNewsIntel = async()=>{state.newsIntel={items:[],top_headlines:[],source_status:{},source_breakdown:{}};};
       fetchEvidenceLedNews = async()=>[];
     });
     for (let attempt=0;attempt<2;attempt++) {
-      const out = await page.evaluate(async()=>{
+      const running = page.evaluate(async()=>{
         await run();
         return {seal:!!state.seal,scanning:state.scanning,txs:state.txs.length,
           coverage:state.txScanCoverage,report:state.morningStoryReport.length,
           deltas:state.wallets.slice(0,2).map(w=>w.delta_xrp),disabled:document.getElementById('scanBtn').disabled,
           network:window.liveRequests,errors:state.errorLog.slice(-5),logs:state.runLog.slice(-8)};
       });
+      await page.waitForFunction(()=>document.getElementById('swReportMonitor').dataset.phase==='verifying');
+      assert(await page.locator('#swReportMonitor').isVisible(),'monitor must survive dashboard adoption');
+      const box=await page.locator('#swReportMonitor').boundingBox();
+      assert(box && box.x>=0 && box.y>=0 && box.x+box.width<=390 && box.y+box.height<=844,'monitor must be in the first mobile viewport');
+      assert.match(await page.locator('#swMonitorDetail').innerText(), /2 of 4 files verified/);
+      assert.equal(await page.locator('#swMonitorBar').getAttribute('aria-valuenow'),'50');
+      assert.match(await page.locator('#swMonitorSignal').innerText(),/Last server update/);
+      await page.waitForTimeout(350);
+      assert.equal(await page.locator('#swMonitorBar').getAttribute('aria-valuenow'),'50','heartbeats must not invent progress');
+      if (attempt===0 && process.env.SW_MONITOR_SCREENSHOT) await page.screenshot({path:process.env.SW_MONITOR_SCREENSHOT});
+      const out = await running;
       console.log('RUN '+(attempt+1),JSON.stringify(out));
       assert(out.seal,'stored RUN must seal even when XRPL is offline');
       assert.equal(out.txs,150000); assert(out.report>0); assert(!out.scanning); assert(!out.disabled);
       assert.equal(out.coverage.complete_wallets,roster.length); assert.equal(out.network,0);
       assert.deepEqual(out.deltas,[null,null],'stale balance and missing stored baseline cannot use device net flow');
       assert.equal(reads,attempt+1,'one stored GET per RUN, including rerun');
+      await page.waitForFunction(()=>document.getElementById('swReportMonitor').dataset.phase==='complete');
+      assert.match(await page.locator('#swMonitorDetail').innerText(), /archive saved/);
     }
     unavailable = true;
     const failed = await page.evaluate(async()=>{await run();return {seal:state.seal,pack:state.pack,scanning:state.scanning,disabled:document.getElementById('scanBtn').disabled,network:window.liveRequests};});
     assert.equal(failed.seal,null); assert.equal(failed.pack,null); assert(!failed.scanning); assert(!failed.disabled);
     assert.equal(failed.network,0); assert.equal(writes,0);
+    await page.waitForFunction(()=>document.getElementById('swReportMonitor').dataset.phase==='error');
+    assert.match(await page.locator('#swMonitorDetail').innerText(),/STORE_DOWN/);
+    assert.equal(await page.locator('#swMonitorBar').getAttribute('aria-valuenow'),null);
     console.log('PASS full mobile RUN and rerun seal 150k stored events; store failure stops cleanly; zero acquisition writes/network fallback');
   } finally { await browser.close(); await new Promise(r=>srv.close(r)); }
 })().catch(e=>{console.error(e);process.exit(1);});

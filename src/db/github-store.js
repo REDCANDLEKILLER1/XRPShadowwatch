@@ -633,6 +633,8 @@ async function resolveDayManifests(days, deps) {
       };
       wanted.delete(day);
     }
+    try { if (d.onReportProgress) d.onReportProgress({ phase:'history', states_walked:walked,
+      days_found:Object.keys(byDay).length, days_total:(days || []).length }); } catch (_) {}
     if ((!wanted.size && (!needBaseline || baselineState)) || Number(current.state_version) <= 1) break;
 
     const previousVersion = Number(current.state_version) - 1;
@@ -736,6 +738,9 @@ async function readDays(days, deps, kind, opts) {
         if (asLines) out.lines.push(line); else out.events.push(JSON.parse(line));
       }
       out.files.push(path); found++;
+      if (verifyManifest) {
+        try { if (d.onReportProgress) d.onReportProgress({ phase:'shard', day, kind:name }); } catch (_) {}
+      }
     }
     if (verifyManifest) {
       for (const path of expected) {

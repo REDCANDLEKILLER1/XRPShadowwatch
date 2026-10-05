@@ -44,6 +44,7 @@ const SUITES = [
   ['morning-news-sources',   'morning-news-source-handoff.test.js', 8233],
   ['post-news-stack',      'post-news-stack-overflow.test.js', 8234],
   ['stored-run-completion', 'stored-run-completion.test.js', 8235],
+  ['stored-report-stream',  'stored-report-stream.test.js', null],
   // A report that cannot be posted was not published. The field holds 4,000.
   ['public-morning-4k',      'public-morning-4k.test.js',           null],
   // A working scan that says nothing is indistinguishable from a hung one.

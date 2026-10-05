@@ -398,13 +398,20 @@
       window_end_ms: String(w.endMs)
     });
     var maxStrikes = Math.max(1, Number(attempts) || 3);
-    var strikes = 0, hiddenWaits = 0;
+    var strikes = 0, hiddenWaits = 0, attempt = 0;
+    function progress(value) {
+      try { window.dispatchEvent(new CustomEvent('shadowwatch:stored-report-progress',
+        { detail:Object.assign({ attempt:attempt }, value) })); } catch (_) {}
+    }
 
     function once() {
+      attempt++;
+      progress({ phase:'connecting' });
       var controller = new AbortController();
       var timer = null;
       var sawHidden = isHidden();
       var streamed = [];
+      var expectedEvents = null;
 
       function idle() {
         if (timer) { clearTimeout(timer); timer = null; }
@@ -436,8 +443,16 @@
         if (response.ok && response.body && response.body.getReader &&
             /application\/x-ndjson/i.test(type)) {
           return readNdjson(response, function (value) {
+            if (value && (value.t === 'progress' || value.t === 'heartbeat')) {
+              progress(Object.assign({}, value, { server_update:true }));
+            }
+            if (value && value.t === 'meta') {
+              expectedEvents = Number(value.events_count);
+              progress({ phase:'receiving', events_received:0, events_total:expectedEvents, server_update:true });
+            }
             if (value && value.t === 'events' && Array.isArray(value.events)) {
               for (var i = 0; i < value.events.length; i++) streamed.push(value.events[i]);
+              progress({ phase:'receiving', events_received:streamed.length, events_total:expectedEvents, server_update:true });
             }
           }, idle).then(function (final) {
             final.events = streamed;
@@ -448,6 +463,7 @@
         return plainBody(response);
       }).then(function (value) {
         cleanup();
+        progress({ phase:'snapshot-ready', events_received:streamed.length, server_update:true });
         return inflateEvents(value);
       }, function (e) {
         cleanup();
@@ -468,6 +484,7 @@
         if (sawHidden || isHidden()) {
           if (hiddenWaits >= HIDDEN_RETRY_MAX) throw err;
           hiddenWaits++;
+          progress({ phase:'paused' });
           return whenVisible(HIDDEN_WAIT_MAX_MS).then(function (returned) {
             if (!returned) throw err;
             return once();
@@ -476,11 +493,15 @@
 
         strikes++;
         if (strikes >= maxStrikes) throw err;
+        progress({ phase:'retry', error:String(err.message || err) });
         return new Promise(function (resolve) { setTimeout(resolve, 2000); }).then(once);
       });
     }
 
-    return once();
+    return once().catch(function (e) {
+      progress({ phase:'error', error:String(e && e.message || e) });
+      throw e;
+    });
   }
 
   var run = null;   // the single acquisition this page performed
