@@ -1,4 +1,6 @@
 #swReportMonitor{margin:10px 0;padding:12px 14px;border:1px solid #245a48;border-radius:10px;background:rgba(4,17,14,.94);color:#b9d9cb;font:12px/1.5 system-ui,sans-serif;overflow:hidden}
+/* Boot UI stays out of document flow so adoption cannot shift scroll anchoring. */
+body:not(.sw-stored-monitor-mounted) #swReportMonitor{position:fixed;top:70px;left:16px;right:16px;z-index:1000}
 .sw-stored-monitor-mounted #swPhaseRuntime{display:none}
 #swReportMonitor .sw-monitor-heading{display:flex;justify-content:space-between;align-items:baseline;gap:12px;color:#89f1c3}
 #swMonitorTitle{font-size:13px;font-weight:650}

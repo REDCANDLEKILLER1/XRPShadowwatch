@@ -76,6 +76,13 @@ const srv = http.createServer((req,res) => {
     await page.waitForFunction(()=>window.SW_STORED_EVIDENCE_READER_20260927);
     await page.waitForTimeout(8500); // roster promotion/load-time wrappers settle
     await page.waitForFunction(()=>document.getElementById('swReportMonitor').dataset.phase==='ready');
+    async function reactorBelowHeader() {
+      const header=await page.locator('#swDashHeader').boundingBox();
+      const reactor=await page.locator('#swReactorPhase').boundingBox();
+      assert(header && reactor && header.y>=0 && reactor.y>=header.y+header.height,
+        'monitor adoption must not scroll the reactor behind the header');
+    }
+    await reactorBelowHeader();
     await page.evaluate(()=>{
       market = async()=>[];
       fetchNewsIntel = async()=>{state.newsIntel={items:[],top_headlines:[],source_status:{},source_breakdown:{}};};
@@ -116,6 +123,8 @@ const srv = http.createServer((req,res) => {
     await page.waitForFunction(()=>document.getElementById('swReportMonitor').dataset.phase==='error');
     assert.match(await page.locator('#swMonitorDetail').innerText(),/STORE_DOWN/);
     assert.equal(await page.locator('#swMonitorBar').getAttribute('aria-valuenow'),null);
+    await page.setViewportSize({width:1440,height:900});
+    await reactorBelowHeader();
     console.log('PASS full mobile RUN and rerun seal 150k stored events; store failure stops cleanly; zero acquisition writes/network fallback');
   } finally { await browser.close(); await new Promise(r=>srv.close(r)); }
 })().catch(e=>{console.error(e);process.exit(1);});
