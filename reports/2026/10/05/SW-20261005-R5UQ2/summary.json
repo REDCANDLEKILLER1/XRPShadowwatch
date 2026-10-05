@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20261005-R5UQ2",
+  "generated_at": "2026-10-05T13:01:21.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107449996,
+  "transactions_in_window": null,
+  "new_observations": 0,
+  "xrpl_requests": 0,
+  "report_hash": "c57fffe042d72007f7965122b8d64d000fd070890bc219e4319304fd1074d620"
+}
