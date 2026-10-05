@@ -61,7 +61,7 @@
   --sw-f-lbl:9px; --sw-f-num:22px;
 }
 /* Boot cloak — opaque cover kills the legacy-HUD flash until boot lifts it. */
-html.sw-booting body::after{content:"";position:fixed;inset:0;background:#04070A;z-index:99990;pointer-events:none;}
+html.sw-booting body::after{content:"Opening Shadow Watch…";display:grid;place-items:center;color:#75e9ba;font:14px system-ui;position:fixed;inset:0;background:#04070A;z-index:99990;pointer-events:none;}
 /* ════════ FIXED COCKPIT SHELL — one viewport, no page scroll ════════ */
 body.sw-dash-v1{overflow:hidden !important;height:100% !important;max-height:100vh !important;}
 .sw-dash-v1 #screenStage{overflow:hidden !important;}
@@ -2480,6 +2480,15 @@ body.xai-command-mounted .main-grid{
     <button data-screen-target="evidence">🔒 VAULT</button>
     <button data-screen-target="developer">⚙ SYSTEM</button>
   </nav>
+
+  <aside id="swReportMonitor" aria-label="Report activity" data-phase="opening">
+    <div class="sw-monitor-heading"><strong id="swMonitorTitle" role="status" aria-live="polite">Opening Shadow Watch…</strong><span id="swMonitorElapsed" aria-live="off">0:00</span></div>
+    <div id="swMonitorDetail">Loading the report workspace</div>
+    <div id="swMonitorSignal" aria-live="off"></div>
+    <div id="swMonitorBar" role="progressbar" aria-label="Current report step"><i></i></div>
+  </aside>
+  <link rel="stylesheet" href="/src/brief/47-stored-report-progress-20261005.css">
+  <script src="/src/brief/47-stored-report-progress-20261005.js"></script>
 
   <main id="screenStage">
     <section class="app-screen active" data-screen="command" id="screen-command">

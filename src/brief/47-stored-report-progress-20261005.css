@@ -1,0 +1,17 @@
+#swReportMonitor{margin:10px 0;padding:12px 14px;border:1px solid #245a48;border-radius:10px;background:rgba(4,17,14,.94);color:#b9d9cb;font:12px/1.5 system-ui,sans-serif;overflow:hidden}
+/* Boot UI stays out of document flow so adoption cannot shift scroll anchoring. */
+body:not(.sw-stored-monitor-mounted) #swReportMonitor{position:fixed;top:70px;left:16px;right:16px;z-index:1000}
+.sw-stored-monitor-mounted #swPhaseRuntime{display:none}
+#swReportMonitor .sw-monitor-heading{display:flex;justify-content:space-between;align-items:baseline;gap:12px;color:#89f1c3}
+#swMonitorTitle{font-size:13px;font-weight:650}
+#swMonitorElapsed{white-space:nowrap;font-variant-numeric:tabular-nums}
+#swMonitorDetail{margin-top:3px;overflow-wrap:anywhere}
+#swMonitorSignal{font-size:11px;color:#8aa99c;min-height:16px}
+#swMonitorBar{height:3px;margin-top:9px;overflow:hidden;border-radius:3px;background:#19352c}
+#swMonitorBar i{display:block;height:100%;width:30%;background:#74e9bb;animation:swMonitorPulse 1.8s ease-in-out infinite}
+#swMonitorBar[data-measured] i{animation:none;transition:width .2s ease-out}
+#swReportMonitor[data-phase="ready"] #swMonitorBar,#swReportMonitor[data-phase="complete"] #swMonitorBar,#swReportMonitor[data-phase="error"] #swMonitorBar{display:none}
+#swReportMonitor[data-phase="error"]{border-color:#9b6446}
+#swReportMonitor[data-phase="error"] #swMonitorTitle{color:#f1b58e}
+@keyframes swMonitorPulse{0%{transform:translateX(-100%)}100%{transform:translateX(440%)}}
+@media(prefers-reduced-motion:reduce){#swMonitorBar i{animation:none;transition:none}}

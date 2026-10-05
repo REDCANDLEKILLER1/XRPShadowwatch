@@ -1567,6 +1567,7 @@ async function readReportWindow(input, deps) {
     Store.readDays(days, d, undefined, verifiedOpts),
     Store.readDays(days, d, 'participants', verifiedOpts)
   ]);
+  try { if (d.onReportProgress) d.onReportProgress({ phase:'assembling' }); } catch (_) {}
   const fresh = (input.rows || []).map(r => X.eventOf({ ...r, close_time: r.close_time_iso || r.close_time }));
   const byHash = new Map();
   // Freshly walked rows win on a tie: they came from this run's proven range.

@@ -99,11 +99,13 @@ async function main() {
   };
   const ENV = { SHADOWWATCH_EVIDENCE_TOKEN:'test-token' };
   await checkAsync('a matching event shard is accepted and marked verified', async () => {
-    const r = await Store.readDays([day], {env:ENV,gh}, undefined,
+    const progress = [];
+    const r = await Store.readDays([day], {env:ENV,gh,onReportProgress:v=>progress.push(v)}, undefined,
       {manifest,requireManifest:true});
     assert.equal(r.events.length,1);
     assert.equal(r.verified.length,1);
     assert.equal(r.verified[0].sha256,State.sha256(eventPacked));
+    assert.deepEqual(progress,[{phase:'shard',day,kind:'events'}]);
   });
   await checkAsync('a matching provenance shard is accepted and marked verified', async () => {
     const r = await Store.readDays([day], {env:ENV,gh}, 'participants',
@@ -112,11 +114,13 @@ async function main() {
     assert.equal(r.verified.length,1);
   });
   await checkAsync('a bad committed hash refuses the whole read', async () => {
+    const progress = [];
     const bad = JSON.parse(JSON.stringify(manifest));
     bad[day].shards[eventPath].sha256 = '0'.repeat(64);
-    const msg = await refused(() => Store.readDays([day], {env:ENV,gh}, undefined,
+    const msg = await refused(() => Store.readDays([day], {env:ENV,gh,onReportProgress:v=>progress.push(v)}, undefined,
       {manifest:bad,requireManifest:true}));
     assert(/EVIDENCE_SHARD_HASH_MISMATCH/.test(msg),msg);
+    assert.equal(progress.length,0,'a bad hash cannot advance verified progress');
   });
   await checkAsync('a missing manifest refuses the day instead of treating it as quiet', async () => {
     const msg = await refused(() => Store.readDays([day], {env:ENV,gh}, undefined,
@@ -185,11 +189,13 @@ async function main() {
     throw new Error('UNEXPECTED_STATE_GH_CALL ' + method + ' ' + p);
   };
   await checkAsync('resolver finds each day at the state version that last wrote it', async () => {
-    const r = await Store.resolveDayManifests(['2026-09-26','2026-09-27'],{env:ENV,gh:stateGh});
+    const progress = [];
+    const r = await Store.resolveDayManifests(['2026-09-26','2026-09-27'],{env:ENV,gh:stateGh,onReportProgress:v=>progress.push(v)});
     assert.equal(r.ref,'snapshot-head');
     assert.equal(r.byDay['2026-09-27'].state_version,3);
     assert.equal(r.byDay['2026-09-26'].state_version,2);
     assert.equal(r.byDay['2026-09-26'].shards[day26Path].sha256,'1'.repeat(64));
+    assert.deepEqual(progress.map(p=>[p.states_walked,p.days_found,p.days_total]),[[1,1,2],[2,2,2]]);
   });
 
   console.log('\n4. the post-core fence never re-crawls a watched wallet');

@@ -14,6 +14,7 @@
     'INIT',
     'NEWS_COLLECTION',
     'EVIDENCE_ACQUISITION',
+    'STORED_SNAPSHOT',
     'WALLET_SNAPSHOT',
     'WALLET_HISTORY_SCAN',
     'TRANSACTION_ANALYSIS',
@@ -32,6 +33,7 @@
     // so without its own name the panel showed Wallet Snapshot as completed
     // AND running for the whole of it.
     EVIDENCE_ACQUISITION: 'Evidence Acquisition',
+    STORED_SNAPSHOT: 'Stored Snapshot',
     WALLET_SNAPSHOT: 'Wallet Snapshot',
     WALLET_HISTORY_SCAN: 'Wallet History Scan',
     TRANSACTION_ANALYSIS: 'Transaction Analysis',

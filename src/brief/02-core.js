@@ -11408,12 +11408,13 @@ if (typeof window !== 'undefined' && window.SHADOW_EVENT_BUS) {
     try {
       if (window.SW_PHASE_PROGRESS_RUNTIME_20260820 &&
           typeof window.SW_PHASE_PROGRESS_RUNTIME_20260820.setPhase === 'function') {
-        window.SW_PHASE_PROGRESS_RUNTIME_20260820.setPhase('EVIDENCE_ACQUISITION',
+        var storedProgress = m.stored || m.waiting_on === 'stored-evidence' || /^stored/.test(m.phase || '');
+        window.SW_PHASE_PROGRESS_RUNTIME_20260820.setPhase(storedProgress ? 'STORED_SNAPSHOT' : 'EVIDENCE_ACQUISITION',
           XAI_SCAN_PROGRESS.evidenceTotal
-            ? Math.round(100 * XAI_SCAN_PROGRESS.evidenceWallets / XAI_SCAN_PROGRESS.evidenceTotal)
-            : 0,
+            && (!storedProgress || XAI_SCAN_PROGRESS.evidenceWallets > 0)
+            ? Math.round(100 * XAI_SCAN_PROGRESS.evidenceWallets / XAI_SCAN_PROGRESS.evidenceTotal) : null,
           XAI_SCAN_PROGRESS.evidenceWallets + ' of ' + XAI_SCAN_PROGRESS.evidenceTotal +
-            ' wallets walked' + (XAI_SCAN_PROGRESS.evidenceAttempt > 1
+            (storedProgress ? ' wallets verified from snapshot' : ' wallets walked') + (XAI_SCAN_PROGRESS.evidenceAttempt > 1
               ? ' \u00b7 attempt ' + XAI_SCAN_PROGRESS.evidenceAttempt : ''));
       }
     } catch (_) {}

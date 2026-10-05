@@ -208,16 +208,58 @@ function streamStoredReport(res, body, chunkSize) {
   }
   lines.push({ t:'done', ...meta, events_streamed:events.length });
   if (res) {
-    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-    res.setHeader('X-Accel-Buffering', 'no');
+    if (!res.headersSent) {
+      res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+      res.setHeader('X-Accel-Buffering', 'no');
+    }
     for (const line of lines) res.write(JSON.stringify(line) + '\n');
     res.end();
   }
   return lines;
 }
 
-async function storedReport(input, deps) {
+// Start the stream BEFORE GitHub reads. Heartbeats show that the request is
+// alive; only verified milestones advance the file/history counters.
+async function streamStoredReportRequest(res, input, deps) {
   const d = deps || {};
+  const started = Date.now();
+  let closed = false, phase = 'checkpoint';
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Cache-Control', 'no-store');
+  function line(value) {
+    if (!closed && !res.destroyed && !res.writableEnded) {
+      res.write(JSON.stringify({ ...value, elapsed_ms:Date.now() - started }) + '\n');
+    }
+  }
+  function progress(value) {
+    phase = value.phase || phase;
+    line({ ...value, t:'progress', phase });
+  }
+  const beat = setInterval(() => line({ t:'heartbeat', phase }), d.heartbeatMs || 5000);
+  function close() { closed = true; clearInterval(beat); }
+  res.once('close', close);
+  try {
+    progress({ phase:'checkpoint' });
+    const body = await (d.readReport || storedReport)(input, { ...d, pack:false, onReportProgress:progress });
+    if (!closed && !res.destroyed) streamStoredReport(res, body, 750);
+  } catch (e) {
+    line({ t:'error', error:String(e && e.message || 'STORED_REPORT_UNAVAILABLE'),
+      status:Number(e && e.httpStatus) || 503, stored_report:false, xrpl_fallback_allowed:false });
+    if (!closed && !res.destroyed) res.end();
+  } finally {
+    clearInterval(beat);
+    res.removeListener('close', close);
+  }
+}
+
+async function storedReport(input, deps) {
+  let verified = 0, total = 0;
+  const notify = deps && deps.onReportProgress;
+  const d = { ...(deps || {}), onReportProgress(value) {
+    if (value.phase === 'shard') value = { ...value, phase:'verifying', files_verified:++verified, files_total:total };
+    try { if (notify) notify(value); } catch (_) {}
+  } };
   const startMs = Number(input && input.window_start_ms);
   const endMs = Number(input && input.window_end_ms);
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
@@ -239,6 +281,10 @@ async function storedReport(input, deps) {
   const manifests = await Store.resolveDayManifests(days, {
     ...d, gh:loaded.gh, ref:loaded.ref, loaded_state:loaded.state, baseline_ms:startMs
   });
+  total = Object.values(manifests.byDay).reduce((n, day) => n +
+    Object.keys(day.shards || {}).filter(p => /\/(events|participants)(\.\d+)?\.ndjson\.gz$/.test(p)).length, 0);
+  d.onReportProgress({ phase:'verifying', files_verified:0, files_total:total,
+    state_version:loaded.state.state_version });
   const state = manifests.state;
   const baselineState = manifests.baseline_state || null;
   const baselineByAddress = Object.create(null);
@@ -379,14 +425,12 @@ module.exports = async function handler(req, res) {
     if (input.action === 'report') {
       try {
         const wantsStream = /^(1|true)$/i.test(String(input.stream || ''));
-        const body = await storedReport(input, { pack: !wantsStream });
-        if (!wantsStream) return res.json(body);
+        if (!wantsStream) return res.json(await storedReport(input, { pack:true }));
 
         // Compact report windows can exceed Vercel's normal 4.5 MB response
         // ceiling even after gzip. Stream NDJSON chunks instead of forcing the
         // whole 24/48/60/72h window through one buffered JSON response.
-        streamStoredReport(res, body, 750);
-        return;
+        return await streamStoredReportRequest(res, input);
       } catch (e) {
         const status = Number(e && e.httpStatus) || 503;
         return res.status(status).json({
@@ -659,3 +703,4 @@ module.exports.storedReport = storedReport;
 module.exports.nextScheduledSlot = nextScheduledSlot;
 module.exports.capWindowToAnchor = capWindowToAnchor;
 module.exports.streamStoredReport = streamStoredReport;
+module.exports.streamStoredReportRequest = streamStoredReportRequest;
