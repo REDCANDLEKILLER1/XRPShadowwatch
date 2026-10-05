@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20261005-VNK5O",
+  "generated_at": "2026-10-05T14:12:01.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107451095,
+  "transactions_in_window": null,
+  "new_observations": 0,
+  "xrpl_requests": 0,
+  "report_hash": "6976b449fb1cab2fa82332f5bcc6f3b10556d661c1c65fbcc3b330159299d0dd"
+}
