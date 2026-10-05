@@ -16542,6 +16542,25 @@ async function buildEvidenceSeal(p, report, bundle) {
   return seal;
 }
 
+// Saving is separate from sealing. A stalled archive response cannot leave a
+// completed report stuck in RUN; the phone copy can retry the same payload.
+async function uploadSealedReport(payload) {
+  const controller = new AbortController();
+  let timer;
+  try {
+    return await Promise.race([
+      (async () => {
+        const response = await fetch('/api/report-archive', {method:'POST',
+          headers:{'Content-Type':'application/json'},cache:'no-store',signal:controller.signal,
+          body:JSON.stringify(payload)});
+        const result = await response.json().catch(function () { return {status:'FAILED',error:'ARCHIVE_RESPONSE_INVALID'}; });
+        return {response,result};
+      })(),
+      new Promise((_,reject) => { timer = setTimeout(() => reject(new Error('ARCHIVE_SAVE_TIMEOUT')),20000); })
+    ]);
+  } finally { clearTimeout(timer); controller.abort(); }
+}
+
 async function archiveSealedReport(p, seal) {
   const started={attempted:true,status:'PENDING',report_id:seal&&seal.report_id||null,
     branch:'shadowwatch-report-archive',commit_sha:null,archived_at:null,files_written:0,bytes_written:0,retry_count:0,error:null};
@@ -16549,11 +16568,14 @@ async function archiveSealedReport(p, seal) {
   try {
     if(!seal||!seal.report_id||!seal.scan_id||!state.indexRun||!state.indexRun.scan_id||!state.morningStoryReport)
       throw new Error('ARCHIVE_SEAL_INCOMPLETE');
-    const response=await fetch('/api/report-archive',{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',
-      body:JSON.stringify({report_id:seal.report_id,scan_id:seal.scan_id,evidence_scan_id:state.indexRun.scan_id,
+    const archivePayload={report_id:seal.report_id,scan_id:seal.scan_id,evidence_scan_id:state.indexRun.scan_id,
         generated_at:seal.generated_at,morning_report:state.morningStoryReport,morning_hash:seal.morning_hash,
-        public_hash:seal.public_hash,full_hash:seal.full_hash})});
-    const result=await response.json().catch(function(){return {status:'FAILED',error:'ARCHIVE_RESPONSE_INVALID'};});
+        public_hash:seal.public_hash,full_hash:seal.full_hash};
+    // Keep the exact sealed report on this phone before the network save.
+    // A later visit can retry the archive without generating another report.
+    try { if(window.SW_SAVED_REPORTS)await window.SW_SAVED_REPORTS.capture(archivePayload); }
+    catch(e){log('Phone report save unavailable: '+String(e.message||e));}
+    const {response,result}=await uploadSealedReport(archivePayload);
     state.githubArchive=Object.assign(started,result,{attempted:true});if(p)p.github_archive=state.githubArchive;
     if(!response.ok&&state.githubArchive.status!=='ARCHIVE_CONFLICT')state.githubArchive.status='FAILED';
     log('GitHub archive: '+state.githubArchive.status+(state.githubArchive.commit_sha?' · '+state.githubArchive.commit_sha.slice(0,12):''));
@@ -16561,6 +16583,7 @@ async function archiveSealedReport(p, seal) {
     state.githubArchive=Object.assign(started,{status:'FAILED',error:String(e&&e.message||e)});if(p)p.github_archive=state.githubArchive;
     log('GitHub archive pending retry: '+state.githubArchive.error);
   }
+  try { if(window.SW_SAVED_REPORTS&&seal)await window.SW_SAVED_REPORTS.mark(seal.report_id,state.githubArchive); } catch(_){}
   return state.githubArchive;
 }
 if(typeof window!=='undefined')window.retryGithubArchive=function(){return state.pack&&state.seal?archiveSealedReport(state.pack,state.seal):Promise.resolve({status:'NOT_ATTEMPTED'});};
@@ -19164,7 +19187,9 @@ const EVIDENCE_NEWS_CACHE_TTL = 12 * 60 * 60 * 1000; // 12 hours
 async function fetchEvidenceLedNews(queryIntents, options) {
   options = options || {};
   const lookbackH = n((typeof state !== 'undefined' && state.settings) ? state.settings.newsLookbackHours : 24) || 24;
-  const pack = (typeof state !== 'undefined' && state.pack) || {};
+  // During RUN, state.pack is intentionally unpublished until intelligence is
+  // complete. Attach context to this run's pack, never an old/global fallback.
+  const pack = options.pack || (typeof state !== 'undefined' && state.pack) || {};
   if (!pack.news_intelligence_router) {
     pack.news_intelligence_router = {
       generated_at: new Date().toISOString(),
@@ -19175,68 +19200,82 @@ async function fetchEvidenceLedNews(queryIntents, options) {
   }
   const router = pack.news_intelligence_router;
   const allResults = [];
-
-  for (const intent of (queryIntents || []).slice(0, 5)) {
-    if (!intent || !intent.query) continue;
-    // Hard cap: max 5 words, 55 chars — prevents GDELT rate-limit response
-    const shortQ = intent.query.split(/\s+/).slice(0, 5).join(' ').slice(0, 55);
-    const cacheKey = shortQ + '|' + lookbackH;
-
-    // Check evidence news cache (fresh results run per-scan, not per-page-load)
-    if (EVIDENCE_NEWS_CACHE[cacheKey]) {
-      const cached = EVIDENCE_NEWS_CACHE[cacheKey];
-      if (Date.now() - cached.ts < EVIDENCE_NEWS_CACHE_TTL) {
-        allResults.push(...cached.results);
+  const budgetMs = Math.min(10000, Math.max(1, Number(options.budgetMs) || 10000));
+  const deadline = Date.now() + budgetMs;
+  const controller = new AbortController();
+  let active = true, expired = false, timer, expire;
+  const live = () => active && Date.now() < deadline;
+  const ceiling = new Promise(resolve => {
+    expire = () => { expired = true; resolve(); };
+    timer = setTimeout(expire, budgetMs);
+  });
+  // iOS suspends timers in the background. Check wall time on return as well,
+  // before accepting a late response or starting another request.
+  const onReturn = () => { if (Date.now() >= deadline) expire(); };
+  if (typeof window !== 'undefined') window.addEventListener('pageshow', onReturn);
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onReturn);
+  async function collect() {
+    for (const intent of (queryIntents || []).slice(0, 5)) {
+      if (!live()) break;
+      if (!intent || !intent.query) continue;
+      const shortQ = intent.query.split(/\s+/).slice(0, 5).join(' ').slice(0, 55);
+      const cacheKey = shortQ + '|' + lookbackH;
+      if (EVIDENCE_NEWS_CACHE[cacheKey] && Date.now() - EVIDENCE_NEWS_CACHE[cacheKey].ts < EVIDENCE_NEWS_CACHE_TTL) {
+        allResults.push(...EVIDENCE_NEWS_CACHE[cacheKey].results);
         router.searched_queries.push(shortQ + ' (cached)');
         continue;
       }
-    }
-
-    // Try GDELT with short query via allorigins (lower rate-limit risk than codetabs)
-    let fetched = false;
-    try {
-      const gdeltUrl = 'https://api.gdeltproject.org/api/v2/doc/doc?' +
-        'query=' + encodeURIComponent(shortQ) +
-        '&mode=ArtList&format=json&maxrecords=5&sort=hybridrel&timespan=' + lookbackH + 'h';
-      const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(gdeltUrl);
-      const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 8000);
-      const resp = await fetch(proxyUrl, { signal: controller.signal });
-      clearTimeout(tid);
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      const raw = await resp.text();
-      // Check for "Please limit" rate-limit response before parsing
-      if (!raw || raw.trimStart().startsWith('Please') || raw.trimStart().startsWith('{\"Error')) {
-        router.failed_queries.push({ query: shortQ, provider: 'GDELT', error: 'RATE_LIMIT', excerpt: raw.slice(0, 80) });
-        continue;
+      let fetched = false;
+      try {
+        const gdeltUrl = 'https://api.gdeltproject.org/api/v2/doc/doc?' +
+          'query=' + encodeURIComponent(shortQ) +
+          '&mode=ArtList&format=json&maxrecords=5&sort=hybridrel&timespan=' + lookbackH + 'h';
+        const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(gdeltUrl);
+        // Keep the timeout through BODY consumption, not just response headers.
+        // The whole-lane race also releases RUN if cancellation fails to settle.
+        const { response, body: raw } = await fetchWithTimeout(proxyUrl,
+          Math.min(8000, Math.max(1, deadline - Date.now())), controller.signal, 'text');
+        if (!live()) break;
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        if (!raw || raw.trimStart().startsWith('Please') || raw.trimStart().startsWith('{"Error')) {
+          router.failed_queries.push({ query: shortQ, provider: 'GDELT', error: 'RATE_LIMIT', excerpt: (raw || '').slice(0, 80) });
+          continue;
+        }
+        const data = JSON.parse(raw);
+        const articles = (data.articles || []).slice(0, 3).map(a => ({
+          title: a.title || '', url: a.url || '', source: 'GDELT',
+          query: shortQ, trigger: intent.trigger || intent.trigger_type || ''
+        })).filter(a => a.title);
+        EVIDENCE_NEWS_CACHE[cacheKey] = { ts: Date.now(), results: articles };
+        allResults.push(...articles);
+        router.searched_queries.push(shortQ);
+        fetched = true;
+      } catch (e) {
+        if (!live()) break;
+        const msg = e && e.message ? e.message.slice(0, 60) : 'unknown';
+        router.failed_queries.push({ query: shortQ, provider: 'GDELT', error: msg });
       }
-      const data = JSON.parse(raw);
-      const articles = (data.articles || []).slice(0, 3).map(a => ({
-        title: a.title || '', url: a.url || '', source: 'GDELT',
-        query: shortQ, trigger: intent.trigger || intent.trigger_type || ''
-      })).filter(a => a.title);
-      EVIDENCE_NEWS_CACHE[cacheKey] = { ts: Date.now(), results: articles };
-      allResults.push(...articles);
-      router.searched_queries.push(shortQ);
-      fetched = true;
-    } catch (e) {
-      const msg = e && e.message ? e.message.slice(0, 60) : 'unknown';
-      router.failed_queries.push({ query: shortQ, provider: 'GDELT', error: msg });
-    }
-
-    // If GDELT failed, mark intent-only
-    if (!fetched) {
-      router.source_limits.push('"' + shortQ + '" → intent captured, source unavailable in-browser.');
+      if (!fetched) router.source_limits.push('"' + shortQ + '" → intent captured, source unavailable in-browser.');
     }
   }
-
+  try {
+    await Promise.race([collect(), ceiling]);
+  } finally {
+    active = false;
+    clearTimeout(timer);
+    controller.abort();
+    if (typeof window !== 'undefined') window.removeEventListener('pageshow', onReturn);
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onReturn);
+  }
+  if (expired || Date.now() >= deadline) {
+    router.source_limits.push('Targeted news time budget reached; report uses results already received.');
+    if (typeof log === 'function') log('Targeted news budget reached — continuing with verified ledger evidence.');
+  }
   router.evidence_results = allResults;
-  // Merge into news_intel.items so ranking/display picks up evidence-led results
   if (allResults.length && pack.news_intel) {
     const existing = pack.news_intel.items || pack.news_intel.top_headlines || [];
     pack.news_intel.items = [...allResults, ...existing];
   }
-
   return allResults;
 }
 
@@ -20198,6 +20237,9 @@ function _buildTotalFile(sections, modeLabel) {
   lines.push('Report ID:    ' + reportId);
   lines.push('Generated:    ' + generatedAt);
   lines.push('App Version:  ' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : 'unknown'));
+  lines.push('Report Pipeline: bounded-evidence-news-20261005');
+  lines.push('Report Status: ' + (state.seal ? 'SEALED' : state.scanning ? 'IN_PROGRESS' : 'NOT_SEALED'));
+  if (state.reportBuildStage) lines.push('Report Stage: ' + JSON.stringify(state.reportBuildStage));
   lines.push('');
   lines.push('Shadow Watch needs two export modes: multi-file archive style for local');
   lines.push('records, and one total TXT handoff file for mobile/ChatGPT sharing.');
@@ -20215,7 +20257,8 @@ function _buildTotalFile(sections, modeLabel) {
     lines.push('');
     let text = ''; let ok = false;
     try {
-      const src = _resolveReportSource(s.kind);
+      const pendingReport = !state.seal && /^(morning-story|daily-report|intel-brief)$/.test(s.kind);
+      const src = pendingReport ? {ok:true,text:'[REPORT NOT SEALED — this run has not produced a completed report]'} : _resolveReportSource(s.kind);
       if (src && src.ok && src.text) { text = String(src.text).trim(); ok = text.length > 0; }
     } catch (_) {}
     lines.push(ok ? text : '[EMPTY / NOT GENERATED THIS RUN]');
@@ -22021,6 +22064,10 @@ function playScanCompleteSound() {
 }
 
 // ── MAIN RUN ──────────────────────────────────────────────────
+function reportBuildStage(phase, message) {
+  state.reportBuildStage = { phase, message, started_at: new Date().toISOString() };
+  log(message);
+}
 async function run() {
   if (state.scanning) { log('Scan already in progress.'); return; }
   state._storedReportRun = true;
@@ -22030,6 +22077,7 @@ async function run() {
   state._runAbortReason = null;
   state.scanning = true;
   state.phaseTimings = [];
+  state.reportBuildStage = null;
   state.errorLog = [];
   // A new attempt may never inherit publishable output from the prior run.
   // Acquisition failure before scanWallets used to leave yesterday's seal and
@@ -22206,7 +22254,7 @@ async function run() {
       // SLOW is still in flight, the FAST results are already in state.newsIntel
       // — they are NOT lost. The "if (!state.newsIntel)" guard below only
       // kicks in if the FAST tier itself timed out (catastrophic case).
-      log('Fetching news context (post-ledger)…');
+      reportBuildStage('news', 'Fetching news context (post-ledger)…');
       const NEWS_FETCH_CEILING_MS = 18000;
       try {
         await Promise.race([
@@ -22273,6 +22321,7 @@ async function run() {
     } catch (e) { elog('v3.24 stage1: discovery+newsdoctor', e); }
 
     // Stage 2: Pattern Memory
+    reportBuildStage('patterns', 'Updating pattern memory…');
     try {
       if (typeof savePatternSnapshot  === 'function') savePatternSnapshot(p);
       if (typeof updateWalletMemory   === 'function') updateWalletMemory(p);
@@ -22280,6 +22329,7 @@ async function run() {
     } catch (e) { elog('v3.24 stage2: pattern memory', e); }
 
     // Stage 3: Evidence-led News Router + targeted news fetch
+    reportBuildStage('targeted-news', 'Checking targeted news context — up to 10 seconds…');
     try {
       if (typeof attachNewsIntentToPack === 'function') attachNewsIntentToPack(p);
       // v3.26: compute centralized news health AFTER news fetch + router so
@@ -22289,7 +22339,7 @@ async function run() {
         const queryIntents = (typeof buildEvidenceLedNewsQueries === 'function')
           ? buildEvidenceLedNewsQueries(p) : [];
         if (queryIntents.length) {
-          await fetchEvidenceLedNews(queryIntents.slice(0, 4)).catch(e => {
+          await fetchEvidenceLedNews(queryIntents.slice(0, 4), { pack: p }).catch(e => {
             elog('v3.24 fetchEvidenceLedNews', e);
           });
         }
@@ -22300,6 +22350,7 @@ async function run() {
     // last time (in case fetchEvidenceLedNews added matched articles) and
     // build IntelBrief NOW — so it sees the real headline count and newsMode.
     if (typeof attachNewsHealthToPack === 'function') attachNewsHealthToPack(p);
+    reportBuildStage('report', 'Building the final report…');
     state.intelBrief = buildIntelBrief(p);
     p.intel_brief = state.intelBrief;
 
@@ -22309,6 +22360,7 @@ async function run() {
     // ════════════════════════════════════════════════════════════
     //  BUILD REPORTS — runs after all intelligence is attached
     // ════════════════════════════════════════════════════════════
+    reportBuildStage('sealing', 'Sealing evidence capsule…');
     shadowSay('Sealing evidence capsule…', 'SEAL', 92);
     document.body.classList.remove('scanning');
     document.body.classList.add('building');
@@ -22350,6 +22402,7 @@ async function run() {
     if ($('briefBox'))    $('briefBox').textContent = state.intelBrief;
     // The report and Neon evidence are already sealed. Archive failure is
     // recorded separately and can be retried without another XRPL scan.
+    reportBuildStage('saving', 'Saving the completed report…');
     await archiveSealedReport(p, seal);
     renderHudFromPack(p);
     // v3.4 render new panels

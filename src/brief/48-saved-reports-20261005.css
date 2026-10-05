@@ -1,0 +1,23 @@
+.sw-saved-run-actions{display:flex;flex-direction:column;gap:8px;min-width:0}
+.sw-saved-run-actions #swRunBtn{width:100%;margin:0}
+#swSavedReportsButton{min-height:44px;padding:10px 14px;border:1px solid #38715b;border-radius:8px;background:#091c15;color:#a5f4c7;font:600 13px system-ui;cursor:pointer}
+@media(min-width:901px){.sw-dash-v1 .sw-saved-run-actions{grid-column:2;grid-row:1;align-self:center}}
+#swSavedReportsDialog{box-sizing:border-box;width:min(760px,calc(100vw - 24px));height:min(90dvh,900px);max-height:90vh;margin:auto;padding:18px;border:1px solid #467960;border-radius:14px;background:#091411;color:#d7eadd;font:14px/1.5 system-ui,sans-serif;box-shadow:0 20px 80px #000b}
+#swSavedReportsDialog[open]{display:flex;flex-direction:column;gap:12px}
+#swSavedReportsDialog::backdrop{background:#000c}
+#swSavedReportsDialog [hidden]{display:none!important}
+#swSavedReportsDialog header{display:flex;gap:12px;justify-content:space-between;align-items:start}
+#swSavedReportsDialog h2{font:700 22px/1.25 system-ui;margin:0;color:#a1edc0}
+#swSavedReportsDialog p{margin:4px 0;overflow-wrap:anywhere}
+#swSavedReportsDialog header p,#swSavedNotice,#swSavedReportDate{font-size:12px;color:#b0c5b8}
+#swSavedReportsDialog button,#swSavedReportsDialog select{font:600 13px/1.4 system-ui;color:#d7eadd;background:#142b22;border:1px solid #3c6150;border-radius:7px;min-height:42px;padding:8px 12px;cursor:pointer}
+#swSavedReportsDialog button:hover{border-color:#90e7b6;background:#1b392c}
+#swSavedReportsDialog :focus-visible{outline:2px solid #a8f5c8;outline-offset:2px}
+#swSavedBrowse,#swSavedReader{display:flex;flex-direction:column;gap:12px;min-height:0;flex:1}
+.sw-saved-filters,.sw-saved-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.sw-saved-filters label{display:flex;gap:8px;align-items:center;flex:1;white-space:nowrap}
+.sw-saved-filters select{min-width:0;flex:1}
+#swSavedList{overflow-y:auto;min-height:0;flex:1;padding:3px}
+#swSavedList .sw-saved-row{display:flex;flex-direction:column;gap:5px;width:100%;text-align:left;margin-bottom:10px;padding:14px;overflow-wrap:anywhere}
+#swSavedList .sw-saved-row span{font-size:12px;font-weight:400;color:#adc6b7}
+#swSavedText{flex:1;min-height:0;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:15px/1.75 system-ui,sans-serif;margin:0;padding:14px;border:1px solid #294a3a;border-radius:8px;background:#060e0b;color:#dceee2}

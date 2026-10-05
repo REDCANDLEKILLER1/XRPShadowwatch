@@ -127,6 +127,9 @@
         lines.push('Report ID:    ' + reportId);
         lines.push('Generated:    ' + generatedAt);
         lines.push('App Version:  ' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : 'unknown'));
+        lines.push('Report Pipeline: bounded-evidence-news-20261005');
+        lines.push('Report Status: ' + (state.seal ? 'SEALED' : state.scanning ? 'IN_PROGRESS' : 'NOT_SEALED'));
+        if (state.reportBuildStage) lines.push('Report Stage: ' + JSON.stringify(state.reportBuildStage));
         lines.push('');
         lines.push('Shadow Watch needs two export modes: multi-file archive style for local');
         lines.push('records, and one total TXT handoff file for mobile/ChatGPT sharing.');
@@ -147,7 +150,9 @@
             var resolver = (typeof window.buildDebugSectionContent === 'function')
               ? window.buildDebugSectionContent
               : ((typeof _resolveReportSource === 'function') ? _resolveReportSource : null);
-            var src = resolver ? resolver(s.kind, (typeof state !== 'undefined' ? (state.pack || {}) : {})) : null;
+            var pendingReport = !state.seal && /^(morning-story|daily-report|intel-brief)$/.test(s.kind);
+            var src = pendingReport ? {ok:true,text:'[REPORT NOT SEALED — this run has not produced a completed report]'}
+              : resolver ? resolver(s.kind, (typeof state !== 'undefined' ? (state.pack || {}) : {})) : null;
             if (src && src.ok && src.text) {
               text = String(src.text).trim();
               ok = text.length > 0;

@@ -50,7 +50,13 @@
       case 'receiving': label = 'Receiving verified transactions'; description = count(facts.events_received) + ' of ' + count(facts.events_total) + ' transactions received'; if (facts.events_total > 0) fraction = facts.events_received / facts.events_total; break;
       case 'snapshot-ready':
         label = s && s.githubArchive && s.githubArchive.status === 'PENDING' ? 'Saving report to archive' : 'Building report';
-        description = count(facts.events_received) + ' stored transactions received · checking context and preparing the report'; break;
+        description = count(facts.events_received) + ' stored transactions received · checking context and preparing the report';
+        if (s && s.reportBuildStage) {
+          label = s.reportBuildStage.message;
+          description = count(facts.events_received) + ' verified transactions · this step ' +
+            Math.max(0, Math.floor((Date.now() - Date.parse(s.reportBuildStage.started_at)) / 1000)) + 's';
+        }
+        break;
       case 'paused': label = 'Waiting for the app to return'; description = 'The snapshot read will resume when this screen is active'; break;
       case 'retry': label = 'Reconnecting to snapshot service'; description = 'The connection stopped responding · retrying shortly'; break;
       case 'complete':

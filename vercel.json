@@ -14,6 +14,9 @@
     },
     "api/report-archive.js": {
       "maxDuration": 60
+    },
+    "api/report-history.js": {
+      "maxDuration": 30
     }
   },
   "crons": [
