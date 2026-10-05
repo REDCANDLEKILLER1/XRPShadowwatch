@@ -48,7 +48,9 @@ async function main() {
     assert(/stream:\s*['"]1['"]/.test(layer45));
     assert(/application\/x-ndjson/.test(apiSrc));
     assert(/t:\s*['"]events['"]/.test(apiSrc));
-    assert(/events\.slice\(i, i \+ chunkSize\)/.test(apiSrc));
+    const chunks = DeltaApi.streamStoredReport(null, {events:Array.from({length:1601}, (_, i) => ({hash:String(i)}))}, 750)
+      .filter(line => line.t === 'events');
+    assert.deepEqual(chunks.map(line => line.events.length), [750,750,101]);
   });
   check('the stored response reports zero acquisition XRPL reads', () => {
     assert(/xrpl_requests:\s*0/.test(apiSrc));
@@ -342,7 +344,7 @@ async function main() {
   check('layer 17 prefers the stored baseline over the local snapshot', () => {
     const l17 = fs.readFileSync(path.join(ROOT,'src/brief/17-report-scan-tuning-20260816.js'),'utf8');
     assert(/balance_baseline_by_address/.test(l17));
-    assert(/storeBaseline\s*&&\s*storeBaseline\[w\.address\]/.test(l17));
+    assert(/storeBaseline\s*\?\s*storeBaseline\[w\.address\]/.test(l17));
   });
 
   console.log('\n10. preview stays read-capable while writes remain guarded elsewhere');

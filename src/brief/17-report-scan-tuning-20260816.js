@@ -753,9 +753,8 @@
                 // window start. Browser-local history is never allowed to decide
                 // net flow for a store-backed report.
                 var storeBaseline = state.indexRun && state.indexRun.balance_baseline_by_address;
-                var prior = storeBaseline && storeBaseline[w.address]
-                  ? storeBaseline[w.address] : previous[w.address];
-                if (prior && prior.balance_xrp !== null && prior.balance_xrp !== undefined) {
+                var prior = storeBaseline ? storeBaseline[w.address] : previous[w.address];
+                if (w.balance_current !== false && prior && prior.balance_xrp !== null && prior.balance_xrp !== undefined) {
                   w.prev_balance_xrp = num(prior.balance_xrp);
                   w.delta_xrp = num(w.balance_xrp) - num(prior.balance_xrp);
                 } else {

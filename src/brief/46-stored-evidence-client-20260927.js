@@ -76,6 +76,28 @@
           throw fenced;
         }
 
+        // Enrichment is optional: no reconnect/quota retry chain and a shared
+        // 20-second / 24-request ceiling. Watched evidence never enters here.
+        if (storedActive() && typeof state !== 'undefined' && state._storedReportRun) {
+          var budget = state._storedEnrichment;
+          var socket = state._sock || ws;
+          if (!budget || Date.now() >= budget.deadline || budget.requests >= 24 || !socket || socket.readyState !== 1) {
+            if (budget) budget.unavailable++;
+            throw new Error('OPTIONAL_LIVE_ENRICHMENT_UNAVAILABLE');
+          }
+          budget.requests++;
+          var timer;
+          try {
+            return await Promise.race([
+              _xrplRequest(socket, req),
+              new Promise(function (_, reject) {
+                timer = setTimeout(function () { reject(new Error('OPTIONAL_LIVE_ENRICHMENT_TIMEOUT')); },
+                  Math.max(1, Math.min(4000, budget.deadline - Date.now())));
+              })
+            ]);
+          } finally { if (timer) clearTimeout(timer); }
+        }
+
         return original.apply(this, arguments);
       };
 
@@ -92,6 +114,12 @@
       if (typeof scanWallets !== 'function' || scanWallets.__swStoredPreflight) return;
       var originalScanWallets = scanWallets;
       scanWallets = async function () {
+        // The real RUN owns identity/window initialization and fails closed at
+        // its acquisition boundary. Prefetching before that initialization
+        // causes a second GET (or a window mismatch) on subsequent RUNs.
+        if (typeof state !== 'undefined' && state && state._storedReportRun) {
+          return originalScanWallets.apply(this, arguments);
+        }
         // Direct diagnostic calls to scanWallets (the XRPL resilience suites)
         // are not report RUNs. The report path always mints state.reportId first.
         try {
