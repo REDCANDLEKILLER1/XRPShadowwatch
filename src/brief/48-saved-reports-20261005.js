@@ -161,9 +161,8 @@
       var rows = (await localReports()).filter(function (r) { return r.payload && !saved(r.archive_status) && r.archive_status !== 'ARCHIVE_CONFLICT'; }).slice(0,3);
       for (var row of rows) {
         try {
-          var response = await fetch('/api/report-archive',{method:'POST',credentials:'same-origin',cache:'no-store',
-            headers:{'Content-Type':'application/json'},body:JSON.stringify(row.payload)});
-          var result = await response.json();
+          var uploaded = await uploadSealedReport(row.payload);
+          var response = uploaded.response, result = uploaded.result;
           if (!response.ok && result.status !== 'ARCHIVE_CONFLICT') result.status = 'FAILED';
           await mark(row.report_id,result);
           if (!response.ok) break;

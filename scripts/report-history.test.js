@@ -84,6 +84,19 @@ const srv=http.createServer(async(req,res)=>{
     await page.waitForFunction(()=>document.getElementById('swSavedList').textContent.includes('Saved to archive'));
     assert((await page.evaluate(()=>SW_SAVED_REPORTS.list())).some(r=>r.archive_status==='ARCHIVED'));
     assert.equal(retries,1,'retry uploads existing report once without a new scan');assert.equal(scans,0);
+    await page.evaluate(async id=>{
+      await SW_SAVED_REPORTS.mark(id,{status:'FAILED'});
+      const originalFetch=window.fetch,originalTimer=window.setTimeout;
+      window.fetch=(url,opts)=>url==='/api/report-archive'?new Promise(()=>{}):originalFetch(url,opts);
+      window.setTimeout=(fn,ms,...args)=>originalTimer(fn,ms===20000?40:ms,...args);
+      let timer;
+      try { await Promise.race([SW_SAVED_REPORTS.retryPending(),new Promise((_,reject)=>{
+        timer=originalTimer(()=>reject(Error('RETRY_STILL_HUNG')),2000);
+      })]); } finally { clearTimeout(timer); window.fetch=originalFetch;window.setTimeout=originalTimer; }
+      await SW_SAVED_REPORTS.retryPending();
+    },localId);
+    assert.equal(retries,2,'timed-out upload must release retry lock so the next attempt can save');
+
     await page.evaluate(d=>{localStorage.setItem('SW_BRIEF_ARCHIVE_V1',JSON.stringify({[d]:{date:d,text:'An older phone-only brief',savedAt:Date.parse(d)}}));},priorDay);
     assert((await page.evaluate(()=>SW_SAVED_REPORTS.list())).some(r=>r.text==='An older phone-only brief'));
     if(process.env.SW_HISTORY_SCREENSHOT){await page.click('#swSavedList .sw-saved-row');await page.screenshot({path:process.env.SW_HISTORY_SCREENSHOT});}
