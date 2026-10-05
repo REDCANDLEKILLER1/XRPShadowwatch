@@ -32,13 +32,20 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Install Chromium and WebKit
+        run: npx playwright install --with-deps chromium webkit
 
       # Runs the same list `npm test` runs locally, so a contributor cannot be
       # green on their machine and red here because CI ran a different set.
       - name: Regression suites
         run: npm test
+
+      - name: WebKit mobile completion and saved reports
+        env:
+          SW_TEST_BROWSER: webkit
+        run: |
+          node scripts/stored-run-completion.test.js
+          node scripts/report-history.test.js
 
       # The smoke gate compares against scripts/smoke-baseline.txt. If a
       # baseline entry starts passing the run still succeeds, but the baseline

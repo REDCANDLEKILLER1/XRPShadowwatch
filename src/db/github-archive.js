@@ -442,7 +442,7 @@ async function archiveReport(raw,deps={}){
     // into the receipt to find it. Taken from the receipt, so the index and the
     // receipt cannot say different things.
     if(!index.some(row=>row.report_id===input.report_id))index.push({report_id:input.report_id,
-      scan_id:receipt.scan_id||null,generated_at:generatedAt,
+      scan_id:receipt.scan_id||null,generated_at:generatedAt,sealed_at:receipt.sealed_at,
       coverage_complete:facts.coverage_complete,anchor:facts.validated_anchor_ledger,transactions:facts.transactions_in_window,report_hash:reportHash});
     files[dayRoot+'/index.json']=json(index.sort((a,b)=>String(a.report_id).localeCompare(String(b.report_id))));
     try{

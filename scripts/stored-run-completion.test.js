@@ -5,21 +5,26 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const { chromium } = require('playwright');
+const browserType = require('playwright')[process.env.SW_TEST_BROWSER || 'chromium'];
 const ROOT = path.join(__dirname, '..');
 const PORT = Number(process.env.SW_TEST_PORT || 8235);
 const roster = require('../src/db/roster').select().accounts;
 const anchor = 107449161;
 const cutoff = new Date(Date.now() - 60000).toISOString();
-const events = Array.from({length:150000}, (_, i) => ({
+const events = Array.from({length:200000}, (_, i) => ({
   hash:i.toString(16).padStart(64,'0'), ledger_index:anchor - i % 500,
   close_time:cutoff, tx_type:'Payment', tx_result:'tesSUCCESS', validated:true,
   from_account:roster[0], to_account:roster[1], amount_drops:'1000000', currency:'XRP',
   observed_via:[roster[0],roster[1]]
 }));
-let unavailable = false, reads = 0, writes = 0;
+let unavailable = false, reads = 0, writes = 0, slowNews = false, newsBodies = 0;
 const srv = http.createServer((req,res) => {
   const u = new URL(req.url, 'http://localhost');
+  if (u.pathname === '/test/targeted-news') {
+    res.writeHead(200, {'Content-Type':'application/json'});
+    if (slowNews) { newsBodies++; res.write('{"articles":['); return; }
+    return res.end('{"articles":[{"title":"Timely XRP context","url":"https://example.test/news"}]}');
+  }
   if (u.pathname === '/api/delta') {
     if (req.method !== 'GET') { writes++; res.writeHead(405); return res.end(); }
     reads++;
@@ -60,7 +65,7 @@ const srv = http.createServer((req,res) => {
 });
 (async () => {
   await new Promise(r=>srv.listen(PORT,'127.0.0.1',r));
-  const browser = await chromium.launch({args:['--no-sandbox']});
+  const browser = await browserType.launch({args:process.env.SW_TEST_BROWSER==='webkit'?[]:['--no-sandbox']});
   try {
     const page = await browser.newPage({viewport:{width:390,height:844},isMobile:true});
     await page.route('**/*',r=>r.request().url().startsWith('http://127.0.0.1:'+PORT) ? r.continue() : r.abort());
@@ -86,9 +91,14 @@ const srv = http.createServer((req,res) => {
     await page.evaluate(()=>{
       market = async()=>[];
       fetchNewsIntel = async()=>{state.newsIntel={items:[],top_headlines:[],source_status:{},source_breakdown:{}};};
-      fetchEvidenceLedNews = async()=>[];
+      buildEvidenceLedNewsQueries = ()=>[{query:'XRP liquidity'}];
+      const nativeFetch = window.fetch;
+      window.fetch = (url,opts)=>nativeFetch(String(url).includes(encodeURIComponent('query=XRP%20liquidity'))
+        ? '/test/targeted-news' : url, opts);
     });
     for (let attempt=0;attempt<2;attempt++) {
+      slowNews = attempt === 1;
+      await page.evaluate(()=>clearEvidenceNewsCache());
       const running = page.evaluate(async()=>{
         await run();
         return {seal:!!state.seal,scanning:state.scanning,txs:state.txs.length,
@@ -96,6 +106,7 @@ const srv = http.createServer((req,res) => {
           deltas:state.wallets.slice(0,2).map(w=>w.delta_xrp),disabled:document.getElementById('scanBtn').disabled,
           network:window.liveRequests,errors:state.errorLog.slice(-5),logs:state.runLog.slice(-8)};
       });
+      running.catch(()=>{}); // preserve a foreground assertion if cleanup closes an in-flight RUN
       await page.waitForFunction(()=>document.getElementById('swReportMonitor').dataset.phase==='verifying');
       assert(await page.locator('#swReportMonitor').isVisible(),'monitor must survive dashboard adoption');
       const box=await page.locator('#swReportMonitor').boundingBox();
@@ -106,15 +117,32 @@ const srv = http.createServer((req,res) => {
       await page.waitForTimeout(350);
       assert.equal(await page.locator('#swMonitorBar').getAttribute('aria-valuenow'),'50','heartbeats must not invent progress');
       if (attempt===0 && process.env.SW_MONITOR_SCREENSHOT) await page.screenshot({path:process.env.SW_MONITOR_SCREENSHOT});
-      const out = await running;
+      if (slowNews) {
+        await page.waitForFunction(()=>state.reportBuildStage && state.reportBuildStage.phase==='targeted-news');
+        await page.waitForFunction(()=>document.getElementById('swMonitorTitle').textContent.includes('targeted news'));
+        const debug = await page.evaluate(()=>buildShadowWatchDebugFile());
+        assert(debug.includes('Report Status: IN_PROGRESS'));
+        assert(debug.includes('[REPORT NOT SEALED'));
+        assert(!debug.split('SECTION 02 —')[1].split('SECTION 03 —')[0].includes('Executive Summary'),
+          'debug must not invent a public story before sealing');
+      }
+      let runTimer;
+      const out = await Promise.race([running,new Promise((_,reject)=>{
+        runTimer=setTimeout(()=>reject(Error('RUN_DID_NOT_FINISH')),90000);
+      })]).finally(()=>clearTimeout(runTimer));
       console.log('RUN '+(attempt+1),JSON.stringify(out));
+      if (slowNews) assert(newsBodies>0,'real targeted-news response body must stall during RUN');
+      else assert(await page.evaluate(()=>state.pack.news_intel.items.some(x=>x.title==='Timely XRP context')),'timely context must reach this run');
       assert(out.seal,'stored RUN must seal even when XRPL is offline');
-      assert.equal(out.txs,150000); assert(out.report>0); assert(!out.scanning); assert(!out.disabled);
+      assert.equal(out.txs,200000); assert(out.report>0); assert(!out.scanning); assert(!out.disabled);
       assert.equal(out.coverage.complete_wallets,roster.length); assert.equal(out.network,0);
       assert.deepEqual(out.deltas,[null,null],'stale balance and missing stored baseline cannot use device net flow');
       assert.equal(reads,attempt+1,'one stored GET per RUN, including rerun');
       await page.waitForFunction(()=>document.getElementById('swReportMonitor').dataset.phase==='complete');
       assert.match(await page.locator('#swMonitorDetail').innerText(), /archive saved/);
+      const savedReports=await page.evaluate(async()=>({rows:await window.SW_SAVED_REPORTS.list(),text:state.morningStoryReport,id:state.seal.report_id}));
+      assert.equal(savedReports.rows.filter(r=>r.payload).length,attempt+1,'each completed run is retained separately');
+      assert.equal(savedReports.rows.find(r=>r.report_id===savedReports.id).text,savedReports.text,'save exact sealed Coffee & Crypto report');
     }
     unavailable = true;
     const failed = await page.evaluate(async()=>{await run();return {seal:state.seal,pack:state.pack,scanning:state.scanning,disabled:document.getElementById('scanBtn').disabled,network:window.liveRequests};});
@@ -125,6 +153,12 @@ const srv = http.createServer((req,res) => {
     assert.equal(await page.locator('#swMonitorBar').getAttribute('aria-valuenow'),null);
     await page.setViewportSize({width:1440,height:900});
     await reactorBelowHeader();
-    console.log('PASS full mobile RUN and rerun seal 150k stored events; store failure stops cleanly; zero acquisition writes/network fallback');
-  } finally { await browser.close(); await new Promise(r=>srv.close(r)); }
+    assert.equal((await page.evaluate(()=>window.SW_SAVED_REPORTS.list())).filter(r=>r.payload).length,2,'failed run must not save a third report');
+    await page.reload();
+    await page.waitForSelector('#swSavedReportsButton');
+    await page.click('#swSavedReportsButton');
+    await page.waitForFunction(()=>document.querySelectorAll('#swSavedList .sw-saved-row').length>=2);
+    assert.equal(reads,3,'reopening saved reports after reload must not trigger another scan');
+    console.log('PASS full mobile RUN and rerun seal 200k stored events; store failure stops cleanly; zero acquisition writes/network fallback');
+  } finally { await browser.close(); srv.closeAllConnections(); await new Promise(r=>srv.close(r)); }
 })().catch(e=>{console.error(e);process.exit(1);});
