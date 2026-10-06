@@ -271,8 +271,21 @@
       document.body.appendChild(s);
     }
 
+    function loadOperationalMorningHotfix() {
+      try {
+        if (window.SW_OPERATIONAL_MORNING) { loadHistoricalRepairChain(); return; }
+        var op = document.createElement('script');
+        op.src = '/src/brief/36-operational-morning-hotfix.js';
+        op.async = false;
+        op.setAttribute('data-sw-operational-morning', '2026-09-13.1');
+        op.onload = loadHistoricalRepairChain;
+        op.onerror = loadHistoricalRepairChain;
+        document.body.appendChild(op);
+      } catch (_) { loadHistoricalRepairChain(); }
+    }
+
     if (window.SW_REPORT_SCAN_TUNING_20260816) {
-      loadHistoricalRepairChain();
+      loadOperationalMorningHotfix();
       return;
     }
 
@@ -280,8 +293,8 @@
     tx.src = '/src/brief/17-report-scan-tuning-20260816.js';
     tx.async = false;
     tx.setAttribute('data-sw-report-scan-tuning', '2026-08-19.1');
-    tx.onload = loadHistoricalRepairChain;
-    tx.onerror = loadHistoricalRepairChain;
+    tx.onload = loadOperationalMorningHotfix;
+    tx.onerror = loadOperationalMorningHotfix;
     document.body.appendChild(tx);
   } catch (_) {}
 })();
