@@ -16580,16 +16580,29 @@ async function archiveSealedReport(p, seal) {
   const started={attempted:true,status:'PENDING',report_id:seal&&seal.report_id||null,
     branch:'shadowwatch-report-archive',commit_sha:null,archived_at:null,files_written:0,bytes_written:0,retry_count:0,error:null};
   state.githubArchive=started;if(p)p.github_archive=started;
+  let finishArchive;const archiveFinished=new Promise(resolve=>{finishArchive=resolve;});
   try {
     if(!seal||!seal.report_id||!seal.scan_id||!state.indexRun||!state.indexRun.scan_id||!state.morningStoryReport)
       throw new Error('ARCHIVE_SEAL_INCOMPLETE');
     const archivePayload={report_id:seal.report_id,scan_id:seal.scan_id,evidence_scan_id:state.indexRun.scan_id,
         generated_at:seal.generated_at,morning_report:state.morningStoryReport,morning_hash:seal.morning_hash,
         public_hash:seal.public_hash,full_hash:seal.full_hash};
-    // Keep the exact sealed report on this phone before the network save.
-    // A later visit can retry the archive without generating another report.
-    try { if(window.SW_SAVED_REPORTS)await window.SW_SAVED_REPORTS.capture(archivePayload); }
-    catch(e){log('Phone report save unavailable: '+String(e.message||e));}
+    // Start both saves independently: a stalled phone database must not block
+    // the shared archive. Keep the exact sealed text for retries and downloads.
+    const phoneSave=Promise.resolve().then(()=>window.SW_SAVED_REPORTS
+      ? window.SW_SAVED_REPORTS.capture(archivePayload) : null).then(row=>{
+        const result={status:row?row.persistence||'indexeddb':'unavailable',report_id:seal.report_id};
+        state.phoneSave=result;if(p)p.phone_save=result;
+        if(result.status==='session')log('Phone storage unavailable: report held in this session; download to keep.');
+        return row;
+      }).catch(e=>{log('Phone report save unavailable: '+String(e.message||e));return null;});
+    // Mark after capture, even if the phone completes after the network request.
+    // Neither the capture nor its status write holds up report completion.
+    phoneSave.then(async row=>{
+      if(!row)return;
+      await archiveFinished;
+      try { await window.SW_SAVED_REPORTS.mark(seal.report_id,started); } catch(_){}
+    });
     const {response,result}=await uploadSealedReport(archivePayload);
     state.githubArchive=Object.assign(started,result,{attempted:true});if(p)p.github_archive=state.githubArchive;
     if(!response.ok&&state.githubArchive.status!=='ARCHIVE_CONFLICT')state.githubArchive.status='FAILED';
@@ -16598,7 +16611,7 @@ async function archiveSealedReport(p, seal) {
     state.githubArchive=Object.assign(started,{status:'FAILED',error:String(e&&e.message||e)});if(p)p.github_archive=state.githubArchive;
     log('GitHub archive pending retry: '+state.githubArchive.error);
   }
-  try { if(window.SW_SAVED_REPORTS&&seal)await window.SW_SAVED_REPORTS.mark(seal.report_id,state.githubArchive); } catch(_){}
+  finishArchive();
   return state.githubArchive;
 }
 if(typeof window!=='undefined')window.retryGithubArchive=function(){return state.pack&&state.seal?archiveSealedReport(state.pack,state.seal):Promise.resolve({status:'NOT_ATTEMPTED'});};
