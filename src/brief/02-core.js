@@ -1564,8 +1564,12 @@ async function _ensureSock(ws) {
       // lost the same two, and with them the top actionable finding — "rwV8eL is
       // sitting on 77.15M XRP with no forward". A reader would conclude the
       // finding had gone away. It had not; we stopped looking.
-      state.linkLostDuringScan = true;
-      state.linkLostAt = new Date().toISOString();
+      if (state._storedReportRun) {
+        state.liveEnrichmentLost = true;
+      } else {
+        state.linkLostDuringScan = true;
+        state.linkLostAt = new Date().toISOString();
+      }
       elog('mid-scan reconnect', e);
       return null;
     } finally {
@@ -4419,6 +4423,7 @@ function buildPack(v) {
     watchlist_total: WATCHLIST.length,
     // v16.23: carried on the pack so every renderer can say so, not just the
     // error log. True when the XRPL link died mid-scan and could not be rebuilt.
+    live_enrichment_unavailable: !!state.liveEnrichmentLost,
     scan_link_lost: !!state.linkLostDuringScan,
     scan_link_lost_at: state.linkLostAt || null,
     wallets_checked: checked.length, wallets_failed: failed.length, wallets_invalid: invalid.length,
@@ -22082,6 +22087,7 @@ function reportBuildStage(phase, message) {
 async function run() {
   if (state.scanning) { log('Scan already in progress.'); return; }
   state._storedReportRun = true;
+  state.liveEnrichmentLost = false;
   state._storedEnrichment = { deadline:0, requests:0, unavailable:0 };
   state._balanceFailLogged = 0;
   state._silentReplacements = 0;
@@ -33266,6 +33272,9 @@ document.addEventListener('DOMContentLoaded', () => {
       log('Screen returned after ' + Math.round(hiddenMs / 1000) + 's — ' + stalled +
           ' read(s) had been waiting on a frozen clock. Failing them so the scan retries.');
     }
+    // Stored RUN acquisition is HTTP/server-owned; foregrounding must not
+    // start a legacy wallet-scan reconnect or change its coverage verdict.
+    if (state._storedReportRun) return;
     if (_sockOpen(state._sock) && !stalled) return;
     log('Screen returned with the XRPL link down — reconnecting…');
     _ensureSock(null).then(function (sock) {

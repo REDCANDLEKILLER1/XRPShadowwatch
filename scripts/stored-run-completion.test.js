@@ -72,7 +72,7 @@ const srv = http.createServer((req,res) => {
     await page.addInitScript(() => {
       window.liveRequests = 0;
       window.WebSocket = class {
-        constructor() { this.readyState=3; setTimeout(()=>{if(this.onerror)this.onerror();},1); }
+        constructor() { window.liveConnections=(window.liveConnections||0)+1; this.readyState=3; setTimeout(()=>{if(this.onerror)this.onerror();},1); }
         close() {} send() { window.liveRequests++; throw new Error('LIVE_RPC_FORBIDDEN'); }
         addEventListener() {} removeEventListener() {}
       };
@@ -108,6 +108,15 @@ const srv = http.createServer((req,res) => {
       });
       running.catch(()=>{}); // preserve a foreground assertion if cleanup closes an in-flight RUN
       await page.waitForFunction(()=>document.getElementById('swReportMonitor').dataset.phase==='verifying');
+      const beforeReturn=await page.evaluate(()=>window.liveConnections);
+      await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
+      await page.waitForTimeout(300);
+      assert.equal(await page.evaluate(()=>window.liveConnections),beforeReturn,'foregrounding stored RUN must not start legacy reconnect');
+      await page.evaluate(async()=>{
+        const original=connectXRPL;
+        connectXRPL=async()=>{throw Error('TEST_OPTIONAL_CONNECTION_FAILURE');};
+        try { await _ensureSock(null); } finally { connectXRPL=original; }
+      });
       assert(await page.locator('#swReportMonitor').isVisible(),'monitor must survive dashboard adoption');
       const box=await page.locator('#swReportMonitor').boundingBox();
       assert(box && box.x>=0 && box.y>=0 && box.x+box.width<=390 && box.y+box.height<=844,'monitor must be in the first mobile viewport');
@@ -134,6 +143,10 @@ const srv = http.createServer((req,res) => {
       if (slowNews) assert(newsBodies>0,'real targeted-news response body must stall during RUN');
       else assert(await page.evaluate(()=>state.pack.news_intel.items.some(x=>x.title==='Timely XRP context')),'timely context must reach this run');
       assert(out.seal,'stored RUN must seal even when XRPL is offline');
+      const integrity=await page.evaluate(()=>({lost:state.pack.scan_link_lost,story:state.morningStoryReport}));
+      assert.equal(integrity.lost,false);
+      assert(!integrity.story.includes('SCAN INCOMPLETE'));
+      assert(integrity.story.includes('Live order/offer sweep: not collected'));
       assert.equal(out.txs,200000); assert(out.report>0); assert(!out.scanning); assert(!out.disabled);
       assert.equal(out.coverage.complete_wallets,roster.length); assert.equal(out.network,0);
       assert.deepEqual(out.deltas,[null,null],'stale balance and missing stored baseline cannot use device net flow');

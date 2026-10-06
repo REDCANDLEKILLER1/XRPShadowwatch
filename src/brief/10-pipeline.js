@@ -1389,6 +1389,10 @@ function _buildLedgerDiagnostics(pack){
   if(freshness && freshness.evidence_time){
     L.push('• Watched-ledger evidence current through: '+freshness.evidence_time+' · '+String(freshness.status||'UNKNOWN').replace(/_/g,' '));
   }
+  if(p.evidence_index && p.evidence_index.stored_checkpoint){
+    L.push('• Live order/offer sweep: not collected in this stored-evidence report.');
+    if(p.live_enrichment_unavailable) L.push('• Optional live enrichment connection unavailable; verified stored coverage is unchanged.');
+  }
   var _ig=_intg(p);
   if(_ig.linkLost) L.push('• '+_ig.headline+' — '+_ig.sealLine+'. Figures below cover only the phases that completed.');
   var price=_num(p.xrp_price!=null?p.xrp_price:p.price), d24=_num(p.xrp_delta_24h_pct);
