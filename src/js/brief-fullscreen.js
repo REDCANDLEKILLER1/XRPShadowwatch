@@ -1,46 +1,63 @@
-
-    (function(){
-      var _loaded = false;
-      // Leaving Shadow Watch returns to HOME / Mission Control (the main screen),
-      // not the live XRPL stream.
-      window.exitBriefFullscreen = function(){ try { switchView('home'); } catch(e){} };
-      window.loadBriefConsole = function(){
-        try {
-          var vb = document.getElementById('view-brief');
-          if (vb && vb.parentNode !== document.body) document.body.appendChild(vb);
-        } catch(e){}
-        if (_loaded) return;
-        _loaded = true;
-        try {
-          // Brief Console (XRPMAN SHADOW WATCH v3.31) is now a real file loaded
-          // directly into the iframe, instead of a base64 Blob decoded at runtime.
-          var frame = document.getElementById('brief-frame');
-          if (frame) {
-            frame.src = './brief-console.html';
-            // The console renders its own EXIT in its header, so the app's
-            // #brief-exit overlay sat on top of it — two EXIT buttons stacked in
-            // the same corner. Hide ours ONLY once we can see that theirs
-            // exists; if the console fails to render, our button is the only way
-            // out and must stay.
-            var tries = 0;
-            var t = setInterval(function () {
-              var theirs = null;
-              try { theirs = frame.contentDocument &&
-                             frame.contentDocument.querySelector('.sw-hbtn.sw-exit'); } catch (_) {}
-              if (theirs) {
-                var ours = document.getElementById('brief-exit');
-                if (ours) ours.style.display = 'none';
-                clearInterval(t);
-              } else if (++tries > 40) clearInterval(t);
-            }, 250);
-          }
-        } catch (e) {
-          _loaded = false;
-          try { console.error('[BRIEF] load failed:', e); } catch(_){}
-          var f = document.getElementById('brief-frame');
-          if (f) {
-            f.outerHTML = '<div style="color:#00ff00;font-family:monospace;padding:24px;text-align:center;line-height:1.6;">BRIEF CONSOLE FAILED TO LOAD<br><span style="color:#066;font-size:11px;">' + (e && e.message || '') + '</span></div>';
-          }
-        }
-      };
-    })();
+(function () {
+  'use strict';
+  var loaded = false, timer = null, attempt = 0;
+  window.exitBriefFullscreen = function () { try { switchView('home'); } catch (_) {} };
+  function clearNotice() {
+    var notice = document.getElementById('brief-load-notice');
+    if (notice) notice.remove();
+  }
+  function showRecovery() {
+    loaded = false;
+    if (document.getElementById('brief-load-notice')) return;
+    var panel = document.getElementById('view-brief');
+    if (!panel) return;
+    var notice = document.createElement('div');
+    notice.id = 'brief-load-notice';
+    notice.style.cssText = 'position:absolute;inset:80px 12px auto;z-index:10;background:#001100;color:#00ff00;border:1px solid #00ff00;padding:20px;font-family:monospace;text-align:center;';
+    var message = document.createElement('p');
+    message.textContent = 'The report console has not loaded. Retry, or open it directly.';
+    var retry = document.createElement('button');
+    retry.textContent = 'Retry report console';
+    retry.style.cssText = 'padding:12px;margin:8px;color:#00ff00;background:#000;border:1px solid #00ff00;';
+    retry.onclick = function () { loaded = false; window.loadBriefConsole(); };
+    var direct = document.createElement('a');
+    direct.textContent = 'Open report directly';
+    direct.href = '/brief-console.html';
+    direct.style.cssText = 'display:inline-block;padding:12px;color:#00ff00;';
+    notice.append(message, retry, direct);
+    panel.appendChild(notice);
+  }
+  window.loadBriefConsole = function () {
+    var panel = document.getElementById('view-brief');
+    if (panel && panel.parentNode !== document.body) document.body.appendChild(panel);
+    if (loaded) return;
+    var frame = document.getElementById('brief-frame');
+    if (!frame) return;
+    loaded = true;
+    clearNotice();
+    clearInterval(timer);
+    var ours = document.getElementById('brief-exit');
+    if (ours) ours.style.display = '';
+    var started = Date.now(), id = ++attempt;
+    function check() {
+      if (id !== attempt) return;
+      var theirs;
+      try { theirs = frame.contentDocument && frame.contentDocument.querySelector('.sw-hbtn.sw-exit'); } catch (_) {}
+      if (theirs) {
+        loaded = true;
+        clearNotice();
+        if (ours) ours.style.display = 'none';
+        clearInterval(timer);
+      } else if (Date.now() - started >= 20000) {
+        // Keep checking: a late successful load may still replace the notice.
+        showRecovery();
+        if (Date.now() - started >= 60000) clearInterval(timer);
+      }
+    }
+    frame.onload = check;
+    frame.onerror = showRecovery;
+    timer = setInterval(check, 250);
+    // Root-relative also works when the shell is entered on a nested route.
+    frame.src = '/brief-console.html' + (id > 1 ? '?viewer_retry=' + id : '');
+  };
+})();

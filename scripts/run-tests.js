@@ -28,6 +28,7 @@ const ROOT = path.join(__dirname, '..');
 // cannot make the next one fail for the wrong reason.
 const SUITES = [
   ['freshness-storage-news', 'freshness-storage-news.test.js', null],
+  ['brief-load-recovery', 'brief-load-recovery.test.js', null],
   ['syntax',                 'check-syntax.js',                  null],
   ['report-truth',           'report-truth-acceptance.test.js',  8201],
   ['news-attribution',       'news-provider-attribution.test.js', 8202],
