@@ -1,0 +1,72 @@
+🩸 ℜᴇᴅᴄᴀɴᴅʟᴇᴋɪʟʟᴇR 🩸
+ＳＨＡＤＯＷ ＷＡＴＣＨ
+✨ 𝐹𝑒𝑎𝑡𝑢𝑟𝑖𝑛𝑔 ✨
+𝓛𝓪𝓭𝔂 𝓚'𝓼
+🄴🅇🄲🄴🄻🄻🄴🄽🅃!
+𝖂𝖍𝖎𝖑𝖊 𝖄𝖔𝖚 𝖂ᴇʀᴇ 𝕾𝖑𝖊𝖊𝔭𝖎𝖓𝖌
+𝗫𝗥𝗣𝗟  𝕌ℙ𝔻𝔸𝕋𝔼 ✨✨ on
+☕ COFFEE & CRYPTO with 𝐒𝐓ΟΝΕ
+October 6, 2026
+
+Executive Summary
+─────────────────
+207.88M XRP moved across 47 large transfers in the window. Binance ×10 and Coinbase cbXRP and +3 more absorbed 53.37M XRP this scan. The standout individual anomaly was 6M XRP moved from a large XRP holder to a watched routing wallet in the scanned window. These classifications describe observed movement only; they do not prove intent.
+
+What Mattered Most
+──────────────────
+What the chart won’t tell you: Binance ×10 and Coinbase cbXRP and +3 more absorbed 53.37M XRP this scan. File it. Two weeks from now it may be the first line of a bigger story.
+
+Evidence
+────────
+Here are the receipts, straight off the Ledger. 6M XRP moved from a large XRP holder to a watched routing wallet in the scanned window. A second transfer of 6M XRP reached Binance. The largest single move, 100M XRP, was internal to a Ripple-associated wallet. The discovery queue is carrying 64 flagged candidates — 2 found this scan, 1 recommended for review, separate from the 423 wallets on the permanent watch list — queued on behavior alone. Behavioral evidence only, so not one of them is named until the receipts say so. I don’t predict. I document. It ages better.
+
+
+Escrow Watch
+────────────
+Ripple escrow: current-position verification incomplete this run (0/20 known Ripple-labeled registry addresses checked); locked amount withheld rather than publishing a partial total.
+No Ripple escrow events are present in the acquired record for the last 36h; this alone does not prove an event-free window.
+Other XRPL escrow, last 36h: 1 new lock totalling 10.00M XRP · 0 releases, across 1 owner wallet.
+• Flare Core Vault: 1 lock 10.00M XRP
+Ripple and non-Ripple escrow are separate. Active escrow objects are ledger objects, not owner wallets. Scope is escrow observed by this scan, not every escrow on the XRPL.
+
+Under the Surface
+─────────────────
+Here’s the part the ≥1M whale counter can miss. Shadow Volume is the big-move spotlight: 207.88M XRP in 47 individual moves of at least 1M. Another 130.27M XRP moved in 501 payments from 100K to under 1M. 113.26M XRP across 442 of those payments matched 61 repeat-route, fan-in, or fan-out patterns. That is a signal to trace, not proof somebody was hiding funds.
+
+How to Read It
+──────────────
+New here? Shadow Volume shows the obvious ≥1M moves. Mid-size Flow catches 100K–<1M moves. Clustered Flow asks whether those smaller high-value payments keep using common routes. Net watched flow tells whether the tracked wallet board gained or lost XRP versus its prior snapshot.
+
+What To Watch Next
+──────────────────
+• Watch the absorbing wallets — are they stacking it, or handing it back out?
+• Check whether the largest recipient in this window makes another move.
+• Watch the same-hour clusters — coordination hides in the timing, not the size.
+
+Verdict
+───────
+Bottom line off the Ledger: a busy transfer window under a moderate overall risk score — logged and watched. (37/100). What earned the score: large transfer count, shadow volume, dust/tag flags. Watched wallets are net distributing — about 11.73M XRP moved outward. The ones who move quietly are the ones worth watching closely. Not financial advice. XRP-only forensic watch.
+
+I’m XRPMan, and I tell on the banks.
+
+LEDGER DIAGNOSTICS
+──────────────────
+• Watched-ledger evidence current through: 2026-10-06T10:19:40.000Z · LAST GOOD STALE
+• Native XRPL DEX (24h): SOURCE UNAVAILABLE (no decision recorded)
+• Watched wallets: 423
+• Watched activity (all sizes, LAST 24H): 57486 transactions · 425.03M XRP moved · 190 wallets active
+• Shadow volume (whale moves ≥1M, LAST 24H): 207.88M XRP · 47 transfers
+• Net watched flow: 11.73M XRP outward
+
+🙏 THE DAILY PRAYER
+───────────────────
+Lord, give us eyes for the small transfer that means something and the patience to ignore the large one that does not.
+
+📖 THE DAILY SCRIPTURE
+──────────────────────
+Proverbs 20:23 (KJV)
+“Divers weights are an abomination unto the Lord; and a false balance is not good.”
+
+Sources
+───────
+[No external sources for today’s scan.]

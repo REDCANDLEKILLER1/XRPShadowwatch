@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20261006-2CGWI",
+  "generated_at": "2026-10-06T10:19:40.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107469816,
+  "transactions_in_window": null,
+  "new_observations": 0,
+  "xrpl_requests": 0,
+  "report_hash": "1a8d5a3020914b8950b11a772e1992db31540e5fd45c92a5147d6d7706a06fce"
+}
