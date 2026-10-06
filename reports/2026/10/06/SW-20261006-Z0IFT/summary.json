@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20261006-Z0IFT",
+  "generated_at": "2026-10-06T08:10:30.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107467812,
+  "transactions_in_window": null,
+  "new_observations": 0,
+  "xrpl_requests": 0,
+  "report_hash": "439ff2415683f05a8dc2d8fbeaefa49a6493384a284e1134a11ddd67b29b218d"
+}

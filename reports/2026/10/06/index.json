@@ -1,0 +1,12 @@
+[
+  {
+    "report_id": "SW-20261006-Z0IFT",
+    "scan_id": "SC-MUWFE1WK",
+    "generated_at": "2026-10-06T08:10:30.000Z",
+    "sealed_at": "2026-10-06T08:37:27.781Z",
+    "coverage_complete": true,
+    "anchor": 107467812,
+    "transactions": null,
+    "report_hash": "439ff2415683f05a8dc2d8fbeaefa49a6493384a284e1134a11ddd67b29b218d"
+  }
+]

@@ -1,0 +1,84 @@
+🩸 ℜᴇᴅᴄᴀɴᴅʟᴇᴋɪʟʟᴇR 🩸
+ＳＨＡＤＯＷ ＷＡＴＣＨ
+✨ 𝐹𝑒𝑎𝑡𝑢𝑟𝑖𝑛𝑔 ✨
+𝓛𝓪𝓭𝔂 𝓚'𝓼
+🄴🅇🄲🄴🄻🄻🄴🄽🅃!
+𝖂𝖍𝖎𝖑𝖊 𝖄𝖔𝖚 𝖂ᴇʀᴇ 𝕾𝖑𝖊𝖊𝔭𝖎𝖓𝖌
+𝗫𝗥𝗣𝗟  𝕌ℙ𝔻𝔸𝕋𝔼 ✨✨ on
+☕ COFFEE & CRYPTO with 𝐒𝐓ΟΝΕ
+October 6, 2026
+
+Executive Summary
+─────────────────
+216.25M XRP moved across 52 large transfers in the window. Coinbase ×4 and Kraken ×5 and +3 more absorbed 57.99M XRP this scan. The standout individual anomaly was 6M XRP moved from a large XRP holder to a watched routing wallet in the scanned window. These classifications describe observed movement only; they do not prove intent.
+
+What Mattered Most
+──────────────────
+Beyond the headline, here’s what I flagged: Coinbase ×4 and Kraken ×5 and +3 more absorbed 57.99M XRP this scan, and XRP ETF News: Remittix Announces Its $0.46 Final Presale Stage. That is the sort of move that only reads as odd in hindsight.
+
+Evidence
+────────
+Here’s exactly what the Ledger logged: 6M XRP moved from a large XRP holder to a watched routing wallet in the scanned window. A second transfer of 6M XRP reached Binance. The largest single move, 100M XRP, was internal to a Ripple-associated wallet. In the discovery queue right now: 64 flagged candidates — 2 found this scan, 1 recommended for review, separate from the 423 wallets on the permanent watch list — suspects, not the convicted; behavioral evidence only, the Ledger earns the flag and I don’t hand it out. Above ground, in the daylight world, published news context: XRP ETF News: Remittix Announces Its $0.46 Final Presale Stage · Ripple expands digital asset services in Turkey with Garanti BBVA custody and RLUSD stablecoin launch · XRP News: Ripple Flags Turkey as Digital Assets Hub With Garanti BBVA Custody and RLUSD Rails. Follow the money and you find the motive — every single time.
+
+
+Escrow Watch
+────────────
+Ripple escrow: 31.40B XRP locked now across 98 active validated-ledger escrow objects · registry check 20/20 known Ripple-labeled addresses.
+No Ripple escrow events are present in the acquired record for the last 36h; this alone does not prove an event-free window.
+Other XRPL escrow, last 36h: 1 new lock totalling 10.00M XRP · 0 releases, across 1 owner wallet.
+• Flare Core Vault: 1 lock 10.00M XRP
+Ripple and non-Ripple escrow are separate. Active escrow objects are ledger objects, not owner wallets. Scope is escrow observed by this scan, not every escrow on the XRPL.
+
+Under the Surface
+─────────────────
+Here’s the part the ≥1M whale counter can miss. Shadow Volume is the big-move spotlight: 216.25M XRP in 52 individual moves of at least 1M. Another 146.12M XRP moved in 570 payments from 100K to under 1M. 128.70M XRP across 504 of those payments matched 64 repeat-route, fan-in, or fan-out patterns. That is a signal to trace, not proof somebody was hiding funds.
+
+How to Read It
+──────────────
+New here? Shadow Volume shows the obvious ≥1M moves. Mid-size Flow catches 100K–<1M moves. Clustered Flow asks whether those smaller high-value payments keep using common routes. Net watched flow tells whether the tracked wallet board gained or lost XRP versus its prior snapshot.
+
+What To Watch Next
+──────────────────
+• Watch the absorbing wallets — are they stacking it, or handing it back out?
+• Check whether the largest recipient in this window makes another move.
+• Track whether today’s quiet is the calm before a repositioning.
+
+Verdict
+───────
+The read, straight up: a moderate night — routine patrol holds. (43/100). The flags that lit up: large transfer count, shadow volume, dust/tag flags. Watched wallets are net distributing — about 12.11M XRP moved outward. This is why I keep watch: so you never have to wonder who moved what. Not financial advice. XRP-only forensic watch.
+
+I’m XRPMan, and I tell on the banks.
+
+LEDGER DIAGNOSTICS
+──────────────────
+• XRP price: ~$1.5027 (24h flat)
+• Market volume (exchanges, 24h): $1.30B
+• Native XRPL DEX observed volume (top 200-token index, 24h): ~$5M (~3.61M XRP, ledger-derived estimate)
+• XRPL EVM: $34.7K TVL
+• RLUSD on XRPL (issuer obligations): 1.22B tokens
+• New funded XRPL accounts (2026-10-05): +2,884
+• Watched wallets: 423
+• Watched activity (all sizes, LAST 24H): 65507 transactions · 456.07M XRP moved · 194 wallets active
+• Shadow volume (whale moves ≥1M, LAST 24H): 216.25M XRP · 52 transfers
+• Net watched flow: 12.11M XRP outward
+
+🙏 THE DAILY PRAYER
+───────────────────
+Lord, give us eyes for the small transfer that means something and the patience to ignore the large one that does not.
+
+📖 THE DAILY SCRIPTURE
+──────────────────────
+Proverbs 20:23 (KJV)
+“Divers weights are an abomination unto the Lord; and a false balance is not good.”
+
+Sources
+───────
+[1] XRP ETF News: Remittix Announces Its $0.46 Final Presale Stage — https://news.google.com/rss/articles/CBMijgFBVV95cUxOTlY3eC1TaVdhWmNxcGtueDBjS2RWbGRqcHEtVDltb3lzSjRDc0JSaFZXQWJHVGxOcHpjejZ0T1RBcmlXX2RWcV9hZ3lEUUVTcVpUc0ZtY0o5d1IyY1p5dFhoSXpGb2pGd0M3UG1IN0dGYWR1dHhnUFMxbjZLZy1tNEFwZmUyOFlONG1mc2VB?oc=5
+[2] Ripple expands digital asset services in Turkey with Garanti BBVA custody and RL — https://news.google.com/rss/articles/CBMisgFBVV95cUxPWU1oaS03Rnh1d1dUaC1PN3pNMzJJajRnUG1IaEsyRXlvYkFkSlZ2bVp6ek5oT1UxNzM5aHpPb2s5RXhxeVlVNXFJdnh0VENTNkozVDVaQzRhNUJpVEZHZUFDQmRyQURaRVlFMzhKaGU3NDZEY2ROWWZRRFZjdzRsRkpISm82YkZoM1NZYU5qREhMaFhzakcyVUV4NExhOTV6ekhLNmNTUXcxWEdiODNyNjR3?oc=5
+[3] XRP News: Ripple Flags Turkey as Digital Assets Hub With Garanti BBVA Custody an — https://news.google.com/rss/articles/CBMitAFBVV95cUxQZUIyU2cxT2JGN1k4eTVad0EyNWI2Z210V011MkVRVDk1YzNTYkpNazdDWTREYmRtWlF2c3lIWGFDMUltODBfV2dJbHJGeVJwU1NTUUNuU0hlT09SLU1iZ3JiTXo3QXItbGFWNEdDcHY2LWtzWS1KbW1nSzJWRmpsRzRMbnJTWFZZU1FwUkRPcjRIejdtc3h4aFROOFRBZmNoaGZYMm1UR1QzN1Fuc1lMT2RZdkg?oc=5
+
+
+NEWS USED:
+[1] google_news@self — XRP ETF News: Remittix Announces Its $0.46 Final Presale Stage
+[2] google_news@self — Ripple expands digital asset services in Turkey with Garanti BBVA custody and RLUSD stablecoin launch
+[3] google_news@self — XRP News: Ripple Flags Turkey as Digital Assets Hub With Garanti BBVA Custody and RLUSD Rails
