@@ -1,5 +1,15 @@
 [
   {
+    "report_id": "SW-20261006-3SE6N",
+    "scan_id": "SC-MUWP2055",
+    "generated_at": "2026-10-06T10:19:40.000Z",
+    "sealed_at": "2026-10-06T13:08:01.733Z",
+    "coverage_complete": true,
+    "anchor": 107469816,
+    "transactions": null,
+    "report_hash": "d9a1e8f3c66fa8a1018da0cb0d7a144db0efa7398f8853fec49dbf8258a0c6dd"
+  },
+  {
     "report_id": "SW-20261006-AZVPR",
     "scan_id": "SC-MUWNP533",
     "generated_at": "2026-10-06T08:10:30.000Z",
