@@ -21,7 +21,8 @@
     '/src/brief/26-public-escrow-story-20260816.js?v=20260816.2',
     '/src/brief/33-escrow-terminology-20260819.js?v=20260819.1',
     '/src/brief/27-tx-count-integrity-20260816.js?v=20260817.1',
-    '/src/brief/28-runtime-integrity-and-genesis-debug-20260816.js?v=20260817.1'
+    '/src/brief/28-runtime-integrity-and-genesis-debug-20260816.js?v=20260817.1',
+    '/src/brief/14-report-background-scan-survival.js?v=20260824.1'
   ];
 
   function fallbackSequential() {
