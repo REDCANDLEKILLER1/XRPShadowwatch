@@ -4,6 +4,15 @@
    ================================================================= */
 'use strict';
 
+// Brief history uses a verified IndexedDB copy to avoid localStorage quota loss.
+function briefHistoryRead(key) {
+  return window.SW_HISTORY_STORAGE ? window.SW_HISTORY_STORAGE.read(key) : localStorage.getItem(key);
+}
+function briefHistoryWrite(key,value) {
+  if (!window.SW_HISTORY_STORAGE) { localStorage.setItem(key,value); return; }
+  window.SW_HISTORY_STORAGE.write(key,value).catch(e => elog('history save '+key,e));
+}
+
 // ── CONSTANTS ──────────────────────────────────────────────────
 const APP_VERSION = 'v3.32a-helper-runtime-proof-lock';
 const RIPPLE_EPOCH = 946684800;
@@ -4429,6 +4438,7 @@ function buildPack(v) {
     xrpl_recovery: state.xrplRecovery || null,
     anchor_attempts: state.anchorAttempts || [],
     phase_timings: state.phaseTimings || [],
+    evidence_freshness: state.indexRun && window.SW_EVIDENCE_INDEX && typeof window.SW_EVIDENCE_INDEX.freshness === 'function' ? window.SW_EVIDENCE_INDEX.freshness() : null,
     evidence_index: state.indexRun && window.SW_EVIDENCE_INDEX ? window.SW_EVIDENCE_INDEX.metrics() : null,
     shadow_volume_xrp: shadowVolumeXRP(), total_balance_delta_xrp: totalDeltaXRP(),
     // The measured delta with the escrow-attributable part removed, and the
@@ -6356,14 +6366,14 @@ function _initDiscoveryState() {
   // freshly created here (not pre-set by a caller or test). This prevents
   // localStorage from silently overriding caller-provided minScore / flags.
   try {
-    const inboxRaw = localStorage.getItem(DISCOVERY_STORE_KEY);
+    const inboxRaw = briefHistoryRead(DISCOVERY_STORE_KEY);
     if (inboxRaw) {
       const parsed = JSON.parse(inboxRaw);
       if (Array.isArray(parsed) && !state.discoveryInbox.length) {
         state.discoveryInbox = parsed;
       }
     }
-    const histRaw = localStorage.getItem(DISCOVERY_HISTORY_KEY);
+    const histRaw = briefHistoryRead(DISCOVERY_HISTORY_KEY);
     if (histRaw) {
       const parsed = JSON.parse(histRaw);
       if (Array.isArray(parsed) && !state.discoveryHistory.length) {
@@ -6373,7 +6383,7 @@ function _initDiscoveryState() {
     if (!hadSettings) {
       // Only apply persisted settings when we just created the defaults above.
       // If a caller already provided state.discoverySettings, respect their values.
-      const setRaw = localStorage.getItem(DISCOVERY_SETTINGS_KEY);
+      const setRaw = briefHistoryRead(DISCOVERY_SETTINGS_KEY);
       if (setRaw) {
         const parsed = JSON.parse(setRaw);
         if (parsed && typeof parsed === 'object') {
@@ -6387,11 +6397,11 @@ function _initDiscoveryState() {
 function persistDiscoveryInbox() {
   _initDiscoveryState();
   try {
-    localStorage.setItem(DISCOVERY_STORE_KEY,
+    briefHistoryWrite(DISCOVERY_STORE_KEY,
       JSON.stringify(state.discoveryInbox || []));
-    localStorage.setItem(DISCOVERY_HISTORY_KEY,
+    briefHistoryWrite(DISCOVERY_HISTORY_KEY,
       JSON.stringify((state.discoveryHistory || []).slice(-DISCOVERY_MAX_HISTORY)));
-    localStorage.setItem(DISCOVERY_SETTINGS_KEY,
+    briefHistoryWrite(DISCOVERY_SETTINGS_KEY,
       JSON.stringify(state.discoverySettings || {}));
   } catch (e) { elog('persist discovery inbox', e); }
   // v3.34: keep the copyable "New Wallet Targets" box current after each scan.
@@ -21694,9 +21704,9 @@ function saveBlackboxSnapshot(p) {
     history.push(snapshot);
     // Rolling cap: keep last N
     while (history.length > BLACKBOX_MAX_SNAPSHOTS) history.shift();
-    localStorage.setItem(BLACKBOX_STORE, JSON.stringify(history));
+    briefHistoryWrite(BLACKBOX_STORE, JSON.stringify(history));
     state.blackbox = history;
-    log('BLACK_BOX: snapshot saved (' + history.length + '/' + BLACKBOX_MAX_SNAPSHOTS + ')');
+    log('BLACK_BOX: snapshot queued (' + history.length + '/' + BLACKBOX_MAX_SNAPSHOTS + ')');
   } catch (e) {
     elog('saveBlackboxSnapshot', e);
   }
@@ -21704,7 +21714,7 @@ function saveBlackboxSnapshot(p) {
 
 function loadBlackboxHistory() {
   try {
-    const raw = localStorage.getItem(BLACKBOX_STORE);
+    const raw = briefHistoryRead(BLACKBOX_STORE);
     if (!raw) return [];
     const arr = JSON.parse(raw);
     return Array.isArray(arr) ? arr : [];
@@ -21712,7 +21722,8 @@ function loadBlackboxHistory() {
 }
 
 function clearBlackbox() {
-  localStorage.removeItem(BLACKBOX_STORE);
+  if (window.SW_HISTORY_STORAGE) window.SW_HISTORY_STORAGE.remove(BLACKBOX_STORE).catch(e => elog('clear blackbox',e));
+  else localStorage.removeItem(BLACKBOX_STORE);
   state.blackbox = [];
   log('BLACK_BOX: cleared.');
 }
@@ -22106,6 +22117,7 @@ async function run() {
   let ws = null, p = null, report = '', bundle = '', seal = null;
   let scanSucceeded = false;
   try {
+    if (window.SW_HISTORY_STORAGE) await window.SW_HISTORY_STORAGE.ready;
     // ── v3.26-hotfix2: BOOT WITH HARD CEILING ───────────────────
     // Market + XRPL connect run in parallel, EACH with individual timeouts.
     // The whole boot phase is also wrapped in a 15-second outer ceiling so
@@ -25164,7 +25176,7 @@ function newsDoctorAutoDiscoverySmokeTest() {
   }];
   persistDiscoveryInbox();
   try {
-    const raw = localStorage.getItem('shadowDiscoveryInbox');
+    const raw = briefHistoryRead('shadowDiscoveryInbox');
     const parsed = raw ? JSON.parse(raw) : [];
     check('Discovery Inbox persists to localStorage',
       Array.isArray(parsed) && parsed.length === 1 && parsed[0].address === NEW_ADDR_A);
@@ -33373,4 +33385,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // On boot, populate Black Box panel if we have history
   state.blackbox = loadBlackboxHistory();
   if (state.blackbox.length) renderBlackbox();
+  const bootDiscoverySettings = JSON.stringify(state.discoverySettings || null);
+  if (window.SW_HISTORY_STORAGE) window.SW_HISTORY_STORAGE.ready.then(() => {
+    if (!state.scanning) { state.blackbox = loadBlackboxHistory(); if (state.blackbox.length) renderBlackbox(); }
+    if (!state.scanning && JSON.stringify(state.discoverySettings || null) === bootDiscoverySettings) {
+      try { const saved = JSON.parse(briefHistoryRead(DISCOVERY_SETTINGS_KEY) || 'null'); if (saved && typeof saved === 'object') Object.assign(state.discoverySettings || (state.discoverySettings = {}), saved); } catch (e) { elog('load discovery settings', e); }
+    }
+    _initDiscoveryState();
+  });
 });

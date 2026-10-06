@@ -61,6 +61,18 @@ function retryableError(error) {
 
 async function runScheduledAcquisition(deps) {
   const d = deps || {};
+  // Recovery slots only finish saved work; they never begin a fresh collection.
+  if (d.resumeOnly) {
+    const Store = require('../src/db/github-store');
+    const Journal = require('../src/db/run-journal');
+    const [loaded, saved] = await Promise.all([
+      (d.readState || Store.readState)(), (d.readJournal || Store.readJournal)()
+    ]);
+    if (!loaded.state || !saved.journal || saved.unreadable ||
+        !Journal.usable(saved.journal, loaded.state).ok) {
+      return {httpStatus:200,body:{ok:true,status:'NO_PENDING_RECOVERY',evidence_write_attempted:false}};
+    }
+  }
   const now = typeof d.now === 'function' ? Number(d.now()) : Date.now();
   const clockNow = typeof d.clockNow === 'function' ? d.clockNow : Date.now;
   const makeId = d.makeReportId || (ms => schedulerReportId(ms));
@@ -203,7 +215,7 @@ async function handler(req, res) {
   }
 
   try {
-    const out = await runScheduledAcquisition();
+    const out = await runScheduledAcquisition({resumeOnly:req._shadowwatchResumeOnly === true});
     return res.status(out.httpStatus).json(out.body);
   } catch (e) {
     console.error('[evidence-scheduler] failed', e && e.stack || e);

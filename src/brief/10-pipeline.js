@@ -500,7 +500,21 @@ function summarizeNewsImpact(pack){
       seen[key]=true;
       if(_isXrpNews(it.title,it.url||'')) xrp.push(it);
     });
-    xrp=xrp.slice(0,3);
+    // Equivalent syndicated/truncated headlines should be spoken once.
+    // Keep source provenance elsewhere; this only deduplicates spoken context.
+    function words(title){return String(title).toLowerCase().replace(/https?:\/\/\S+/g,'').replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(function(w){return w.length>2;});}
+    var unique=[];
+    xrp.forEach(function(it){
+      var a=words(it.title), duplicate=unique.some(function(prior){
+        var b=words(prior.title), sa=new Set(a), sb=new Set(b), shared=0;
+        sa.forEach(function(w){if(sb.has(w)) shared++;});
+        // Require the same entities/topic, not merely a shared XRP keyword.
+        var negative=/\b(no|not|never|won't|doesn't)\b/i;
+        return negative.test(it.title)===negative.test(prior.title) && Math.min(sa.size,sb.size)>=6 && shared/Math.min(sa.size,sb.size)>=0.85;
+      });
+      if(!duplicate) unique.push(it);
+    });
+    xrp=unique.slice(0,3);
     if(!xrp.length) return _blank();
     var lead=xrp[0];
     var refs=xrp.map(function(it){
@@ -1371,6 +1385,10 @@ function _usdC(v){
 // night's on-chain activity. Only prints lines that actually have data.
 function _buildLedgerDiagnostics(pack){
   var p=pack||{}, L=[];
+  var freshness=p.evidence_freshness;
+  if(freshness && freshness.evidence_time){
+    L.push('• Watched-ledger evidence current through: '+freshness.evidence_time+' · '+String(freshness.status||'UNKNOWN').replace(/_/g,' '));
+  }
   var _ig=_intg(p);
   if(_ig.linkLost) L.push('• '+_ig.headline+' — '+_ig.sealLine+'. Figures below cover only the phases that completed.');
   var price=_num(p.xrp_price!=null?p.xrp_price:p.price), d24=_num(p.xrp_delta_24h_pct);

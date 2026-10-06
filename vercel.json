@@ -17,6 +17,10 @@
     },
     "api/report-history.js": {
       "maxDuration": 30
+    },
+    "api/evidence-recovery.js": {
+      "maxDuration": 300,
+      "includeFiles": "src/{db,brief,shared}/**"
     }
   },
   "crons": [
@@ -67,6 +71,54 @@
     {
       "path": "/api/evidence-scheduler",
       "schedule": "5 22 * * *"
+    },
+    {
+      "path": "/api/evidence-recovery",
+      "schedule": "5 1 * * *"
+    },
+    {
+      "path": "/api/evidence-recovery",
+      "schedule": "5 3 * * *"
+    },
+    {
+      "path": "/api/evidence-recovery",
+      "schedule": "5 5 * * *"
+    },
+    {
+      "path": "/api/evidence-recovery",
+      "schedule": "5 7 * * *"
+    },
+    {
+      "path": "/api/evidence-recovery",
+      "schedule": "5 9 * * *"
+    },
+    {
+      "path": "/api/evidence-recovery",
+      "schedule": "5 11 * * *"
+    },
+    {
+      "path": "/api/evidence-recovery",
+      "schedule": "5 13 * * *"
+    },
+    {
+      "path": "/api/evidence-recovery",
+      "schedule": "5 15 * * *"
+    },
+    {
+      "path": "/api/evidence-recovery",
+      "schedule": "5 17 * * *"
+    },
+    {
+      "path": "/api/evidence-recovery",
+      "schedule": "5 19 * * *"
+    },
+    {
+      "path": "/api/evidence-recovery",
+      "schedule": "5 21 * * *"
+    },
+    {
+      "path": "/api/evidence-recovery",
+      "schedule": "5 23 * * *"
     }
   ],
   "redirects": [
