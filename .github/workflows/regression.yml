@@ -46,6 +46,7 @@ jobs:
         run: |
           node scripts/stored-run-completion.test.js
           node scripts/report-history.test.js
+          node scripts/storage-recovery.test.js
 
       # The smoke gate compares against scripts/smoke-baseline.txt. If a
       # baseline entry starts passing the run still succeeds, but the baseline

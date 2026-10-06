@@ -1,56 +1,70 @@
 (function () {
   'use strict';
-  var dbPromise, dialog, selectedDay, selectedReport, serverRows = [], phoneRows = [], dates = [], nextOffset = null;
+  var dialog, selectedDay, selectedReport, serverRows = [], phoneRows = [], dates = [], nextOffset = null;
   var sequence = 0, retrying = false;
   var saved = function (status) { return /^(ARCHIVED|ALREADY_ARCHIVED)$/.test(status || ''); };
   function reportDay(id) { var m = /^SW-(\d{4})(\d{2})(\d{2})-[A-Z0-9]{5}$/.exec(id || ''); return m ? m[1]+'-'+m[2]+'-'+m[3] : null; }
   function today(offset) { var d = new Date(); d.setUTCDate(d.getUTCDate() + (offset || 0)); return d.toISOString().slice(0,10); }
   function el(id) { return document.getElementById(id); }
-  function database() {
-    if (!dbPromise) dbPromise = new Promise(function (resolve,reject) {
-      var request = indexedDB.open('SW_SAVED_REPORTS_V1',1);
-      var timer = setTimeout(function () { reject(new Error('PHONE_STORAGE_UNAVAILABLE')); },4000);
-      request.onupgradeneeded = function () { request.result.createObjectStore('reports',{keyPath:'report_id'}); };
-      request.onsuccess = function () { clearTimeout(timer); resolve(request.result); };
-      request.onerror = function () { clearTimeout(timer); reject(request.error); };
-      request.onblocked = function () { clearTimeout(timer); reject(new Error('PHONE_STORAGE_BLOCKED')); };
-    });
-    return dbPromise;
-  }
+  var sessionRows = new Map(), fallbackPrefix = 'SW_SAVED_REPORT_FALLBACK_V1:';
   function storage(mode,operation) {
-    return database().then(function (db) { return new Promise(function (resolve,reject) {
-      var tx = db.transaction('reports',mode), value;
-      var timer = setTimeout(function () {
-        reject(new Error('PHONE_STORAGE_TIMEOUT'));
-        try { tx.abort(); } catch (_) {}
-      },4000);
-      tx.oncomplete = function () { clearTimeout(timer); resolve(value); };
-      tx.onerror = tx.onabort = function () { clearTimeout(timer); reject(tx.error || new Error('PHONE_SAVE_FAILED')); };
-      var request = operation(tx.objectStore('reports'));
-      request.onsuccess = function () { value = request.result; };
-    }); });
+    return window.SW_DURABLE_STORAGE.run('SW_SAVED_REPORTS_V1','reports','report_id',mode,operation);
+  }
+  function fallbackRow(id) {
+    try { return JSON.parse(localStorage.getItem(fallbackPrefix+id) || 'null'); } catch (_) { return null; }
+  }
+  async function rowFor(id) {
+    var disk;
+    try { disk=await storage('readonly',function(s){return s.get(id);}); } catch (_) {}
+    return sessionRows.get(id) || fallbackRow(id) || disk;
+  }
+  async function storeRow(row) {
+    sessionRows.set(row.report_id,row);
+    try {
+      row.persistence='indexeddb';
+      await storage('readwrite',function(s){return s.put(row);});
+      var checked=await storage('readonly',function(s){return s.get(row.report_id);});
+      if (!checked || checked.text!==row.text || checked.report_hash!==row.report_hash ||
+          JSON.stringify(checked.payload)!==JSON.stringify(row.payload) || checked.archive_status!==row.archive_status)
+        throw Error('PHONE_STORAGE_VERIFY_FAILED');
+      row.persistence='indexeddb';
+      try { localStorage.removeItem(fallbackPrefix+row.report_id); } catch (_) {}
+    } catch (_) {
+      try {
+        row.persistence='localstorage';
+        window.SW_DURABLE_STORAGE.localWrite(fallbackPrefix+row.report_id,JSON.stringify(row));
+      } catch (_) { row.persistence='session'; }
+    }
+    return row;
   }
   async function capture(payload) {
     var date = reportDay(payload && payload.report_id);
     if (!date || !payload.morning_report || !/^[a-f0-9]{64}$/.test(payload.morning_hash || '')) throw new Error('INVALID_SAVED_REPORT');
-    var previous = await storage('readonly',function (s) { return s.get(payload.report_id); });
+    var previous = await rowFor(payload.report_id);
     if (previous && previous.report_hash !== payload.morning_hash) throw new Error('PHONE_REPORT_CONFLICT');
     var row = {report_id:payload.report_id,report_day:date,created_at:payload.generated_at,
       text:payload.morning_report,report_hash:payload.morning_hash,payload:payload,
       archive_status:previous && previous.archive_status || 'PENDING',source:'phone'};
-    await storage('readwrite',function (s) { return s.put(row); });
-    return row;
+    return storeRow(row);
   }
   async function mark(id,result) {
-    var row = await storage('readonly',function (s) { return s.get(id); });
+    var row = await rowFor(id);
     if (!row) return;
     row.archive_status = result.status || 'FAILED'; row.archive_error = result.error || null;
     row.archive_day = result.archive_path ? result.archive_path.split('/').slice(1,4).join('-') : row.archive_day;
-    await storage('readwrite',function (s) { return s.put(row); });
+    await storeRow(row);
   }
   async function localReports() {
     var rows = [];
     try { rows = await storage('readonly',function (s) { return s.getAll(); }); } catch (_) {}
+    try {
+      for (var i=0;i<localStorage.length;i++) {
+        var key=localStorage.key(i);
+        if(key && key.indexOf(fallbackPrefix)===0){var row=fallbackRow(key.slice(fallbackPrefix.length));if(row)rows.push(row);}
+      }
+    } catch (_) {}
+    var merged=new Map(rows.map(function(r){return [r.report_id,r];}));
+    sessionRows.forEach(function(r,id){merged.set(id,r);}); rows=Array.from(merged.values());
     // Preserve the older first-report-per-day phone archive without changing
     // its daily gate, rewriting its text, or claiming it was saved remotely.
     try {
@@ -101,7 +115,7 @@
       title.textContent = row.created_at && Number.isFinite(Date.parse(row.created_at))
         ? new Date(row.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',timeZone:'UTC'}) + ' UTC · Shadow Watch report'
         : 'Shadow Watch report';
-      var status = row.source === 'archive' || saved(row.archive_status) ? 'Saved to archive' : row.payload ? 'Saved on this phone · archive pending' : 'Saved on this phone';
+      var status = row.persistence==='session' && !saved(row.archive_status) ? 'This session only · download to keep' : row.source === 'archive' || saved(row.archive_status) ? 'Saved to archive' : row.payload ? 'Saved on this phone · archive pending' : 'Saved on this phone';
       meta.textContent = status + ' · ' + (row.report_id.indexOf('phone-') === 0 ? 'Earlier phone archive' : row.report_id);
       button.append(title,meta); button.addEventListener('click',function () { readReport(row); }); list.appendChild(button);
     });
@@ -140,7 +154,7 @@
   }
   async function readReport(row) {
     var ticket = ++sequence;
-    if (row.source !== 'archive') { showReport(row,saved(row.archive_status) ? 'Original saved report · archived' : 'Original report saved on this phone'); return; }
+    if (row.source !== 'archive') { showReport(row,saved(row.archive_status) ? 'Original saved report · archived' : row.persistence==='session' ? 'Report held in this session only. Download to keep it.' : 'Original report saved on this phone'); return; }
     notice('Opening the saved report…');
     try {
       var data = await api({action:'read',report_id:row.report_id,archive_day:row.archive_day});
