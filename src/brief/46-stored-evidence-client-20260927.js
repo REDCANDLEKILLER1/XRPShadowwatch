@@ -194,18 +194,6 @@
               Number.isInteger(ledger) && ledger > 0 && Number.isInteger(ceiling) && ledger <= ceiling &&
               t.tx_result === 'tesSUCCESS';
           }
-          var outgoing = new Map();
-          var hashes = new Set();
-          (state.txs || []).forEach(function (t) {
-            if (!bounded(t) || t.type !== 'Payment' || t.currency !== 'XRP' ||
-                !t.from || !t.to || t.to === t.from || !Number.isFinite(Number(t.amount)) ||
-                Number(t.amount) <= 0 || Number(t.amount) >= 1e11) return;
-            var key = String(t.hash).toUpperCase();
-            if (hashes.has(key)) return;
-            hashes.add(key);
-            if (!outgoing.has(t.from)) outgoing.set(t.from, []);
-            outgoing.get(t.from).push(t);
-          });
           var recipients = new Map();
           _deliveredToReceiver(null).forEach(function (t) {
             if (!bounded(t) || !t.to || KNOWN[t.to] || !BASE58_RE.test(t.to) || t.currency !== 'XRP' ||
@@ -214,6 +202,18 @@
             var prior = recipients.get(t.to);
             if (!prior || Number(t.amount) > Number(prior.amount) ||
                 (Number(t.amount) === Number(prior.amount) && Number(t.ledger_index) < Number(prior.ledger_index))) recipients.set(t.to, t);
+          });
+          var outgoing = new Map();
+          var hashes = new Set();
+          (state.txs || []).forEach(function (t) {
+            if (!t || !recipients.has(t.from) || !bounded(t) || t.type !== 'Payment' || t.currency !== 'XRP' ||
+                !t.from || !t.to || t.to === t.from || !Number.isFinite(Number(t.amount)) ||
+                Number(t.amount) <= 0 || Number(t.amount) >= 1e11) return;
+            var key = String(t.hash).toUpperCase();
+            if (hashes.has(key)) return;
+            hashes.add(key);
+            if (!outgoing.has(t.from)) outgoing.set(t.from, []);
+            outgoing.get(t.from).push(t);
           });
           state.receivers = [];
           recipients.forEach(function (src, address) {
