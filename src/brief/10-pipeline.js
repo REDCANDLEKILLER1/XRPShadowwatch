@@ -951,18 +951,9 @@ function _intg(pack){
 }
 // The blunt version, for the top of the story.
 function _covLead(cov, seed){
-  return _nvPick([
-    'I have to open with a problem instead of a finding: ',
-    'Before anything else — this scan did not finish. ',
-    'Straight up, because burying it would be worse: ',
-    'This one comes with a warning label on the front. ',
-    'I would rather hand you a short report than a confident wrong one. ',
-    'Read this part first, because it changes how you read the rest: '
-  ], seed, 9) +
-  'only ' + cov.checked + ' of ' + cov.total + ' watched wallets ' + cov.basis_noun + ' (' +
-  cov.percent + '%). ' + cov.failed + ' did not complete that check. Acquisition was incomplete. ' +
-  ' So I am not calling this a quiet night. I could not see most of it, and an unread wallet is not a still one. ' +
-  'Re-run the scan before you trust a single total below.';
+  return 'Scan incomplete: only '+cov.checked+' of '+cov.total+' watched wallets '+cov.basis_noun+
+    ' ('+cov.percent+'%). '+cov.failed+' did not complete that check. '+
+    'Missing activity is unknown, not evidence that nothing happened. Re-run before relying on the totals.';
 }
 
 function _buildExecutiveSummary(interps, pack){
@@ -970,60 +961,23 @@ function _buildExecutiveSummary(interps, pack){
   var cov=_cov(pack);
   // An unreached phase is not a finding. Say so first, before any narrative.
   var ig=_intg(pack);
-  if(ig.linkLost) return ig.headline+'. '+ig.line+' '+_nvBeat(seed,0);
+  if(ig.linkLost) return ig.headline+'. '+ig.line;
   // A scan that lost most of the board reports the outage, not the calm.
-  if(cov.severe) return _covLead(cov, seed)+' '+_nvBeat(seed,0);
+  if(cov.severe) return _covLead(cov, seed);
   var covNote=cov.degraded
     ? ' Coverage note: '+cov.checked+' of '+cov.total+' wallets '+cov.basis_noun+' — totals describe the acquired evidence.'
     : '';
 
-  // Issue #26: when aggregate whale activity is material, the public lead must
-  // describe the scale of the whole window before highlighting one transfer.
-  // This consumes existing scan evidence only; it does not alter any scanner,
-  // threshold, evidence, discovery, or read-only behavior.
+  // Lead with the scale; the transfer receipts belong in Evidence.
   var shadow=_num(pack&&pack.shadow_volume_xrp);
   var largeTxs=_arr(pack&&pack.large_transfers);
   var largeCt=largeTxs.length||_num(pack&&pack.large_transfers_count);
   if(shadow>=2000000 && largeCt>=2){
     var parts=[];
-    parts.push(_xrpFmt(shadow)+' XRP moved across '+largeCt+' large transfer'+(largeCt===1?'':'s')+' in the window.');
-
-    if(absorber&&absorber.has_signal&&absorber.summary){
-      parts.push(_firstSentence(absorber.summary));
-    }
-
-    if(moves&&moves.has_signal&&(moves.headline||moves.summary)){
-      var anomaly=_firstSentence(moves.headline||moves.summary).replace(/\s+overnight(?=[.!?]?$)/i,'');
-      if(anomaly){
-        parts.push('The standout individual anomaly was '+_lc1(anomaly));
-      }
-    }
-
-    // Tie follow-through to the actual largest transfer recipient.
-    var top=null;
-    if(largeTxs.length){
-      top=largeTxs.slice().sort(function(a,b){ return _num(b&&b.amount)-_num(a&&a.amount); })[0]||null;
-    }
-    var topTo=top&&(top.to||top.receiver);
-    var rows=_arr(pack&&pack.receiver_followthrough);
-    var follow=null;
-    if(topTo){
-      for(var fi=0;fi<rows.length;fi++){
-        if(rows[fi]&&rows[fi].address===topTo){ follow=rows[fi]; break; }
-      }
-    }
-    if(follow){
-      var fwdCt=_num(follow.forwarded_large_count);
-      var fwdAmt=_num(follow.forwarded_large_total_xrp);
-      if(fwdCt>0&&fwdAmt>0){
-        parts.push('That recipient subsequently forwarded '+_xrpFmt(fwdAmt)+' XRP onward in '+fwdCt+
-          ' large transaction'+(fwdCt===1?'':'s')+' — routing behavior, not ownership or intent proof.');
-      } else if(String(follow.classification||'')==='RECEIVER_STILL_HOLDING_SIZE'){
-        var bal=_num(follow.balance_xrp);
-        parts.push('That recipient was still holding'+(bal>0?' about '+_xrpFmt(bal)+' XRP':' size')+
-          ' at the follow-through check — observable behavior, not proof of intent.');
-      }
-    }
+    var windowLabel=pack&&pack.tx_window&&pack.tx_window.label;
+    parts.push(_xrpFmt(shadow)+' XRP moved across '+largeCt+' large transfers'+
+      (windowLabel?' during the '+String(windowLabel).toLowerCase():' in the scanned window')+'.');
+    parts.push('Each large transfer is at least 1 million XRP.');
 
     // Transaction-window completeness is independent from balance/read coverage.
     var txc=pack&&pack.tx_scan_coverage;
@@ -1038,46 +992,16 @@ function _buildExecutiveSummary(interps, pack){
         ' proved; '+_causes+'. Zero-result claims are not definitive.');
     }
 
-    parts.push('Transfer classifications are heuristic; movement does not prove intent.');
+    parts.push('These figures describe observed movement only; they do not prove intent.');
     if(covNote) parts.push(covNote.trim());
     return parts.join(' ');
   }
 
-  var openers=[
-    'Coffee’s hot and the Ledger’s open. Here’s the acquired record: ',
-    'XRPMan on the wire — here’s what this scan found: ',
-    'Kettle on, board up. Here’s the read: ',
-    'Fresh receipts from the scanned window: ',
-    'Same seat, same screens, a fresh scan. ',
-    'Let’s open the books on this window: ',
-    'Ledger’s open, coffee’s poured. Here’s what I can show: ',
-    'Back at the board, receipts in hand: '
-  ];
-  var quietOpen=[
-    'the Ledger stayed quiet under my watch. No whale broke cover — and a still night on patrol is a good night.',
-    'the rails ran quiet and honest. Nobody big blinked, and that’s worth saying out loud.',
-    'it was a calm shift. No heavy hands, no cover blown — I still counted every ripple.',
-    'the board sat still. A quiet night isn’t a wasted one; it’s the baseline I measure the loud ones against.',
-    'nothing crossed that was worth waking you for. I checked anyway, wallet by wallet.',
-    'the whales stayed under. No cover blown, no cover needed — I logged the quiet and kept the seat warm.',
-    'the wires carried ordinary traffic and nothing else. That is a finding too, and I am reporting it as one.',
-    'not one wallet did anything it had not done before. Boring is a result, and tonight it is the result.',
-    'the money stayed where it went to sleep. I watched it not move for hours, which is the job.',
-    'no heavy hands on the board. I would rather tell you that plainly than dress up a slow night.'
-  ];
   var factRaw=(moves&&moves.has_signal)?(moves.headline||moves.summary):(best?best.summary:'');
   if(!factRaw && cov.degraded) return 'The ledger record is incomplete. '+cov.line+' I cannot establish whether this window was quiet. Complete the scan before treating missing activity as a finding.';
-  if(!factRaw) return _nvPick(openers,seed,0)+_nvPick(quietOpen,seed,7)+covNote+' '+_nvBeat(seed,0);
-  var _open = _nvPick(openers,seed,0);
-  var _fact = _lc1(_firstSentence(factRaw));
-  if(/overnight/i.test(_open)) _fact = _fact.replace(/\s+overnight(?=[.!?]?$)/i, '');
-  var line=_open+_fact;
-  var score=_num(pack&&pack.risk_score&&pack.risk_score.score);
-  var posture=score>=75?_nvPick(['The signal flared red — this is a full-alert night on the Ledger.','Every alarm I’ve got lit up. Top of the dial.','This is a loud one — the board’s screaming and I’m all eyes.','Red across the board. When it’s this hot, somebody’s making a move.','Full alert. The heavy hands came out to play tonight.','I have not seen the board light like this in a while. Eyes up.','This is the kind of night the receipts get printed for.','Everything I watch moved at once. That is not coincidence, that is coordination.','Loud, fast, and deliberate. Somebody wanted this done before morning.','If you read one report this week, make it this one.'],seed,1)
-             :score>=50?_nvPick(['My instincts are up — something’s moving out there.','The Ledger’s running warm tonight, and I’m watching close.','Not a siren yet, but the needle’s twitching. I’m leaning in.','Enough motion to keep me honest — I’m tracking it.','Warm, not hot. But warm is how the big ones start.','A few wallets stretched their legs. Worth a second look tomorrow.','Nothing alarming, but the shape of it has my attention.','More motion than usual and no obvious reason for it yet.','Middle of the dial. I am staying in the chair.'],seed,1)
-             :score>=25?_nvPick(['Nothing villainous, but I kept one eye open.','A quiet patrol — steady, nothing extreme.','Low hum on the board. I logged it and moved on.','Mostly calm, a little chatter. Nothing I’d wake you for.','Slow night — but slow is when you catch the sloppy ones.','Routine traffic, logged and filed. No drama to sell you.','A working night. Nothing that changes the picture.','Ordinary motion on an ordinary board. I still read every line.','Gentle night. The interesting ones usually follow these.'],seed,1)
-             :_nvPick(['Otherwise the Ledger behaved itself.','The rest of the board stayed in line.','A still night — the rails were quiet and honest.','Nothing else tried to slip past. Good.','Calm water tonight — I still counted every ripple.','Flat board, honest hours. Nothing to report is a report.','Everything sat exactly where it was left.','No movement worth your time — and I checked all of it.','Dead quiet, start to finish. I will take it.'],seed,1);
-  return line+(cov.degraded?' The rest of the requested window remains unverified.':(posture?' '+posture:''))+covNote+' '+_nvBeat(seed,0);
+  if(!factRaw) return 'No reportable signal was identified in the watched-wallet record for this window. This describes the watched wallets, not the entire XRP Ledger.';
+  // Detailed receipts follow below; avoid reading the same transfer twice.
+  return 'This scan identified activity worth reviewing in the watched-wallet record. The findings below describe observed movements; they do not establish why funds moved.'+covNote;
 }
 
 function _buildWhatMatteredMost(interps, pack){
@@ -1096,70 +1020,24 @@ function _buildWhatMatteredMost(interps, pack){
   if(ig.linkLost) return 'The scan did not finish, so I cannot tell you what mattered most. '+
     (ig.missing.length?ig.missing.join(' and ')+' never ran. ':'')+
     'What is missing below was not reached, not found empty.';
-  var tails=[
-    ' Down here the Ledger leads and the chart just follows along.',
-    ' The chart plays catch-up; the Ledger already knew.',
-    ' That’s the move under the move — the part the ticker never shows you.',
-    ' Watch that thread; it usually unspools into something bigger.',
-    ' Small on the surface, loud if you know where the money sleeps.',
-    ' Keep that name in your head; it tends to come back.',
-    ' On its own it is nothing. Alongside the rest of the board it is something.',
-    ' That is the sort of move that only reads as odd in hindsight.',
-    ' The ticker will not mention it. That is rather the point.',
-    ' File it. Two weeks from now it may be the first line of a bigger story.'
-  ];
-  if(band&&band.has_signal&&absorber&&absorber.has_signal){
-    var alertLead=_nvPick(['Here’s the part that put me on alert.','This is the piece I circled twice.','Here’s where the night turned interesting.','This is the tell that earned a hard look.','Here is the line I kept coming back to.','This is the one that made me re-run the numbers.','Out of everything on the board, this is what stuck.','Here is where I stopped scrolling.'],seed,2);
-    var closer=_nvPick(['The chart played dead; the Ledger told the truth.','The price sat still while the money quietly rearranged itself.','No fireworks on the ticker — all the action was underneath.','The price told you nothing. The transfers told you plenty.','Flat candles, busy wallets. That gap is the whole story.','Nobody announced any of it, and it all happened anyway.'],seed,6);
-    return alertLead+' '+band.summary+' '+absorber.summary+' '+closer;
-  }
-  var best=_topInterp(interps);
-  var others=interps.filter(function(i){ return i && i.has_signal && i!==best; })
-    .sort(function(a,b){ return b.narrative_weight-a.narrative_weight; });
-  var leads=[
-    'What really caught my eye out there: ',
-    'Beyond the headline, here’s what I flagged: ',
-    'The part I couldn’t look away from: ',
-    'Here’s what actually mattered under the surface: ',
-    'The tell of the night: ',
-    'If you read one thing, read this: ',
-    'What the chart won’t tell you: ',
-    'The move that earned a second look: ',
-    'Cut through the noise, here’s the signal: '
-  ];
-  if(others.length){
-    // v16.18: the clauses were joined raw, but a headline already ends in a full
-    // stop — so the section read "…absorbed 20.99M XRP this scan., and XRP Price
-    // Outlook…" with the period stranded mid-sentence. Strip the terminator off
-    // each clause before joining, and let the join supply the punctuation.
-    var clauses=others.slice(0,2).map(function(i){
-      return _lc1(String(i.headline||_firstSentence(i.summary)||'').replace(/\s*[.;,]+\s*$/,''));
-    }).filter(Boolean);
-    return _nvPick(leads,seed,2)+clauses.join(', and ')+'.'+_nvPick(tails,seed,6);
-  }
-  if(best) return _nvPick([
-    'One move carried the whole night — a single, deliberate transfer, not a busy board. When it’s that concentrated, the quiet around it is the tell, and I noticed.',
-    'It came down to one move. One deliberate transfer, no crowd around it — and concentration like that is its own kind of loud.',
-    'The whole night hinged on a single hand. Not a busy board, just one purposeful move — the sort I don’t let slide.',
-    'One transfer did the talking tonight. Clean, deliberate, alone on the board — exactly the kind that rewards a closer look.'
-  ],seed,2);
-  // "Nothing forced my hand" is a claim about the board. It is only true if the
-  // board was read. With most of the list dark, the honest answer is that we do
-  // not know — say that instead of dressing an outage up as a calm night.
   var cov=_cov(pack);
-  if(cov.degraded && !cov.severe) return 'Coverage is the unresolved finding. '+cov.line+' I cannot call the unread part calm or clear.';
-  if(cov.severe) return _nvPick([
-    'What mattered most is what I could not see. Only '+cov.checked+' of '+cov.total+' wallets '+cov.basis_noun+'. Any absence below describes that acquired evidence alone.',
-    'The gap in coverage leads this report. Only '+cov.checked+' wallets '+cov.basis_noun+'. I will not dress that up as a quiet shift.',
-    'I cannot settle what mattered most, because '+cov.failed+' of the '+cov.total+' watched wallets lack complete acquisition. The rest remains unknown.',
-    'The headline tonight is the gap in my own coverage. '+cov.percent+'% of the board reported in. The rest is unknown, and unknown is not the same as quiet.'
-  ],seed,2);
-  return _nvPick([
-    'A steady patrol tonight. The rails stayed calm and nothing tried to slip past me.',
-    'Quiet on the board. No single move stood up and asked to be watched — so I watched everything instead.',
-    'Nothing forced my hand tonight. Calm rails, honest flow, and me still reading every line.',
-    'The night kept its secrets, if it had any. I found no move worth circling — which is its own clean answer.'
-  ],seed,2);
+  if(cov.degraded) return 'Coverage is incomplete. '+cov.line+' The unread part of the requested window remains unknown.';
+  var context=[];
+  if(absorber&&absorber.has_signal){
+    var received=absorber.summary.replace(/absorbed/g,'received').replace(/ ×(\d+)/g,' ($1 transfers)').replace(/ and \+(\d+) more/g,', plus $1 other labeled groups');
+    // When every large transfer reached an exchange label, the topline already
+    // carries the total. Keep the recipients here without repeating that total.
+    var repeated=' received '+_xrpFmt(_num(pack&&pack.shadow_volume_xrp))+' XRP this scan.';
+    if(received.indexOf(repeated)>-1) received='Receiving exchange labels: '+received.replace(repeated,'.');
+    context.push(received+' Receiving XRP does not establish that an exchange bought it or kept it.');
+  }
+  if(band&&band.has_signal){
+    var priceLine=_firstSentence(band.summary);
+    var rangeLine=_firstSentence(String(band.summary).slice(priceLine.length).trim());
+    context.push(priceLine+(rangeLine?' '+rangeLine:''));
+  }
+  if(context.length) return context.join('\n\n');
+  return 'This report covers the watched wallets and the requested time window. Transfers show where XRP moved; they do not identify a motive or predict its price.';
 }
 
 function _buildEvidence(interps, pack){
@@ -1167,13 +1045,24 @@ function _buildEvidence(interps, pack){
   var moves=interps[0], domShift=interps[1], news=interps[2],
       recv=interps[3];
   var parts=[];
-  var receiptsLead=_nvPick(['Here are the receipts, straight off the Ledger.','Let’s go to the tape.','The evidence, plain and on-chain:','Here’s exactly what the Ledger logged:','Receipts first, opinions never:'],seed,8);
-  var tracedLead=_nvPick(['I traced it —','I followed the money —','I ran it down —','I chased the hops —','I walked it forward —'],seed,9);
-  var domLead=_nvPick(['Across the whole board,','Zooming out,','On the wider board,','Stepping back for the big picture,'],seed,10);
-  var newsLead=_nvPick(['And out in the daylight world,','Up in the headlines,','And where the news lives,','Above ground, in the daylight world,'],seed,11);
-  if(moves&&moves.has_signal) parts.push(receiptsLead+' '+moves.summary);
-  if(recv&&recv.has_signal)   parts.push(tracedLead+' '+_lc1(recv.summary));
-  if(domShift&&domShift.has_signal) parts.push(domLead+' '+_lc1(domShift.summary));
+  if(moves&&moves.has_signal) parts.push(moves.summary);
+  // Preserve the measured follow-through previously stated in the summary.
+  // Array-shaped scan rows do not use the older interpretation object's shape.
+  var ranked=_arr(pack&&pack.large_transfers).slice().sort(function(a,b){return _num(b&&b.amount)-_num(a&&a.amount);});
+  var largest=ranked[0],recipient=largest&&(largest.to||largest.receiver);
+  var follow=_arr(pack&&pack.receiver_followthrough).find(function(row){return row&&row.address===recipient;});
+  if(follow){
+    var forwardedCount=_num(follow.forwarded_large_count),forwardedXrp=_num(follow.forwarded_large_total_xrp);
+    if(forwardedCount>0&&forwardedXrp>0) parts.push('The recipient of the largest transfer later sent '+_xrpFmt(forwardedXrp)+
+      ' XRP onward in '+forwardedCount+' large transaction'+(forwardedCount===1?'':'s')+'. This shows routing behavior, not ownership or intent.');
+    else if(String(follow.classification||'')==='RECEIVER_STILL_HOLDING_SIZE'){
+      var heldXrp=_num(follow.balance_xrp);
+      parts.push('The recipient of the largest transfer was still holding'+(heldXrp>0?' about '+_xrpFmt(heldXrp)+' XRP':' funds')+
+        ' when checked. This is an observed balance, not proof of intent.');
+    }
+  }
+  if(recv&&recv.has_signal)   parts.push(recv.summary);
+  if(domShift&&domShift.has_signal) parts.push(domShift.summary);
   // v16.8: surface newly-discovered related wallets so the report says more.
   try {
     // CANONICAL DISCOVERY COUNTS.
@@ -1226,23 +1115,8 @@ function _buildEvidence(interps, pack){
       // right now: "), so whether the report even mentioned discovery came down
       // to which variant the day's seed picked — and the smoke assertion that
       // looks for /DISCOVERY/i passed or failed with it.
-      var netLead=_nvPick(['The discovery queue is holding ','On the discovery pile I have ','The discovery queue is carrying ','In the discovery queue right now: '],seed,12);
-      // Every variant here must carry the ownership disclaimer, not just the
-      // first one. Two of the old three said only "nobody gets a badge for free"
-      // and "suspects, not the convicted" — good voice, no disclaimer — so which
-      // report carried the required line came down to the day's pick. Now that
-      // the picker rotates per RUN that would have been a coin flip on every
-      // scan, so the rule is: vary the wording, never vary the claim.
-      var netTail=_nvPick([
-        ' — flagged, not trusted; behavioral evidence only, nobody gets a badge automatically.',
-        ' — every one flagged on behavior, not identity; behavioral evidence only, and nobody gets a badge for free.',
-        ' — suspects, not the convicted; behavioral evidence only, the Ledger earns the flag and I don’t hand it out.',
-        ' — behavioral evidence only, not ownership proof; a wallet gets on that pile by what it did, never by whose name is on it.',
-        ' — queued on behavior alone. Behavioral evidence only, so not one of them is named until the receipts say so.',
-        ' — all of them flagged, none of them accused; behavioral evidence only, and not ownership proof.',
-        ' — that pile is behavioral evidence only. It says what moved, never who owns it, and I keep that line hard.',
-        ' — behavior put them there and behavior alone. Not ownership proof, and I won’t dress it up as any.'
-      ],seed,13);
+      var netLead='Discovery queue: ';
+      var netTail='. These wallet-activity flags are not ownership proof.';
       var watchedClause=watched?(', separate from the '+watched+' wallets on the permanent watch list'):'';
       // When the canonical split is available, say which of the queue came from
       // THIS scan — the number a listener actually wants — instead of a single
@@ -1254,22 +1128,17 @@ function _buildEvidence(interps, pack){
                  breakdown+watchedClause+netTail);
     }
   } catch(_){}
-  if(news&&news.has_signal)   parts.push(newsLead+' '+_lc1(news.summary));
+  if(news&&news.has_signal)   parts.push(news.summary);
   // Same rule as WHAT MATTERED MOST: "no move crossed the line" is a finding
   // about a board that was read. With the list mostly dark it is not available.
   var covE=_cov(pack);
   var igE=_intg(pack);
   if(igE.linkLost) return 'No evidence is offered for this run. '+igE.headline+' — the ledger read stopped partway, so anything absent below is unread, not clear.';
   if(!parts.length && covE.degraded && !covE.severe) return 'No qualifying movement is established by the available record. '+covE.line+' An incomplete read cannot establish that no movement occurred.';
-  if(!parts.length && covE.severe)
-    return _nvPick([
-      'The evidence is the read itself: '+covE.checked+' of '+covE.total+' wallets '+covE.basis_noun+', '+covE.failed+' did not.',
-      'The acquired record is incomplete. '+covE.failed+' of '+covE.total+' wallets are missing the required coverage.',
-      'What I have is a partial ledger — '+covE.checked+' wallets out of '+covE.total+'. I am not going to build a case on that.'
-    ],seed,4)+' Nothing crossed my threshold in the part I could read, and I am reporting that as a limit, not a result. '+_nvBeat(seed,3);
-  if(!parts.length) return _nvPick(['No move crossed the line big enough to book tonight. I stayed on watch anyway.','Nothing hit the threshold worth booking — but a clean night is still a logged night.','The board gave me nothing to charge tonight. I kept the watch regardless.'],seed,4)+' '+_nvBeat(seed,3);
-  parts.push(_nvBeat(seed,3));
-  return parts.join(' ');
+  if(!parts.length && covE.severe) return 'The acquired record is incomplete: '+covE.checked+' of '+covE.total+
+    ' wallets '+covE.basis_noun+'. No qualifying movement was identified in that record; this does not establish that the unread wallets were inactive.';
+  if(!parts.length) return 'No qualifying transfer was identified in the watched-wallet record for this window. This finding does not cover every wallet on the XRP Ledger.';
+  return parts.join('\n\n');
 }
 
 function _buildWatchNext(interps, pack){
@@ -1285,28 +1154,22 @@ function _buildWatchNext(interps, pack){
                  (cov.severe?', and nothing below is settled until they do.':'.'));
   if(recv&&recv.has_signal){
     if(recv.summary.indexOf('forwarded')>-1)
-      bullets.push('Follow the forwarded funds — where they land tells me who’s really behind it.');
+      bullets.push('Trace the next transfers from the receiving wallet; a route alone does not establish ownership.');
     else if(recv.summary.indexOf('held')>-1)
       bullets.push('Keep eyes on that holding wallet for any move out in the next day.');
   }
   if(band&&band.has_signal&&band.summary.indexOf('corridor')>-1)
     bullets.push('See whether the price corridor holds through the next session.');
   if(absorber&&absorber.has_signal)
-    bullets.push('Watch the absorbing wallets — are they stacking it, or handing it back out?');
+    bullets.push('Check whether the receiving exchange wallets keep the XRP or send it onward.');
   if(moves&&moves.has_signal)
     bullets.push('Check whether the largest recipient in this window makes another move.');
-  // Standing watch \u2014 always-true forensic to-dos. Fill out the list (especially
-  // on a quiet night) so the section stays substantive instead of a lone line.
+  // Two useful follow-ups are enough; avoid padding the report with slogans.
   var standing=[
-    'Keep the watchlist warm and wait for the next whale to break cover.',
-    'Watch the exchanges around the open \u2014 that\u2019s when the banks like to move.',
-    'If a dormant giant wakes up, I\u2019ll flag it before the chart does.',
-    'Eyes on the escrow calendar \u2014 a big unlock reshapes the whole board.',
-    'Track whether today\u2019s quiet is the calm before a repositioning.',
-    'Keep tracing the chains we\u2019ve already opened; they tend to extend another hop.',
-    'Watch the same-hour clusters \u2014 coordination hides in the timing, not the size.'
+    'Compare the next report with this one for changes in watched-wallet activity.',
+    'Check new escrow locks and releases separately from ordinary transfers.'
   ];
-  var need=Math.max(0, 3-bullets.length);
+  var need=Math.max(0, 2-bullets.length);
   for(var s=0; s<standing.length && need>0; s++){
     var pick=_nvPick(standing, seed, 24+s);
     if(bullets.indexOf(pick)===-1){ bullets.push(pick); need--; }
@@ -1332,7 +1195,7 @@ function _buildVerdict(interps, pack){
     return _nvPick(['Today’s forensic read: ','The read, straight up: ','Bottom line off the Ledger: ','My call this morning: '],seed,32)+
       ig.headline+'. '+ig.sealLine+'. '+
       'The score reads '+risk+'/100, but the scan stopped partway, so it is not a verdict and I will not offer one. '+
-      'Re-run before anything here is treated as the night’s record. '+_nvBeat(seed,5)+
+      'Re-run before relying on this report. '+
       ' Not financial advice. XRP-only forensic watch.\n\n'+
       'I’m XRPMan, and I tell on the banks.';
   }
@@ -1347,27 +1210,20 @@ function _buildVerdict(interps, pack){
       '. The score reads '+risk+'/100, but it was calculated across only '+cov.checked+' of '+
       cov.total+' wallets ('+cov.percent+'%). '+
       'A low number off '+cov.percent+'% coverage means unread, not clear — do not report it as a quiet night. '+
-      'Re-run the scan when the connection is back and take that read instead. '+_nvBeat(seed,5)+
+      'Re-run the scan when the connection is back and take that read instead. '+
       ' Not financial advice. XRP-only forensic watch.\n\n'+
       'I’m XRPMan, and I tell on the banks.';
   }
-  var verbal=risk>=75?_nvPick(['the Ledger is on high alert — heavy hands moving all night','this was a loud night — big money didn’t even try to hide','the board ran hot; the whales were busy','full-alert night — the heavy hands showed themselves'],seed,30):
-             risk>=50?_nvPick(['the Ledger is restless, and I’m watching close','a stirring night — motion working under the surface','the board’s warm; something’s in play','an unsettled night — I’m leaning in on it'],seed,30):
-             risk>=25?_nvPick(['a moderate night — routine patrol holds','a steady night — nothing broke the pattern','ordinary motion, nothing that raised the hair on my neck','a middling night — logged and watched'],seed,30):
-             _nvPick(['a quiet night — no villain broke cover','a still night — the rails stayed honest','calm water — nobody made a move worth booking','a silent shift — and silence gets logged too'],seed,30);
-  var dir=' ('+risk+'/100).';
-  if(_drivers.length) dir+=' '+_nvPick(['What tipped me off: ','What put me here: ','The flags that lit up: ','What earned the score: '],seed,31)+_drivers.join(', ')+'.';
+  var level=risk>=75?'high':risk>=50?'elevated':risk>=25?'moderate':'low';
+  var verdict='The read, straight up: '+level+' watch score ('+risk+'/100). '+
+    'This score summarizes watched transfers, activity flags, and available news context. It is not a price forecast or proof of wrongdoing.';
+  var driverNames={'large transfer count':'number of large transfers','shadow volume':'XRP moved in large transfers','dust/tag flags':'small-payment or destination-tag flags'};
+  if(_drivers.length) verdict+=' Main factors: '+_drivers.map(function(d){return driverNames[d]||d;}).join(', ')+'.';
   var delta=_num(pack&&(pack.total_balance_delta_xrp!=null?pack.total_balance_delta_xrp:pack.balance_delta));
-  if(delta>500000) dir+=' Watched wallets are net accumulating — about '+_xrpFmt(delta)+' XRP moved inward.';
-  else if(delta<-500000) dir+=' Watched wallets are net distributing — about '+_xrpFmt(Math.abs(delta))+' XRP moved outward.';
-  if(cov.degraded) dir+=' Scored across '+cov.checked+' of '+cov.total+' wallets that '+
-                        (cov.basis_noun||'answered')+' ('+cov.percent+'%) — '+
-                        cov.failed+(cov.basis==='transaction window'
-                          ? ' did not, so treat this as a partial read.'
-                          : ' failed to read, so treat this as a partial read.');
-  return _nvPick(['Today\u2019s forensic read: ','The read, straight up: ','Bottom line off the Ledger: ','My call this morning: '],seed,32)+verbal+'.'+dir+' '+_nvBeat(seed,5)+
-         ' Not financial advice. XRP-only forensic watch.\n\n'+
-         'I\u2019m XRPMan, and I tell on the banks.';
+  if(delta>500000) verdict+=' Overall, about '+_xrpFmt(delta)+' XRP moved inward to watched wallets.';
+  else if(delta<-500000) verdict+=' Overall, about '+_xrpFmt(Math.abs(delta))+' XRP moved outward from watched wallets.';
+  return verdict+' Not financial advice. XRP-only forensic watch.\n\n'+
+    'I’m XRPMan, and I tell on the banks.';
 }
 
 // Compact USD formatter for the diagnostics readout.
