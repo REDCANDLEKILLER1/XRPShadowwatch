@@ -31,7 +31,7 @@ Escrow Watch
 Ripple escrow: 31.40B XRP locked now across 98 active validated-ledger escrow objects · registry check 20/20 known Ripple-labeled addresses.
 No Ripple escrow events are present in the acquired record for the last 36h; this alone does not prove an event-free window.
 No other XRPL escrow events are present in the acquired record for the last 36h; this is not a complete XRPL escrow sweep.
-Escrow means XRP locked until its release conditions are met. The count is of separate locks, not wallets. Ripple and other owners are listed separately; this report covers observed escrow, not every escrow on the XRPL.
+Escrow means XRP locked until its release conditions are met. The count is of separate locks (ledger objects, not owner wallets). Ripple and other owners are listed separately; this report covers observed escrow, not every escrow on the XRPL.
 
 Under the Surface
 ─────────────────
@@ -78,4 +78,4 @@ Sources
 [No external sources for today’s scan.]
 ```
 
-The publishable copy is 3704 characters; the full canonical report is 3704 characters.
+The publishable copy is 3727 characters; the full canonical report is 3727 characters.

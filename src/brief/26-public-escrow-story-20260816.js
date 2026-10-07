@@ -145,7 +145,7 @@
     }
     // Three separate measurements that had been blurring together, plus the
     // scope limit: this is the escrow this scan observed, not the whole XRPL.
-    lines.push('Escrow means XRP locked until its release conditions are met. The count is of separate locks, not wallets. Ripple and other owners are listed separately; this report covers observed escrow, not every escrow on the XRPL.');
+    lines.push('Escrow means XRP locked until its release conditions are met. The count is of separate locks (ledger objects, not owner wallets). Ripple and other owners are listed separately; this report covers observed escrow, not every escrow on the XRPL.');
     return lines.join('\n');
   }
 

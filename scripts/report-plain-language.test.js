@@ -57,7 +57,7 @@ const server=http.createServer((q,r)=>{
   assert.match(result.text,/several wallets sending to one/);assert.match(result.text,/one wallet sending to several/);
   const flow=result.text.split('Under the Surface\n')[1].split('How to Read It\n')[0];assert(!/112M XRP/.test(flow),'mid-size section does not repeat whale total');
   assert.match(result.text,/31\.40B XRP locked now/);assert.match(result.text,/98 active validated-ledger escrow objects/);assert.match(result.text,/registry check 20\/20/);
-  assert.match(result.text,/count is of separate locks, not wallets/);assert.match(result.text,/not every escrow on the XRPL/);
+  assert.match(result.text,/count is of separate locks \(ledger objects, not owner wallets\)/);assert.match(result.text,/not every escrow on the XRPL/);
   assert.match(result.text,/2026-10-06T10:19:40.000Z.*LAST GOOD STALE/);assert.match(result.text,/Live order\/offer sweep: not collected/);
   assert.match(result.lost,/SCAN INCOMPLETE — CONNECTION LOST/);assert.match(result.lost,/REPORT NOT SEALED/);assert.match(result.lost,/not a verdict/);
   assert.match(result.incomplete,/19 of 20 watched wallets proved the requested window/);assert.match(result.incomplete,/1 unproven/);assert.match(result.incomplete,/withholding an all-clear/);
