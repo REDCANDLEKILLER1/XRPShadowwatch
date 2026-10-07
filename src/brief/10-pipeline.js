@@ -1031,7 +1031,11 @@ function _buildWhatMatteredMost(interps, pack){
     if(received.indexOf(repeated)>-1) received='Receiving exchange labels: '+received.replace(repeated,'.');
     context.push(received+' Receiving XRP does not establish that an exchange bought it or kept it.');
   }
-  if(band&&band.has_signal) context.push(_firstSentence(band.summary));
+  if(band&&band.has_signal){
+    var priceLine=_firstSentence(band.summary);
+    var rangeLine=_firstSentence(String(band.summary).slice(priceLine.length).trim());
+    context.push(priceLine+(rangeLine?' '+rangeLine:''));
+  }
   if(context.length) return context.join('\n\n');
   return 'This report covers the watched wallets and the requested time window. Transfers show where XRP moved; they do not identify a motive or predict its price.';
 }
@@ -1042,6 +1046,21 @@ function _buildEvidence(interps, pack){
       recv=interps[3];
   var parts=[];
   if(moves&&moves.has_signal) parts.push(moves.summary);
+  // Preserve the measured follow-through previously stated in the summary.
+  // Array-shaped scan rows do not use the older interpretation object's shape.
+  var ranked=_arr(pack&&pack.large_transfers).slice().sort(function(a,b){return _num(b&&b.amount)-_num(a&&a.amount);});
+  var largest=ranked[0],recipient=largest&&(largest.to||largest.receiver);
+  var follow=_arr(pack&&pack.receiver_followthrough).find(function(row){return row&&row.address===recipient;});
+  if(follow){
+    var forwardedCount=_num(follow.forwarded_large_count),forwardedXrp=_num(follow.forwarded_large_total_xrp);
+    if(forwardedCount>0&&forwardedXrp>0) parts.push('The recipient of the largest transfer later sent '+_xrpFmt(forwardedXrp)+
+      ' XRP onward in '+forwardedCount+' large transaction'+(forwardedCount===1?'':'s')+'. This shows routing behavior, not ownership or intent.');
+    else if(String(follow.classification||'')==='RECEIVER_STILL_HOLDING_SIZE'){
+      var heldXrp=_num(follow.balance_xrp);
+      parts.push('The recipient of the largest transfer was still holding'+(heldXrp>0?' about '+_xrpFmt(heldXrp)+' XRP':' funds')+
+        ' when checked. This is an observed balance, not proof of intent.');
+    }
+  }
   if(recv&&recv.has_signal)   parts.push(recv.summary);
   if(domShift&&domShift.has_signal) parts.push(domShift.summary);
   // v16.8: surface newly-discovered related wallets so the report says more.
