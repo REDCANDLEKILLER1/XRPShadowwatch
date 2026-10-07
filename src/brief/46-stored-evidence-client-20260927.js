@@ -185,7 +185,7 @@
           if (!storedActive()) return originalReceivers.apply(this, arguments);
           var range = typeof getTxWindow === 'function' ? getTxWindow() : {};
           var anchor = state.indexRun || {};
-          var start = Number(range && range.startMs), end = Number(anchor.anchor_close_ms || (range && range.endMs));
+          var start = Number(range && range.startMs), end = Math.min(Number(anchor.anchor_close_ms), Number(range && range.endMs));
           var ceiling = Number(anchor.anchor_ledger);
           function bounded(t) {
             var time = Date.parse(t && t.date), ledger = Number(t && t.ledger_index);
