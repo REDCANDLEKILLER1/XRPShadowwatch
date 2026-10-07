@@ -137,22 +137,21 @@
     lines.push('Under the Surface');
     lines.push('─────────────────');
     lines.push(
-      'Here’s the part the ≥1M whale counter can miss. Shadow Volume is the big-move spotlight: ' +
-      fmt(shadow) + ' XRP in ' + large + ' individual moves of at least 1M. Another ' +
-      fmt(m.total_xrp) + ' XRP moved in ' + m.transfer_count + ' payments from 100K to under 1M. ' +
+      'Smaller transfers tell another part of the story. ' +
+      fmt(m.total_xrp) + ' XRP moved in ' + m.transfer_count + ' payments of 100,000 to under 1 million XRP. ' +
       (m.clustered_transfer_count
         ? fmt(m.clustered_flow_xrp) + ' XRP across ' + m.clustered_transfer_count + ' of those payments matched ' +
-          (patterns ? patterns + ' ' : '') + 'repeat-route, fan-in, or fan-out patterns. '
+          (patterns ? patterns + ' ' : '') + 'patterns: repeated routes, several wallets sending to one, or one wallet sending to several. '
         : 'None of those mid-size payments met the repeated-routing cluster rule. ') +
-      'That is a signal to trace, not proof somebody was hiding funds.'
+      'These patterns are worth tracing; they do not prove funds were being hidden.'
     );
     lines.push('');
     lines.push('How to Read It');
     lines.push('──────────────');
     lines.push(
-      'New here? Shadow Volume shows the obvious ≥1M moves. Mid-size Flow catches 100K–<1M moves. ' +
-      'Clustered Flow asks whether those smaller high-value payments keep using common routes. ' +
-      'Net watched flow tells whether the tracked wallet board gained or lost XRP versus its prior snapshot.'
+      'Shadow Volume counts transfers of at least 1 million XRP. ' +
+      'Net watched flow is the overall change across watched wallets compared with their prior snapshot; ' +
+      'it does not mean a wallet has a negative balance.'
     );
     return lines.join('\n');
   }
