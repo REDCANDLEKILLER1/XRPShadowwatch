@@ -159,6 +159,106 @@
 
   function installHeavyEnrichmentFence() {
     try {
+      if (typeof renderReceiverFollowthrough === 'function' && !renderReceiverFollowthrough.__swUnknownRetention) {
+        var originalFollowthrough = renderReceiverFollowthrough;
+        renderReceiverFollowthrough = function () {
+          var lines = originalFollowthrough.apply(this, arguments);
+          lines = lines.map(function (line) {
+            return line.replace('held — no large forward', 'no large forward observed; retention unproved')
+              .replace(/receiver followthrough unproven|RECEIVER_FOLLOWTHROUGH_UNPROVEN/g, 'follow-through unknown');
+          });
+          if (lines.length && (arguments[0] || []).some(function (r) { return r && r.evidence_source === 'STORED_VERIFIED_EVIDENCE'; })) {
+            lines.push('• Stored receiver tracing uses observed watched-wallet payments only; receiver history is incomplete.');
+          }
+          return lines;
+        };
+        renderReceiverFollowthrough.__swUnknownRetention = true;
+      }
+    } catch (_) {}
+    // Follow observed outgoing payments without relying on the optional live
+    // socket. A watched-window archive is not complete history for an unknown
+    // receiver: it proves observed transfers, never an absence or retention.
+    try {
+      if (typeof scanReceivers === 'function' && !scanReceivers.__swStoredReceiverTrace) {
+        var originalReceivers = scanReceivers;
+        scanReceivers = async function () {
+          if (!storedActive()) return originalReceivers.apply(this, arguments);
+          var range = typeof getTxWindow === 'function' ? getTxWindow() : {};
+          var anchor = state.indexRun || {};
+          var start = Number(range && range.startMs), end = Number(anchor.anchor_close_ms || (range && range.endMs));
+          var ceiling = Number(anchor.anchor_ledger);
+          function bounded(t) {
+            var time = Date.parse(t && t.date), ledger = Number(t && t.ledger_index);
+            return t && t.proves_coverage === true && t.hash && Number.isFinite(time) &&
+              Number.isFinite(start) && Number.isFinite(end) && time >= start && time <= end &&
+              Number.isInteger(ledger) && ledger > 0 && Number.isInteger(ceiling) && ledger <= ceiling &&
+              t.tx_result === 'tesSUCCESS';
+          }
+          var outgoing = new Map();
+          var hashes = new Set();
+          (state.txs || []).forEach(function (t) {
+            if (!bounded(t) || t.type !== 'Payment' || t.currency !== 'XRP' ||
+                !t.from || !t.to || t.to === t.from || !Number.isFinite(Number(t.amount)) ||
+                Number(t.amount) <= 0 || Number(t.amount) >= 1e11) return;
+            var key = String(t.hash).toUpperCase();
+            if (hashes.has(key)) return;
+            hashes.add(key);
+            if (!outgoing.has(t.from)) outgoing.set(t.from, []);
+            outgoing.get(t.from).push(t);
+          });
+          var recipients = new Map();
+          _deliveredToReceiver(null).forEach(function (t) {
+            if (!bounded(t) || !t.to || KNOWN[t.to] || !BASE58_RE.test(t.to) || t.currency !== 'XRP' ||
+                !Number.isFinite(Number(t.amount)) || Number(t.amount) <= 0 || Number(t.amount) >= 1e11 ||
+                (t.type !== 'Payment' && t.type !== 'EscrowFinish')) return;
+            var prior = recipients.get(t.to);
+            if (!prior || Number(t.amount) > Number(prior.amount) ||
+                (Number(t.amount) === Number(prior.amount) && Number(t.ledger_index) < Number(prior.ledger_index))) recipients.set(t.to, t);
+          });
+          state.receivers = [];
+          recipients.forEach(function (src, address) {
+            var rec = {address: address, source_label: src.sender_label, source_amount_xrp: src.amount,
+              balance_xrp: null, tx_count: 0, forwarded_large_count: 0, forwarded_large_total_xrp: 0,
+              classification: 'RECEIVER_FOLLOWTHROUGH_UNPROVEN', confidence: 'LOW', error: '',
+              evidence_source: 'STORED_VERIFIED_EVIDENCE', history_complete: false,
+              evidence_through: new Date(end).toISOString(), anchor_ledger: ceiling,
+              observed_forward_hashes: [], source_hash: src.hash};
+            var cp = checkpointWallet(address);
+            if (cp && cp.balance_drops != null && Number.isFinite(Number(cp.balance_drops)) &&
+                Number.isInteger(Number(cp.balance_ledger)) && Number(cp.balance_ledger) === ceiling) {
+              rec.balance_xrp = Number(cp.balance_drops) / 1e6;
+              rec.balance_as_of_ledger = ceiling;
+            }
+            (outgoing.get(address) || []).forEach(function (t) {
+              // Same-ledger transaction order is not retained in the compact
+              // archive, so only later ledgers prove an onward move.
+              if (Number(t.ledger_index) <= Number(src.ledger_index) || Date.parse(t.date) < Date.parse(src.date)) return;
+              rec.tx_count++;
+              if (Number(t.amount) >= 1e6) {
+                rec.forwarded_large_count++;
+                rec.forwarded_large_total_xrp += Number(t.amount);
+                rec.observed_forward_hashes.push(t.hash);
+              }
+            });
+            if (rec.forwarded_large_count > 0) {
+              rec.classification = 'NEXT_HOP_FORWARDING_DETECTED';
+              rec.confidence = 'HIGH';
+            }
+            rec.coverage_note = 'Observed payments after the largest receipt, within watched-wallet evidence only; receiver history is not complete. No observed large forward does not prove funds were held.';
+            state.receivers.push(rec);
+            if (typeof log === 'function') log('NEXT_HOP: ' + address + ' ' + rec.classification + ' · stored observed payments; receiver history not complete');
+          });
+          if (typeof setText === 'function') {
+            setText('hudReceiverCount', state.receivers.length);
+            setText('hudReceiverMode', state.receivers.length + ' receiver(s) · stored observed routes');
+          }
+          return state.receivers;
+        };
+        scanReceivers.__swStoredReceiverTrace = true;
+        scanReceivers.__swOriginal = originalReceivers;
+      }
+    } catch (_) {}
+    try {
       if (typeof scanOffers === 'function' && !scanOffers.__swStoredEvidenceFence) {
         var originalOffers = scanOffers;
         scanOffers = async function () {
