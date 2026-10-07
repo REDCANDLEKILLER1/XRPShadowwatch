@@ -1097,7 +1097,7 @@ function _buildEvidence(interps, pack){
       // to which variant the day's seed picked — and the smoke assertion that
       // looks for /DISCOVERY/i passed or failed with it.
       var netLead='Discovery queue: ';
-      var netTail='. These wallets were flagged by their activity, not identified by ownership.';
+      var netTail='. These wallet-activity flags are not ownership proof.';
       var watchedClause=watched?(', separate from the '+watched+' wallets on the permanent watch list'):'';
       // When the canonical split is available, say which of the queue came from
       // THIS scan — the number a listener actually wants — instead of a single
