@@ -18,6 +18,7 @@ const events = Array.from({length:200000}, (_, i) => ({
   observed_via:[roster[0],roster[1]]
 }));
 let unavailable = false, reads = 0, writes = 0, slowNews = false, newsBodies = 0;
+let releaseVerification = null;
 const srv = http.createServer((req,res) => {
   const u = new URL(req.url, 'http://localhost');
   if (u.pathname === '/test/targeted-news') {
@@ -48,7 +49,9 @@ const srv = http.createServer((req,res) => {
         deps.onReportProgress({phase:'history',states_walked:4,days_found:3,days_total:4});
         await new Promise(r=>setTimeout(r,400));
         deps.onReportProgress({phase:'verifying',files_verified:2,files_total:4});
-        await new Promise(r=>setTimeout(r,1200));
+        // Hold this phase until the browser has checked unchanged heartbeat progress.
+        // A fixed delay can expire between assertions on a slower WebKit runner.
+        await new Promise(resolve=>{releaseVerification=resolve;});
         deps.onReportProgress({phase:'assembling'});
         return body;
       }});
@@ -125,6 +128,9 @@ const srv = http.createServer((req,res) => {
       assert.match(await page.locator('#swMonitorSignal').innerText(),/Last server update/);
       await page.waitForTimeout(350);
       assert.equal(await page.locator('#swMonitorBar').getAttribute('aria-valuenow'),'50','heartbeats must not invent progress');
+      assert(releaseVerification, 'verification phase must be waiting for the browser check');
+      releaseVerification();
+      releaseVerification=null;
       if (attempt===0 && process.env.SW_MONITOR_SCREENSHOT) await page.screenshot({path:process.env.SW_MONITOR_SCREENSHOT});
       if (slowNews) {
         await page.waitForFunction(()=>state.reportBuildStage && state.reportBuildStage.phase==='targeted-news');
