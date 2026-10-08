@@ -21,6 +21,14 @@
     "api/evidence-recovery.js": {
       "maxDuration": 300,
       "includeFiles": "src/{db,brief,shared}/**"
+    },
+    "api/storage-health.js": {
+      "maxDuration": 60,
+      "includeFiles": "src/{db,brief,shared}/**"
+    },
+    "api/wallet-admission.js": {
+      "maxDuration": 300,
+      "includeFiles": "src/{db,brief,shared}/**"
     }
   },
   "crons": [

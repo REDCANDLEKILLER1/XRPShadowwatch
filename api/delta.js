@@ -330,6 +330,7 @@ async function storedReport(input, deps) {
 
   const body = {
     source: 'STORED_VERIFIED_EVIDENCE',
+    evidence_ref: loaded.ref,
     stored_checkpoint: true,
     committed: false,
     reason: 'STORED_CHECKPOINT_READ',
@@ -454,9 +455,9 @@ module.exports = async function handler(req, res) {
         // What the roster says versus what the checkpoint has proven. The gap
         // is the wallets still waiting to join, and it is worth seeing BEFORE
         // a run rather than inferring it from a count that looks short.
-        roster_wallets: rosterCount(),
+        roster_wallets: loaded.state ? new Set(roster.select().accounts.concat(loaded.state.wallets.map(w => w.address))).size : rosterCount(),
         wallets_awaiting_admission: loaded.state
-          ? Math.max(0, rosterCount() - Number(loaded.state.wallet_count || 0)) : rosterCount(),
+          ? roster.select().accounts.filter(a => !loaded.state.wallets.some(w => w.address === a)).length : rosterCount(),
         // The per-wallet checkpoints, so the UI can show what is proven before
         // a run starts rather than only after it finishes.
         wallets_detail: input.action === 'state' && loaded.state ? loaded.state.wallets : undefined

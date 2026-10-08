@@ -265,7 +265,8 @@ function advance(prior, run) {
       sealed_at: _s(r.sealed_at),
       // Named in the sealed run, so a roster change is visible in the state
       // that carried it rather than only in the diff of the wallet list.
-      admitted_wallets: [...admitting].sort()
+      admitted_wallets: [...admitting].sort(),
+      ...(r.auto_roster ? {auto_roster:r.auto_roster} : {})
     },
     wallets,
     evidence_shards: shards.map(s => ({ path: String(s.path), sha256: String(s.sha256), rows: _int(s.rows) }))

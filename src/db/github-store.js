@@ -456,6 +456,7 @@ async function commitRun(input, deps) {
       // The roster change this run carried, named in the run's own manifest so
       // a wallet's first morning is findable without diffing two state files.
       admitted_wallets: state.sealed_run.admitted_wallets || [],
+      ...(state.sealed_run.auto_roster ? {auto_roster:state.sealed_run.auto_roster} : {}),
       state_version: state.state_version, state_sha256: state.state_sha256,
       evidence_shards: state.evidence_shards, sealed_at: state.sealed_run.sealed_at
     }, null, 2) + '\n';
