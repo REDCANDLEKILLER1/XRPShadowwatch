@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20261008-YD81V",
+  "generated_at": "2026-10-08T14:12:00.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107518095,
+  "transactions_in_window": null,
+  "new_observations": 0,
+  "xrpl_requests": 0,
+  "report_hash": "77339021a86e745e51ba1bd2fd88c823d90c87162c2d88e0dea45fe4c99c8443"
+}
