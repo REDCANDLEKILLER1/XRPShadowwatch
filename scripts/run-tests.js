@@ -27,6 +27,8 @@ const ROOT = path.join(__dirname, '..');
 // name, file, port. Ports are distinct so a leaked listener from one suite
 // cannot make the next one fail for the wrong reason.
 const SUITES = [
+  ['report-startup-race', 'report-startup-race.test.js', null],
+  ['stored-receiver-tracing', 'stored-receiver-tracing.test.js', 8238],
   ['report-plain-language', 'report-plain-language.test.js', 8237],
   ['storage-recovery', 'storage-recovery.test.js', null],
   ['freshness-storage-news', 'freshness-storage-news.test.js', null],

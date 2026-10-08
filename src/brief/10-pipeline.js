@@ -1249,6 +1249,11 @@ function _buildLedgerDiagnostics(pack){
     L.push('• Live order/offer sweep: not collected in this stored-evidence report.');
     if(p.live_enrichment_unavailable) L.push('• Optional live enrichment connection unavailable; verified stored coverage is unchanged.');
   }
+  var storedReceivers=_arr(p.receiver_followthrough).filter(function(r){return r&&r.evidence_source==='STORED_VERIFIED_EVIDENCE';});
+  if(storedReceivers.length){
+    var onward=storedReceivers.filter(function(r){return _num(r.forwarded_large_count)>0;}).length;
+    L.push('• Receiver tracing: '+onward+' of '+storedReceivers.length+' receivers have observed large onward payments after their largest receipt. Stored watched-wallet evidence only; complete receiver history and retention are not proved.');
+  }
   var _ig=_intg(p);
   if(_ig.linkLost) L.push('• '+_ig.headline+' — '+_ig.sealLine+'. Figures below cover only the phases that completed.');
   var price=_num(p.xrp_price!=null?p.xrp_price:p.price), d24=_num(p.xrp_delta_24h_pct);
@@ -1657,7 +1662,11 @@ function assertNoInternalHelpersVisible(report){
 }
 
 function assertNarrativeFlow(report){
-  var sentences=report.split(/(?<=[.!?])\s+/);
+  // Headings, diagnostic rows and source URLs are separate lines, not prose sentences.
+  var prose=report.split(/\n/).filter(function(line){
+    return line.trim() && !/^\s*(?:[•]|\[\d+\]|https?:\/\/)/.test(line);
+  }).join('\n');
+  var sentences=prose.split(/\n|(?<=[.!?])\s+/);
   for(var i=1;i<sentences.length;i++){
     if(sentences[i].trim()===sentences[i-1].trim()&&sentences[i].trim().length>10)
       return _fail('assertNarrativeFlow','Duplicate consecutive sentence.',sentences[i]);
