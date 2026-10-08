@@ -2811,65 +2811,72 @@ async function fetchXrplDailyMetrics(){
            transaction_count:n(m.transaction_count), payments_count:n(m.payments_count) };
 }
 
-async function market() {
+async function market(marketRun) {
   const notes = [];
+  const marketRead = async promise => {
+    const value = await promise;
+    if (marketRun && marketRun.cancelled) throw new Error("MARKET_BOOT_BUDGET_EXPIRED");
+    return value;
+  };
+  // Clear the native DEX claim before any optional request can time out.
+  try { $("inXrpldex").value = ""; state.dexVolumeDecision = null; } catch (_) {}
   // 1. CoinGecko (primary)
   try {
-    const r = await fetchWithTimeout('https://api.coingecko.com/api/v3/coins/xrp?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false', MARKET_FETCH_TIMEOUT_MS);
+    const r = await marketRead(fetchWithTimeout('https://api.coingecko.com/api/v3/coins/xrp?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false', MARKET_FETCH_TIMEOUT_MS));
     if (r.ok) {
-      const j = await r.json(), m = j.market_data || {};
+      const j = await marketRead(r.json()), m = j.market_data || {};
       if (m.current_price?.usd)          $('inPrice').value = Number(m.current_price.usd).toFixed(4);
       if (m.price_change_percentage_24h != null) $('inDelta').value = Number(m.price_change_percentage_24h).toFixed(2);
       if (m.total_volume?.usd)           $('inVolume').value = Math.round(m.total_volume.usd);
       notes.push('✓ CoinGecko');
     } else notes.push('CoinGecko ' + r.status);
-  } catch (e) { notes.push('CoinGecko ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
+  } catch (e) { if (marketRun && marketRun.cancelled) return notes; notes.push('CoinGecko ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
   // 2. Coinbase (price only fallback)
   try {
     if (!n($('inPrice').value)) {
-      const r = await fetchWithTimeout('https://api.coinbase.com/v2/prices/XRP-USD/spot', MARKET_FETCH_TIMEOUT_MS);
-      if (r.ok) { const j = await r.json(); $('inPrice').value = Number(j.data.amount).toFixed(4); notes.push('✓ Coinbase'); }
+      const r = await marketRead(fetchWithTimeout('https://api.coinbase.com/v2/prices/XRP-USD/spot', MARKET_FETCH_TIMEOUT_MS));
+      if (r.ok) { const j = await marketRead(r.json()); $('inPrice').value = Number(j.data.amount).toFixed(4); notes.push('✓ Coinbase'); }
     }
-  } catch (e) { notes.push('Coinbase ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
+  } catch (e) { if (marketRun && marketRun.cancelled) return notes; notes.push('Coinbase ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
   // 3. CoinCap
   try {
     if (!n($('inPrice').value) || !n($('inVolume').value)) {
-      const r = await fetchWithTimeout('https://api.coincap.io/v2/assets/xrp', MARKET_FETCH_TIMEOUT_MS);
+      const r = await marketRead(fetchWithTimeout('https://api.coincap.io/v2/assets/xrp', MARKET_FETCH_TIMEOUT_MS));
       if (r.ok) {
-        const j = await r.json(), d = j.data || {};
+        const j = await marketRead(r.json()), d = j.data || {};
         if (!n($('inPrice').value)  && d.priceUsd)        $('inPrice').value = Number(d.priceUsd).toFixed(4);
         if (!n($('inDelta').value)  && d.changePercent24Hr) $('inDelta').value = Number(d.changePercent24Hr).toFixed(2);
         if (!n($('inVolume').value) && d.volumeUsd24Hr)   $('inVolume').value = Math.round(Number(d.volumeUsd24Hr));
         notes.push('✓ CoinCap');
       }
     }
-  } catch (e) { notes.push('CoinCap ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
+  } catch (e) { if (marketRun && marketRun.cancelled) return notes; notes.push('CoinCap ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
   // 4. CoinPaprika
   try {
     if (!n($('inVolume').value)) {
-      const r = await fetchWithTimeout('https://api.coinpaprika.com/v1/tickers/xrp-xrp', MARKET_FETCH_TIMEOUT_MS);
+      const r = await marketRead(fetchWithTimeout('https://api.coinpaprika.com/v1/tickers/xrp-xrp', MARKET_FETCH_TIMEOUT_MS));
       if (r.ok) {
-        const j = await r.json(), q = (j.quotes && j.quotes.USD) || {};
+        const j = await marketRead(r.json()), q = (j.quotes && j.quotes.USD) || {};
         if (!n($('inPrice').value)  && q.price)            $('inPrice').value = Number(q.price).toFixed(4);
         if (!n($('inDelta').value)  && q.percent_change_24h != null) $('inDelta').value = Number(q.percent_change_24h).toFixed(2);
         if (!n($('inVolume').value) && q.volume_24h)       $('inVolume').value = Math.round(Number(q.volume_24h));
         notes.push('✓ CoinPaprika');
       }
     }
-  } catch (e) { notes.push('CoinPaprika ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
+  } catch (e) { if (marketRun && marketRun.cancelled) return notes; notes.push('CoinPaprika ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
   // 5. DefiLlama TVL
   try {
-    const r = await fetchWithTimeout('https://api.llama.fi/chains', MARKET_FETCH_TIMEOUT_MS);
+    const r = await marketRead(fetchWithTimeout('https://api.llama.fi/chains', MARKET_FETCH_TIMEOUT_MS));
     if (r.ok) {
-      const a = await r.json(), row = a.find(x => (x.name || '').toLowerCase() === 'xrpl evm');
+      const a = await marketRead(r.json()), row = a.find(x => (x.name || '').toLowerCase() === 'xrpl evm');
       if (row) { $('inTvl').value = Math.round(row.tvl || 0); notes.push('✓ DefiLlama TVL'); }
     }
-  } catch (e) { notes.push('DefiLlama TVL ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
+  } catch (e) { if (marketRun && marketRun.cancelled) return notes; notes.push('DefiLlama TVL ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
   // 6. DefiLlama EVM DEX (direct → relay fallback; keep prior value on failure)
   try {
-    const v = await fetchDefiDex('https://api.llama.fi/overview/dexs/xrpl-evm?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume');
+    const v = await marketRead(fetchDefiDex('https://api.llama.fi/overview/dexs/xrpl-evm?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume'));
     if (v != null) { $('inDexvol').value = v; notes.push('✓ EVM DEX'); } else notes.push('EVM DEX empty');
-  } catch (e) { notes.push('EVM DEX blocked'); }
+  } catch (e) { if (marketRun && marketRun.cancelled) return notes; notes.push('EVM DEX blocked'); }
   // 7. Native XRPL DEX — LEDGER-DERIVED, with the aggregator as a cross-check.
   //
   // This used to be `fetchDefiDex(...); if (v != null) use it`, and on
@@ -2897,22 +2904,22 @@ async function market() {
 
     if (DV) {
       try {
-        const lr = await fetchWithTimeout(DV.XRPLMETA_URL, MARKET_FETCH_TIMEOUT_MS);
+        const lr = await marketRead(fetchWithTimeout(DV.XRPLMETA_URL, MARKET_FETCH_TIMEOUT_MS));
         if (lr.ok) {
-          const lj = await lr.json();
+          const lj = await marketRead(lr.json());
           // Pass the endpoint's own total (`count`, ~165,000) alongside the
           // returned list. Without it the decision layer cannot tell a short,
           // degraded response from a genuinely small index, and the
           // diagnostics showed tokens_total=null on every healthy run.
           ledger = DV.sumLedgerVolume(lj && lj.tokens, lj && lj.count);
         }
-      } catch (e) { notes.push('Native DEX ledger source ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
+      } catch (e) { if (marketRun && marketRun.cancelled) return notes; notes.push('Native DEX ledger source ' + (/timeout/i.test(e.message) ? 'timeout' : 'blocked')); }
     }
 
     try {
-      const raw = await fetchDefiDexRaw('https://api.llama.fi/overview/dexs/xrpl?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume');
+      const raw = await marketRead(fetchDefiDexRaw('https://api.llama.fi/overview/dexs/xrpl?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=dailyVolume'));
       if (raw && DV) agg = DV.aggregatorHealth(raw);
-    } catch (e) { /* cross-check only; its absence never blocks the ledger figure */ }
+    } catch (e) { if (marketRun && marketRun.cancelled) return notes; /* cross-check only; its absence never blocks the ledger figure */ }
 
     if (DV) {
       const decision = DV.reconcile({
@@ -2933,11 +2940,11 @@ async function market() {
       // printing whatever survived from last time.
       notes.push('Native DEX unavailable: DECISION_LAYER_MISSING');
     }
-  } catch (e) { notes.push('Native DEX unavailable: ACQUISITION_FAILED'); }
+  } catch (e) { if (marketRun && marketRun.cancelled) return notes; notes.push('Native DEX unavailable: ACQUISITION_FAILED'); }
   // 8. RLUSD supply — TWO independent sources in parallel (on-chain gateway +
   //    CoinGecko). Either one covers if the other fails; keep both to compare.
   try {
-    const rl = await Promise.allSettled([ fetchRlusdGateway(), fetchRlusdCoinGecko() ]);
+    const rl = await marketRead(Promise.allSettled([ fetchRlusdGateway(), fetchRlusdCoinGecko() ]));
     const gwv = rl[0].status === 'fulfilled' ? rl[0].value : null;
     const cgv = rl[1].status === 'fulfilled' ? rl[1].value : null;
     state.rlusdSupplySources = { gateway: gwv, coingecko: cgv };
@@ -2951,13 +2958,13 @@ async function market() {
       else            tag = gwv ? 'XRPL issuer obligations only' : 'CoinGecko aggregate only';
       notes.push('✓ RLUSD supply (' + tag + ')');
     } else notes.push('RLUSD supply empty (both sources failed)');
-  } catch (e) { state.rlusdSupply = null; state.rlusdSupplySources = {}; notes.push('RLUSD supply error'); }
+  } catch (e) { if (marketRun && marketRun.cancelled) return notes; state.rlusdSupply = null; state.rlusdSupplySources = {}; notes.push('RLUSD supply error'); }
   // 9. New funded XRPL accounts per day (XRPScan daily metrics, no key).
   try {
-    const dm = await fetchXrplDailyMetrics();
+    const dm = await marketRead(fetchXrplDailyMetrics());
     if (dm) { state.xrplDaily = dm; notes.push('✓ XRPL accounts created +' + dm.accounts_created + ' on ' + dm.date); }
     else notes.push('XRPL daily metrics empty');
-  } catch (e) { notes.push('XRPL daily metrics error'); }
+  } catch (e) { if (marketRun && marketRun.cancelled) return notes; notes.push('XRPL daily metrics error'); }
 
   // Update HUD
   const price = n($('inPrice').value), delta = n($('inDelta').value), vol = n($('inVolume').value);
@@ -22143,8 +22150,9 @@ async function run() {
     // even if every individual timeout misfires, the scan moves forward.
     // News is NOT in this phase — it runs after the full ledger scan.
     shadowSay('Booting ledger lens…', 'BOOT', 8);
+    const marketRun = { cancelled: false };
     const marketPromise = (async () => {
-      try { (await market()).forEach(log); }
+      try { (await market(marketRun)).forEach(log); }
       catch (e) { log('Market fill issue: ' + e.message); elog('market()', e); }
     })();
     // Stored reports do not need a live socket to prove the watched roster.
@@ -22163,9 +22171,13 @@ async function run() {
     });
     shadowProgress(8, 28, 0.5);
     // Outer ceiling — Promise.race ensures boot never blocks > 15s total
-    const bootCeiling = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('boot ceiling: 15s exceeded')), 15000)
-    );
+    let bootTimer;
+    const bootCeiling = new Promise((_, reject) => {
+      bootTimer = setTimeout(() => {
+        marketRun.cancelled = true;
+        reject(new Error('boot ceiling: 15s exceeded'));
+      }, 15000);
+    });
     try {
       [, ws] = await Promise.race([
         Promise.all([marketPromise, wsPromise]),
@@ -22173,11 +22185,11 @@ async function run() {
       ]);
     } catch (e) {
       // If outer ceiling fires, fall through with whatever ws we may have
-      log('Boot phase hit safety ceiling — continuing with available data.');
-      elog('boot ceiling', e);
+      log('Optional market fill reached its 15s budget — continuing with available data; late results will be ignored.');
       // Try to read whatever the ws connection resolved to (may be null)
       try { ws = await wsPromise; } catch (_) { ws = null; }
     }
+    clearTimeout(bootTimer);
     if (!ws) log('Live enrichment unavailable — continuing from verified stored evidence.');
     // Hand the socket to state so a mid-scan reconnect can replace it without
     // any of the scan's call sites holding a stale reference.

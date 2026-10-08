@@ -1662,7 +1662,11 @@ function assertNoInternalHelpersVisible(report){
 }
 
 function assertNarrativeFlow(report){
-  var sentences=report.split(/(?<=[.!?])\s+/);
+  // Headings, diagnostic rows and source URLs are separate lines, not prose sentences.
+  var prose=report.split(/\n/).filter(function(line){
+    return line.trim() && !/^\s*(?:[•]|\[\d+\]|https?:\/\/)/.test(line);
+  }).join('\n');
+  var sentences=prose.split(/\n|(?<=[.!?])\s+/);
   for(var i=1;i<sentences.length;i++){
     if(sentences[i].trim()===sentences[i-1].trim()&&sentences[i].trim().length>10)
       return _fail('assertNarrativeFlow','Duplicate consecutive sentence.',sentences[i]);
