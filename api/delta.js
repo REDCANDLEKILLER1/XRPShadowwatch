@@ -253,6 +253,14 @@ async function streamStoredReportRequest(res, input, deps) {
   }
 }
 
+function walletWindowProven(wallet, state, baselineState) {
+  if (Number(wallet.last_proven_ledger) !== Number(state.anchor_ledger)) return false;
+  if (!wallet.admitted_at_ledger) return true; // original seeded roster
+  // A new wallet must prove the START of the requested window, not just its end.
+  var floor=Number(wallet.history_from_ledger), baseline=Number(baselineState && baselineState.anchor_ledger);
+  return Number.isInteger(floor) && floor>0 && Number.isInteger(baseline) && baseline>0 && floor<=baseline;
+}
+
 async function storedReport(input, deps) {
   let verified = 0, total = 0;
   const notify = deps && deps.onReportProgress;
@@ -319,7 +327,9 @@ async function storedReport(input, deps) {
   const wallets = (state.wallets || []).map(w => ({
     address: w.address,
     status: 'COMPLETE',
-    proven: Number(w.last_proven_ledger) === Number(state.anchor_ledger),
+    proven: walletWindowProven(w, state, baselineState),
+    history_from_ledger: w.history_from_ledger,
+    admitted_at_ledger: w.admitted_at_ledger,
     proven_through: w.last_proven_ledger,
     balance_drops: w.balance_drops,
     balance_ledger: w.balance_ledger,
@@ -705,3 +715,5 @@ module.exports.nextScheduledSlot = nextScheduledSlot;
 module.exports.capWindowToAnchor = capWindowToAnchor;
 module.exports.streamStoredReport = streamStoredReport;
 module.exports.streamStoredReportRequest = streamStoredReportRequest;
+
+module.exports.walletWindowProven = walletWindowProven;

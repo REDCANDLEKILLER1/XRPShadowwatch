@@ -32,6 +32,10 @@ identity is inferred. Labels are `AUTO_<full address>`. Remaining candidates are
 recomputed from stored evidence on the next scheduled pass; they are not discarded by
 an arbitrary browser queue limit. Eligibility does not promise admission: a new wallet
 must still pass the existing cold-history, anchored balance and complete-run gates.
+Automatic additions request a 100,000-ledger initial history range. Reports independently
+check that an admitted wallet's proven history floor reaches the requested window start;
+proving only its latest anchor cannot claim a complete earlier 24/48/72h window.
+If the floor or baseline is unknown, that wallet remains unproved for that report.
 
 Qualified receipts are stored in the resumable journal, sealed checkpoint and run
 manifest so resuming uses the original nomination evidence. Existing journal digests

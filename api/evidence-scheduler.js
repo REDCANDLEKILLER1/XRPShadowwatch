@@ -98,6 +98,7 @@ async function runScheduledAcquisition(deps) {
     sealed_at: null,
     roster: accounts,
     auto_roster: selected.auto_roster || null,
+    ...(selected.auto_roster && selected.auto_roster.candidates.length ? {cold_window_ledgers:100000} : {}),
     max_admissions: MAX_ADMISSIONS,
     // No report window: scheduler commits ledger evidence only. Interactive
     // report runs later read whatever current proven window they need.

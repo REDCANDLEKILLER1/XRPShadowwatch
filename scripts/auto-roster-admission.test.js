@@ -7,6 +7,11 @@ const A=R.roster()[0].address,B=address(7),end=Date.now(),close=new Date(end).to
 const row=(n,extra={})=>({hash:n.toString(16).padStart(64,'0'),validated:true,tx_type:'Payment',tx_result:'tesSUCCESS',currency:'XRP',amount_drops:'3000000000000',from_account:A,to_account:B,ledger_index:n+10,close_time:new Date(end-60000).toISOString(),observed_via:[A],...extra});
 const anchor={anchor_close:close,anchor_ledger:1000};
 (async()=>{
+ const proves=require('../api/delta').walletWindowProven;
+ assert(proves({last_proven_ledger:100,admitted_at_ledger:100,history_from_ledger:20},{anchor_ledger:100},{anchor_ledger:30}));
+ assert(!proves({last_proven_ledger:100,admitted_at_ledger:100,history_from_ledger:40},{anchor_ledger:100},{anchor_ledger:30}),'proving an anchor must not falsely prove an earlier window');
+ assert(!proves({last_proven_ledger:100,admitted_at_ledger:100,history_from_ledger:20},{anchor_ledger:100},null),'unknown window floor fails closed');
+ assert(proves({last_proven_ledger:100,admitted_at_ledger:null},{anchor_ledger:100},null),'legacy seeded wallets retain their existing coverage contract');
  assert(Auto.validAddress(A));assert(Auto.validAddress(B));assert(!Auto.validAddress(B.slice(0,-1)+'x'));
  const rows=[row(1),row(2)];const before=JSON.stringify(rows);const qualified=Auto.qualify(rows,[A],anchor);assert.equal(qualified.length,1);assert.equal(qualified[0].transaction_count,2);assert.equal(qualified[0].total_drops,'6000000000000');assert.equal(qualified[0].ownership,'UNKNOWN');assert.equal(JSON.stringify(rows),before);
  assert.equal(Auto.qualify([row(1),row(1)],[A],anchor).length,0,'replaying one transaction is not recurrence');
