@@ -18,11 +18,12 @@ continuing the existing roster. The dry-run endpoint never uses account_tx or wr
 
 ## Qualification policy, version 1
 
-Within the last 72 hours of verified stored evidence, require at least two distinct,
+Within the last 72 hours of verified stored evidence, qualify either one payment of at least 10M XRP, or at least two distinct,
 successful, validated XRP Payment hashes, each at least 1M XRP, on at least two ledgers,
-with a combined value of at least 5M XRP. The sender must already be watched and appear
-in the surviving observation provenance. The recipient must be a checksum-valid,
-unwatched classic XRPL account. Reject dust, incoming spam, IOUs, offers, escrow
+with a combined value of at least 5M XRP. One endpoint must already be watched and appear in the surviving observation
+provenance. The unknown counterparty, sender or recipient, must be a checksum-valid
+classic XRPL account. The reason states whether one very large payment or a
+repeat route earned the nomination. Reject dust, small incoming spam, IOUs, offers, escrow
 submissions, self-payments, failed payments, conflicting hashes and incomplete or
 reconstructed evidence windows. Replaying the same snapshot earns no recurrence.
 

@@ -1,6 +1,6 @@
 'use strict';
 const crypto=require('crypto'),R=require('./roster'),Store=require('./github-store'),A=require('./github-archive');
-const POLICY={version:1,window_hours:72,min_payment_xrp:1000000,min_transactions:2,min_ledgers:2,min_total_xrp:5000000,max_additions_per_run:5};
+const POLICY={version:1,window_hours:72,min_payment_xrp:1000000,min_transactions:2,min_ledgers:2,min_total_xrp:5000000,single_large_xrp:10000000,max_additions_per_run:5};
 // Decode classic XRPL addresses and verify the double-SHA256 checksum. A
 // regex alone admits typo addresses that can stall every collection forever.
 const alphabet='rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz';
@@ -22,15 +22,19 @@ function qualify(events,watched,anchor){
   const amount=BigInt(e.amount_drops);if(amount<BigInt(POLICY.min_payment_xrp)*1000000n||amount>100000000000000000n)continue;
   const hash=e.hash.toUpperCase();const fingerprint=JSON.stringify([e.from_account,e.to_account,e.amount_drops,ledger,e.close_time]);
   if(seen.has(hash)){if(seen.get(hash)!==fingerprint)throw Error('AUTO_ROSTER_CONFLICTING_HASH');continue;}seen.set(hash,fingerprint);
-  // Only a proved watched sender's observed payment nominates a recipient.
-  // Incoming spam, dust, IOUs, offers and escrow submits do not qualify it.
-  if(!known.has(e.from_account)||known.has(e.to_account)||e.from_account===e.to_account||!validAddress(e.to_account)||!Array.isArray(e.observed_via)||!e.observed_via.includes(e.from_account))continue;
-  let c=candidates.get(e.to_account);if(!c){c={address:e.to_account,total:0n,hashes:[],ledgers:new Set(),senders:new Set()};candidates.set(e.to_account,c);}
-  c.total+=amount;c.hashes.push(hash);c.ledgers.add(ledger);c.senders.add(e.from_account);
+  // Nominate the unknown endpoint of a directly observed watched payment.
+  // Small inbound spam cannot qualify; a large sender deserves tracing too.
+  if(e.from_account===e.to_account)continue;
+  const senderKnown=known.has(e.from_account),receiverKnown=known.has(e.to_account);
+  if(senderKnown===receiverKnown)continue;
+  const observed=senderKnown?e.from_account:e.to_account,unknown=senderKnown?e.to_account:e.from_account;
+  if(!validAddress(unknown)||!Array.isArray(e.observed_via)||!e.observed_via.includes(observed))continue;
+  let c=candidates.get(unknown);if(!c){c={address:unknown,total:0n,max:0n,hashes:[],ledgers:new Set(),senders:new Set()};candidates.set(unknown,c);}
+  c.total+=amount;c.max=c.max>amount?c.max:amount;c.hashes.push(hash);c.ledgers.add(ledger);c.senders.add(observed);
  }
- return [...candidates.values()].filter(c=>c.hashes.length>=POLICY.min_transactions&&c.ledgers.size>=POLICY.min_ledgers&&c.total>=BigInt(POLICY.min_total_xrp)*1000000n)
+ return [...candidates.values()].filter(c=>c.max>=BigInt(POLICY.single_large_xrp)*1000000n||(c.hashes.length>=POLICY.min_transactions&&c.ledgers.size>=POLICY.min_ledgers&&c.total>=BigInt(POLICY.min_total_xrp)*1000000n))
   .sort((a,b)=>a.total===b.total?a.address.localeCompare(b.address):a.total>b.total?-1:1)
-  .map(c=>({address:c.address,label:'AUTO_'+c.address,cat:'discovered_receiver',ownership:'UNKNOWN',transaction_count:c.hashes.length,total_xrp:Number(c.total)/1000000,total_drops:c.total.toString(),qualifying_hashes:c.hashes.sort(),ledgers:[...c.ledgers].sort((a,b)=>a-b),watched_senders:[...c.senders].sort(),policy_version:POLICY.version}));
+  .map(c=>({address:c.address,label:'AUTO_'+c.address,cat:'discovered_counterparty',ownership:'UNKNOWN',transaction_count:c.hashes.length,total_xrp:Number(c.total)/1000000,total_drops:c.total.toString(),qualifying_hashes:c.hashes.sort(),ledgers:[...c.ledgers].sort((a,b)=>a-b),qualification_reason:c.max>=BigInt(POLICY.single_large_xrp)*1000000n?'SINGLE_LARGE_10M':'REPEAT_LARGE_ROUTE',watched_counterparties:[...c.senders].sort(),policy_version:POLICY.version}));
 }
 async function preview(deps={}){
  const read=deps.readReport||require('../../api/delta').storedReport;

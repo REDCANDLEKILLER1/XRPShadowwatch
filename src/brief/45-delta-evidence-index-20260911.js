@@ -538,7 +538,7 @@
           (result.wallets || []).forEach(function (w) {
             if (!w.proven || Number(w.proven_through) !== Number(result.anchor_ledger)) return;
             if (typeof KNOWN !== 'undefined' && !KNOWN[w.address] && /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(w.address)) {
-              var entry = {address:w.address,label:'AUTO_'+w.address,cat:'discovered_receiver',shared_checkpoint:true};
+              var entry = {address:w.address,label:'AUTO_'+w.address,cat:'discovered_counterparty',shared_checkpoint:true};
               WATCHLIST.push(entry); KNOWN[w.address] = entry;
             }
           });

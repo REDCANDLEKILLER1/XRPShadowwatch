@@ -12,6 +12,8 @@ const anchor={anchor_close:close,anchor_ledger:1000};
  assert.equal(Auto.qualify([row(1),row(1)],[A],anchor).length,0,'replaying one transaction is not recurrence');
  assert.equal(Auto.qualify([row(1),row(2,{ledger_index:11})],[A],anchor).length,0);
  assert.equal(Auto.qualify(rows,[A,B],anchor).length,0);
+ assert.equal(Auto.qualify([row(1,{amount_drops:'10000000000000'})],[A],anchor)[0].qualification_reason,'SINGLE_LARGE_10M');
+ const incoming=rows.map(r=>({...r,from_account:B,to_account:A,observed_via:[A]}));assert.equal(Auto.qualify(incoming,[A],anchor)[0].address,B,'large unknown senders are traced too');
  for(const change of [{validated:false},{tx_result:'tecPATH_DRY'},{currency:'USD'},{tx_type:'EscrowFinish'},{amount_drops:'1'},{amount_drops:'1.2'},{issuer:A},{observed_via:[]},{from_account:B},{to_account:A},{ledger_index:1001},{close_time:new Date(end-73*3600000).toISOString()}])assert.equal(Auto.qualify([row(1),row(2,change)],[A],anchor).length,0,JSON.stringify(change));
  assert.throws(()=>Auto.qualify([row(1),row(1,{amount_drops:'4000000000000'})],[A],anchor),/CONFLICTING_HASH/);
  const fixture={...anchor,stored_checkpoint:true,failed_wallets:0,complete_wallets:1,target_wallets:1,wallets:[{address:A}],events:rows,window:{provenance:'OBSERVED',days_without_shards:[],shards_verified:2},state_sha256:'d'.repeat(64)};
