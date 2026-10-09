@@ -10,7 +10,7 @@ on:
     - cron: '7,22,37,52 * * * *'
     - cron: '43 6 * * *'
   push:
-    branches: [agent/forensic-patterns-20261009]
+    branches: [agent/forensic-patterns-20261009, agent/pattern-surfaces-20261009]
     paths: ['src/db/forensic-*.js', 'scripts/forensic-*.js', 'scripts/market-*.js', '.github/workflows/forensic-evidence.yml']
 permissions:
   contents: read

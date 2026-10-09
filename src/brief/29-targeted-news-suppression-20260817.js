@@ -53,9 +53,9 @@
     return { suppressed:false };
   }
 
-  function noteSkippedIntents(queryIntents, reason) {
+  function noteSkippedIntents(queryIntents, reason, options) {
     try {
-      var p = (typeof state !== 'undefined' && state && state.pack) ? state.pack : null;
+      var p = options && options.pack || ((typeof state !== 'undefined' && state && state.pack) ? state.pack : null);
       if (!p) return;
       if (!p.news_intelligence_router) {
         p.news_intelligence_router = {
@@ -81,14 +81,14 @@
     var wrapped = async function (queryIntents, options) {
       var s = suppression();
       if (s && s.suppressed) {
-        noteSkippedIntents(queryIntents, s.reason || 'provider suppressed');
+        noteSkippedIntents(queryIntents, s.reason || 'provider suppressed', options);
         try {
           if (typeof log === 'function') {
             log('Evidence-led GDELT skipped — ' + (s.reason || 'source governor suppressed it') +
               (s.nextRetryMin != null ? ' · next probe in ' + s.nextRetryMin + ' min.' : '.'));
           }
         } catch (_) {}
-        return [];
+        return await fn.call(this, queryIntents, Object.assign({}, options || {}, {skipGdelt:true}));
       }
       return await fn.apply(this, arguments);
     };

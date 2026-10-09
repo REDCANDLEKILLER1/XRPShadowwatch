@@ -4452,6 +4452,7 @@ function buildPack(v) {
     phase_timings: state.phaseTimings || [],
     evidence_freshness: state.indexRun && window.SW_EVIDENCE_INDEX && typeof window.SW_EVIDENCE_INDEX.freshness === 'function' ? window.SW_EVIDENCE_INDEX.freshness() : null,
     market_watch: state.marketWatch || {status:'UNAVAILABLE'},
+    escrow_history_coverage: state.escrowHistoryCoverage || null,
     evidence_index: state.indexRun && window.SW_EVIDENCE_INDEX ? window.SW_EVIDENCE_INDEX.metrics() : null,
     shadow_volume_xrp: shadowVolumeXRP(), total_balance_delta_xrp: totalDeltaXRP(),
     // The measured delta with the escrow-attributable part removed, and the
@@ -4671,7 +4672,7 @@ function parseEscrowItem(item) {
   const t = item.tx_json || item.tx || {}, meta = item.meta || item.metaData || {};
   const type = t.TransactionType;
   if (type !== 'EscrowFinish' && type !== 'EscrowCreate') return null;
-  if (meta.TransactionResult && meta.TransactionResult !== 'tesSUCCESS') return null;
+  if (meta.TransactionResult !== 'tesSUCCESS') return null;
   const isFinish = type === 'EscrowFinish';
   let xrp = 0, owner = t.Account, dest = null;
   for (const nd of (meta.AffectedNodes || [])) {
@@ -4687,9 +4688,10 @@ function parseEscrowItem(item) {
   if (!isFinish && !xrp && typeof t.Amount === 'string') xrp = drops(t.Amount);
   if (!(xrp > 0)) return null;
   const iso = item.close_time_iso || (t.date ? rip(t.date) : '');
-  const ts = iso ? new Date(iso).getTime() : Date.now();
+  const ts = iso ? new Date(iso).getTime() : NaN;
+  if(!Number.isFinite(ts))return null;
   return { hash: t.hash || item.hash || '', type: isFinish ? 'UNLOCK' : 'LOCK', xrp: Math.floor(xrp),
-    owner, dest: isFinish ? (dest || null) : null, ts: ts || Date.now(), ledger: t.ledger_index || null };
+    owner, dest: isFinish ? (dest || null) : null, ts, ledger: t.ledger_index || item.ledger_index || null };
 }
 
 function loadEscrowHistory() { try { const a = JSON.parse(localStorage.getItem(ESCROW_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
@@ -4720,26 +4722,47 @@ function escrowFromTxs(byHash) {
 
 // Read-only escrow backfill: runs before report generation.
 async function escrowBackfill(ws) {
-  const byHash = {};
-  loadEscrowHistory().forEach(e => { if (e && e.hash) byHash[e.hash] = e; });
+  const byHash = {}, now=Date.now(), cutoff=now-30*ESCROW_DAY;
+  loadEscrowHistory().forEach(e => { if(e&&e.hash&&e.ts>=cutoff&&e.ts<=now)byHash[e.hash]=e; });
   escrowFromTxs(byHash);
-  // The 1m07s silence. One account_tx per escrow wallet, serially, saying
-  // nothing until the whole sweep was done.
-  const _escrowAddrs = escrowWallets();
-  let _escrowDone = 0;
-  for (const addr of _escrowAddrs) {
-    try {
-      const res = await xrpl(ws, { command: 'account_tx', account: addr, ledger_index_min: -1, ledger_index_max: -1, limit: 40, forward: false });
-      for (const item of (res.transactions || [])) { const e = parseEscrowItem(item); if (e && e.hash && !byHash[e.hash]) byHash[e.hash] = e; }
-    } catch (e) { log('escrow backfill miss: ' + addr.slice(0, 8) + ' (' + e.message + ')'); }
-    _escrowDone++;
-    logTick('escrow-backfill', 'Escrow backfill: ' + _escrowDone + ' / ' + _escrowAddrs.length +
-      ' wallets read · ' + Object.keys(byHash).length + ' event(s) so far');
+  const index=window.SW_EVIDENCE_INDEX;
+  const stored=!!(index&&index.storedActive&&index.storedActive());
+  const addresses=escrowWallets(), range=state.txWindowEffective||getTxWindow();
+  const coverage={source:stored?'STORED_VERIFIED_EVIDENCE_AND_OPTIONAL_LOOKUPS':'LIVE_OPTIONAL_LOOKUPS',
+    window_start:new Date(range.startMs).toISOString(),window_end:new Date(range.endMs).toISOString(),
+    registry_wallets:addresses.length,stored_wallets:0,lookup_wallets:0,partial_wallets:0,unavailable_wallets:0,
+    complete_30_day_history:false};
+  let stop=false;
+  for(const addr of addresses){
+    logTick('escrow-backfill', 'Escrow history: '+(coverage.stored_wallets+coverage.lookup_wallets+coverage.unavailable_wallets)+' / '+addresses.length+' wallets processed; '+coverage.lookup_wallets+' optional page(s) read');
+    const watched=stored&&typeof getActiveWatchlist==='function'&&getActiveWatchlist().some(w=>w.address===addr);
+    if(watched){
+      const cp=index.checkpointWallet&&index.checkpointWallet(addr);
+      if(cp&&(cp.proven===true||(cp.proven===undefined&&cp.status==='COMPLETE')))coverage.stored_wallets++;
+      else coverage.unavailable_wallets++;
+      continue;
+    }
+    if(stop){coverage.unavailable_wallets++;continue;}
+    try{
+      const res=await xrpl(ws,{command:'account_tx',account:addr,ledger_index_min:-1,ledger_index_max:state.indexRun&&state.indexRun.anchor_ledger||-1,limit:40,forward:false});
+      coverage.lookup_wallets++;
+      // A single page is a sample, never a 30-day completeness claim.
+      coverage.partial_wallets++;
+      for(const item of(res.transactions||[])){
+        if(item.validated!==true)continue;
+        const e=parseEscrowItem(item);
+        if(e&&e.hash&&Number.isInteger(e.ledger)&&e.ledger>0&&e.ts>=cutoff&&e.ts<=now&&(!state.indexRun||!state.indexRun.anchor_ledger||e.ledger<=state.indexRun.anchor_ledger)&&!byHash[e.hash])byHash[e.hash]=e;
+      }
+    }catch(e){
+      coverage.unavailable_wallets++;
+      if(/quota|rate.?limit|OPTIONAL_LIVE_ENRICHMENT/i.test(String(e.message)))stop=true;
+      log('Escrow optional history unavailable: '+addr.slice(0,8)+' ('+e.message+')');
+    }
   }
-  const all = Object.values(byHash).sort((a, b) => (b.ts || 0) - (a.ts || 0));
-  state.escrow = all;
-  saveEscrowHistory(all);
-  log('Escrow backfill: ' + all.length + ' event(s) in 30d history.');
+  state.escrow=Object.values(byHash).filter(e=>e.ts>=cutoff&&e.ts<=Math.min(now,stored?range.endMs:now)).sort((a,b)=>b.ts-a.ts);
+  state.escrowHistoryCoverage=coverage;
+  saveEscrowHistory(state.escrow);
+  log('Escrow history: '+coverage.stored_wallets+' registry wallets covered by stored report-window evidence; '+coverage.lookup_wallets+' optional page(s) read; '+coverage.unavailable_wallets+' unavailable. Full 30-day history is not proved.');
 }
 
 // Best-effort, read-only follow-on status from already-scanned state.
@@ -19263,35 +19286,42 @@ async function fetchEvidenceLedNews(queryIntents, options) {
         continue;
       }
       let fetched = false;
-      try {
-        const gdeltUrl = 'https://api.gdeltproject.org/api/v2/doc/doc?' +
-          'query=' + encodeURIComponent(shortQ) +
-          '&mode=ArtList&format=json&maxrecords=5&sort=hybridrel&timespan=' + lookbackH + 'h';
-        const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(gdeltUrl);
-        // Keep the timeout through BODY consumption, not just response headers.
-        // The whole-lane race also releases RUN if cancellation fails to settle.
-        const { response, body: raw } = await fetchWithTimeout(proxyUrl,
-          Math.min(8000, Math.max(1, deadline - Date.now())), controller.signal, 'text');
+      const providers = options.skipGdelt ? ['Google News'] : ['GDELT', 'Google News'];
+      for (const provider of providers) {
         if (!live()) break;
-        if (!response.ok) throw new Error('HTTP ' + response.status);
-        if (!raw || raw.trimStart().startsWith('Please') || raw.trimStart().startsWith('{"Error')) {
-          router.failed_queries.push({ query: shortQ, provider: 'GDELT', error: 'RATE_LIMIT', excerpt: (raw || '').slice(0, 80) });
-          continue;
+        try {
+          const target = provider === 'GDELT'
+            ? 'https://api.gdeltproject.org/api/v2/doc/doc?' + new URLSearchParams({query:shortQ,mode:'ArtList',format:'json',maxrecords:'5',sort:'hybridrel',timespan:lookbackH+'h'})
+            : 'https://news.google.com/rss/search?' + new URLSearchParams({q:shortQ+' when:'+lookbackH+'h',hl:'en-US',gl:'US',ceid:'US:en'});
+          const { response, body: raw } = await fetchWithTimeout('/api/proxy?url='+encodeURIComponent(target),
+            Math.min(3500, Math.max(1, deadline-Date.now())), controller.signal, 'text');
+          if (!live()) break;
+          if (!response.ok) throw new Error('HTTP '+response.status);
+          let articles;
+          if (provider === 'GDELT') {
+            if (!raw || raw.trimStart().startsWith('Please')) throw new Error('GDELT rate limit or invalid response');
+            const data=JSON.parse(raw);
+            if (!Array.isArray(data.articles)) throw new Error('GDELT articles unavailable');
+            articles=data.articles.map(a=>({title:a.title||'',url:a.url||'',published_at:a.seendate||''}));
+          } else {
+            if (!/<rss[\s>]|<feed[\s>]/i.test(raw||'')) throw new Error('Not RSS');
+            articles=parseRssXml(raw,'Google News');
+          }
+          articles=articles.filter(a=>a.title && /^https?:\/\//i.test(a.url||'')).slice(0,3).map(a=>({
+            title:a.title,url:a.url,published_at:a.published_at||'',source:provider,
+            query:shortQ,trigger:intent.trigger||intent.trigger_type||''}));
+          router.searched_queries.push(shortQ+' ['+provider+']');
+          if (!articles.length) { router.source_limits.push(provider+': no matching articles for "'+shortQ+'".'); continue; }
+          EVIDENCE_NEWS_CACHE[cacheKey]={ts:Date.now(),results:articles};
+          allResults.push(...articles);
+          if(provider==='Google News')router.google_news_results.push(...articles);
+          fetched=true;break;
+        } catch(e) {
+          if (!live()) break;
+          router.failed_queries.push({query:shortQ,provider,error:String(e&&e.message||e).slice(0,100)});
         }
-        const data = JSON.parse(raw);
-        const articles = (data.articles || []).slice(0, 3).map(a => ({
-          title: a.title || '', url: a.url || '', source: 'GDELT',
-          query: shortQ, trigger: intent.trigger || intent.trigger_type || ''
-        })).filter(a => a.title);
-        EVIDENCE_NEWS_CACHE[cacheKey] = { ts: Date.now(), results: articles };
-        allResults.push(...articles);
-        router.searched_queries.push(shortQ);
-        fetched = true;
-      } catch (e) {
-        if (!live()) break;
-        const msg = e && e.message ? e.message.slice(0, 60) : 'unknown';
-        router.failed_queries.push({ query: shortQ, provider: 'GDELT', error: msg });
       }
+      if (!live()) break;
       if (!fetched) router.source_limits.push('"' + shortQ + '" → intent captured, source unavailable in-browser.');
     }
   }
@@ -22111,6 +22141,7 @@ async function run() {
   state._storedReportRun = true;
   state.liveEnrichmentLost = false;
   state._storedEnrichment = { deadline:0, requests:0, unavailable:0 };
+  state.escrowHistoryCoverage = null;
   state._balanceFailLogged = 0;
   state._silentReplacements = 0;
   state._runAbortReason = null;

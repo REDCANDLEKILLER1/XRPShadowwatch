@@ -155,6 +155,7 @@
       version: VERSION,
       generated_at: new Date().toISOString(),
       window_hours: Math.round(windowMs / 3600000),
+      history_coverage: s && s.escrowHistoryCoverage || null,
 
       // ── RIPPLE COHORT — full registry sweep, ledger-measured ────────────
       ripple: {
@@ -237,6 +238,11 @@
       (R.registry_addresses_checked != null ? R.registry_addresses_checked : '—') +
       ' public owner coverage (registry addresses answered)');
     L.push('  source: validated-ledger account_objects over the published Ripple registry');
+    if(m.history_coverage){
+      var h=m.history_coverage;
+      L.push('Escrow activity coverage: '+h.stored_wallets+'/'+h.registry_wallets+' registry wallets in verified stored evidence ('+h.window_start+' to '+h.window_end+'); '+h.lookup_wallets+' optional history pages read; '+h.unavailable_wallets+' unavailable.');
+      L.push('  Earlier cached events and one-page lookups are observations only; complete 30-day escrow history is not proved. Current locked-position coverage is reported separately above.');
+    }
     L.push('Ripple escrow activity, last ' + m.window_hours + 'h: ' +
       R.activity.releases + ' release' + (R.activity.releases === 1 ? '' : 's') + ' · ' +
       R.activity.locks + ' new lock' + (R.activity.locks === 1 ? '' : 's'));
