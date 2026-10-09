@@ -135,8 +135,12 @@ current tracked evidence files; Git history size is explicitly unmeasured.
 - Existing 8 GB bucket stop applies to backups, exports, and market samples. This
   is an operational limit for this bucket, not an account-wide billing guarantee.
 - Market data: at most 2 MiB per sample, 32 MiB per UTC day; no automatic deletion.
-- Export: at most 250,000 unique events per day, 4 MiB per NDJSON row and 100 MiB
-  compressed output. A limit failure stops publication, never silently truncates.
+- Export: at most 250,000 unique events per day and 4 MiB per NDJSON row. The
+  compressed archive is streamed to R2 and independently streamed back through
+  SHA256 verification. Its full size must fit within the existing 8 GB bucket
+  stop before any upload. Identical archive objects are reused but reverified.
+  The initial 100 MiB in-memory export limit rejected the real dataset and was
+  replaced by bounded transfers; no records are discarded to make an export fit.
 - One day is analyzed at a time; payloads are streamed. Flagged originals are
   reread after the pattern pass. Conflicting events/orphan payloads fail export.
 - Only the newest verified checkpoint manifest for each day selects its shards.

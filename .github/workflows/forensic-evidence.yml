@@ -35,6 +35,7 @@ jobs:
         id: safeguards
         run: |
           node scripts/forensic-patterns.test.js
+          node scripts/forensic-archive.test.js
           node scripts/forensic-report.test.js
           node scripts/market-evidence.test.js
           node scripts/storage-master-backup.test.js
