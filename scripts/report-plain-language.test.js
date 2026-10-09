@@ -41,7 +41,14 @@ const server=http.createServer((q,r)=>{
    const holding={...pack,receiver_followthrough:[{address:B,classification:'RECEIVER_STILL_HOLDING_SIZE',balance_xrp:37000000}]};
    const band={...pack,market:{price:1.33,pct24h:-0.1},forensic_memory:{band_hold_days:20}};
    const quiet={...pack,large_transfers:[],shadow_volume_xrp:0,tx_24h_count:0,total_tx_xrp:0,total_balance_delta_xrp:0,xrp_price:0,risk_score:{score:5,drivers:[]}};
-   return {text,raw,onward:api.assemble(onward).text,holding:api.assemble(holding).text,band:api.assemble(band).text,lost:api.render(lost),incomplete:api.render(incomplete),unknown:api.render(unknown),quiet:api.render(quiet),published:SW_PUBLIC_MORNING_4K_20260817.publicText(text),inputsUnchanged,interpretationsUnchanged,mode:window._SW_REPORT_MODE};
+   const watch={status:'AVAILABLE',summary:{schema:'shadowwatch-forensic-report/1',window_start:'2026-10-05T10:00:00Z',window_end:'2026-10-06T10:00:00Z',exchange_transactions:2,classified_records:2,xrp_sold_for_rlusd:'904.120603',xrp_bought_with_rlusd:'904.120603',repeated_quote_wallets:1,repeated_cancel_wallets:0,regular_transfer_wallets:0,unclassified_records:0}};
+   const watchPack={...pack,market_watch:watch},watchBefore=JSON.stringify(watch);
+   const watchText=canonicalMorningStory(watchPack,{rebuild:true});
+   state.marketWatch={status:'UNAVAILABLE'};
+   const watchCached=canonicalMorningStory();
+   const staleWatch=canonicalMorningStory({...pack,market_watch:{...watch,status:'STALE'}},{rebuild:true});
+   const missingWatch=canonicalMorningStory({...pack,market_watch:{status:'UNAVAILABLE'}},{rebuild:true});
+   return {text,raw,watchText,watchCached,staleWatch,missingWatch,watchUnchanged:watchBefore===JSON.stringify(watch),onward:api.assemble(onward).text,holding:api.assemble(holding).text,band:api.assemble(band).text,lost:api.render(lost),incomplete:api.render(incomplete),unknown:api.render(unknown),quiet:api.render(quiet),published:SW_PUBLIC_MORNING_4K_20260817.publicText(text),inputsUnchanged,interpretationsUnchanged,mode:window._SW_REPORT_MODE};
   });
   assert(result.inputsUnchanged,'editorial rendering must not mutate evidence');assert(result.interpretationsUnchanged,'rendering must not change interpretations');
   assert.match(result.raw,/112M XRP moved across 3 large transfers during the last 24h/);
@@ -65,11 +72,31 @@ const server=http.createServer((q,r)=>{
   for(const s of ['THE DAILY PRAYER','THE DAILY SCRIPTURE','I’m XRPMan, and I tell on the banks.'])assert(result.text.includes(s),s);
   assert(result.published.length<=4000);assert.match(result.published,/\(41\/100\)/);assert.match(result.published,/31\.40B/);
   assert(!/banks like to move|single, deliberate|every transfer is a confession|where they land tells me who/i.test(result.text));
+  assert.equal((result.watchText.match(/Market activity watch/g)||[]).length,1);
+  assert.match(result.watchText,/904\.120603 XRP was exchanged for RLUSD/);
+  assert.match(result.watchText,/1 wallet repeatedly quoted the same price/);
+  assert(result.watchText.indexOf('Market activity watch')<result.watchText.indexOf('How to Read It'));
+  assert.equal(result.watchText,result.watchCached,'late state changes cannot alter the saved report');
+  assert(result.watchUnchanged);assert(!result.text.includes('Market activity watch'),'old saved packs remain unchanged');
+  assert.match(result.staleWatch,/too old to describe current activity/);assert(!result.staleWatch.includes('904.120603'));
+  assert.match(result.missingWatch,/does not establish that no activity occurred/);
+  // Exercise Lady K's actual capture, clipboard, and download surfaces.
+  const lady=await browser.newPage({viewport:{width:390,height:844},isMobile:true});
+  await lady.route('**/*',r=>r.request().url().startsWith(origin)?r.continue():r.abort());
+  await lady.goto(origin+'/ladyk.html',{waitUntil:'domcontentloaded'});
+  await lady.waitForFunction(()=>{const w=document.getElementById('engine').contentWindow;return w.MORNING_REPORT_FLOAT&&w.MORNING_REPORT_FLOAT.__ladykHooked;},{},{timeout:25000});
+  await lady.evaluate(text=>{document.getElementById('engine').contentWindow.MORNING_REPORT_FLOAT.show(text,[],{});Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async t=>{window.__copied=t;}}});},result.watchText);
+  assert.equal(await lady.locator('#report').textContent(),result.watchText);
+  await lady.locator('#copy').click();assert.equal(await lady.evaluate(()=>window.__copied),result.watchText);
+  const downloading=lady.waitForEvent('download');await lady.locator('#dl').click();const download=await downloading;
+  assert.equal(fs.readFileSync(await download.path(),'utf8'),result.watchText);
+  assert.equal(await lady.evaluate(()=>JSON.parse(localStorage.getItem('ladyk.lastReport.v1')).text),result.watchText);
+  await lady.close();
   assert.equal(errors.length,0,errors.join('\n'));
   if(process.env.SW_REPORT_PREVIEW){
    fs.mkdirSync(path.join(root,'docs'),{recursive:true});
    fs.writeFileSync(path.join(root,'docs/report-editorial-preview.md'),'# ShadowWatch editorial preview\n\nGenerated by the real canonical renderer from a controlled test fixture. These are illustrative fixture findings, not a new live scan. The fixture uses the October 6 market, flow and escrow figures alongside three synthetic large-transfer rows.\n\n```text\n'+result.text+'\n```\n\nThe publishable copy is '+result.published.length+' characters; the full canonical report is '+result.text.length+' characters.\n');
   }
-  console.log('PASS plain-language canonical report, unique transfer lead, exact amounts and score, untouched inputs, incomplete/unknown safeguards, flow/escrow explanations, 4K copy, mobile rendering');
+  console.log('PASS plain-language canonical report, untouched inputs, incomplete/unknown safeguards, market-watch saved text, stale/missing distinctions, Lady K display/copy/download parity, 4K copy, mobile rendering');
  }finally{await browser.close();await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);server.close();process.exit(1);});

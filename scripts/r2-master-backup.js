@@ -83,4 +83,4 @@ async function run(){
   'R2 download and isolated restore passed.\n\nSource commit: `'+result.source_commit+'`\n\nManifest SHA256: `'+result.manifest_sha256+'`\n\nFiles: '+result.files+'; bytes: '+result.bytes+'\n');
 }
 if(require.main===module)run().catch(e=>{console.error('R2 backup failed:',String(e.message).replace(/https?:\/\/\S+/g,'[endpoint]'));process.exitCode=1;});
-module.exports={roundTrip,inventory,download,client,LIMIT};
+module.exports={roundTrip,inventory,download,client,LIMIT,BUCKET};

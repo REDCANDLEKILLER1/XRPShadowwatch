@@ -4451,6 +4451,7 @@ function buildPack(v) {
     anchor_attempts: state.anchorAttempts || [],
     phase_timings: state.phaseTimings || [],
     evidence_freshness: state.indexRun && window.SW_EVIDENCE_INDEX && typeof window.SW_EVIDENCE_INDEX.freshness === 'function' ? window.SW_EVIDENCE_INDEX.freshness() : null,
+    market_watch: state.marketWatch || {status:'UNAVAILABLE'},
     evidence_index: state.indexRun && window.SW_EVIDENCE_INDEX ? window.SW_EVIDENCE_INDEX.metrics() : null,
     shadow_volume_xrp: shadowVolumeXRP(), total_balance_delta_xrp: totalDeltaXRP(),
     // The measured delta with the escrow-attributable part removed, and the
@@ -17889,6 +17890,7 @@ function finalizeReportPresentation(text, pack, structured) {
   if (escrow) out = structured ? escrow.injectStructured(out) : escrow.inject(out);
   if (layers) out = structured ? layers.enrichStructured(out, pack) : layers.enrichStory(out, pack);
   if (terms) out = terms.clarify(out);
+  if (window.SW_MARKET_WATCH) out = window.SW_MARKET_WATCH.inject(out, pack);
   return out;
 }
 
@@ -22122,6 +22124,7 @@ async function run() {
   state.pack = null;
   state.seal = null;
   state.morningStoryReport = '';
+  state.marketWatch = null;
   state.structuredReport = null;
   state.githubArchive = {attempted:false,status:'NOT_ATTEMPTED',branch:'shadowwatch-report-archive'};
   try { if (window.MORNING_REPORT_FLOAT) window.MORNING_REPORT_FLOAT.hide(); } catch (_) {}
@@ -22151,6 +22154,7 @@ async function run() {
     // News is NOT in this phase — it runs after the full ledger scan.
     shadowSay('Booting ledger lens…', 'BOOT', 8);
     const marketRun = { cancelled: false };
+    const forensicPromise = window.SW_MARKET_WATCH ? window.SW_MARKET_WATCH.load() : Promise.resolve({status:'UNAVAILABLE'});
     const marketPromise = (async () => {
       try { (await market(marketRun)).forEach(log); }
       catch (e) { log('Market fill issue: ' + e.message); elog('market()', e); }
@@ -22179,8 +22183,8 @@ async function run() {
       }, 15000);
     });
     try {
-      [, ws] = await Promise.race([
-        Promise.all([marketPromise, wsPromise]),
+      [, ws, state.marketWatch] = await Promise.race([
+        Promise.all([marketPromise, wsPromise, forensicPromise]),
         bootCeiling
       ]);
     } catch (e) {
