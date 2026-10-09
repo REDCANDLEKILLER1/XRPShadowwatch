@@ -21,6 +21,20 @@ let unavailable = false, reads = 0, writes = 0, slowNews = false, newsBodies = 0
 let releaseVerification = null;
 const srv = http.createServer((req,res) => {
   const u = new URL(req.url, 'http://localhost');
+  if (u.pathname === '/api/forensic-report') {
+    // The analysis arrives after the old six-second cutoff while an unrelated
+    // price lookup exceeds boot's ceiling. RUN must keep the completed result.
+    if (slowNews) { res.writeHead(503); return res.end(); }
+    setTimeout(()=>{
+      res.writeHead(200, {'Content-Type':'application/json'});
+      res.end(JSON.stringify({status:'AVAILABLE',summary:{schema:'shadowwatch-forensic-report/1',
+        window_start:new Date(Date.parse(cutoff)-86400000).toISOString(),window_end:cutoff,
+        exchange_transactions:2,classified_records:2,unclassified_records:0,
+        xrp_sold_for_rlusd:'904.120603',xrp_bought_with_rlusd:'904.120603',
+        repeated_quote_wallets:1,repeated_cancel_wallets:0,regular_transfer_wallets:0}}));
+    },7000);
+    return;
+  }
   if (u.pathname === '/test/targeted-news') {
     res.writeHead(200, {'Content-Type':'application/json'});
     if (slowNews) { newsBodies++; res.write('{"articles":['); return; }
@@ -104,6 +118,7 @@ const srv = http.createServer((req,res) => {
     });
     for (let attempt=0;attempt<2;attempt++) {
       slowNews = attempt === 1;
+      await page.evaluate(stall=>{market=stall?()=>new Promise(()=>{}):async()=>[];},attempt===0);
       await page.evaluate(()=>clearEvidenceNewsCache());
       const running = page.evaluate(async()=>{
         await run();
@@ -152,7 +167,14 @@ const srv = http.createServer((req,res) => {
       if (slowNews) assert(newsBodies>0,'real targeted-news response body must stall during RUN');
       else assert(await page.evaluate(()=>state.pack.news_intel.items.some(x=>x.title==='Timely XRP context')),'timely context must reach this run');
       assert(out.seal,'stored RUN must seal even when XRPL is offline');
-      const integrity=await page.evaluate(()=>({lost:state.pack.scan_link_lost,story:state.morningStoryReport}));
+      const integrity=await page.evaluate(()=>({lost:state.pack.scan_link_lost,story:state.morningStoryReport,watch:state.pack.market_watch}));
+      if(attempt===0){
+        assert.equal(integrity.watch.status,'AVAILABLE','market-price timeout must preserve completed XRP/RLUSD analysis');
+        assert.match(integrity.story,/904\.120603 XRP was exchanged for RLUSD/);
+      }else{
+        assert.equal(integrity.watch.status,'UNAVAILABLE','a rerun must not inherit the previous analysis');
+        assert(!integrity.story.includes('904.120603'));
+      }
       assert.equal(integrity.lost,false);
       assert(!integrity.story.includes('SCAN INCOMPLETE'));
       assert(integrity.story.includes('Live order/offer sweep: not collected'));

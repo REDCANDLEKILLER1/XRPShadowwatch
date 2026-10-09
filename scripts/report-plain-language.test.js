@@ -48,7 +48,7 @@ const server=http.createServer((q,r)=>{
    const watchCached=canonicalMorningStory();
    const staleWatch=canonicalMorningStory({...pack,market_watch:{...watch,status:'STALE'}},{rebuild:true});
    const missingWatch=canonicalMorningStory({...pack,market_watch:{status:'UNAVAILABLE'}},{rebuild:true});
-   return {text,raw,watchText,watchCached,staleWatch,missingWatch,watchUnchanged:watchBefore===JSON.stringify(watch),onward:api.assemble(onward).text,holding:api.assemble(holding).text,band:api.assemble(band).text,lost:api.render(lost),incomplete:api.render(incomplete),unknown:api.render(unknown),quiet:api.render(quiet),published:SW_PUBLIC_MORNING_4K_20260817.publicText(text),inputsUnchanged,interpretationsUnchanged,mode:window._SW_REPORT_MODE};
+   return {text,raw,watchText,watchPublished:SW_PUBLIC_MORNING_4K_20260817.publicText(watchText),watchCached,staleWatch,missingWatch,watchUnchanged:watchBefore===JSON.stringify(watch),onward:api.assemble(onward).text,holding:api.assemble(holding).text,band:api.assemble(band).text,lost:api.render(lost),incomplete:api.render(incomplete),unknown:api.render(unknown),quiet:api.render(quiet),published:SW_PUBLIC_MORNING_4K_20260817.publicText(text),inputsUnchanged,interpretationsUnchanged,mode:window._SW_REPORT_MODE};
   });
   assert(result.inputsUnchanged,'editorial rendering must not mutate evidence');assert(result.interpretationsUnchanged,'rendering must not change interpretations');
   assert.match(result.raw,/112M XRP moved across 3 large transfers during the last 24h/);
@@ -72,12 +72,14 @@ const server=http.createServer((q,r)=>{
   for(const s of ['THE DAILY PRAYER','THE DAILY SCRIPTURE','I’m XRPMan, and I tell on the banks.'])assert(result.text.includes(s),s);
   assert(result.published.length<=4000);assert.match(result.published,/\(41\/100\)/);assert.match(result.published,/31\.40B/);
   assert(!/banks like to move|single, deliberate|every transfer is a confession|where they land tells me who/i.test(result.text));
-  assert.equal((result.watchText.match(/Market activity watch/g)||[]).length,1);
+  assert.equal((result.watchText.match(/XRP\/RLUSD market activity watch/g)||[]).length,1);
   assert.match(result.watchText,/904\.120603 XRP was exchanged for RLUSD/);
+  assert(result.watchPublished.length<=4000);assert.match(result.watchPublished,/XRP\/RLUSD market activity watch/);
+  assert.match(result.watchPublished,/904\.120603 XRP was exchanged for RLUSD/);
   assert.match(result.watchText,/1 wallet repeatedly quoted the same price/);
-  assert(result.watchText.indexOf('Market activity watch')<result.watchText.indexOf('How to Read It'));
+  assert(result.watchText.indexOf('XRP/RLUSD market activity watch')<result.watchText.indexOf('How to Read It'));
   assert.equal(result.watchText,result.watchCached,'late state changes cannot alter the saved report');
-  assert(result.watchUnchanged);assert(!result.text.includes('Market activity watch'),'old saved packs remain unchanged');
+  assert(result.watchUnchanged);assert(!result.text.includes('XRP/RLUSD market activity watch'),'old saved packs remain unchanged');
   assert.match(result.staleWatch,/too old to describe current activity/);assert(!result.staleWatch.includes('904.120603'));
   assert.match(result.missingWatch,/does not establish that no activity occurred/);
   // Exercise Lady K's actual capture, clipboard, and download surfaces.

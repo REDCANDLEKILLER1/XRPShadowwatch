@@ -22185,7 +22185,13 @@ async function run() {
     // News is NOT in this phase — it runs after the full ledger scan.
     shadowSay('Booting ledger lens…', 'BOOT', 8);
     const marketRun = { cancelled: false };
-    const forensicPromise = window.SW_MARKET_WATCH ? window.SW_MARKET_WATCH.load() : Promise.resolve({status:'UNAVAILABLE'});
+    // Keep the completed analysis even if the unrelated market-price fill
+    // loses the boot race. Capture it per run; late results cannot change a seal.
+    let forensicResult = {status:'UNAVAILABLE',reason:'BOOT_TIMEOUT'}, forensicOpen = true;
+    const forensicPromise = Promise.resolve().then(() => window.SW_MARKET_WATCH
+      ? window.SW_MARKET_WATCH.load() : {status:'UNAVAILABLE',reason:'MODULE_UNAVAILABLE'})
+      .catch(() => ({status:'UNAVAILABLE',reason:'NETWORK_ERROR'}))
+      .then(result => { if (forensicOpen) forensicResult = result; });
     const marketPromise = (async () => {
       try { (await market(marketRun)).forEach(log); }
       catch (e) { log('Market fill issue: ' + e.message); elog('market()', e); }
@@ -22214,7 +22220,7 @@ async function run() {
       }, 15000);
     });
     try {
-      [, ws, state.marketWatch] = await Promise.race([
+      [, ws] = await Promise.race([
         Promise.all([marketPromise, wsPromise, forensicPromise]),
         bootCeiling
       ]);
@@ -22225,6 +22231,11 @@ async function run() {
       try { ws = await wsPromise; } catch (_) { ws = null; }
     }
     clearTimeout(bootTimer);
+    forensicOpen = false;
+    state.marketWatch = forensicResult;
+    log('XRP/RLUSD analysis: ' + forensicResult.status +
+      (forensicResult.reason ? ' (' + forensicResult.reason + ')' : '') +
+      (forensicResult.summary ? ' · observed through ' + forensicResult.summary.window_end : ''));
     if (!ws) log('Live enrichment unavailable — continuing from verified stored evidence.');
     // Hand the socket to state so a mid-scan reconnect can replace it without
     // any of the scan's call sites holding a stale reference.
