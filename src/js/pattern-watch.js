@@ -39,7 +39,9 @@
       body.appendChild(el('p',stamp(s.window_start)+' – '+stamp(s.window_end),'sw-pattern-note'));
       var totals=el('div',null,'sw-pattern-totals');
       totals.appendChild(el('div','XRP → RLUSD: '+s.xrp_sold_for_rlusd+' XRP'));
-      totals.appendChild(el('div','RLUSD → XRP: '+s.xrp_bought_with_rlusd+' XRP'));body.appendChild(totals);
+      totals.appendChild(el('div','RLUSD → XRP: '+s.xrp_bought_with_rlusd+' XRP'));
+      if(s.classified_records>0)body.appendChild(totals);else body.appendChild(el('p','No classified records in this window; trading activity is unknown.'));
+      if(s.unclassified_records>0)body.appendChild(el('p',s.unclassified_records+' records could not be classified.','sw-pattern-note'));
       body.appendChild(el('p','Observed wallet flows, not total market volume. Daily analysis; separate from the live stream.','sw-pattern-note'));
       body.appendChild(el('p',s.regular_transfer_wallets+' regular-transfer wallets · '+s.repeated_quote_wallets+' repeated-price wallets · '+s.repeated_cancel_wallets+' cancellation wallets'));
       body.appendChild(el('p','Flags are leads, not proof of bots or price control.','sw-pattern-note'));
