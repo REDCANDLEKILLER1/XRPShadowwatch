@@ -53,3 +53,8 @@ New reports identify the section as **XRP/RLUSD market activity watch**. Unavail
 analysis explicitly differs from zero trading; previously sealed text stays intact.
 The full RUN regression combines a seven-second analysis response with a stalled
 price fill, then checks an unavailable rerun does not inherit earlier figures.
+
+Validation: all 71 local regression suites pass. Serving the previous core
+against the same slow-price fixture fails with `UNAVAILABLE` instead of
+`AVAILABLE`; the corrected core preserves the XRP/RLUSD figures. The canonical,
+shortened, Lady K display, clipboard, and download checks also pass.
