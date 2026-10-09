@@ -40,5 +40,6 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           SHADOWWATCH_EVIDENCE_TOKEN: ${{ secrets.SHADOWWATCH_EVIDENCE_TOKEN }}
         run: node scripts/r2-master-backup.js "$RUNNER_TEMP/shadowwatch-r2-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-      # No evidence artifact upload, source deletion, receipt publication or
-      # auto-admission toggle. Initial restoration must be inspected first.
+      # Publishes restore metadata only after independent R2 download and
+      # isolated verification. No evidence artifact upload, source deletion or
+      # auto-admission toggle. Admission remains a separate operator gate.
