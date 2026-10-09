@@ -14,8 +14,8 @@
   else lines.push('There are no classified records in this observation period, so no trading-activity conclusion is available.');
   var patterns=[];
   if(s.repeated_quote_wallets>0)patterns.push(s.repeated_quote_wallets+' wallet'+(s.repeated_quote_wallets===1?'':'s')+' repeatedly quoted the same price');
-  if(s.repeated_cancel_wallets>0)patterns.push(s.repeated_cancel_wallets+' repeatedly canceled orders');
-  if(s.regular_transfer_wallets>0)patterns.push(s.regular_transfer_wallets+' sent transfers at regular intervals');
+  if(s.repeated_cancel_wallets>0)patterns.push(s.repeated_cancel_wallets+' wallet'+(s.repeated_cancel_wallets===1?'':'s')+' repeatedly canceled orders');
+  if(s.regular_transfer_wallets>0)patterns.push(s.regular_transfer_wallets+' wallet'+(s.regular_transfer_wallets===1?'':'s')+' sent transfers at regular intervals');
   if(patterns.length)lines.push('Patterns to watch: '+patterns.join('; ')+'.');
   if(s.unclassified_records>0)lines.push(s.unclassified_records+' records could not be classified.');
   lines.push('These observations do not establish who controls the wallets or whether anyone is controlling the price.');

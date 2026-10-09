@@ -4,7 +4,7 @@ const assert=require('assert'),fs=require('fs'),vm=require('vm');
 const source=fs.readFileSync(require('path').join(__dirname,'../src/brief/02-core.js'),'utf8');
 function context(fetch) {
   const pack={news_intel:{items:[]}};
-  const c={state:{settings:{},pack:{news_intel:{items:[]}}},n:Number,fetch,AbortController,setTimeout,clearTimeout,
+  const c={state:{settings:{},pack:{news_intel:{items:[]}}},n:Number,fetch,AbortController,URLSearchParams,setTimeout,clearTimeout,
     EVIDENCE_NEWS_CACHE:{},EVIDENCE_NEWS_CACHE_TTL:43200000,log:()=>{},_abortErr:message=>new Error(message)};
   vm.createContext(c);
   vm.runInContext(source.slice(source.indexOf('async function fetchWithTimeout('),source.indexOf('function _abortErr(')),c);

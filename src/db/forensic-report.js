@@ -22,7 +22,12 @@ function build(records,verified,now=new Date().toISOString()){
   xrp_sold_for_rlusd:sells.reduce((a,b)=>F.add(a,b),'0'),xrp_bought_with_rlusd:buys.reduce((a,b)=>F.add(a,b),'0'),
   repeated_quote_wallets:walletsFor('REPEATED_LIMIT_PRICE'),repeated_cancel_wallets:walletsFor('REPEATED_CONFIRMED_CANCEL'),
   regular_transfer_wallets:walletsFor('REGULAR_TRANSFER_INTERVAL'),scope:'OBSERVED_WALLETS_AND_COUNTERPARTIES',
-  whole_market_complete:false,price_control_proven:false,ownership_proven:false};
+  whole_market_complete:false,price_control_proven:false,ownership_proven:false,
+  pattern_details:result.flags.slice().sort((a,b)=>b.count-a.count||a.account.localeCompare(b.account)||a.kind.localeCompare(b.kind)).slice(0,24).map(f=>({
+   kind:f.kind,account:f.account,count:f.count,hashes:f.hashes.slice(0,3),
+   ...(f.to?{to:f.to,interval_seconds:f.interval_seconds}:{}),
+   ...(f.price_key?{price_key:f.price_key}:{})})),
+  pattern_details_total:result.flags.length};
  summary.sha256=seal(summary);validate(summary);return summary;
 }
 function validate(s){
@@ -34,6 +39,16 @@ function validate(s){
   if(!Number.isSafeInteger(s[key])||s[key]<0||s[key]>1000000)throw Error('FORENSIC_REPORT_COUNTS_INVALID');}
  if(s.classified_records+s.unclassified_records+s.excluded_unsuccessful_records!==s.observed_records||s.exchange_transactions>s.classified_records)throw Error('FORENSIC_REPORT_COUNTS_INVALID');
  for(const key of ['xrp_sold_for_rlusd','xrp_bought_with_rlusd'])if(typeof s[key]!=='string'||!/^\d+(?:\.\d{1,6})?$/.test(s[key])||s[key].length>40)throw Error('FORENSIC_REPORT_AMOUNT_INVALID');
+ if(s.pattern_details!==undefined){
+  if(!Array.isArray(s.pattern_details)||s.pattern_details.length>24||!Number.isSafeInteger(s.pattern_details_total)||s.pattern_details_total<s.pattern_details.length)throw Error('FORENSIC_REPORT_DETAILS_INVALID');
+  const address=/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
+  for(const d of s.pattern_details){
+   if(!['REPEATED_LIMIT_PRICE','REPEATED_CONFIRMED_CANCEL','REGULAR_TRANSFER_INTERVAL'].includes(d.kind)||!address.test(d.account)||
+    !Number.isSafeInteger(d.count)||d.count<3||!Array.isArray(d.hashes)||!d.hashes.length||d.hashes.length>3||d.hashes.some(h=>!/^[a-fA-F0-9]{64}$/.test(h))||
+    (d.kind==='REGULAR_TRANSFER_INTERVAL'&&(!address.test(d.to)||!Number.isFinite(d.interval_seconds)||d.interval_seconds<10))||
+    (d.price_key!==undefined&&(typeof d.price_key!=='string'||d.price_key.length>200)))throw Error('FORENSIC_REPORT_DETAILS_INVALID');
+  }
+ }
  return s;
 }
 async function read(deps={}){

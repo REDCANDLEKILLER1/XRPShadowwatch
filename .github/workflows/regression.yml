@@ -50,6 +50,7 @@ jobs:
           node scripts/report-plain-language.test.js
           node scripts/stored-receiver-tracing.test.js
           node scripts/storage-status.test.js
+          node scripts/pattern-surfaces.test.js
 
       # The smoke gate compares against scripts/smoke-baseline.txt. If a
       # baseline entry starts passing the run still succeeds, but the baseline

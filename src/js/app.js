@@ -940,6 +940,7 @@
                 let r = (n.type==='CENTER'?8:5) / Math.sqrt(graphZoom); // Adjust size slightly
                 r = Math.max(r, 2);
                 graphCtx.arc(n.x, n.y, r, 0, Math.PI*2);
+                if(window.SW_PATTERN_WATCH && window.SW_PATTERN_WATCH.hasWallet(n.id)) { graphCtx.strokeStyle="#ffd76a"; graphCtx.lineWidth=3/graphZoom; graphCtx.stroke(); }
                 graphCtx.fillStyle = n.color;
                 graphCtx.fill();
                 
@@ -1599,7 +1600,7 @@
                 } else {
                     mapCtx.fillStyle = this.color; mapCtx.fill();
                 }
-                mapCtx.strokeStyle = "#fff"; mapCtx.lineWidth = 1; mapCtx.stroke();
+                mapCtx.strokeStyle = window.SW_PATTERN_WATCH && (window.SW_PATTERN_WATCH.hasWallet(this.rawFrom) || window.SW_PATTERN_WATCH.hasWallet(this.rawTo)) ? "#ffd76a" : "#fff"; mapCtx.lineWidth = mapCtx.strokeStyle === "#ffd76a" ? 3 : 1; mapCtx.stroke();
                 if ((this.radius * mapCamera.zoom) > 8) {
                     mapCtx.textAlign = "center"; mapCtx.font = "bold 9px monospace";
                     mapCtx.lineWidth = 3; mapCtx.strokeStyle = "black"; mapCtx.strokeText(this.label, this.x, this.y + 3);
@@ -1809,7 +1810,8 @@
                     const row = document.createElement('div');
                     row.className = "tx-row";
                     row.innerHTML = `<div class="row-top text-cyan-400"><div class="flex items-center gap-2"><span class="font-bold text-base text-shadow-lime">RLUSD TRUST LINE</span><span class="tag-pill tag-trust">INFRASTRUCTURE</span></div><div class="text-[10px] font-mono text-gray-500">${new Date().toLocaleTimeString()}</div></div><div class="flex justify-between text-[11px] font-mono text-gray-400"><span>${tx.Account.substring(0,8)}... ACTIVATED</span></div>`;
-                    feed.prepend(row);
+                    if(window.SW_PATTERN_WATCH) window.SW_PATTERN_WATCH.decorateTransaction(row,tx.Account,tx.Destination);
+                feed.prepend(row);
                     if(feed.children.length > 40) feed.lastChild.remove();
                 } else { metrics.trustLines++; }
                 return;
@@ -1979,7 +1981,7 @@
                 if(feed.children.length > 40) feed.lastChild.remove();
             } 
 
-            if (mapActive && isSuccess) bubbles.push(new Bubble(isL2 ? tokenName : amt.toLocaleString(undefined, {maximumFractionDigits:0}), amt, mapColor, tx.hash, nameFrom||tx.Account, nameTo||tx.Destination, type, issuer));
+            if (mapActive && isSuccess) { const bubble=new Bubble(isL2 ? tokenName : amt.toLocaleString(undefined, {maximumFractionDigits:0}), amt, mapColor, tx.hash, nameFrom||tx.Account, nameTo||tx.Destination, type, issuer); bubble.rawFrom=tx.Account; bubble.rawTo=tx.Destination; bubbles.push(bubble); }
         } 
 
         // --- UI FUNCTIONS ---
