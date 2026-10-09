@@ -9,13 +9,14 @@ async function run(root){
  const source=path.join(root,'source'),downloaded=path.join(root,'downloaded'),restored=path.join(root,'restored'),out=path.join(root,'forensics');
  await B.backup(source,{onProgress:(n,total)=>{if(n%100===0||n===total)console.log('Source verified: '+n+'/'+total);}});
  const restore=await R.roundTrip(source,downloaded,restored,s3);
+ const receipt=await require('./publish-restore-receipt').publish(restored,restore);
  const analysis=await E.exportForensics(restored,out,{restoreReceipt:restore});
  const market=await require('./market-history').appendMarket(out,s3);
  const archive=path.join(root,'shadowwatch-forensics.tar.gz');
  execFileSync('tar',['-czf',archive,'-C',out,'.']);
  const uploaded=await require('./forensic-archive').publish(archive,restore.source_commit,s3);
  const report=await require('../src/db/forensic-report').publish(analysis.report_summary);
- const result={source_commit:restore.source_commit,restore_verified:true,manifest_sha256:restore.manifest_sha256,
+ const result={source_commit:restore.source_commit,restore_verified:true,manifest_sha256:restore.manifest_sha256,receipt,
   ...uploaded,days:analysis.days.length,flags:analysis.days.reduce((n,d)=>n+d.flags,0),market,report,source_deletion:false};
  console.log(JSON.stringify(result,null,2));
  if(process.env.GITHUB_STEP_SUMMARY)fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,

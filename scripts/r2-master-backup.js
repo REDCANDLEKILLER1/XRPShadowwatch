@@ -68,7 +68,7 @@ async function roundTrip(source,downloaded,restored,s3){
   const dest=path.join(downloaded,B.relative(e.path));fs.mkdirSync(path.dirname(dest),{recursive:true});fs.writeFileSync(dest,data,{flag:'wx'});
  }
  const result=B.restore(downloaded,restored,verified.source_commit,verified.manifest_sha256);
- return{...result,destination_uri:ENDPOINT+'/'+BUCKET+'/'+manifestKey,bucket_bytes_before:before.total,new_bytes:added,projected_bucket_bytes:before.total+added};
+ return{...result,independent_readback_verified:true,destination_uri:ENDPOINT+'/'+BUCKET+'/'+manifestKey,bucket_bytes_before:before.total,new_bytes:added,projected_bucket_bytes:before.total+added};
 }
 async function run(){
  const root=process.argv[2];if(!root)throw Error('Usage: node scripts/r2-master-backup.js NEW_WORK_DIRECTORY');
@@ -76,6 +76,7 @@ async function run(){
  const source=path.join(root,'source'),downloaded=path.join(root,'downloaded'),restored=path.join(root,'restored');
  await B.backup(source,{onProgress:(n,total)=>{if(n%100===0||n===total)console.log('Verified source files: '+n+'/'+total);}});
  const result=await roundTrip(source,downloaded,restored,s3);
+ result.receipt=await require('./publish-restore-receipt').publish(restored,result);
  fs.writeFileSync(path.join(root,'result.json'),JSON.stringify(result,null,2)+'\n',{flag:'wx'});
  console.log(JSON.stringify(result,null,2));
  // This is independent source/manifest evidence, not a private data artifact.
