@@ -27,15 +27,32 @@ function write(root,name,data,gzip=false){B.relative(name);const p=path.join(roo
 const json=v=>JSON.stringify(v,null,2)+'\n';
 const ndjson=values=>values.map(v=>JSON.stringify(v)).join('\n')+(values.length?'\n':'');
 function csv(rows){return rows.map(row=>row.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\n')+'\n';}
+function dayShards(source,state){
+ // A day's old plain shard can survive the switch to numbered shards. The
+ // newest checkpoint that wrote that day selects its authoritative file set.
+ const days=new Map();let current=state;
+ while(current){const grouped=new Map();
+  for(const e of current.evidence_shards||[]){const m=e.path.match(/^evidence\/(\d{4})\/(\d{2})\/(\d{2})\//);if(!m)continue;
+   const day=m.slice(1).join('-');if(!grouped.has(day))grouped.set(day,[]);grouped.get(day).push(e.path);}
+  for(const [day,paths]of grouped)if(!days.has(day)){
+   const files={events:[],payloads:[],checkpoint_state_version:current.state_version};
+   for(const file of paths){const m=file.match(/\/(events|payloads)(?:\.\d+)?\.ndjson\.gz$/);if(m)files[m[1]].push(file);}
+   if(!files.events.length)throw Error('FORENSIC_DAY_EVENTS_UNMANIFESTED');days.set(day,files);
+  }
+  if(current.state_version<=1)break;
+  current=JSON.parse(fs.readFileSync(path.join(source,Store.historyPath(current.state_version-1))));
+ }
+ return days;
+}
 async function exportForensics(source,destination,{now}={}){
  const verified=B.verify(source),manifest=JSON.parse(fs.readFileSync(path.join(source,'manifest.json')));
  const state=JSON.parse(fs.readFileSync(path.join(source,Store.STATE_PATH)));
  now=now||state.anchor_close;const cutoff=retention(manifest,{now}).cutoff_utc;
  fs.mkdirSync(destination,{recursive:false});
- const days=new Map(),flaggedDays=[],stats=[],walletRows=[['day_utc','wallet','direct_xrp_received','direct_xrp_sent','offer_create_count','confirmed_cancel_count','exchange_legs','flag_count']],
+ const days=dayShards(source,state),walletDays=new Map(),flaggedDays=[],stats=[],walletRows=[['day_utc','wallet','direct_xrp_received','direct_xrp_sent','offer_create_count','confirmed_cancel_count','exchange_legs','flag_count']],
   csvRows=[['day_utc','wallet','currency','issuer','bought_xrp','sold_xrp','stable_spent','stable_received','wallet_legs']];
- for(const e of manifest.files){const m=e.path.match(/^evidence\/(\d{4})\/(\d{2})\/(\d{2})\/(events|payloads)(?:\.\d+)?\.ndjson\.gz$/);
-  if(!m)continue;const day=m.slice(1,4).join('-');if(!days.has(day))days.set(day,{events:[],payloads:[]});days.get(day)[m[4]].push(e.path);}
+ const selected=new Set([...days.values()].flatMap(d=>d.events.concat(d.payloads)));
+ const excluded=manifest.files.filter(e=>/^evidence\/\d{4}\/\d{2}\/\d{2}\/(events|payloads)(?:\.\d+)?\.ndjson\.gz$/.test(e.path)&&!selected.has(e.path)).map(e=>e.path);
  if(!days.size)throw Error('FORENSIC_NO_DAILY_SHARDS');
  for(const [day,files] of [...days].sort((a,b)=>a[0].localeCompare(b[0]))){
   const events=new Map(),processed=new Set(),records=[];
@@ -65,6 +82,7 @@ async function exportForensics(source,destination,{now}={}){
   }
   for(const w of result.wallets){
    if(!/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(w.account))throw Error('FORENSIC_WALLET_PATH_INVALID');
+   if(!walletDays.has(w.account))walletDays.set(w.account,[]);walletDays.get(w.account).push(day);
    const coverage=state.wallets.find(a=>a.address===w.account)||null;
    // Historical totals persist; recent/flagged transaction references persist too.
    const detail=day>=cutoff?w:{...w,orders:w.orders.filter(o=>flagged.has(o.hash)),exchanges:w.exchanges.filter(t=>flagged.has(t.hash))};
@@ -75,10 +93,18 @@ async function exportForensics(source,destination,{now}={}){
    for(const [asset,t] of Object.entries(w.stable_totals)){const [currency,issuer]=asset.split(':');csvRows.push([day,w.account,currency,issuer,t.buy_xrp,t.sell_xrp,t.stable_spent,t.stable_received,t.legs]);}
   }
  }
+ for(const w of state.wallets)if(!walletDays.has(w.address))walletDays.set(w.address,[]);
+ for(const [account,observedDays] of walletDays){
+  if(!/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(account))throw Error('FORENSIC_WALLET_PATH_INVALID');
+  write(destination,'wallets/'+account+'/index.json',json({account,observed_days:observedDays,
+   latest_checkpoint:state.wallets.find(w=>w.address===account)||null,source_commit:verified.source_commit,
+   lifetime_history_complete:false,note:'An empty day list means no classified activity in this export, not proof of no activity.'}));
+ }
  write(destination,'daily-wallet-totals.csv',csv(walletRows));
  write(destination,'daily-exchange-totals.csv',csv(csvRows));
  write(destination,'retention-preview.json',json(retention(manifest,{now,flaggedDays})));
  const result={schema:F.SCHEMA,generated_at:new Date().toISOString(),source:verified,analysis_as_of:now,assets:F.ASSETS,days:stats,
+  excluded_unselected_shards:excluded,
   causal_price_analysis:'NOT_EVALUATED: market/history.json, when present, contains descriptive comparisons only; a price pattern does not identify its cause.',
   limits:{max_events_per_day:MAX_DAY_EVENTS,raw_details_days:30,stablecoin_scope:'Only the exact listed currency/issuer pairs; all other assets remain unclassified.',
    ownership_attribution:false,manipulation_attribution:false,source_deletion:false}};
@@ -86,4 +112,4 @@ async function exportForensics(source,destination,{now}={}){
 }
 if(require.main===module){const [source,destination]=process.argv.slice(2);if(!source||!destination)throw Error('Usage: node scripts/forensic-export.js VERIFIED_BACKUP NEW_OUTPUT_DIRECTORY');
  exportForensics(source,destination).then(r=>console.log(JSON.stringify({source_commit:r.source.source_commit,days:r.days.length}))).catch(e=>{console.error(e.message);process.exitCode=1;});}
-module.exports={exportForensics,retention,csv,rows};
+module.exports={exportForensics,retention,csv,rows,dayShards};

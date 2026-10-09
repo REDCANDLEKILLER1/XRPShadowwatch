@@ -79,6 +79,8 @@ Archive contents:
 - `daily-exchange-totals.csv`: exact daily exchange totals by wallet and asset.
 - `wallets/<address>/<UTC-day>.json`: daily wallet totals, recent exchanges/orders,
   flags and available checkpoint coverage. Null coverage is unknown, not complete.
+- `wallets/<address>/index.json`: every watched wallet and every classified
+  counterparty, including watched wallets with no classified activity in the export.
 - `days/<UTC-day>/`: daily summaries, flags, recent derived facts, and flagged
   facts **plus their complete original payloads** regardless of age.
 - `retention-preview.json`: 30-day working-detail policy, 5 GB review threshold,
@@ -107,6 +109,9 @@ current tracked evidence files; Git history size is explicitly unmeasured.
   compressed output. A limit failure stops publication, never silently truncates.
 - One day is analyzed at a time; payloads are streamed. Flagged originals are
   reread after the pattern pass. Conflicting events/orphan payloads fail export.
+- Only the newest verified checkpoint manifest for each day selects its shards.
+  Superseded files left in Git are listed as excluded and remain in the backup;
+  they are not silently mixed into the current day or counted twice.
 - Missing or unsupported payloads are counted and left unclassified; they cannot
   create trade totals. Daily summaries expose these counts.
 - Branch push performs an initial sample and verified export. After merge to the

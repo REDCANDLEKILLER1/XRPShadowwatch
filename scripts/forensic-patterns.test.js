@@ -64,6 +64,8 @@ function inspect(f){return F.inspect(f.event,f.payload);}
   const state=S.genesis([{address:owner,scan_coverage_through:102}],{anchor_ledger:102,anchor_close:'2026-10-09T00:00:00Z',
    evidence_shards:Object.entries(data).map(([p,b])=>({path:p,sha256:B.sha256(b),rows:3}))});
   data[Store.STATE_PATH]=data[Store.historyPath(1)]=Buffer.from(S.serialize(state));
+  // Obsolete shard survives in Git but is outside the canonical day manifest.
+  data['evidence/2026/10/09/payloads.001.ndjson.gz']=zlib.gzipSync(JSON.stringify(payloads[0])+'\n');
   const files=Object.entries(data).map(([p,b])=>({path:p,bytes:b.length,sha256:B.sha256(b),git_blob_sha:B.blobSha(b)}));
   const manifest={schema:B.SCHEMA,source_commit:'a'.repeat(40),source_repository:A.EVIDENCE_REPO,source_tree:B.treeSha(files),files,file_count:files.length,total_bytes:files.reduce((n,e)=>n+e.bytes,0)};
   manifest.manifest_sha256=B.seal(manifest);
@@ -71,7 +73,9 @@ function inspect(f){return F.inspect(f.event,f.payload);}
   fs.writeFileSync(path.join(source,'manifest.json'),JSON.stringify(manifest));
   const dest=path.join(root,'export'),result=await E.exportForensics(source,dest);
   assert.equal(result.days[0].flags,1);assert.equal(result.days[0].payloads,3);
+  assert.deepEqual(result.excluded_unselected_shards,['evidence/2026/10/09/payloads.001.ndjson.gz']);
   const wallet=JSON.parse(fs.readFileSync(path.join(dest,'wallets',owner,'2026-10-09.json')));assert.equal(wallet.stable_totals[F.assetKey(stable)].sell_xrp,'300');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dest,'wallets',owner,'index.json'))).lifetime_history_complete,false);
   assert.equal(zlib.gunzipSync(fs.readFileSync(path.join(dest,'days/2026-10-09/flagged-payloads.ndjson.gz'))).toString().trim().split('\n').length,3);
   assert(fs.readFileSync(path.join(dest,'daily-exchange-totals.csv'),'utf8').includes('"300"'));
   assert(fs.readFileSync(path.join(dest,'daily-wallet-totals.csv'),'utf8').includes('"'+owner+'"'));
