@@ -11,7 +11,7 @@ on:
     - cron: '43 6 * * *'
   push:
     branches: [agent/forensic-patterns-20261009]
-    paths: ['src/db/forensic-patterns.js', 'scripts/forensic-*.js', 'scripts/market-*.js', '.github/workflows/forensic-evidence.yml']
+    paths: ['src/db/forensic-*.js', 'scripts/forensic-*.js', 'scripts/market-*.js', '.github/workflows/forensic-evidence.yml']
 permissions:
   contents: read
 # Share the storage writer lane with the master backup; capacity checks cannot race.
@@ -35,6 +35,7 @@ jobs:
         id: safeguards
         run: |
           node scripts/forensic-patterns.test.js
+          node scripts/forensic-report.test.js
           node scripts/market-evidence.test.js
           node scripts/storage-master-backup.test.js
           node scripts/r2-master-backup.test.js

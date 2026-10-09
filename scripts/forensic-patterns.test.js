@@ -85,6 +85,13 @@ function inspect(f){return F.inspect(f.event,f.payload);}
   assert.equal(zlib.gunzipSync(fs.readFileSync(path.join(dest,'days/2026-10-09/flagged-payloads.ndjson.gz'))).toString().trim().split('\n').length,3);
   assert(fs.readFileSync(path.join(dest,'daily-exchange-totals.csv'),'utf8').includes('"300"'));
   assert(fs.readFileSync(path.join(dest,'daily-wallet-totals.csv'),'utf8').includes('"'+owner+'"'));
+  assert.equal(result.report_summary,null,'an offline export alone cannot publish a report summary');
+  const receipt={...B.verify(source),restore_verified:true};
+  const reported=await E.exportForensics(source,path.join(root,'report-export'),{restoreReceipt:receipt});
+  assert.equal(reported.report_summary.xrp_sold_for_rlusd,'300');
+  assert.equal(reported.report_summary.repeated_quote_wallets,1);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root,'report-export/report-summary.json'))).sha256,reported.report_summary.sha256);
+  await assert.rejects(()=>E.exportForensics(source,path.join(root,'wrong-restore'),{restoreReceipt:{...receipt,source_commit:'f'.repeat(40)}}),/RESTORE_MISMATCH/);
   assert(B.verify(source).verified);await assert.rejects(()=>E.exportForensics(source,dest),/EEXIST/);
  }finally{fs.rmSync(root,{recursive:true,force:true});}
  console.log('PASS exact amounts, fees, issuer identity, opposite trustline orientation, validated fills, no-fill orders, cancellation ambiguity, self-payment boundary, pattern thresholds, verified export, flagged originals, and non-deleting retention');

@@ -1,5 +1,8 @@
 {
   "functions": {
+    "api/forensic-report.js": {
+      "maxDuration": 15
+    },
     "api/evidence.js": {
       "maxDuration": 300,
       "includeFiles": "src/{brief,shared}/**"

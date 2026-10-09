@@ -44,11 +44,12 @@ function dayShards(source,state){
  }
  return days;
 }
-async function exportForensics(source,destination,{now}={}){
+async function exportForensics(source,destination,{now,restoreReceipt}={}){
  const verified=B.verify(source),manifest=JSON.parse(fs.readFileSync(path.join(source,'manifest.json')));
  const state=JSON.parse(fs.readFileSync(path.join(source,Store.STATE_PATH)));
  now=now||state.anchor_close;const cutoff=retention(manifest,{now}).cutoff_utc;
  fs.mkdirSync(destination,{recursive:false});
+ const recentRecords=[],end=Date.parse(state.anchor_close),start=end-86400000;
  const days=dayShards(source,state),walletDays=new Map(),flaggedDays=[],stats=[],walletRows=[['day_utc','wallet','direct_xrp_received','direct_xrp_sent','offer_create_count','confirmed_cancel_count','exchange_legs','flag_count']],
   csvRows=[['day_utc','wallet','currency','issuer','bought_xrp','sold_xrp','stable_spent','stable_received','wallet_legs']];
  const selected=new Set([...days.values()].flatMap(d=>d.events.concat(d.payloads)));
@@ -67,6 +68,7 @@ async function exportForensics(source,destination,{now}={}){
   }
   for(const e of events.values())if(!processed.has(e.hash))records.push(F.inspect(e,null));
   records.sort((a,b)=>a.ledger_index-b.ledger_index||(a.transaction_index??Infinity)-(b.transaction_index??Infinity)||a.hash.localeCompare(b.hash));
+  if(restoreReceipt)for(const r of records)if(Date.parse(r.close_time)>start&&Date.parse(r.close_time)<=end){if(recentRecords.length>=500000)throw Error('FORENSIC_REPORT_WINDOW_LIMIT');recentRecords.push(r);}
   const result=F.summarize(records),flagged=new Set(result.flags.flatMap(f=>f.hashes));
   if(flagged.size)flaggedDays.push(day);
   const summary={day,events:events.size,payloads:processed.size,statuses:result.statuses,flags:result.flags.length,wallets:result.wallets.length,
@@ -103,12 +105,18 @@ async function exportForensics(source,destination,{now}={}){
  write(destination,'daily-wallet-totals.csv',csv(walletRows));
  write(destination,'daily-exchange-totals.csv',csv(csvRows));
  write(destination,'retention-preview.json',json(retention(manifest,{now,flaggedDays})));
+ let reportSummary=null;
+ if(restoreReceipt){
+  if(!restoreReceipt.restore_verified||restoreReceipt.source_commit!==verified.source_commit||restoreReceipt.manifest_sha256!==verified.manifest_sha256)throw Error('FORENSIC_REPORT_RESTORE_MISMATCH');
+  reportSummary=require('../src/db/forensic-report').build(recentRecords,{...verified,restore_verified:true});
+  write(destination,'report-summary.json',json(reportSummary));
+ }
  const result={schema:F.SCHEMA,generated_at:new Date().toISOString(),source:verified,analysis_as_of:now,assets:F.ASSETS,days:stats,
   excluded_unselected_shards:excluded,
   causal_price_analysis:'NOT_EVALUATED: market/history.json, when present, contains descriptive comparisons only; a price pattern does not identify its cause.',
   limits:{max_events_per_day:MAX_DAY_EVENTS,raw_details_days:30,stablecoin_scope:'Only the exact listed currency/issuer pairs; all other assets remain unclassified.',
    ownership_attribution:false,manipulation_attribution:false,source_deletion:false}};
- write(destination,'index.json',json(result));return result;
+ write(destination,'index.json',json(result));return{...result,report_summary:reportSummary};
 }
 if(require.main===module){const [source,destination]=process.argv.slice(2);if(!source||!destination)throw Error('Usage: node scripts/forensic-export.js VERIFIED_BACKUP NEW_OUTPUT_DIRECTORY');
  exportForensics(source,destination).then(r=>console.log(JSON.stringify({source_commit:r.source.source_commit,days:r.days.length}))).catch(e=>{console.error(e.message);process.exitCode=1;});}

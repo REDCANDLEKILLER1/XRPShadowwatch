@@ -2,8 +2,8 @@
 
 Branch: `agent/forensic-patterns-20261009`, stacked on storage/automatic-roster PR #104.
 Read-only XRPL mainnet observations. No transaction submission, signing, automatic
-roster changes, deletion, or ownership attribution. Existing report and acquisition
-paths are unchanged.
+roster changes, deletion, or ownership attribution. The existing acquisition path
+is unchanged; Lady K's report receives the optional summary described below.
 
 ## What this adds
 
@@ -88,6 +88,36 @@ Archive contents:
 - `market/`: observed-prices CSV, sample references/checksums and descriptive
   history comparisons, plus recent raw sample files (whole UTC days covering at
   least the last 24 hours). Older originals remain in R2.
+- `report-summary.json`: sealed aggregate for the latest 24 hours ending at the
+  verified evidence anchor, available only after an independent R2 restore.
+
+## Lady K's report
+
+After the export is uploaded and independently read back, the workflow publishes
+only the compact summary to `forensics/report/latest.json` and an immutable history
+file in the private evidence repository. The existing evidence token needs Contents
+write access for this step. A conflict retries against the new repository head;
+an older evidence anchor cannot replace a newer one. Original shards and checkpoint
+files are never modified by summary publication.
+
+`GET /api/forensic-report` reads the summary at one pinned repository commit and
+checks its seal, counts, amounts and observation period. It returns aggregate
+figures without wallet addresses, raw payloads or private R2 locations. The browser
+captures the response in the report pack before final rendering. The canonical
+report gains a short **Market activity watch** section, so Lady K's displayed,
+copied, downloaded and locally saved report contain the same text. Historical
+packs without this field are unchanged.
+
+The section identifies observed XRP sold for RLUSD and bought with RLUSD, repeated
+same-price orders, repeated confirmed cancellations and regular transfer timing.
+It names the observation window and states that observed wallet legs are not
+whole-market volume or proof of common ownership or price control. It does not
+yet narrate the separate market-snapshot timeline or the untested $1.41 hypothesis.
+Data older than 36 hours is marked stale; a missing/failed response is unavailable,
+never zero activity. Loading runs alongside startup with a six-second ceiling and
+cannot edit an already saved report. With the current schedule the analysis updates
+daily, not on every report scan. Missing credentials or a failed publication leave
+the previous summary available with its original timestamp.
 
 All original source files remain in private R2 content-addressed storage and the
 source repository. Historical totals remain in immutable exports. Old unflagged
@@ -119,13 +149,15 @@ current tracked evidence files; Git history size is explicitly unmeasured.
   export regenerates deterministic facts from the pinned source; it does not add
   yesterday's totals onto today's and double-count them.
 - Rollback: disable `Private forensic evidence` in Actions. Original evidence,
-  existing collector, report, checkpoint and watchlist remain intact.
+  collector, checkpoint and watchlist remain intact; the report summary ages into
+  an explicit stale notice.
 
 Local operator use (no network access for the analyzer):
 
 ```sh
 node scripts/forensic-export.js VERIFIED_MASTER_BACKUP NEW_OUTPUT_DIRECTORY
 node scripts/forensic-patterns.test.js
+node scripts/forensic-report.test.js
 node scripts/market-evidence.test.js
 ```
 
