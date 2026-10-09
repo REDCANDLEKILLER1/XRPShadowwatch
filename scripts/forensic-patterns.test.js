@@ -17,6 +17,12 @@ function inspect(f){return F.inspect(f.event,f.payload);}
  assert.equal(sell.exchanges[0].xrp,'100');assert.equal(sell.exchanges[0].stable,'141');assert.equal(sell.exchanges[0].effective_price_fraction,'141/100');
  assert.equal(F.add('100000000000000000.123456789','1.000000001'),'100000000000000001.12345679');assert.equal(F.add('1e-81','2e-81'),'0.'+'0'.repeat(80)+'3');
  assert.equal(F.priceFraction('1.4100','1.00'),'141/100');
+ const real=require('./fixtures/forensic-live-ledger-107530078.json'),T=require('../src/db/transactions'),X=require('../src/db/evidence-export');
+ const realLegs=real.transactions.map(item=>{const row=T.rowFromAccountTx({tx_json:item.tx_json||item.tx||item,hash:item.hash,
+  ledger_index:real.provenance.ledger_index,validated:real.provenance.validated,meta:item.meta||item.metaData});
+  return F.inspect(X.eventOf({...row,close_time:real.provenance.close_time}),X.payloadOf(row)).exchanges;});
+ assert.deepEqual(realLegs.map(legs=>legs.find(t=>t.basis==='OFFERCREATE_OWNER').xrp),['359.045227','545.075376']);
+ for(const legs of realLegs){assert.equal(legs.length,2);assert.equal(legs[0].xrp,legs[1].xrp);assert.equal(legs[0].stable,legs[1].stable);assert.notEqual(legs[0].side,legs[1].side);}
  const failed=fixture();failed.event.tx_result=failed.payload.raw_meta.TransactionResult='tecUNFUNDED_OFFER';assert.equal(inspect(failed).exchanges.length,0);
  const pending=fixture();pending.event.validated=false;assert.equal(inspect(pending).exchanges.length,0);
  const mismatch=fixture();mismatch.payload.raw_meta.TransactionIndex=1;assert.equal(inspect(mismatch).status,'PAYLOAD_EVENT_MISMATCH');
