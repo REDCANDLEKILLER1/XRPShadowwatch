@@ -44,17 +44,24 @@ existing deadline and report suites, and the repository regression gate.
 
 The October 9 morning report exposed a boot race: an unrelated market-price
 timeout discarded an already completed forensic summary. The report now captures
-that result independently within the existing 15-second boot ceiling. The shared
-analysis request allows 12 seconds, and timeout/network/HTTP outcomes are recorded
-without including upstream error text. Results arriving after boot cannot change
+that result independently of the existing 15-second boot ceiling. The shared
+analysis request allows 20 seconds while stored evidence is processed; it is
+joined before the report pack is built. Timeout/network/HTTP outcomes are recorded
+without including upstream error text. Results arriving after sealing cannot change
 the report, and each new run starts without the prior result.
 
 New reports identify the section as **XRP/RLUSD market activity watch**. Unavailable
 analysis explicitly differs from zero trading; previously sealed text stays intact.
-The full RUN regression combines a seven-second analysis response with a stalled
+The full RUN regression combines a seventeen-second analysis response with a stalled
 price fill, then checks an unavailable rerun does not inherit earlier figures.
 
-Validation: all 71 local regression suites pass. Serving the previous core
-against the same slow-price fixture fails with `UNAVAILABLE` instead of
+Validation: the initial timeout correction passed all 71 local regression suites.
+Serving the previous core
+against the slow-price fixture failed with `UNAVAILABLE` instead of
 `AVAILABLE`; the corrected core preserves the XRP/RLUSD figures. The canonical,
 shortened, Lady K display, clipboard, and download checks also pass.
+
+Production verification observed a 12.7-second analysis response, so the request
+now has its own 20-second budget instead of competing with market boot. The
+17-second fixture specifically checks that a result arriving after boot is
+included before sealing.
