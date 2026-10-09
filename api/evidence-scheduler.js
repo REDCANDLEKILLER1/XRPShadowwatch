@@ -76,11 +76,11 @@ async function runScheduledAcquisition(deps) {
   const now = typeof d.now === 'function' ? Number(d.now()) : Date.now();
   const clockNow = typeof d.clockNow === 'function' ? d.clockNow : Date.now;
   const makeId = d.makeReportId || (ms => schedulerReportId(ms));
-  const getRoster = d.selectRoster || (() => roster.select());
+  const getRoster = d.selectRoster || (() => require('../src/db/auto-roster').selection({env:d.env||process.env}));
   const getReader = d.acquireReader || acquireReader;
   const putReader = d.releaseReader || releaseReader;
   const acquire = d.acquire || D.acquire;
-  const selected = getRoster();
+  const selected = await getRoster();
   const accounts = selected && Array.isArray(selected.accounts) ? selected.accounts : [];
   if (!accounts.length) throw new Error('SCHEDULER_ROSTER_EMPTY');
 
@@ -97,6 +97,8 @@ async function runScheduledAcquisition(deps) {
     scan_id: null,
     sealed_at: null,
     roster: accounts,
+    auto_roster: selected.auto_roster || null,
+    ...(selected.auto_roster && selected.auto_roster.candidates.length ? {cold_window_ledgers:100000} : {}),
     max_admissions: MAX_ADMISSIONS,
     // No report window: scheduler commits ledger evidence only. Interactive
     // report runs later read whatever current proven window they need.

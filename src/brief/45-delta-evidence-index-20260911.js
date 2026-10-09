@@ -534,6 +534,15 @@
         if (!result || result.stored_checkpoint !== true) {
           throw new Error((result && result.error) || 'STORED_REPORT_UNAVAILABLE');
         }
+        if (result.failed_wallets === 0 && result.complete_wallets === result.target_wallets) {
+          (result.wallets || []).forEach(function (w) {
+            if (!w.proven || Number(w.proven_through) !== Number(result.anchor_ledger)) return;
+            if (typeof KNOWN !== 'undefined' && !KNOWN[w.address] && /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(w.address)) {
+              var entry = {address:w.address,label:'AUTO_'+w.address,cat:'discovered_counterparty',shared_checkpoint:true};
+              WATCHLIST.push(entry); KNOWN[w.address] = entry;
+            }
+          });
+        }
         run = result;
         run.byAddress = Object.create(null);
         run.balance_baseline_by_address = Object.create(null);

@@ -876,7 +876,7 @@ async function acquire(input, deps) {
       from_state_version: state.state_version, from_state_sha256: state.state_sha256,
       anchor_ledger: anchor.ledger, anchor_close: anchor.close_iso,
       cold_from_ledger: admitted.length ? coldFrom : null,
-      admitted_wallets: admitted });
+      admitted_wallets: admitted, auto_roster: run.auto_roster || null });
   }
   let journalWritten = journal.segments > 0;
   const results = new Array(entries.length);
@@ -1421,6 +1421,7 @@ async function acquire(input, deps) {
     evidence_shards: built.shards,
     wallets: nextEntries,
     admitted_wallets: admitted,
+    auto_roster: journal.auto_roster || null,
     // Named so the commit that lands the evidence also removes the journal,
     // in the same tree and the same ref update. A separate cleanup call is a
     // call that can fail after the evidence is already in.

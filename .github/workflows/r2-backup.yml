@@ -1,0 +1,44 @@
+name: Private R2 backup and restore
+on:
+  workflow_dispatch:
+  # Bootstrap the first copy on the approved builder branch. No PR triggers.
+  push:
+    branches: [agent/storage-auto-roster-20261008]
+    paths: ['scripts/r2-master-backup.js', 'src/db/master-backup.js', '.github/workflows/r2-backup.yml']
+permissions:
+  contents: read
+concurrency:
+  group: shadowwatch-private-r2-backup
+  cancel-in-progress: false
+jobs:
+  backup:
+    if: github.repository == 'REDCANDLEKILLER1/XRPShadowwatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check required secrets without exposing values
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          SHADOWWATCH_EVIDENCE_TOKEN: ${{ secrets.SHADOWWATCH_EVIDENCE_TOKEN }}
+        run: |
+          node -e "for (const k of ['R2_ACCESS_KEY_ID','R2_SECRET_ACCESS_KEY','SHADOWWATCH_EVIDENCE_TOKEN']) if (!process.env[k]) { console.error('Missing repository secret: '+k); process.exitCode=1; }"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify transport and restore regression tests
+        run: |
+          node scripts/storage-master-backup.test.js
+          node scripts/r2-master-backup.test.js
+      - name: Upload private evidence, download independently, restore and verify
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          SHADOWWATCH_EVIDENCE_TOKEN: ${{ secrets.SHADOWWATCH_EVIDENCE_TOKEN }}
+        run: node scripts/r2-master-backup.js "$RUNNER_TEMP/shadowwatch-r2-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+      # No evidence artifact upload, source deletion, receipt publication or
+      # auto-admission toggle. Initial restoration must be inspected first.

@@ -253,6 +253,14 @@ async function streamStoredReportRequest(res, input, deps) {
   }
 }
 
+function walletWindowProven(wallet, state, baselineState) {
+  if (Number(wallet.last_proven_ledger) !== Number(state.anchor_ledger)) return false;
+  if (!wallet.admitted_at_ledger) return true; // original seeded roster
+  // A new wallet must prove the START of the requested window, not just its end.
+  var floor=Number(wallet.history_from_ledger), baseline=Number(baselineState && baselineState.anchor_ledger);
+  return Number.isInteger(floor) && floor>0 && Number.isInteger(baseline) && baseline>0 && floor<=baseline;
+}
+
 async function storedReport(input, deps) {
   let verified = 0, total = 0;
   const notify = deps && deps.onReportProgress;
@@ -319,7 +327,9 @@ async function storedReport(input, deps) {
   const wallets = (state.wallets || []).map(w => ({
     address: w.address,
     status: 'COMPLETE',
-    proven: Number(w.last_proven_ledger) === Number(state.anchor_ledger),
+    proven: walletWindowProven(w, state, baselineState),
+    history_from_ledger: w.history_from_ledger,
+    admitted_at_ledger: w.admitted_at_ledger,
     proven_through: w.last_proven_ledger,
     balance_drops: w.balance_drops,
     balance_ledger: w.balance_ledger,
@@ -330,6 +340,7 @@ async function storedReport(input, deps) {
 
   const body = {
     source: 'STORED_VERIFIED_EVIDENCE',
+    evidence_ref: loaded.ref,
     stored_checkpoint: true,
     committed: false,
     reason: 'STORED_CHECKPOINT_READ',
@@ -454,9 +465,9 @@ module.exports = async function handler(req, res) {
         // What the roster says versus what the checkpoint has proven. The gap
         // is the wallets still waiting to join, and it is worth seeing BEFORE
         // a run rather than inferring it from a count that looks short.
-        roster_wallets: rosterCount(),
+        roster_wallets: loaded.state ? new Set(roster.select().accounts.concat(loaded.state.wallets.map(w => w.address))).size : rosterCount(),
         wallets_awaiting_admission: loaded.state
-          ? Math.max(0, rosterCount() - Number(loaded.state.wallet_count || 0)) : rosterCount(),
+          ? roster.select().accounts.filter(a => !loaded.state.wallets.some(w => w.address === a)).length : rosterCount(),
         // The per-wallet checkpoints, so the UI can show what is proven before
         // a run starts rather than only after it finishes.
         wallets_detail: input.action === 'state' && loaded.state ? loaded.state.wallets : undefined
@@ -704,3 +715,5 @@ module.exports.nextScheduledSlot = nextScheduledSlot;
 module.exports.capWindowToAnchor = capWindowToAnchor;
 module.exports.streamStoredReport = streamStoredReport;
 module.exports.streamStoredReportRequest = streamStoredReportRequest;
+
+module.exports.walletWindowProven = walletWindowProven;

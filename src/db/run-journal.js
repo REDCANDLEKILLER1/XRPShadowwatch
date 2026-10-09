@@ -75,6 +75,7 @@ function canonical(journal) {
     anchor_close: _s(j.anchor_close),
     cold_from_ledger: _int(j.cold_from_ledger),
     admitted_wallets: (j.admitted_wallets || []).slice().sort(),
+    ...(j.auto_roster ? {auto_roster:j.auto_roster} : {}),
     wallet_count: (j.wallets || []).length,
     wallets: (j.wallets || []).slice().sort((a, b) =>
       String(a.address) < String(b.address) ? -1 : (String(a.address) > String(b.address) ? 1 : 0)),
@@ -123,6 +124,7 @@ function begin(input) {
     anchor_ledger: i.anchor_ledger, anchor_close: i.anchor_close,
     cold_from_ledger: i.cold_from_ledger,
     admitted_wallets: i.admitted_wallets || [],
+    ...(i.auto_roster ? {auto_roster:i.auto_roster} : {}),
     wallets: [], row_shards: []
   });
 }
