@@ -1,0 +1,94 @@
+🩸 ℜᴇᴅᴄᴀɴᴅʟᴇᴋɪʟʟᴇR 🩸
+ＳＨＡＤＯＷ ＷＡＴＣＨ
+✨ 𝐹𝑒𝑎𝑡𝑢𝑟𝑖𝑛𝑔 ✨
+𝓛𝓪𝓭𝔂 𝓚'𝓼
+🄴🅇🄲🄴🄻🄻🄴🄽🅃!
+𝖂𝖍𝖎𝖑𝖊 𝖄𝖔𝖚 𝖂ᴇʀᴇ 𝕾𝖑𝖊𝖊𝔭𝖎𝖓𝖌
+𝗫𝗥𝗣𝗟  𝕌ℙ𝔻𝔸𝕋𝔼 ✨✨ on
+☕ COFFEE & CRYPTO with 𝐒𝐓ΟΝΕ
+October 9, 2026
+
+Executive Summary
+─────────────────
+464.56M XRP moved across 70 large transfers during the last 24h. Each large transfer is at least 1 million XRP. These figures describe observed movement only; they do not prove intent.
+
+What Mattered Most
+──────────────────
+Coinbase (7 transfers) and Bithumb (4 transfers), plus 6 other labeled groups received 125.67M XRP this scan. Receiving XRP does not establish that an exchange bought it or kept it.
+
+Evidence
+────────
+20M XRP moved from a Ripple-associated wallet to a large XRP holder in the scanned window. A second transfer of 20M XRP reached a large XRP holder. The largest single move, 200M XRP, was internal to a Ripple-associated wallet.
+
+Discovery queue: 65 flagged candidates — 2 found this scan, 1 recommended for review, separate from the 423 wallets on the permanent watch list. These wallet-activity flags are not ownership proof.
+
+Published news context: Ripple (XRP) Expands Wall Street Push With Leveraged ETF Swap Financing: Report · Paxos Adds XRP to Brokerage Platform, Expanding Regulated Access.
+
+
+Escrow Watch
+────────────
+Ripple escrow: 31.40B XRP locked now across 98 active validated-ledger escrow objects · registry check 20/20 known Ripple-labeled addresses.
+No Ripple escrow events are present in the acquired record for the last 36h; this alone does not prove an event-free window.
+Other XRPL escrow, last 36h: 1 new lock totalling 10.00M XRP · 0 releases, across 1 owner wallet.
+• Flare Core Vault: 1 lock 10.00M XRP
+Escrow means XRP locked until its release conditions are met. The count is of separate locks (ledger objects, not owner wallets). Ripple and other owners are listed separately; this report covers observed escrow, not every escrow on the XRPL.
+
+Under the Surface
+─────────────────
+Smaller transfers tell another part of the story. 213.22M XRP moved in 781 payments of 100,000 to under 1 million XRP. 191.52M XRP across 701 of those payments matched 99 patterns: repeated routes, several wallets sending to one, or one wallet sending to several. These patterns are worth tracing; they do not prove funds were being hidden.
+
+Market activity watch
+Observation period: Oct 7, 9:31 PM CDT to Oct 8, 9:31 PM CDT.
+In the analyzed wallet records, 5.947155 XRP was exchanged for RLUSD, and 4.855545 XRP was bought with RLUSD. These are observed wallet flows, not total market volume.
+Patterns to watch: 6 sent transfers at regular intervals.
+These observations do not establish who controls the wallets or whether anyone is controlling the price.
+
+How to Read It
+──────────────
+Shadow Volume counts transfers of at least 1 million XRP. Net watched flow is the overall change across watched wallets compared with their prior snapshot; it does not mean a wallet has a negative balance.
+
+What To Watch Next
+──────────────────
+• Check whether the receiving exchange wallets keep the XRP or send it onward.
+• Check whether the largest recipient in this window makes another move.
+
+Verdict
+───────
+The read, straight up: elevated watch score (51/100). This score summarizes watched transfers, activity flags, and available news context. It is not a price forecast or proof of wrongdoing. Main factors: number of large transfers, XRP moved in large transfers, small-payment or destination-tag flags. Overall, about 9.04M XRP moved outward from watched wallets. Not financial advice. XRP-only forensic watch.
+
+I’m XRPMan, and I tell on the banks.
+
+LEDGER DIAGNOSTICS
+──────────────────
+• Watched-ledger evidence current through: 2026-10-09T04:40:02.000Z · CURRENT
+• Live order/offer sweep: not collected in this stored-evidence report.
+• Receiver tracing: 0 of 2 receivers have observed large onward payments after their largest receipt. Stored watched-wallet evidence only; complete receiver history and retention are not proved.
+• XRP price: ~$1.3920 (24h flat)
+• Market volume (exchanges, 24h): $2.52B
+• Native XRPL DEX observed volume (top 200-token index, 24h): ~$13M (~9.04M XRP, ledger-derived estimate)
+• XRPL EVM: $32.2K TVL
+• RLUSD on XRPL (issuer obligations): 1.17B tokens
+• New funded XRPL accounts (2026-10-08): +2,834
+• Watched wallets: 423
+• Watched activity (all sizes, LAST 24H): 76944 transactions · 795.66M XRP moved · 192 wallets active
+• Shadow volume (whale moves ≥1M, LAST 24H): 464.56M XRP · 70 transfers
+• Net watched flow: 9.04M XRP outward
+
+🙏 THE DAILY PRAYER
+───────────────────
+Lord, let this work outlast our interest in it. Build something that serves after the novelty is gone.
+
+📖 THE DAILY SCRIPTURE
+──────────────────────
+Proverbs 25:2 (KJV)
+“It is the glory of God to conceal a thing: but the honour of kings is to search out a matter.”
+
+Sources
+───────
+[1] Ripple (XRP) Expands Wall Street Push With Leveraged ETF Swap Financing: Report — https://news.google.com/rss/articles/CBMitAFBVV95cUxQUUx0eUs1cW5xWXp4enl4OWlwTlZNZkh5ZDVPSE1nT1lTdlFmNXFNX1FwZU9EMGo1NmVIMlR2QzN5LXJtOFNLblVpWFRQRW4yVVJjQU1NV0NZeEdlWVBVMFA1b2ptSzZpN3JfNjlJcm8xWnJpX053RUF2bHVUVjR0UGJJQ1dDdzlOemxmVEIyUk9TTS1maWZLbU5DV2RtRGxiMXhYTDdGSlVIQ2gyNUlqaUkwLTU?oc=5
+[2] Paxos Adds XRP to Brokerage Platform, Expanding Regulated Access — https://news.google.com/rss/articles/CBMingFBVV95cUxPNUJlNFRwZWFONUg1dHYweXpPZWYtV3NXanQwZEJuLXkwQm5SVjNOa0pBdnNQTk9jaXQtc255b2dMQ3Y2UXh6RGJEeWdWcmxWUzhnZFZIaHdJZEtaWkpCTmZ6WWF0UVAzMWVteFFHUXV0MmhiSmdNUlFFZ0Q0eDVpUlAzNFRVQWw5YmhiODB3MnAzQ1JadHg3TDJsWUJadw?oc=5
+
+
+NEWS USED:
+[1] google_news@self — Ripple (XRP) Expands Wall Street Push With Leveraged ETF Swap Financing: Report
+[2] google_news@self — Paxos Adds XRP to Brokerage Platform, Expanding Regulated Access
