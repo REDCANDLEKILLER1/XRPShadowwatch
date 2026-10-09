@@ -15,6 +15,9 @@ const server=http.createServer((req,res)=>{if(req.url==='/api/forensic-report'){
 (async()=>{await new Promise(r=>server.listen(port,'127.0.0.1',r));const browser=await(process.env.SW_TEST_BROWSER==='webkit'?webkit:chromium).launch({args:process.env.SW_TEST_BROWSER==='webkit'?[]:['--no-sandbox']});
 try{const page=await browser.newPage({viewport:{width:1440,height:900}});await page.route('**/*',r=>r.request().url().startsWith('http://127.0.0.1:'+port)?r.continue():r.abort());await page.routeWebSocket(/wss:\/\//,ws=>ws.close());
  await page.goto('http://127.0.0.1:'+port+'/');await page.waitForFunction(()=>document.querySelector('#pattern-watch-live').textContent.includes('Regular transfers · 6 events'));
+ // The desktop landing hook runs 300ms after DOMContentLoaded. Wait for it
+ // before selecting tabs so it cannot move the test back to HOME mid-click.
+ await page.waitForFunction(()=>window.switchView.__swWall===true);
  await page.evaluate(()=>{document.getElementById('splash-screen').remove();});
  for(const mode of ['live','map','graph']){await page.evaluate(m=>{switchView(m);document.getElementById('pattern-watch-'+m).open=true;},mode);
  const p=page.locator('#pattern-watch-'+mode);assert.match(await p.textContent(),/Regular transfers · 6 events/);assert.match(await p.textContent(),/not proof of bots/);assert.equal(await p.locator('a[href*="/transactions/"]').count(),3);
@@ -25,7 +28,7 @@ try{const page=await browser.newPage({viewport:{width:1440,height:900}});await p
  await page.evaluate(()=>switchView('live'));await page.locator('#pattern-watch-live button').filter({hasText:'Trace wallet'}).click();assert.equal(await page.locator('#view-graph').isVisible(),true);
  assert.equal(await page.evaluate(x=>window.SW_PATTERN_WATCH.hasWallet(x),a),true);
  assert.equal(calls,1,'three panels share one API request');
- await page.evaluate(x=>{const row=document.createElement('div');document.getElementById('feed').appendChild(row);SW_PATTERN_WATCH.decorateTransaction(row,x,'');},a);
+ await page.evaluate(([from,to])=>handleTx({TransactionType:'Payment',Account:from,Destination:to,Amount:'10000000',hash:'F'.repeat(64)},{TransactionResult:'tesSUCCESS',delivered_amount:'10000000',AffectedNodes:[]}),[a,b]);
  assert.equal(await page.locator('#feed .sw-pattern-badge').count(),1);
  await page.setViewportSize({width:390,height:844});for(const mode of ['live','map','graph']){await page.evaluate(m=>switchView(m),mode);const p=page.locator('#pattern-watch-'+mode);const box=await p.boundingBox();assert(box.width<=390);assert(await p.evaluate(e=>e.scrollWidth<=e.clientWidth+1));}
  await page.screenshot({path:'/tmp/shadowwatch-pattern-phone.png'});

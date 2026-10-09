@@ -35,6 +35,11 @@ jobs:
       - name: Install Chromium and WebKit
         run: npx playwright install --with-deps chromium webkit
 
+      - name: WebKit pattern surfaces
+        env:
+          SW_TEST_BROWSER: webkit
+        run: node scripts/pattern-surfaces.test.js
+
       # Runs the same list `npm test` runs locally, so a contributor cannot be
       # green on their machine and red here because CI ran a different set.
       - name: Regression suites
@@ -50,7 +55,6 @@ jobs:
           node scripts/report-plain-language.test.js
           node scripts/stored-receiver-tracing.test.js
           node scripts/storage-status.test.js
-          node scripts/pattern-surfaces.test.js
 
       # The smoke gate compares against scripts/smoke-baseline.txt. If a
       # baseline entry starts passing the run still succeeds, but the baseline

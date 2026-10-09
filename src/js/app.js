@@ -1811,7 +1811,7 @@
                     row.className = "tx-row";
                     row.innerHTML = `<div class="row-top text-cyan-400"><div class="flex items-center gap-2"><span class="font-bold text-base text-shadow-lime">RLUSD TRUST LINE</span><span class="tag-pill tag-trust">INFRASTRUCTURE</span></div><div class="text-[10px] font-mono text-gray-500">${new Date().toLocaleTimeString()}</div></div><div class="flex justify-between text-[11px] font-mono text-gray-400"><span>${tx.Account.substring(0,8)}... ACTIVATED</span></div>`;
                     if(window.SW_PATTERN_WATCH) window.SW_PATTERN_WATCH.decorateTransaction(row,tx.Account,tx.Destination);
-                feed.prepend(row);
+                    feed.prepend(row);
                     if(feed.children.length > 40) feed.lastChild.remove();
                 } else { metrics.trustLines++; }
                 return;
@@ -1850,6 +1850,7 @@
                     var erow = document.createElement('div'); erow.className = 'tx-row';
                     var eColor = isFinish ? 'text-yellow-300' : 'text-orange-400';
                     erow.innerHTML = '<div class="row-top ' + eColor + '"><div class="flex items-center gap-2"><span class="font-bold text-base text-shadow-lime">' + escXrp.toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' XRP</span><span class="tag-pill ' + (isFinish ? 'tag-hvt' : 'tag-dep') + '">' + eLabel + '</span></div><div class="text-[10px] font-mono text-gray-500">' + new Date().toLocaleTimeString() + '</div></div><div class="flex justify-between text-[11px] font-mono text-gray-400"><span>' + SWE(eFromName || (escOwner ? escOwner.substring(0, 8) + '…' : '?')) + ' ➔ ' + SWE(eToName || (escTo ? escTo.substring(0, 8) + '…' : '?')) + '</span></div><div class="btn-row"><button class="action-btn trace-btn" onclick="traceWallet(\'' + escTo + '\')">TRACE</button><button class="action-btn" onclick="openScan(\'' + tx.hash + '\')">SCAN</button></div>';
+                    if(window.SW_PATTERN_WATCH) window.SW_PATTERN_WATCH.decorateTransaction(erow,escOwner,escTo);
                     efeed.prepend(erow);
                     if (efeed.children.length > 40) efeed.lastChild.remove();
                 }
@@ -1977,6 +1978,7 @@
                 const flowPill = (_flow && _flow.label && !isHVT) ? `<span class="tag-pill" style="background:#001a2a;color:#66ccff;border:1px solid #045566">${SWE(_flow.label)}</span>` : '';
                 row.innerHTML = `<div class="row-top ${color}"><div class="flex items-center gap-2"><span class="font-bold text-base text-shadow-lime">${displayAmt}</span>${isHVT ? '<span class="tag-pill tag-hvt">HVT</span>' : ''}${isL2 ? `<span class="tag-pill tag-l2">${SWE(tokenName)}</span>` : ''}${flowPill}${!isSuccess ? '<span class="tag-pill tag-fail">FAIL</span>' : ''}</div><div class="text-[10px] font-mono text-gray-500">${new Date().toLocaleTimeString()}</div></div><div class="flex justify-between text-[11px] font-mono text-gray-400"><span>${dispFrom} ➔ ${dispTo}</span></div><div class="btn-row"><button class="action-btn trace-btn" onclick="traceWallet('${tx.Account}')">TRACE</button><button class="action-btn" onclick="openScan('${tx.hash}')">SCAN</button><button class="action-btn" onclick='saveCase(${JSON.stringify({hash:tx.hash, amt, from:dispFrom, to:dispTo})})'>SAVE</button></div>`;
                 
+                if(window.SW_PATTERN_WATCH) window.SW_PATTERN_WATCH.decorateTransaction(row,tx.Account,tx.Destination);
                 feed.prepend(row);
                 if(feed.children.length > 40) feed.lastChild.remove();
             } 
