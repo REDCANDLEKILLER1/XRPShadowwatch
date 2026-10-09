@@ -40,3 +40,21 @@ not a complete history. The isolated current-position sweep remains separate.
 Validation: dedicated browser surface tests (including CI WebKit), sealed summary
 references, real RSS parsing and failure fallback, escrow source/coverage tests,
 existing deadline and report suites, and the repository regression gate.
+# Morning report loading correction
+
+The October 9 morning report exposed a boot race: an unrelated market-price
+timeout discarded an already completed forensic summary. The report now captures
+that result independently within the existing 15-second boot ceiling. The shared
+analysis request allows 12 seconds, and timeout/network/HTTP outcomes are recorded
+without including upstream error text. Results arriving after boot cannot change
+the report, and each new run starts without the prior result.
+
+New reports identify the section as **XRP/RLUSD market activity watch**. Unavailable
+analysis explicitly differs from zero trading; previously sealed text stays intact.
+The full RUN regression combines a seven-second analysis response with a stalled
+price fill, then checks an unavailable rerun does not inherit earlier figures.
+
+Validation: all 71 local regression suites pass. Serving the previous core
+against the same slow-price fixture fails with `UNAVAILABLE` instead of
+`AVAILABLE`; the corrected core preserves the XRP/RLUSD figures. The canonical,
+shortened, Lady K display, clipboard, and download checks also pass.

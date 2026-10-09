@@ -37,14 +37,19 @@ function reader(summary){return async(method,p)=>{assert.equal(method,'GET');if(
  assert.match(W.render({status:'UNAVAILABLE'}),/not available/);assert(!W.render({status:'STALE',summary}).includes('904.120603'));
  assert.match(W.render({status:'AVAILABLE',summary:missing}),/could not be classified/);assert.match(W.render({status:'AVAILABLE',summary:outside}),/no classified records/);
  const original='Ledger story\nDetails\n\nHow to Read It\nContext\n',pack={market_watch:{status:'AVAILABLE',summary}},injected=W.inject(original,pack);
- assert(injected.indexOf('Market activity watch')<injected.indexOf('How to Read It'));assert.equal(W.inject(injected,pack),injected);assert.equal(W.inject(original,{}),original);
- assert.equal((await W.load(async()=>{throw Error('offline');})).status,'UNAVAILABLE');
+ assert(injected.indexOf('XRP/RLUSD market activity watch')<injected.indexOf('How to Read It'));assert.equal(W.inject(injected,pack),injected);assert.equal(W.inject(original,{}),original);
+ assert.equal((await W.load(async()=>{throw Error('offline');})).reason,'NETWORK_ERROR');
+ assert.deepEqual(await W.load(async()=>({ok:false,status:503})),{status:'UNAVAILABLE',reason:'HTTP_ERROR',http_status:503});
+ assert.equal((await W.load(async()=>({ok:true,json:async()=>({status:'unexpected'})}))).reason,'INVALID_RESPONSE');
+ assert.match(W.render({status:'UNAVAILABLE',reason:'TIMEOUT'}),/request timed out/);
+ assert.match(W.render({status:'UNAVAILABLE'}),/Missing analysis does not mean zero XRP\/RLUSD trading/);
+ const legacy='Market activity watch\nPreviously sealed text';assert.equal(W.inject(legacy,pack),legacy);
  assert.equal((await W.load(async()=>({ok:true,json:async()=>({status:'AVAILABLE',summary})}))).summary.sha256,summary.sha256);
  let deadline,signal;
- const sandbox={module:{exports:{}},AbortController,setTimeout:(fn,ms)=>{assert.equal(ms,6000);deadline=fn;return 1;},clearTimeout:()=>{}};
+ const sandbox={module:{exports:{}},AbortController,setTimeout:(fn,ms)=>{assert.equal(ms,12000);deadline=fn;return 1;},clearTimeout:()=>{}};
  require('vm').runInNewContext(require('fs').readFileSync(require.resolve('../src/shared/market-watch'),'utf8'),sandbox);
  const bounded=sandbox.module.exports.load((url,opts)=>{signal=opts.signal;return new Promise(()=>{});});
- deadline();assert.equal((await bounded).status,'UNAVAILABLE');assert.equal(signal.aborted,true);
+ deadline();assert.equal((await bounded).reason,'TIMEOUT');assert.equal(signal.aborted,true);
  const api=require('../api/forensic-report'),responses=[],res={setHeader(){},status(code){this.code=code;return this;},json(body){responses.push(body);return this;}};
  await api({method:'POST'},res);assert.equal(res.code,405);
  const save=R.read;R.read=async()=>{throw Error('DO_NOT_LEAK_PRIVATE_SECRET');};try{await api({method:'GET'},res);assert.equal(res.code,503);assert(!JSON.stringify(responses).includes('DO_NOT_LEAK'));}finally{R.read=save;}
