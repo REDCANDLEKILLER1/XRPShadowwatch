@@ -92,6 +92,33 @@ be connected and exercised before automatic admission is enabled in production.
 
 ## Capacity and rollover plan
 
+### R2 transport (initial operator run)
+
+`scripts/r2-master-backup.js NEW_WORK_DIRECTORY` now connects the verified backup
+to the private `shadowwatch-backups` R2 bucket. The account endpoint is pinned in
+the worker; credentials remain server-side in GitHub Actions repository secrets:
+`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `SHADOWWATCH_EVIDENCE_TOKEN`.
+The last credential reads the existing pinned private evidence repository; the
+application repository's default `GITHUB_TOKEN` cannot replace it. Read-only
+Contents access to the evidence repository is sufficient for this initial run.
+
+The `Private R2 backup and restore` workflow runs on worker changes on the builder
+branch or by manual dispatch after the workflow reaches the default branch.
+There is intentionally no recurring schedule yet. It inventories the entire
+bucket, refuses a projected total above 8,000,000,000 bytes before uploads, stores
+SHA256-addressed objects once, and uploads the snapshot manifest last. Nothing
+is deleted or overwritten. This is a worker guard, not a Cloudflare billing cap;
+other clients and other buckets can consume additional storage or operations.
+
+Every referenced object and the manifest are downloaded from R2 to a new local
+directory, including previously uploaded objects. Hashes and the isolated restore
+are checked against the independently retained source commit/manifest seal. The
+Actions summary retains these hashes but no evidence is uploaded as an Actions
+artifact. A failed run cannot publish a restore receipt or enable admission.
+The first successful run still needs its live result reviewed, receipt publication
+and cadence connected before automatic admission is enabled. PR #104 remains a
+staged change until merged. Existing production acquisition is unchanged.
+
 1. Monitor current bytes, repository bytes, checkpoint verification and restore age.
 2. Preserve daily compressed evidence as immutable, content-addressed objects offsite.
 3. Maintain a signed/externally retained inventory plus source and manifest hashes.
