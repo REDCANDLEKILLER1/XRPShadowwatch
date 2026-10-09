@@ -46,7 +46,7 @@ function reader(summary){return async(method,p)=>{assert.equal(method,'GET');if(
  const legacy='Market activity watch\nPreviously sealed text';assert.equal(W.inject(legacy,pack),legacy);
  assert.equal((await W.load(async()=>({ok:true,json:async()=>({status:'AVAILABLE',summary})}))).summary.sha256,summary.sha256);
  let deadline,signal;
- const sandbox={module:{exports:{}},AbortController,setTimeout:(fn,ms)=>{assert.equal(ms,12000);deadline=fn;return 1;},clearTimeout:()=>{}};
+ const sandbox={module:{exports:{}},AbortController,setTimeout:(fn,ms)=>{assert.equal(ms,20000);deadline=fn;return 1;},clearTimeout:()=>{}};
  require('vm').runInNewContext(require('fs').readFileSync(require.resolve('../src/shared/market-watch'),'utf8'),sandbox);
  const bounded=sandbox.module.exports.load((url,opts)=>{signal=opts.signal;return new Promise(()=>{});});
  deadline();assert.equal((await bounded).reason,'TIMEOUT');assert.equal(signal.aborted,true);

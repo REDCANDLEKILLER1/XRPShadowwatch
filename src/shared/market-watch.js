@@ -34,7 +34,7 @@
   var controller=new AbortController(),timer;
   try{return await Promise.race([(async function(){var r=await(fetcher||fetch)('/api/forensic-report',{signal:controller.signal,cache:'no-store'});
    if(!r.ok)return{status:'UNAVAILABLE',reason:'HTTP_ERROR',http_status:r.status};var body=await r.json();return body&&['AVAILABLE','STALE','UNAVAILABLE'].indexOf(body.status)>=0?body:{status:'UNAVAILABLE',reason:'INVALID_RESPONSE'};})(),
-   new Promise(function(resolve){timer=setTimeout(function(){resolve({status:'UNAVAILABLE',reason:'TIMEOUT'});controller.abort();},12000);})]);}
+   new Promise(function(resolve){timer=setTimeout(function(){resolve({status:'UNAVAILABLE',reason:'TIMEOUT'});controller.abort();},20000);})]);}
   catch(_){return{status:'UNAVAILABLE',reason:'NETWORK_ERROR'};}finally{clearTimeout(timer);controller.abort();}
  }
  return{render:render,inject:inject,load:load};

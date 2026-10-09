@@ -22,8 +22,8 @@ let releaseVerification = null;
 const srv = http.createServer((req,res) => {
   const u = new URL(req.url, 'http://localhost');
   if (u.pathname === '/api/forensic-report') {
-    // The analysis arrives after the old six-second cutoff while an unrelated
-    // price lookup exceeds boot's ceiling. RUN must keep the completed result.
+    // Analysis arrives after the 15-second boot ceiling while an unrelated
+    // price lookup stalls. RUN must join it before sealing the report.
     if (slowNews) { res.writeHead(503); return res.end(); }
     setTimeout(()=>{
       res.writeHead(200, {'Content-Type':'application/json'});
@@ -32,7 +32,7 @@ const srv = http.createServer((req,res) => {
         exchange_transactions:2,classified_records:2,unclassified_records:0,
         xrp_sold_for_rlusd:'904.120603',xrp_bought_with_rlusd:'904.120603',
         repeated_quote_wallets:1,repeated_cancel_wallets:0,regular_transfer_wallets:0}}));
-    },7000);
+    },17000);
     return;
   }
   if (u.pathname === '/test/targeted-news') {
