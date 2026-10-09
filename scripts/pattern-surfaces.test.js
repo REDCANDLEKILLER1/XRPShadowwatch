@@ -25,9 +25,11 @@ try{const page=await browser.newPage({viewport:{width:1440,height:900}});await p
  await page.evaluate(()=>switchView('live'));await page.locator('#pattern-watch-live button').filter({hasText:'Trace wallet'}).click();assert.equal(await page.locator('#view-graph').isVisible(),true);
  assert.equal(await page.evaluate(x=>window.SW_PATTERN_WATCH.hasWallet(x),a),true);
  assert.equal(calls,1,'three panels share one API request');
+ await page.evaluate(x=>{const row=document.createElement('div');document.getElementById('feed').appendChild(row);SW_PATTERN_WATCH.decorateTransaction(row,x,'');},a);
+ assert.equal(await page.locator('#feed .sw-pattern-badge').count(),1);
  await page.setViewportSize({width:390,height:844});for(const mode of ['live','map','graph']){await page.evaluate(m=>switchView(m),mode);const p=page.locator('#pattern-watch-'+mode);const box=await p.boundingBox();assert(box.width<=390);assert(await p.evaluate(e=>e.scrollWidth<=e.clientWidth+1));}
  await page.screenshot({path:'/tmp/shadowwatch-pattern-phone.png'});
- status='STALE';await page.evaluate(()=>SW_PATTERN_WATCH.refresh());assert.equal(await page.evaluate(x=>SW_PATTERN_WATCH.hasWallet(x),a),false);assert.equal(await page.locator('#pattern-watch-graph .sw-pattern-card').count(),0);assert.match(await page.locator('#pattern-watch-graph').textContent(),/too old/);
+ status='STALE';await page.evaluate(()=>SW_PATTERN_WATCH.refresh());assert.equal(await page.evaluate(x=>SW_PATTERN_WATCH.hasWallet(x),a),false);assert.equal(await page.locator('#feed .sw-pattern-badge').count(),0);assert.equal(await page.locator('#pattern-watch-graph .sw-pattern-card').count(),0);assert.match(await page.locator('#pattern-watch-graph').textContent(),/too old/);
  status='UNAVAILABLE';await page.evaluate(()=>SW_PATTERN_WATCH.refresh());assert.match(await page.locator('#pattern-watch-live').textContent(),/not available/);
  console.log('PASS sealed wallet evidence, invalid refs rejected, shared fetch, LIVE/MAP/GRAPH filters and routes, explorer links, trace, phone bounds, stale/unavailable no wallet flags');
 }finally{await browser.close();server.close();}})().catch(e=>{console.error(e);server.close();process.exitCode=1;});

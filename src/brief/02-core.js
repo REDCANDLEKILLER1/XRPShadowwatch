@@ -4734,6 +4734,7 @@ async function escrowBackfill(ws) {
     complete_30_day_history:false};
   let stop=false;
   for(const addr of addresses){
+    logTick('escrow-backfill', 'Escrow history: '+(coverage.stored_wallets+coverage.lookup_wallets+coverage.unavailable_wallets)+' / '+addresses.length+' wallets processed; '+coverage.lookup_wallets+' optional page(s) read');
     const watched=stored&&typeof getActiveWatchlist==='function'&&getActiveWatchlist().some(w=>w.address===addr);
     if(watched){
       const cp=index.checkpointWallet&&index.checkpointWallet(addr);
@@ -4750,7 +4751,7 @@ async function escrowBackfill(ws) {
       for(const item of(res.transactions||[])){
         if(item.validated!==true)continue;
         const e=parseEscrowItem(item);
-        if(e&&e.hash&&e.ts>=cutoff&&e.ts<=now&&(!state.indexRun||!state.indexRun.anchor_ledger||e.ledger<=state.indexRun.anchor_ledger)&&!byHash[e.hash])byHash[e.hash]=e;
+        if(e&&e.hash&&Number.isInteger(e.ledger)&&e.ledger>0&&e.ts>=cutoff&&e.ts<=now&&(!state.indexRun||!state.indexRun.anchor_ledger||e.ledger<=state.indexRun.anchor_ledger)&&!byHash[e.hash])byHash[e.hash]=e;
       }
     }catch(e){
       coverage.unavailable_wallets++;

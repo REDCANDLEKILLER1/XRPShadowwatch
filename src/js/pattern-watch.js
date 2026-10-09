@@ -51,11 +51,11 @@
       var shown=rows.filter(function(d){return !selected||d.kind===selected;});
       body.appendChild(el('p',rows.length+' of '+s.pattern_details_total+' findings shown; up to 3 sample transactions per finding.'));
       if(!shown.length)body.appendChild(el('p','No findings for this filter in the displayed sample.'));
-      if(h.mode==='graph')body.appendChild(graph(shown));
+      if(h.mode==='graph'){body.appendChild(graph(shown));if(shown.filter(function(d){return d.kind==='REGULAR_TRANSFER_INTERVAL';}).length>6)body.appendChild(el('p','Diagram shows the first six transfer findings; the list below contains the displayed sample.'));}
       var list=el('div',null,h.mode==='map'?'sw-pattern-wallets':'sw-pattern-list');
       shown.forEach(function(d){var card=el('article',null,'sw-pattern-card');card.appendChild(el('strong',labels[d.kind]+' · '+d.count+' events'));card.appendChild(wallet(d.account));
         if(d.to&&address.test(d.to)){card.appendChild(el('span','Observed recipient · approximately '+d.interval_seconds+' seconds between transfers'));card.appendChild(wallet(d.to));}
-        if(d.price_key)card.appendChild(el('span','Exact quote grouping: '+d.price_key));
+        if(d.price_key){var ratio=d.price_key.match(/:(\d+)\/(\d+)$/);if(ratio&&Number(ratio[2])>0){var price=Number(ratio[1])/Number(ratio[2]);if(Number.isFinite(price))card.appendChild(el('span',(d.price_key.indexOf('SELL_XRP:')===0?'Sell':'Buy')+' limit quote: approximately '+price.toPrecision(6)+' RLUSD per XRP. An order quote is not a confirmed fill.'));}}
         var refs=el('div',null,'sw-pattern-refs');(d.hashes||[]).filter(function(hash){return /^[a-fA-F0-9]{64}$/.test(hash);}).forEach(function(hash,i){refs.appendChild(link('Transaction '+(i+1),'https://livenet.xrpl.org/transactions/'+hash));});card.appendChild(refs);
         var trace=el('button','Trace wallet in GRAPH');trace.type='button';trace.onclick=function(){if(typeof traceWallet==='function')traceWallet(d.account);};card.appendChild(trace);list.appendChild(card);
       });body.appendChild(list);

@@ -8,7 +8,7 @@ async function escrow(){
   loadEscrowHistory:()=>[{hash:'old',ts:now-31*86400000},{hash:'future',ts:now+100000},{hash:'cached',ts:now-2*86400000}],saveEscrowHistory:()=>{},
   escrowFromTxs:by=>{by.verified={hash:'verified',ts:now-1000};},escrowWallets:()=>[known,'other1','other2','other3'],getActiveWatchlist:()=>[{address:known}],
   xrpl:async(_,req)=>{calls.push(req);if(req.account==='other2')throw Error('rate limit: units quota');return {transactions:[{validated:true,hash:'live',ts:now-5000,ledger:1230},{validated:false,hash:'unvalidated',ts:now-5000}]};},
-  parseEscrowItem:x=>x,log:x=>logs.push(x)};
+  parseEscrowItem:x=>x,log:x=>logs.push(x),logTick:()=>{}};
  vm.createContext(c);vm.runInContext(source.slice(source.indexOf('async function escrowBackfill('),source.indexOf('// Best-effort, read-only follow-on')),c);
  await c.escrowBackfill({});assert.equal(calls.length,2);assert(!calls.some(r=>r.account===known));assert.equal(calls[0].ledger_index_max,1234);
  assert.equal(state.escrowHistoryCoverage.stored_wallets,1);assert.equal(state.escrowHistoryCoverage.lookup_wallets,1);assert.equal(state.escrowHistoryCoverage.unavailable_wallets,2);assert.equal(state.escrowHistoryCoverage.complete_30_day_history,false);

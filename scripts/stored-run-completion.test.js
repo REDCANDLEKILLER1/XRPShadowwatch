@@ -96,8 +96,11 @@ const srv = http.createServer((req,res) => {
       fetchNewsIntel = async()=>{state.newsIntel={items:[],top_headlines:[],source_status:{},source_breakdown:{}};};
       buildEvidenceLedNewsQueries = ()=>[{query:'XRP liquidity'}];
       const nativeFetch = window.fetch;
-      window.fetch = (url,opts)=>nativeFetch(String(url).includes(encodeURIComponent('query=XRP%20liquidity'))
-        ? '/test/targeted-news' : url, opts);
+      window.fetch = (url,opts)=>{
+        const outer=new URL(String(url),location.href),target=outer.searchParams.get('url');
+        const query=target?new URL(target).searchParams.get('query'):null;
+        return nativeFetch(query==='XRP liquidity'?'/test/targeted-news':url,opts);
+      };
     });
     for (let attempt=0;attempt<2;attempt++) {
       slowNews = attempt === 1;
