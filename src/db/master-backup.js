@@ -49,8 +49,11 @@ function verify(root,expectedCommit,expectedManifest){
  }
  for(const shards of dayManifests.values())for(const e of shards){
   if(!seen.has(e.path))throw Error('BACKUP_EVIDENCE_SHARD_MISSING');
-  const text=zlib.gunzipSync(fs.readFileSync(file(root,e.path))).toString('utf8');
-  if(sha256(text)!==e.sha256||text.split('\n').filter(Boolean).length!==e.rows)throw Error('BACKUP_EVIDENCE_SHARD_MISMATCH');
+  // Checkpoint shards hash the stored gzip bytes (delta-acquisition.js),
+  // unlike the separate legacy export manifest's plaintext digest.
+  const packed=fs.readFileSync(file(root,e.path));
+  const text=zlib.gunzipSync(packed).toString('utf8');
+  if(sha256(packed)!==e.sha256||text.split('\n').filter(Boolean).length!==e.rows)throw Error('BACKUP_EVIDENCE_SHARD_MISMATCH');
  }
  return{verified:true,source_commit:m.source_commit,files:m.file_count,bytes,checkpoint_versions:walked,anchor_close:latest.anchor_close,state_version:latest.state_version,manifest_sha256:m.manifest_sha256};
 }

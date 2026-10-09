@@ -4,7 +4,7 @@ on:
   # Bootstrap the first copy on the approved builder branch. No PR triggers.
   push:
     branches: [agent/storage-auto-roster-20261008]
-    paths: ['scripts/r2-master-backup.js', '.github/workflows/r2-backup.yml']
+    paths: ['scripts/r2-master-backup.js', 'src/db/master-backup.js', '.github/workflows/r2-backup.yml']
 permissions:
   contents: read
 concurrency:

@@ -5,7 +5,7 @@ const B=require('../src/db/master-backup'),H=require('../src/db/storage-health')
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'sw-backup-test-'));
  try{
   const raw=JSON.stringify({hash:'a'.repeat(64)})+'\n',shard='evidence/2026/10/08/events.ndjson.gz';
-  const state=S.genesis([{address:'rTest',scan_coverage_through:100}],{anchor_ledger:100,anchor_close:'2026-10-08T13:00:00.000Z',evidence_shards:[{path:shard,sha256:B.sha256(raw),rows:1}]});
+  const state=S.genesis([{address:'rTest',scan_coverage_through:100}],{anchor_ledger:100,anchor_close:'2026-10-08T13:00:00.000Z',evidence_shards:[{path:shard,sha256:B.sha256(zlib.gzipSync(raw)),rows:1}]});
   const data={'README.md':Buffer.from('private evidence\n'),[Store.STATE_PATH]:Buffer.from(S.serialize(state)),[Store.historyPath(1)]:Buffer.from(S.serialize(state)),[shard]:zlib.gzipSync(raw)};
   const entries=Object.entries(data).map(([p,b])=>({path:p,type:'blob',mode:'100644',sha:B.blobSha(b),size:b.length}));
   const tree={tree:entries,truncated:false},treeHash=B.treeSha(entries.map(e=>({path:e.path,git_blob_sha:e.sha}))),commit='c'.repeat(40);let writes=0;
