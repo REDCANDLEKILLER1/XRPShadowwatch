@@ -10,3 +10,6 @@
 @media(max-width:600px){.sw-pattern-watch{font-size:12px;max-height:52%}.sw-pattern-map,.sw-pattern-graph{bottom:45px}}
 
 .sw-pattern-totals{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px}.sw-pattern-totals>div{background:#14312b;padding:8px;border-radius:4px;color:#b9f5dc;overflow-wrap:anywhere}
+.sw-market-overview h3{font-size:14px;color:#b9f5dc;margin:12px 0 4px}.sw-market-overview>section+section{border-top:1px solid #34564f;padding-top:4px}
+.sw-pattern-body>details{border-top:1px solid #34564f;margin-top:12px;padding-top:8px}.sw-pattern-body>details>summary{cursor:pointer;color:#8de3ec;padding:6px 0;font-weight:600}
+@media(max-width:600px){.sw-market-overview{font-size:14px;line-height:1.5}}

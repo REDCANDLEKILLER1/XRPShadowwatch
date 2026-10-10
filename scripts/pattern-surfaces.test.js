@@ -30,6 +30,10 @@ try{const page=await browser.newPage({viewport:{width:1440,height:900}});await p
  await page.evaluate(()=>{document.getElementById('splash-screen').remove();});
  for(const mode of ['live','map','graph']){await page.evaluate(m=>{switchView(m);document.getElementById('pattern-watch-'+m).open=true;},mode);
  const p=page.locator('#pattern-watch-'+mode);assert.match(await p.textContent(),/Regular transfers · 6 events/);assert.match(await p.textContent(),/not proof of bots/);assert.equal(await p.locator('a[href*="/transactions/"]').count(),4);
+ assert.equal(await p.locator('.sw-market-overview h3').allTextContents().then(v=>v.join('|')),'What we found|What’s missing|Why it matters');
+ assert.equal(await p.locator('.sw-collector-details').evaluate(e=>e.open),false);
+ assert.match(await p.locator('summary').first().textContent(),/Saved sample · missing coverage/);
+ await p.locator('.sw-wallet-details>summary').click();
  assert.equal(await p.locator('a[href*="/accounts/"]').count(),3);
  assert.match(await p.textContent(),/104–200 \(BACKLOG\)/);assert.match(await p.textContent(),/Private storage: 0.002 \/ 8 GB/);
  assert.match(await p.textContent(),/Collection lag at snapshot: 7 minutes/);assert.match(await p.textContent(),/Verified order-book fill · partial/);
@@ -50,7 +54,10 @@ try{const page=await browser.newPage({viewport:{width:1440,height:900}});await p
  status='AVAILABLE';summary.classified_records=0;summary.unclassified_records=summary.observed_records;await page.evaluate(()=>SW_PATTERN_WATCH.refresh());assert.match(await page.locator('#pattern-watch-live').textContent(),/trading activity is unknown/);assert.equal(await page.locator('#pattern-watch-live .sw-pattern-totals').count(),0);
  status='UNAVAILABLE';collectorStatus='AVAILABLE';await page.evaluate(()=>SW_PATTERN_WATCH.refresh());assert.match(await page.locator('#pattern-watch-live').textContent(),/not available/);
  assert.equal(await page.locator('#pattern-watch-live .sw-execution-card').count(),1,'coverage survives a missing legacy report');
- await page.evaluate(()=>switchView('live'));await page.locator('#pattern-watch-live button').filter({hasText:'Trace execution wallet'}).click();assert.equal(await page.locator('#view-graph').isVisible(),true);
+ await page.evaluate(()=>switchView('live'));await page.locator('#pattern-watch-live .sw-collector-details>summary').click();await page.locator('#pattern-watch-live button').filter({hasText:'Trace execution wallet'}).click();assert.equal(await page.locator('#view-graph').isVisible(),true);
  collectorStatus='UNAVAILABLE';await page.evaluate(()=>SW_PATTERN_WATCH.refresh());assert.equal(await page.locator('#pattern-watch-live .sw-execution-card').count(),0);assert.match(await page.locator('#pattern-watch-live').textContent(),/coverage is unavailable/);
+ collectorStatus='AVAILABLE';coverage.generated_at=new Date(Date.now()-46*60000).toISOString();await page.evaluate(()=>SW_PATTERN_WATCH.refresh());
+ assert.equal(await page.locator('#pattern-watch-live .sw-execution-card').count(),0,'old AVAILABLE responses must age out locally');
+ assert.match(await page.locator('#pattern-watch-live').textContent(),/execution totals are withheld/);
  console.log('PASS LIVE/MAP/GRAPH coverage, fills, gap/storage/delay displays, independent fetches, explorer links, execution tracing, phone bounds and stale/unknown withholding');
 }finally{await browser.close();server.close();}})().catch(e=>{console.error(e);server.close();process.exitCode=1;});

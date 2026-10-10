@@ -4452,6 +4452,7 @@ function buildPack(v) {
     phase_timings: state.phaseTimings || [],
     evidence_freshness: state.indexRun && window.SW_EVIDENCE_INDEX && typeof window.SW_EVIDENCE_INDEX.freshness === 'function' ? window.SW_EVIDENCE_INDEX.freshness() : null,
     market_watch: state.marketWatch || {status:'UNAVAILABLE'},
+    market_watch_as_of_utc: new Date().toISOString(),
     escrow_history_coverage: state.escrowHistoryCoverage || null,
     evidence_index: state.indexRun && window.SW_EVIDENCE_INDEX ? window.SW_EVIDENCE_INDEX.metrics() : null,
     shadow_volume_xrp: shadowVolumeXRP(), total_balance_delta_xrp: totalDeltaXRP(),

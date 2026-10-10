@@ -126,9 +126,45 @@ exercise desktop/phone layouts, stale withholding and independent evidence
 availability. AMM tests are synthetic protocol fixtures; this version has not
 been independently reconciled against a captured live AMM swap.
 
-The earlier two-ledger R2 pilot verified the base storage path. It does not verify
-this new supervisor's live workflow. After review/merge, enable the variable and
-dispatch one controlled invocation. Inspect the bounded range, R2 readback,
-published summary, run limits and admission-off setting before leaving the
-schedule enabled. To pause, set the variable to `false`; keep all stored state
-and evidence so the next approved run resumes the same cursor.
+The earlier two-ledger R2 pilot verified the base storage path. On October 10,
+2026 the merged supervisor was also exercised against private R2 in workflow
+run `38081864310`: the first manual attempt verified one ledger and the second
+resumed for four more. The public summary matched the saved cursor at
+`107568227`, five verified ledgers, 293 transactions, and admission disabled.
+The two attempts prove the manual path and resumption; they do not prove a
+scheduled invocation or continuous coverage. At the 20:34 UTC check, GitHub
+reported the workflow active but its history still contained only that manual
+run. Schedule execution remains unverified until an actual `schedule` event
+and its collector step are checked.
+
+For a new installation, enable the variable and dispatch one controlled
+invocation. Inspect the bounded range, R2 readback, published summary, run limits
+and admission-off setting before leaving the schedule enabled. To pause, set
+the variable to `false`; keep all stored state and evidence so the next approved
+run resumes the same cursor.
+
+### Plain-language display and report
+
+`src/shared/market-watch.js` builds one overview for LIVE, MAP, GRAPH and the
+canonical report: **What we found**, **What’s missing**, and **Why it matters**.
+The workbench labels the panel **XRP/RLUSD findings** and opens it in LIVE;
+ledger diagnostics, wallet patterns and transaction links are expandable.
+Wallet-flow totals and ledger execution totals retain separate observation
+periods and are never added together. Aggregate matched XRP/RLUSD amounts do
+not infer buy/sell direction. AMM movements remain separate from order-book
+fills and liquidity operations remain excluded from swaps.
+
+Freshness uses the collector snapshot timestamp and latest verified ledger
+close, measured against one explicit reference time. A newly built report
+freezes that reference in `market_watch_as_of_utc`; the dashboard uses its
+current render time. A 2-minute lag recorded in an old snapshot is never
+presented as the report's current lag. The 45-minute collector and 36-hour
+wallet-analysis freshness thresholds also apply at presentation time; stale
+execution amounts and links are withheld. Saved `RUNNING` means a historical
+result, not proof a job is currently executing or the schedule has fired.
+
+Saved canonical reports remain unchanged. The 4,000-character publication copy
+keeps the new findings and limitations together; an unusually large block is
+omitted with an explicit full-report notice rather than exposing amounts
+without their qualifications. Full reports, Lady K display/copy/download and
+stored evidence retain their existing integrity boundaries.

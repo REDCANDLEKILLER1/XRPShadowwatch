@@ -6,7 +6,7 @@
   var labels={REPEATED_LIMIT_PRICE:'Repeated price',REPEATED_CONFIRMED_CANCEL:'Order cancellations',REGULAR_TRANSFER_INTERVAL:'Regular transfers'};
   var address=/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
   function el(tag,text,cls){var n=document.createElement(tag);if(text!=null)n.textContent=text;if(cls)n.className=cls;return n;}
-  function details(){var s=envelope.summary;return envelope.status==='AVAILABLE'&&s&&Array.isArray(s.pattern_details)?s.pattern_details.filter(function(d){return labels[d.kind]&&address.test(d.account);}):[];}
+  function details(){var s=envelope.summary;return envelope.status==='AVAILABLE'&&s&&Date.now()-Date.parse(s.window_end)<=36*3600000&&Array.isArray(s.pattern_details)?s.pattern_details.filter(function(d){return labels[d.kind]&&address.test(d.account);}):[];}
   function flagged(a){return !!a&&details().some(function(d){return d.account===a;});}
   function decorate(row,from,to){
     row.dataset.patternFrom=from||'';row.dataset.patternTo=to||'';
@@ -17,11 +17,11 @@
   function link(text,url){var a=el('a',text);a.href=url;a.target='_blank';a.rel='noopener noreferrer';return a;}
   function wallet(a){return link(a,'https://livenet.xrpl.org/accounts/'+encodeURIComponent(a));}
   function short(a){return a.slice(0,7)+'…'+a.slice(-4);}
-  function collector(body){
+  function collector(body,asOf){
     var e=envelope.collector||{status:'UNAVAILABLE'},s=e.summary;
     var box=el('section',null,'sw-collector-coverage');box.appendChild(el('h3','Ledger-wide collection'));
-    box.appendChild(el('p',window.SW_MARKET_WATCH.renderCollector(e),'sw-pattern-summary'));body.appendChild(box);
-    if(e.status!=='AVAILABLE'||!s||s.schema!=='shadowwatch-market-coverage/1')return;
+    box.appendChild(el('p',window.SW_MARKET_WATCH.renderCollector(e,{asOf:asOf}),'sw-pattern-summary'));body.appendChild(box);
+    if(window.SW_MARKET_WATCH.collectorStatus(e,asOf)!=='AVAILABLE')return;
     var list=el('div',null,'sw-pattern-wallets');
     (s.samples||[]).filter(function(f){return address.test(f.account)&&/^[A-Fa-f0-9]{64}$/.test(f.hash);}).forEach(function(f){
       var card=el('article',null,'sw-execution-card sw-pattern-card');
@@ -47,12 +47,20 @@
   }
   function render(){
     document.querySelectorAll('#feed [data-pattern-from]').forEach(function(row){decorate(row,row.dataset.patternFrom,row.dataset.patternTo);});
-    hosts.forEach(function(h){var body=h.body,s=envelope.summary;body.replaceChildren();
-      var c=envelope.collector;
-      h.status.textContent=busy?'Checking…':(c&&c.status==='AVAILABLE'&&c.summary?'Collector '+c.summary.state:c&&c.status==='STALE'?'Collector stale':'Collector unavailable')+' · '+(envelope.status==='AVAILABLE'?'daily evidence':envelope.status==='STALE'?'older wallet evidence':'wallet evidence unavailable');
+    hosts.forEach(function(h){var body=h.body,s=envelope.summary,asOf=Date.now();
+      var oldCollector=body.querySelector('.sw-collector-details'),oldWallet=body.querySelector('.sw-wallet-details');
+      var collectionOpen=!!(oldCollector&&oldCollector.open),walletOpen=!!(oldWallet&&oldWallet.open);body.replaceChildren();
+      var model=window.SW_MARKET_WATCH.overview(envelope,{asOf:asOf});
+      h.status.textContent=busy?'Checking…':model.label;
       h.refresh.disabled=busy;
-      collector(body);
-      if(envelope.status!=='AVAILABLE'||!s){body.appendChild(el('p',window.SW_MARKET_WATCH.renderWallet(envelope),'sw-pattern-summary'));return;}
+      var overview=el('section',null,'sw-market-overview');
+      model.sections.forEach(function(section){var group=el('section');group.appendChild(el('h3',section.title));
+        section.lines.forEach(function(line){group.appendChild(el('p',line));});overview.appendChild(group);});body.appendChild(overview);
+      var collection=el('details',null,'sw-collector-details');collection.open=collectionOpen;
+      collection.appendChild(el('summary','Ledger details and trade links'));body.appendChild(collection);collector(collection,asOf);
+      var wallets=el('details',null,'sw-wallet-details');wallets.open=walletOpen;
+      wallets.appendChild(el('summary','Wallet patterns and transaction links'));body.appendChild(wallets);body=wallets;
+      if(model.walletStatus!=='AVAILABLE'||!s){body.appendChild(el('p',window.SW_MARKET_WATCH.renderWallet(Object.assign({},envelope,{status:model.walletStatus})),'sw-pattern-summary'));return;}
       var stamp=function(t){return new Date(t).toLocaleString('en-US',{timeZone:'America/Chicago',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'});};
       body.appendChild(el('p',stamp(s.window_start)+' – '+stamp(s.window_end),'sw-pattern-note'));
       var totals=el('div',null,'sw-pattern-totals');
@@ -86,7 +94,8 @@
   async function refresh(){if(busy||!window.SW_MARKET_WATCH)return;busy=true;render();envelope=await window.SW_MARKET_WATCH.load();busy=false;render();}
   ['live','map','graph'].forEach(function(mode){var panel=document.getElementById('view-'+mode);if(!panel)return;
     var box=el('details',null,'sw-pattern-watch sw-pattern-'+mode);box.id='pattern-watch-'+mode;
-    var heading=el('summary','Pattern watch · '),status=el('span','Loading');heading.appendChild(status);box.appendChild(heading);
+    var heading=el('summary','XRP/RLUSD findings · '),status=el('span','Loading');heading.appendChild(status);box.appendChild(heading);
+    box.open=mode==='live';
     var refreshButton=el('button','Refresh analysis');refreshButton.type='button';refreshButton.onclick=refresh;
     var body=el('div',null,'sw-pattern-body');box.appendChild(refreshButton);box.appendChild(body);
     if(mode==='live')panel.insertBefore(box,document.getElementById('filter-zone'));else panel.appendChild(box);
