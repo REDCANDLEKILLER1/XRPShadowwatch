@@ -54,6 +54,7 @@ const state=s=>JSON.parse(s.objects.get(C.stateKey(100,102)).toString());
 (async()=>{
  for(const [a,b] of [[1,3],[100,99],[100,132],[NaN,102],[100.5,102]])assert.throws(()=>C.bounds(a,b),/RANGE/);
  const s=fakeS3(),r=rpcFixture(),first=await run(s,r);
+ const linked=fakeS3();await assert.rejects(()=>run(linked,rpcFixture(),{expectedParent:'0'.repeat(64)}),/SUPERVISOR_CHAIN_MISMATCH/);assert.equal(linked.writes,0,'adjacent range mismatch rejected before reservation or write');
  assert.equal(first.interval_complete,true);assert.equal(first.processed_ledgers,3);assert.equal(r.calls,8);
  assert.equal(state(s).next,103);assert.equal(state(s).history_complete,false);assert.equal(state(s).automatic_admission,false);
  assert.equal(first.unique_market_volume,null);

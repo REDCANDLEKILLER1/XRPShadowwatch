@@ -157,4 +157,4 @@ function summarize(records){
   interpretation:'Pattern flags are investigation leads, not proof of bot control, manipulation, identity, or common ownership. Exchange totals count wallet legs, not market volume.',
   rules:{repeated_price_min_orders:3,cancel_min:5,regular_transfer_min:6,interval_tolerance:'max(2 seconds, 2%)'}};
 }
-module.exports={SCHEMA,ASSETS,add,sub,abs,sign,amount,assetKey,priceFraction,inspect,summarize};
+module.exports={SCHEMA,ASSETS,add,sub,abs,sign,amount,assetKey,priceFraction,balances,inspect,summarize};

@@ -17,6 +17,22 @@
   function link(text,url){var a=el('a',text);a.href=url;a.target='_blank';a.rel='noopener noreferrer';return a;}
   function wallet(a){return link(a,'https://livenet.xrpl.org/accounts/'+encodeURIComponent(a));}
   function short(a){return a.slice(0,7)+'…'+a.slice(-4);}
+  function collector(body){
+    var e=envelope.collector||{status:'UNAVAILABLE'},s=e.summary;
+    var box=el('section',null,'sw-collector-coverage');box.appendChild(el('h3','Ledger-wide collection'));
+    box.appendChild(el('p',window.SW_MARKET_WATCH.renderCollector(e),'sw-pattern-summary'));body.appendChild(box);
+    if(e.status!=='AVAILABLE'||!s||s.schema!=='shadowwatch-market-coverage/1')return;
+    var list=el('div',null,'sw-pattern-wallets');
+    (s.samples||[]).filter(function(f){return address.test(f.account)&&/^[A-Fa-f0-9]{64}$/.test(f.hash);}).forEach(function(f){
+      var card=el('article',null,'sw-execution-card sw-pattern-card');
+      card.appendChild(el('strong',f.venue==='AMM'?'Verified AMM pool movement':'Verified order-book fill · '+f.completion.toLowerCase().replace(/_/g,' ')));
+      card.appendChild(el('span',f.xrp+' XRP / '+f.rlusd+' RLUSD · ledger '+f.ledger_index));
+      card.appendChild(el('span',(f.venue==='AMM'?'Pool':'Offer owner')+' '+(f.side==='SELL_XRP'?'sold XRP':'bought XRP')));
+      card.appendChild(wallet(f.account));card.appendChild(link('Verified transaction','https://livenet.xrpl.org/transactions/'+f.hash));
+      var trace=el('button','Trace execution wallet');trace.type='button';trace.onclick=function(){if(typeof traceWallet==='function')traceWallet(f.account);};card.appendChild(trace);list.appendChild(card);
+    });box.appendChild(list);
+    box.appendChild(el('p','Up to 12 recent execution components are shown. Wallets are observed participants; this does not add them to the watchlist or establish ownership links.','sw-pattern-note'));
+  }
   function graph(rows){
     var routes=rows.filter(function(d){return d.kind==='REGULAR_TRANSFER_INTERVAL'&&address.test(d.to);}).slice(0,6);
     if(!routes.length)return el('p','No observed transfer routes in the displayed findings. Quote and cancellation patterns do not establish wallet connections.');
@@ -32,9 +48,11 @@
   function render(){
     document.querySelectorAll('#feed [data-pattern-from]').forEach(function(row){decorate(row,row.dataset.patternFrom,row.dataset.patternTo);});
     hosts.forEach(function(h){var body=h.body,s=envelope.summary;body.replaceChildren();
-      h.status.textContent=busy?'Checking…':envelope.status==='AVAILABLE'?'Daily evidence':envelope.status==='STALE'?'Older evidence':'Unavailable';
+      var c=envelope.collector;
+      h.status.textContent=busy?'Checking…':(c&&c.status==='AVAILABLE'&&c.summary?'Collector '+c.summary.state:c&&c.status==='STALE'?'Collector stale':'Collector unavailable')+' · '+(envelope.status==='AVAILABLE'?'daily evidence':envelope.status==='STALE'?'older wallet evidence':'wallet evidence unavailable');
       h.refresh.disabled=busy;
-      if(envelope.status!=='AVAILABLE'||!s){body.appendChild(el('p',window.SW_MARKET_WATCH.render(envelope),'sw-pattern-summary'));return;}
+      collector(body);
+      if(envelope.status!=='AVAILABLE'||!s){body.appendChild(el('p',window.SW_MARKET_WATCH.renderWallet(envelope),'sw-pattern-summary'));return;}
       var stamp=function(t){return new Date(t).toLocaleString('en-US',{timeZone:'America/Chicago',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'});};
       body.appendChild(el('p',stamp(s.window_start)+' – '+stamp(s.window_end),'sw-pattern-note'));
       var totals=el('div',null,'sw-pattern-totals');
