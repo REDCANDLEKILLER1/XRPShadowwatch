@@ -32,6 +32,7 @@ const SUITES = [
   ['forensic-archive', 'forensic-archive.test.js', null],
   ['forensic-report', 'forensic-report.test.js', null],
   ['forensic-patterns', 'forensic-patterns.test.js', null],
+  ['market-collector', 'market-collector.test.js', null],
   ['market-evidence', 'market-evidence.test.js', null],
   ['r2-master-backup', 'r2-master-backup.test.js', null],
   ['storage-status', 'storage-status.test.js', 8239],

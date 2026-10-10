@@ -4,8 +4,14 @@ on:
     inputs:
       job:
         type: choice
-        options: [market, export, both]
+        options: [market, export, both, pilot]
         default: both
+      pilot_start:
+        description: First validated ledger (pilot only, explicit bounded range)
+        type: string
+      pilot_end:
+        description: Last validated ledger (at most 32 ledgers, resume same range)
+        type: string
   schedule:
     - cron: '7,22,37,52 * * * *'
     - cron: '43 6 * * *'
@@ -38,6 +44,7 @@ jobs:
           node scripts/forensic-archive.test.js
           node scripts/forensic-report.test.js
           node scripts/market-evidence.test.js
+          node scripts/market-collector.test.js
           node scripts/storage-master-backup.test.js
           node scripts/r2-master-backup.test.js
       - name: Collect public market sample into private R2
@@ -46,6 +53,16 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: node scripts/market-evidence.js
+      - name: Bounded private market collector pilot
+        if: github.event_name == 'workflow_dispatch' && inputs.job == 'pilot' && github.ref == 'refs/heads/main'
+        timeout-minutes: 5
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          SHADOWWATCH_AUTOROSTER_ENABLED: 'false'
+          MARKET_PILOT_START: ${{ inputs.pilot_start }}
+          MARKET_PILOT_END: ${{ inputs.pilot_end }}
+        run: node scripts/market-collector.js
       - name: Independent backup, restore, and forensic export
         if: always() && !cancelled() && steps.safeguards.outcome == 'success' && (github.event_name == 'push' || github.event.schedule == '43 6 * * *' || inputs.job == 'export' || inputs.job == 'both')
         env:
