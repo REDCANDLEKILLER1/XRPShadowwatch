@@ -36,6 +36,7 @@ const SUITES = [
   ['market-supervisor', 'market-supervisor.test.js', null],
   ['market-executions', 'market-executions.test.js', null],
   ['market-coverage', 'market-coverage.test.js', null],
+  ['market-overview', 'market-overview.test.js', null],
   ['market-evidence', 'market-evidence.test.js', null],
   ['r2-master-backup', 'r2-master-backup.test.js', null],
   ['storage-status', 'storage-status.test.js', 8239],

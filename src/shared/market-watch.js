@@ -26,29 +26,89 @@
  function inject(text,pack){
   if(!pack||!Object.prototype.hasOwnProperty.call(pack,'market_watch'))return text;
   var t=String(text||'');if(t.indexOf(HEADING+'\n')>=0||t.indexOf(LEGACY_HEADING+'\n')>=0)return t;
-  var block=render(pack.market_watch)+'\n\n',match=t.match(/(?:^|\n)(How to Read It|VERDICT|🙏 THE DAILY PRAYER|NEWS USED:)/);
+  var block=render(pack.market_watch,{asOf:pack.market_watch_as_of_utc})+'\n\n',match=t.match(/(?:^|\n)(How to Read It|VERDICT|🙏 THE DAILY PRAYER|NEWS USED:)/);
   if(match){var at=match.index+(t[match.index]==='\n'?1:0);return t.slice(0,at)+block+t.slice(at);}
   return t+'\n\n'+block.trim();
  }
- function renderCollector(e){
+ function instant(v){if(v===null||v===undefined||v==='')return null;var n=typeof v==='number'?v:Date.parse(v);return Number.isFinite(n)?n:null;}
+ function reference(envelope,options){return instant(options&&options.asOf)??instant(envelope&&envelope.checked_at);}
+ function minutes(ms){var n=Math.max(0,Math.ceil(ms/60000));return n+' minute'+(n===1?'':'s');}
+ function collectorStatus(e,asOf){
+  var s=e&&e.summary,at=instant(asOf),generated=instant(s&&s.generated_at);
+  if(!s||s.schema!=='shadowwatch-market-coverage/1'||!s.coverage||!s.executions||!s.storage||generated===null||
+   ['AVAILABLE','STALE'].indexOf(e.status)<0||(at!==null&&generated>at+300000))return 'UNAVAILABLE';
+  return e.status==='STALE'||(at!==null&&at-generated>45*60000)?'STALE':'AVAILABLE';
+ }
+ function collectorLabel(e,asOf){
+  var status=collectorStatus(e,asOf),s=e&&e.summary;
+  if(status==='UNAVAILABLE')return 'Collection status unavailable';
+  if(status==='STALE')return 'Collector needs an update';
+  if(s.state==='CAPPED')return 'Collection limit reached';
+  if(s.state==='GAP'||s.state==='ERROR')return 'Collection needs attention';
+  if((s.coverage.missing_ranges||[]).length)return 'Saved sample · missing coverage';
+  return 'Saved sample · limited coverage';
+ }
+ function overview(envelope,options){
+  var e=envelope||{},at=reference(e,options),walletEnvelope=e,w=e.summary;
+  // Use one explicit time for a saved report. The dashboard supplies its current
+  // render time, so an old AVAILABLE response cannot stay fresh indefinitely.
+  if(e.status==='AVAILABLE'&&w&&at!==null&&instant(w.window_end)!==null&&at-instant(w.window_end)>36*3600000)walletEnvelope=Object.assign({},e,{status:'STALE'});
+  var walletLines=renderWallet(walletEnvelope).split('\n').slice(1),found=[],missing=[],meaning=[];
+  walletLines.forEach(function(line){
+   if(/^Observation period:/.test(line))missing.push(line.replace('Observation period:','Watched-wallet analysis window:'));
+   else if(/^These observations/.test(line))return;
+   else if(walletEnvelope.status!=='AVAILABLE'||/could not be classified|no classified records/i.test(line))missing.push(line);
+   else found.push(line);
+  });
+  var ce=e.collector||{status:'UNAVAILABLE'},s=ce.summary,status=collectorStatus(ce,at);
+  if(status==='UNAVAILABLE')missing.push('Ledger-wide collection coverage is unavailable. Missing evidence does not mean zero trading.');
+  else{
+   var c=s.coverage,t=s.executions,b=s.storage,gaps=c.missing_ranges||[];
+   found.push('Ledger-wide XRP/RLUSD collector: '+c.verified_ledgers+' verified ledgers (ledger snapshots)'+(Number.isSafeInteger(t.transactions)?', '+t.transactions+' transactions':'')+' since activation.');
+   if(status==='AVAILABLE'){
+    found.push(t.order_book_fills+' verified order-book fill'+(t.order_book_fills===1?'':'s')+' ('+t.partial_fills+' partial): matched amounts of '+t.order_book_xrp+' XRP and '+t.order_book_rlusd+' RLUSD.');
+    found.push(t.amm_swaps?'AMM swaps: '+t.amm_swaps+'; net pool movement '+t.amm_xrp+' XRP / '+t.amm_rlusd+' RLUSD, including fees.':'No verified XRP/RLUSD AMM swaps in this collected sample.');
+    if(t.liquidity_operations)missing.push(t.liquidity_operations+' AMM liquidity operations were excluded from swap totals.');
+    if(t.unclassified_transactions)missing.push(t.unclassified_transactions+' transactions could not yet be classified; trade totals are incomplete.');
+   }else missing.push('The collector snapshot is too old to describe current activity; execution totals are withheld until an update arrives.');
+   missing.push('Collector snapshot saved '+time(s.generated_at)+(at!==null?' ('+minutes(at-Date.parse(s.generated_at))+' old at '+time(new Date(at).toISOString())+')':'')+'.');
+   missing.push(c.last_verified_close?'Latest verified ledger closed '+time(c.last_verified_close)+(at!==null?' ('+minutes(at-Date.parse(c.last_verified_close))+' before that check)':'')+'.':'Latest verified ledger time is unavailable.');
+   if(gaps.length)missing.push('Missing ranges at that snapshot: '+gaps.map(function(r){return r.from+'–'+r.through+' ('+r.reason+')';}).join('; ')+'. The backlog may have grown.');
+   else missing.push('No gaps were recorded up to the last observed ledger. This does not establish current or continuous coverage.');
+   if(s.state==='CAPPED')missing.push('The saved run stopped at a collection limit.');
+   if(s.state==='GAP'||s.state==='ERROR')missing.push('The saved run needs attention before coverage can advance.');
+   missing.push('Private storage: '+(b.bucket_bytes/1e9).toFixed(3)+' / '+(b.bucket_limit/1e9).toFixed(0)+' GB. Daily collection budget: '+(b.daily_charged_bytes/1048576).toFixed(2)+' / '+(b.daily_limit/1048576).toFixed(0)+' MiB ('+b.day_utc+' UTC).');
+  }
+  meaning.push('Wallet flows and collected trades cover different records and periods; do not add their totals. These samples are not total market volume or proof of bots, wallet ownership, or price control.');
+  meaning.push('Collection targets a run every 15 minutes, with at most four new ledgers per run. It cannot keep up with XRPL; a saved result does not confirm scheduled runs.');
+  return{title:HEADING,label:collectorLabel(ce,at),asOf:at,collectorStatus:status,walletStatus:walletEnvelope.status,sections:[
+   {title:'What we found',lines:found.length?found:['No verified trading findings are available for this view.']},
+   {title:'What’s missing',lines:missing},{title:'Why it matters',lines:meaning}]};
+ }
+ function renderCollector(e,options){
   var s=e&&e.summary;
-  if(!s||['AVAILABLE','STALE'].indexOf(e.status)<0||s.schema!=='shadowwatch-market-coverage/1')return 'Ledger-wide XRP/RLUSD collector\nCollection coverage is unavailable. Missing evidence does not mean zero trading.';
+  var status=collectorStatus(e,options&&options.asOf);
+  if(status==='UNAVAILABLE')return 'Ledger-wide XRP/RLUSD collector\nCollection coverage is unavailable. Missing evidence does not mean zero trading.';
   var c=s.coverage,t=s.executions,b=s.storage;
   var lines=['Ledger-wide XRP/RLUSD collector',
-   'Status: '+(e.status==='STALE'?'STALE · ':'')+s.state+'. Snapshot: '+time(s.generated_at)+'.',
+   'Saved run status: '+(status==='STALE'?'STALE · ':'')+s.state+'. Snapshot: '+time(s.generated_at)+'. This is a saved result, not a live-running indicator.',
    'Verified '+c.verified_ledgers+' ledgers since activation at '+c.start+'. Next ledger: '+c.next+'. Latest observed ledger: '+(c.observed_tip===null?'unknown':c.observed_tip)+'.',
    'Collection lag at snapshot: '+Math.ceil(c.collection_delay_ms/60000)+' minutes. Gap beyond the 15-minute run target: '+Math.ceil(c.schedule_delay_ms/60000)+' minutes.'];
   if(c.missing_ranges.length)lines.push('Missing ranges: '+c.missing_ranges.map(function(r){return r.from+'–'+r.through+' ('+r.reason+')';}).join('; ')+'.');
   lines.push('Private storage: '+(b.bucket_bytes/1000000000).toFixed(3)+' / '+(b.bucket_limit/1000000000).toFixed(0)+' GB. Collector daily charged budget ('+b.day_utc+' UTC): '+(b.daily_charged_bytes/1048576).toFixed(2)+' / '+(b.daily_limit/1048576).toFixed(0)+' MiB.');
-  if(e.status!=='STALE'){
-   lines.push('Since activation: '+t.order_book_fills+' verified order-book fills ('+t.partial_fills+' partial), exchanging '+t.order_book_xrp+' XRP for '+t.order_book_rlusd+' RLUSD.');
+  if(status!=='STALE'){
+   lines.push('Since activation: '+t.order_book_fills+' verified order-book fill'+(t.order_book_fills===1?'':'s')+' ('+t.partial_fills+' partial), with matched amounts of '+t.order_book_xrp+' XRP and '+t.order_book_rlusd+' RLUSD.');
    lines.push('AMM swaps: '+t.amm_swaps+'; net pool movement '+t.amm_xrp+' XRP / '+t.amm_rlusd+' RLUSD, including pool fees.');
    lines.push(t.unclassified_transactions+' transactions need further reconciliation; '+t.liquidity_operations+' AMM operations excluded from swap totals.');
   }else lines.push('This snapshot is stale; execution totals are withheld until a fresh collector summary is available.');
   lines.push('Coverage begins at activation. These are observed liquidity executions, not total market volume, continuous coverage, or proof of price control.');
   return lines.join('\n');
  }
- function render(envelope){return renderWallet(envelope)+(envelope&&envelope.collector?'\n\n'+renderCollector(envelope.collector):'');}
+ function render(envelope,options){
+  if(!envelope||!envelope.collector)return renderWallet(envelope);
+  var model=overview(envelope,options);
+  return model.title+'\n'+model.sections.map(function(section){return section.title+'\n'+section.lines.join('\n');}).join('\n\n');
+ }
  async function load(fetcher){
   var controller=new AbortController(),timer,collector,base;
   async function read(url){try{var r=await(fetcher||fetch)(url,{signal:controller.signal,cache:'no-store'});
@@ -62,5 +122,5 @@
     {collector:collector||{status:'UNAVAILABLE',reason:'TIMEOUT'}}));controller.abort();},20000);})]);}
   finally{clearTimeout(timer);controller.abort();}
  }
- return{render:render,renderWallet:renderWallet,renderCollector:renderCollector,inject:inject,load:load};
+ return{render:render,renderWallet:renderWallet,renderCollector:renderCollector,overview:overview,collectorStatus:collectorStatus,collectorLabel:collectorLabel,inject:inject,load:load};
 });

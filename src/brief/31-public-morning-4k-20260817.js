@@ -116,15 +116,36 @@
     if (s.length <= TARGET) return s;
     var marker = '\nLEDGER DIAGNOSTICS\n';
     var at = s.indexOf(marker);
-    if (at < 0) return s.slice(0, TARGET - 1).trimEnd() + '…';
+    var overviewMarker = '\nXRP/RLUSD market activity watch\nWhat we found\n';
+    var hasOverview = s.indexOf(overviewMarker) >= 0;
+    var omission = 'XRP/RLUSD market activity watch\nDetailed findings are omitted from this shortened copy. Read the full report for amounts, observation periods, and missing coverage. These samples do not establish total market volume or price control.';
+    if (at < 0) {
+      if (!hasOverview) return s.slice(0, TARGET - 1).trimEnd() + '…';
+      at = s.length;
+    }
 
     var tail = s.slice(at);
     var maxHead = TARGET - tail.length - 2;
-    if (maxHead < 400) return s.slice(0, TARGET - 1).trimEnd() + '…';
-    var head = s.slice(0, maxHead);
+    if (maxHead < 400) return hasOverview
+      ? omission + '\n\n' + tail.trimStart().slice(0, TARGET - omission.length - 4).trimEnd() + '…'
+      : s.slice(0, TARGET - 1).trimEnd() + '…';
+    // Keep the new findings and their limitations together. Cutting between
+    // the amounts and "Why it matters" would remove the coverage caveat.
+    // Older sealed reports without this overview retain their existing path.
+    var narrative = s.slice(0, at), reserved = '';
+    var marketAt = narrative.indexOf(overviewMarker);
+    if (marketAt >= 0) {
+      reserved = narrative.slice(marketAt).trim();
+      narrative = narrative.slice(0, marketAt);
+      if (reserved.length + 200 > maxHead) {
+        reserved = omission;
+      }
+      maxHead -= reserved.length + 4;
+    }
+    var head = narrative.slice(0, maxHead);
     var cut = Math.max(head.lastIndexOf('\n\n'), head.lastIndexOf('. '));
     if (cut > Math.floor(maxHead * 0.65)) head = head.slice(0, cut + (head.charAt(cut) === '.' ? 1 : 0));
-    return head.trimEnd() + '\n…\n' + tail.trimStart();
+    return head.trimEnd() + '\n…\n' + (reserved ? reserved + '\n\n' : '') + tail.trimStart();
   }
 
   function govern(text) {
