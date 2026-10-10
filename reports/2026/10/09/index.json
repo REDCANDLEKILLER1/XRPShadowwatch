@@ -58,5 +58,15 @@
     "anchor": 107531544,
     "transactions": null,
     "report_hash": "934266c11b5074a0a546edc34db311a73cd95e803934505f69a7a71982b07a82"
+  },
+  {
+    "report_id": "SW-20261010-MC8WC",
+    "scan_id": "SC-MV1NN0VZ",
+    "generated_at": "2026-10-09T22:39:32.000Z",
+    "sealed_at": "2026-10-10T00:27:14.118Z",
+    "coverage_complete": true,
+    "anchor": 107548329,
+    "transactions": null,
+    "report_hash": "be05d27d999ed57d3dcd9fad9971f111d2ea7446e64cb98a1502b16e007fbf78"
   }
 ]

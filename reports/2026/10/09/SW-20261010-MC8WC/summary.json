@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20261010-MC8WC",
+  "generated_at": "2026-10-09T22:39:32.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107548329,
+  "transactions_in_window": null,
+  "new_observations": 0,
+  "xrpl_requests": 0,
+  "report_hash": "be05d27d999ed57d3dcd9fad9971f111d2ea7446e64cb98a1502b16e007fbf78"
+}
