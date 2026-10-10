@@ -42,6 +42,10 @@ const server=http.createServer((q,r)=>{
    const band={...pack,market:{price:1.33,pct24h:-0.1},forensic_memory:{band_hold_days:20}};
    const quiet={...pack,large_transfers:[],shadow_volume_xrp:0,tx_24h_count:0,total_tx_xrp:0,total_balance_delta_xrp:0,xrp_price:0,risk_score:{score:5,drivers:[]}};
    const watch={status:'AVAILABLE',summary:{schema:'shadowwatch-forensic-report/1',window_start:'2026-10-05T10:00:00Z',window_end:'2026-10-06T10:00:00Z',exchange_transactions:2,classified_records:2,xrp_sold_for_rlusd:'904.120603',xrp_bought_with_rlusd:'904.120603',repeated_quote_wallets:1,repeated_cancel_wallets:0,regular_transfer_wallets:0,unclassified_records:0}};
+   watch.collector={status:'AVAILABLE',summary:{schema:'shadowwatch-market-coverage/1',generated_at:'2026-10-06T10:00:00Z',state:'RUNNING',
+    coverage:{start:100,next:104,verified_ledgers:4,observed_tip:200,collection_delay_ms:384000,schedule_delay_ms:60000,missing_ranges:[{from:104,through:200,reason:'BACKLOG'}]},
+    storage:{bucket_bytes:2000000,bucket_limit:8000000000,daily_charged_bytes:500000,daily_limit:33554432,day_utc:'2026-10-06'},
+    executions:{order_book_fills:2,partial_fills:1,order_book_xrp:'12.345678',order_book_rlusd:'18.518517',amm_swaps:1,amm_xrp:'3',amm_rlusd:'4.5',unclassified_transactions:0,liquidity_operations:0}}};
    const watchPack={...pack,market_watch:watch},watchBefore=JSON.stringify(watch);
    const watchText=canonicalMorningStory(watchPack,{rebuild:true});
    state.marketWatch={status:'UNAVAILABLE'};
@@ -77,6 +81,8 @@ const server=http.createServer((q,r)=>{
   assert(result.watchPublished.length<=4000);assert.match(result.watchPublished,/XRP\/RLUSD market activity watch/);
   assert.match(result.watchPublished,/904\.120603 XRP was exchanged for RLUSD/);
   assert.match(result.watchText,/1 wallet repeatedly quoted the same price/);
+  assert.match(result.watchText,/104–200 \(BACKLOG\)/);assert.match(result.watchText,/12\.345678 XRP/);assert.match(result.watchText,/AMM swaps: 1/);
+  assert.match(result.watchPublished,/104–200 \(BACKLOG\)/);assert.match(result.watchPublished,/12\.345678 XRP/);
   assert(result.watchText.indexOf('XRP/RLUSD market activity watch')<result.watchText.indexOf('How to Read It'));
   assert.equal(result.watchText,result.watchCached,'late state changes cannot alter the saved report');
   assert(result.watchUnchanged);assert(!result.text.includes('XRP/RLUSD market activity watch'),'old saved packs remain unchanged');

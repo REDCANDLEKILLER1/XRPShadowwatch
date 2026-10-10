@@ -138,7 +138,7 @@ function r2Store(s3) {
     }
   };
 }
-async function collect({start,end,store,rpc=M.rpc,clock=Date.now,id=require('crypto').randomUUID()}={}) {
+async function collect({start,end,store,rpc=M.rpc,clock=Date.now,id=require('crypto').randomUUID(),expectedParent}={}) {
   bounds(start,end);
   const begun=clock(), key=stateKey(start,end), day=new Date(begun).toISOString().slice(0,10);
   const metrics={rpc_requests:0,processed_ledgers:0,reused_ledgers:0,raw_bytes:0,compressed_bytes:0,elapsed_ms:0};
@@ -166,6 +166,8 @@ async function collect({start,end,store,rpc=M.rpc,clock=Date.now,id=require('cry
       receipts:[],scope:'BOUNDED_VALIDATED_LEDGER_INTERVAL',history_complete:false,continuous:false,
       interval_complete:false,unique_market_volume:null,classification_complete:false};
   }
+  // The supervisor binds adjacent ranges before any reservation or evidence write.
+  if(expectedParent!==undefined&&(!hashOK(expectedParent)||s.anchor_parent!==expectedParent))throw Error('PILOT_SUPERVISOR_CHAIN_MISMATCH');
   if(s.next===end+1)return {...metrics,elapsed_ms:clock()-begun,interval_complete:true,next:s.next,remaining_ledgers:0,unique_market_volume:null,classification_complete:false};
   // Reserve worst-case storage BEFORE any new data/checkpoint writes. Reservations
   // include checkpoint/control overhead. Shared writer lane is mandatory.

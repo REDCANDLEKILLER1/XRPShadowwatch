@@ -1,0 +1,40 @@
+name: Automatic market evidence
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '11,26,41,56 * * * *'
+permissions:
+  contents: read
+# All private R2 writers must use this same lane. A delay is reported, never hidden.
+concurrency:
+  group: shadowwatch-private-r2-backup
+  cancel-in-progress: false
+jobs:
+  collect:
+    if: github.repository == 'REDCANDLEKILLER1/XRPShadowwatch' && github.ref == 'refs/heads/main' && vars.SHADOWWATCH_MARKET_AUTOCOLLECT_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Collector safeguards
+        run: |
+          node scripts/market-collector.test.js
+          node scripts/market-supervisor.test.js
+          node scripts/market-executions.test.js
+          node scripts/market-coverage.test.js
+      - name: Resume bounded collector and publish derived coverage
+        timeout-minutes: 5
+        env:
+          SHADOWWATCH_MARKET_AUTOCOLLECT_ENABLED: 'true'
+          SHADOWWATCH_AUTOROSTER_ENABLED: 'false'
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          SHADOWWATCH_EVIDENCE_TOKEN: ${{ secrets.SHADOWWATCH_EVIDENCE_TOKEN }}
+        run: node scripts/market-supervisor.js
+      # No artifacts, evidence pruning, automatic wallet admission, signing or submit.

@@ -1,0 +1,44 @@
+'use strict';
+const assert=require('assert/strict'),C=require('./market-collector'),A=require('./market-auto-store'),S=require('./market-supervisor'),R=require('./r2-master-backup');
+const {fakeS3,rpcFixture}=require('./fixtures/market-test-helpers');
+const codeSha='a'.repeat(40),state=s3=>JSON.parse(s3.objects.get(S.KEY));
+async function tick(s3,source,overrides={}){return S.run({store:A.store(s3),rpc:source.rpc,clock:source.now,codeSha,...overrides});}
+(async()=>{
+ const s=fakeS3(),r=rpcFixture();let out=await tick(s,r);
+ assert.equal(out.summary.coverage.next,101);assert.equal(out.summary.coverage.verified_ledgers,1);
+ assert.equal(out.summary.state,'CAUGHT_UP');assert.equal(out.summary.automatic_admission,false);assert.equal(out.summary.continuous,false);
+ r.tip=120;out=await tick(s,r);assert.equal(out.summary.coverage.next,105);assert.equal(out.metrics.processed_ledgers,4);
+ assert.deepEqual(out.summary.coverage.missing_ranges,[{from:105,through:120,reason:'BACKLOG'}]);
+ assert(out.summary.storage.daily_charged_bytes<1024*1024,'completed reservations settle to conservative actual bytes');
+ assert(out.summary.coverage.collection_delay_ms>0);
+ const next=await tick(s,r);assert.equal(next.summary.coverage.next,109);assert.equal(next.summary.executions.transactions,9,'prior receipts never counted twice');
+ const g=fakeS3(),q=rpcFixture();await tick(g,q);q.tip=120;q.fail=102;
+ const gap=await tick(g,q);assert.equal(gap.summary.coverage.next,102);assert.equal(gap.summary.state,'GAP');
+ q.fail=null;const recovered=await tick(g,q);assert.equal(recovered.summary.coverage.next,106);assert.equal(recovered.summary.executions.transactions,6);
+ const crash=fakeS3(),p=rpcFixture();await tick(crash,p);p.tip=120;
+ let failed=false;crash.fail=cmd=>{if(!failed&&cmd.constructor.name==='PutObjectCommand'&&cmd.input.Key===S.KEY&&JSON.parse(cmd.input.Body).next>101){failed=true;throw Error('write failed');}};
+ const interrupted=await tick(crash,p);assert.equal(interrupted.summary.coverage.next,101,'failed supervisor commit never publishes its tentative cursor');
+ crash.fail=null;const restart=await tick(crash,p);assert.equal(restart.summary.coverage.next,109);assert.equal(restart.summary.executions.transactions,9);
+ const cap=fakeS3(),c=rpcFixture();await tick(cap,c);c.tip=120;cap.total=R.LIMIT;
+ const writes=cap.writes,capped=await tick(cap,c);assert.equal(capped.summary.state,'CAPPED');assert.equal(capped.summary.coverage.next,101);assert.equal(cap.writes,writes);
+ const daily=fakeS3(),d=rpcFixture();await tick(daily,d);d.tip=120;
+ const day=new Date(d.now()).toISOString().slice(0,10);daily.objects.set(A.PREFIX+'budgets/'+day+'/reserved/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/'+C.LIMITS.day+'.json',Buffer.from('{}'));
+ assert.equal((await tick(daily,d)).summary.state,'CAPPED');assert.equal(state(daily).next,101);
+ const corrupt=fakeS3(),k=rpcFixture();await tick(corrupt,k);corrupt.objects.set(state(corrupt).last_receipt.key,Buffer.from('tampered'));
+ await assert.rejects(()=>tick(corrupt,k),/HASH|SIZE/);
+ const failedStore=fakeS3(),f=rpcFixture();await tick(failedStore,f);f.tip=120;
+ failedStore.fail=cmd=>{if(cmd.constructor.name==='PutObjectCommand'&&cmd.input.Key.includes('/objects/'))throw Error('lost write');};
+ const stop=await tick(failedStore,f);assert.equal(stop.summary.coverage.next,101);assert(stop.summary.storage.daily_charged_bytes>8*1024*1024,'storage failures retain reservation');
+ const linked=fakeS3(),l=rpcFixture();await tick(linked,l);l.tip=120;l.wrongParent=true;assert.equal((await tick(linked,l)).summary.coverage.next,101);
+ const schedule=fakeS3(),late=rpcFixture();await tick(schedule,late);late.tip=1000;assert((await tick(schedule,late)).summary.coverage.schedule_delay_ms>0);
+ const rollover=fakeS3(),midnight=rpcFixture();let time=Date.parse('2026-10-10T23:59:59.900Z');
+ const rolled=await tick(rollover,midnight,{clock:()=>time,rpc:async(method,p)=>{
+  const v=await midnight.rpc(method,p);v.ledger.close_time=Date.parse('2026-10-10T23:59:59Z')/1000-946684800;
+  time=Date.parse('2026-10-11T00:00:00.100Z');return v;
+ }});
+ assert.equal(rolled.summary.storage.day_utc,'2026-10-11');
+ assert.equal(rolled.summary.storage.daily_charged_bytes,(await A.store(rollover).usage('2026-10-11')).dayBytes,'midnight summary uses the displayed UTC budget day');
+ const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'REDCANDLEKILLER1/XRPShadowwatch',GITHUB_WORKFLOW:'Automatic market evidence',GITHUB_REF:'refs/heads/main',GITHUB_EVENT_NAME:'schedule',SHADOWWATCH_AUTOROSTER_ENABLED:'false',SHADOWWATCH_MARKET_AUTOCOLLECT_ENABLED:'true'};
+ S.lane(env);for(const key of Object.keys(env))assert.throws(()=>S.lane({...env,[key]:'wrong'}),/LANE/);
+ console.log('PASS automatic resume, no double counts, gap retry, checkpoint failure recovery, corruption, daily/bucket caps, reservation settlement, parent continuity, delay reporting and execution gates');
+})().catch(e=>{console.error(e);process.exitCode=1;});
