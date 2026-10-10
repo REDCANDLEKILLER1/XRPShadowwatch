@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20261010-OHVG9",
+  "generated_at": "2026-10-10T20:49:51.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107569026,
+  "transactions_in_window": null,
+  "new_observations": 0,
+  "xrpl_requests": 0,
+  "report_hash": "ae2c5dc72e1f64bd5101c690246e2b5c548689260aa023aad4e56115ed230841"
+}

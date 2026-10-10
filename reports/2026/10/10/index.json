@@ -20,6 +20,16 @@
     "report_hash": "7895fa5c198235950b383301eb07deaa2b1c55fa67c07863ed9e90a590f5315e"
   },
   {
+    "report_id": "SW-20261010-OHVG9",
+    "scan_id": "SC-MV2ZBA37",
+    "generated_at": "2026-10-10T20:49:51.000Z",
+    "sealed_at": "2026-10-10T22:41:47.736Z",
+    "coverage_complete": true,
+    "anchor": 107569026,
+    "transactions": null,
+    "report_hash": "ae2c5dc72e1f64bd5101c690246e2b5c548689260aa023aad4e56115ed230841"
+  },
+  {
     "report_id": "SW-20261010-Q4V1I",
     "scan_id": "SC-MV2Z6078",
     "generated_at": "2026-10-10T20:49:51.000Z",
