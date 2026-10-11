@@ -11,3 +11,7 @@ Each segment pins source commit, source tree, backup manifest SHA256, checkpoint
 Local copies in these tests simulate independent recovery. Distinct directories do NOT establish independent providers. Before any real rotation: verify offsite provenance, immutable catalogs and recovery copies; integrate the application report reader; measure storage/restore costs; prove rollback and replay against real data; obtain separate merge and cutover approvals. Retain all old history. Automatic wallet admission stays disabled. No credentials, deletion, history rewriting, destination switching or production jobs are authorized by this experiment.
 
 Test: `node scripts/run-tests.js --only archive-rotation`.
+
+## Older-day revision policy
+
+Closed-day revisions are explicitly rejected during append with `ARCHIVE_OLDER_DAY_REVISION: YYYY-MM-DD`. For every prior segment, the candidate's verified full snapshot supplies that segment's pinned historical checkpoint. The existing canonical resolver is run at both that historical checkpoint and the candidate's latest checkpoint. Any difference in shard paths, hashes or row counts prevents catalog extension. All prior segment checkpoints must match their pinned ancestry. Existing catalogs remain historical snapshots; they are not advertised as current after a rejected revision. A future version-aware catalog/rebuild requires separate design and approval. No evidence is deleted or treated as lost.
