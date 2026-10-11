@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20261011-JFRDS",
+  "generated_at": "2026-10-11T02:31:10.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107574320,
+  "transactions_in_window": null,
+  "new_observations": 0,
+  "xrpl_requests": 0,
+  "report_hash": "e6ad6a05e4ef35f943cd459aa192821df2d66c4388894d97e8e79496b99a0607"
+}
