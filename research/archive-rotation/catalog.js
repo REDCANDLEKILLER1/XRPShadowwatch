@@ -49,6 +49,18 @@ async function append(c,expected,{id,first,last,primary,recovery}){
  const next=seal([...c.segments,s]);validate(next,next.sha256);
  const prev=c.segments.at(-1);
  if(prev){const p=path.join(primary,Store.historyPath(prev.state_version));if(JSON.parse(fs.readFileSync(p)).state_sha256!==prev.state_sha256)throw Error('ARCHIVE_ANCESTRY_MISMATCH');}
+ // Closed-day policy: reject revisions rather than silently serving an older snapshot.
+ // Full backups retain the owning checkpoint, so compare the canonical reader at
+ // that checkpoint with the newest checkpoint using the same verified snapshot.
+ for(const old of c.segments){
+  const historical=JSON.parse(fs.readFileSync(path.join(primary,Store.historyPath(old.state_version))));
+  if(historical.state_sha256!==old.state_sha256)throw Error('ARCHIVE_ANCESTRY_MISMATCH');
+  const days=daysBetween(old.first,old.last),deps=adapter(primary,a.m);
+  const before=await Store.resolveDayManifests(days,{...deps,loaded_state:historical});
+  const after=await Store.resolveDayManifests(days,deps);
+  const signature=m=>JSON.stringify(Object.values(m.shards).sort((x,y)=>x.path.localeCompare(y.path)));
+  for(const d of days)if(signature(before.byDay[d])!==signature(after.byDay[d]))throw Error('ARCHIVE_OLDER_DAY_REVISION: '+d);
+ }
  // Require all canonical shard kinds for every owned day, not a synthetic coverage claim.
  const days=daysBetween(first,last);
  for(const kind of ['events','participants','payloads'])await read(primary,a.m,days,kind);
