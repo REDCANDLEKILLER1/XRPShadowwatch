@@ -1,6 +1,9 @@
 name: Private R2 backup and restore
 on:
   workflow_dispatch:
+  # Refresh the 24-hour restore receipt twice daily, away from the hour.
+  schedule:
+    - cron: '17 5,17 * * *'
   # Bootstrap the first copy on the approved builder branch. No PR triggers.
   push:
     branches: [agent/storage-auto-roster-20261008]
