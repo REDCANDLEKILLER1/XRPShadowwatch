@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20261012-B4KP8",
+  "generated_at": "2026-10-12T10:19:31.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107603966,
+  "transactions_in_window": null,
+  "new_observations": 0,
+  "xrpl_requests": 0,
+  "report_hash": "b68457f378940ad92f67be7f6a67160b18577b48ee12611b968db16022c501b5"
+}
