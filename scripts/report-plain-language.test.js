@@ -52,7 +52,7 @@ const server=http.createServer((q,r)=>{
    const watchCached=canonicalMorningStory();
    const staleWatch=canonicalMorningStory({...pack,market_watch:{...watch,status:'STALE'}},{rebuild:true});
    const missingWatch=canonicalMorningStory({...pack,market_watch:{status:'UNAVAILABLE'}},{rebuild:true});
-   return {text,raw,watchText,watchPublished:SW_PUBLIC_MORNING_4K_20260817.publicText(watchText),watchCached,staleWatch,missingWatch,watchUnchanged:watchBefore===JSON.stringify(watch),onward:api.assemble(onward).text,holding:api.assemble(holding).text,band:api.assemble(band).text,lost:api.render(lost),incomplete:api.render(incomplete),unknown:api.render(unknown),quiet:api.render(quiet),published:SW_PUBLIC_MORNING_4K_20260817.publicText(text),inputsUnchanged,interpretationsUnchanged,mode:window._SW_REPORT_MODE};
+   return {technical:finalizeReportPresentation("Technical report",watchPack,true),text,raw,watchText,watchPublished:SW_PUBLIC_MORNING_4K_20260817.publicText(watchText),watchCached,staleWatch,missingWatch,watchUnchanged:watchBefore===JSON.stringify(watch),onward:api.assemble(onward).text,holding:api.assemble(holding).text,band:api.assemble(band).text,lost:api.render(lost),incomplete:api.render(incomplete),unknown:api.render(unknown),quiet:api.render(quiet),published:SW_PUBLIC_MORNING_4K_20260817.publicText(text),inputsUnchanged,interpretationsUnchanged,mode:window._SW_REPORT_MODE};
   });
   assert(result.inputsUnchanged,'editorial rendering must not mutate evidence');assert(result.interpretationsUnchanged,'rendering must not change interpretations');
   assert.match(result.raw,/112M XRP moved across 3 large transfers during the last 24h/);
@@ -69,28 +69,23 @@ const server=http.createServer((q,r)=>{
   const flow=result.text.split('Under the Surface\n')[1].split('How to Read It\n')[0];assert(!/112M XRP/.test(flow),'mid-size section does not repeat whale total');
   assert.match(result.text,/31\.40B XRP locked now/);assert.match(result.text,/98 active validated-ledger escrow objects/);assert.match(result.text,/registry check 20\/20/);
   assert.match(result.text,/count is of separate locks \(ledger objects, not owner wallets\)/);assert.match(result.text,/not every escrow on the XRPL/);
-  assert.match(result.text,/2026-10-06T10:19:40.000Z.*LAST GOOD STALE/);assert.match(result.text,/Live order\/offer sweep: not collected/);
+  assert.match(result.text,/2026-10-06T10:19:40.000Z.*LAST GOOD STALE/);assert(!result.text.includes("Live order/offer sweep: not collected"));
   assert.match(result.lost,/SCAN INCOMPLETE — CONNECTION LOST/);assert.match(result.lost,/REPORT NOT SEALED/);assert.match(result.lost,/not a verdict/);
   assert.match(result.incomplete,/19 of 20 watched wallets proved the requested window/);assert.match(result.incomplete,/1 unproven/);assert.match(result.incomplete,/withholding an all-clear/);
   assert.match(result.unknown,/coverage was not established/);assert.match(result.quiet,/watched-wallet record/);
   for(const s of ['THE DAILY PRAYER','THE DAILY SCRIPTURE','I’m XRPMan, and I tell on the banks.'])assert(result.text.includes(s),s);
   assert(result.published.length<=4000);assert.match(result.published,/\(41\/100\)/);assert.match(result.published,/31\.40B/);
   assert(!/banks like to move|single, deliberate|every transfer is a confession|where they land tells me who/i.test(result.text));
-  assert.equal((result.watchText.match(/XRP\/RLUSD market activity watch/g)||[]).length,1);
-  assert.match(result.watchText,/904\.120603 XRP was exchanged for RLUSD/);
-  assert(result.watchPublished.length<=4000);assert.match(result.watchPublished,/XRP\/RLUSD market activity watch/);
-  assert.match(result.watchPublished,/904\.120603 XRP was exchanged for RLUSD/);
-  assert.match(result.watchText,/1 wallet repeatedly quoted the same price/);
-  assert.match(result.watchText,/104–200 \(BACKLOG\)/);assert.match(result.watchText,/12\.345678 XRP/);assert.match(result.watchText,/AMM swaps: 1/);
-  assert.match(result.watchPublished,/104–200 \(BACKLOG\)/);assert.match(result.watchPublished,/12\.345678 XRP/);
-  for(const heading of ['What we found','What’s missing','Why it matters']){assert(result.watchText.includes(heading));assert(result.watchPublished.includes(heading));}
-  assert.match(result.watchText,/24 minutes old/);assert.match(result.watchText,/26 minutes before that check/);
-  assert.match(result.watchPublished,/not total market volume/);assert.match(result.watchPublished,/before that check/);
-  assert(result.watchText.indexOf('XRP/RLUSD market activity watch')<result.watchText.indexOf('How to Read It'));
+  for (const report of [result.watchText,result.watchPublished,result.staleWatch,result.missingWatch]) {
+    assert(!/XRP\/RLUSD market activity watch|BACKLOG|904\.120603|What’s missing/.test(report));
+  }
+  assert(result.watchPublished.length<=4000);
+  assert.match(result.technical,/904\.120603 XRP was exchanged for RLUSD/);
+  assert.match(result.technical,/104–200 \(BACKLOG\)/);
   assert.equal(result.watchText,result.watchCached,'late state changes cannot alter the saved report');
   assert(result.watchUnchanged);assert(!result.text.includes('XRP/RLUSD market activity watch'),'old saved packs remain unchanged');
-  assert.match(result.staleWatch,/too old to describe current activity/);assert(!result.staleWatch.includes('904.120603'));
-  assert.match(result.missingWatch,/does not establish that no activity occurred/);
+  assert(!result.staleWatch.includes('904.120603'));
+
   // Exercise Lady K's actual capture, clipboard, and download surfaces.
   const lady=await browser.newPage({viewport:{width:390,height:844},isMobile:true});
   await lady.route('**/*',r=>r.request().url().startsWith(origin)?r.continue():r.abort());
