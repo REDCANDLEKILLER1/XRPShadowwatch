@@ -167,17 +167,19 @@ const srv = http.createServer((req,res) => {
       if (slowNews) assert(newsBodies>0,'real targeted-news response body must stall during RUN');
       else assert(await page.evaluate(()=>state.pack.news_intel.items.some(x=>x.title==='Timely XRP context')),'timely context must reach this run');
       assert(out.seal,'stored RUN must seal even when XRPL is offline');
-      const integrity=await page.evaluate(()=>({lost:state.pack.scan_link_lost,story:state.morningStoryReport,watch:state.pack.market_watch}));
+      const integrity=await page.evaluate(()=>({lost:state.pack.scan_link_lost,story:state.morningStoryReport,technical:document.getElementById("mainReport").textContent,watch:state.pack.market_watch}));
       if(attempt===0){
         assert.equal(integrity.watch.status,'AVAILABLE','market-price timeout must preserve completed XRP/RLUSD analysis');
-        assert.match(integrity.story,/904\.120603 XRP was exchanged for RLUSD/);
+        assert.match(integrity.technical,/904\.120603 XRP was exchanged for RLUSD/);
       }else{
         assert.equal(integrity.watch.status,'UNAVAILABLE','a rerun must not inherit the previous analysis');
         assert(!integrity.story.includes('904.120603'));
       }
       assert.equal(integrity.lost,false);
       assert(!integrity.story.includes('SCAN INCOMPLETE'));
-      assert(integrity.story.includes('Live order/offer sweep: not collected'));
+      assert(!integrity.story.includes('Live order/offer sweep: not collected'));
+      assert(!integrity.story.includes('904.120603'));
+      assert(integrity.technical.includes('Live order/offer sweep: not collected'));
       assert.equal(out.txs,200000); assert(out.report>0); assert(!out.scanning); assert(!out.disabled);
       assert.equal(out.coverage.complete_wallets,roster.length); assert.equal(out.network,0);
       assert.deepEqual(out.deltas,[null,null],'stale balance and missing stored baseline cannot use device net flow');
