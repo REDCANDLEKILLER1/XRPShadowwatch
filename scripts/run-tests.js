@@ -40,6 +40,7 @@ const SUITES = [
   ['market-evidence', 'market-evidence.test.js', null],
   ['r2-master-backup', 'r2-master-backup.test.js', null],
   ['storage-status', 'storage-status.test.js', 8239],
+  ['archive-rotation', 'archive-rotation.test.js', null],
   ['storage-master-backup', 'storage-master-backup.test.js', null],
   ['auto-roster-admission', 'auto-roster-admission.test.js', null],
   ['report-startup-race', 'report-startup-race.test.js', null],
