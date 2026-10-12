@@ -17914,7 +17914,9 @@ function finalizeReportPresentation(text, pack, structured) {
   if (escrow) out = structured ? escrow.injectStructured(out) : escrow.inject(out);
   if (layers) out = structured ? layers.enrichStructured(out, pack) : layers.enrichStory(out, pack);
   if (terms) out = terms.clarify(out);
-  if (window.SW_MARKET_WATCH) out = window.SW_MARKET_WATCH.inject(out, pack);
+  if (window.SW_MARKET_WATCH) out = structured
+    ? window.SW_MARKET_WATCH.inject(out, pack)
+    : window.SW_MARKET_WATCH.publicReport(out, pack);
   return out;
 }
 
