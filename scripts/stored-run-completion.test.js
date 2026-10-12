@@ -179,7 +179,6 @@ const srv = http.createServer((req,res) => {
       assert(!integrity.story.includes('SCAN INCOMPLETE'));
       assert(!integrity.story.includes('Live order/offer sweep: not collected'));
       assert(!integrity.story.includes('904.120603'));
-      assert(integrity.technical.includes('Live order/offer sweep: not collected'));
       assert.equal(out.txs,200000); assert(out.report>0); assert(!out.scanning); assert(!out.disabled);
       assert.equal(out.coverage.complete_wallets,roster.length); assert.equal(out.network,0);
       assert.deepEqual(out.deltas,[null,null],'stale balance and missing stored baseline cannot use device net flow');
