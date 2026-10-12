@@ -18,5 +18,15 @@
     "anchor": 107603966,
     "transactions": null,
     "report_hash": "dcf099357f37419f0aff2c4443b8f6983433aaeb55a68a11a0025be075d76457"
+  },
+  {
+    "report_id": "SW-20261012-TONQO",
+    "scan_id": "SC-MV59F81V",
+    "generated_at": "2026-10-12T10:19:31.000Z",
+    "sealed_at": "2026-10-12T13:00:20.231Z",
+    "coverage_complete": true,
+    "anchor": 107603966,
+    "transactions": null,
+    "report_hash": "3e40e375448bae481cf46b32ac3ec9a6084c15148add74cfec558492c6703b8c"
   }
 ]

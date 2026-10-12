@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20261012-TONQO",
+  "generated_at": "2026-10-12T10:19:31.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107603966,
+  "transactions_in_window": null,
+  "new_observations": 0,
+  "xrpl_requests": 0,
+  "report_hash": "3e40e375448bae481cf46b32ac3ec9a6084c15148add74cfec558492c6703b8c"
+}
