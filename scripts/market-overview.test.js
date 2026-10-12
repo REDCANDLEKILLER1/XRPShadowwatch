@@ -46,3 +46,18 @@ assert(withoutDiagnostics.length<=4000);assert(withoutDiagnostics.includes(text)
 const oversizeTail=sandbox.window.SW_PUBLIC_MORNING_4K_20260817.publicText(longReport+'Diagnostics only. '.repeat(300));
 assert(oversizeTail.length<=4000);assert.match(oversizeTail,/findings are omitted/);assert(!oversizeTail.includes('1.425213'));
 console.log('PASS shared overview: snapshot age, ledger age, separate periods/totals, bounded scope, stale/unknown withholding and frozen reports');
+
+// Public story excludes optional pilot diagnostics; technical overview is intact.
+const story='Executive Summary\n221.90M XRP across 72 transfers.\n\nHow to Read It\nObserved movement.\n\nLEDGER DIAGNOSTICS\n• Watched-ledger evidence current through: 2026-10-12T10:19:31.000Z · CURRENT\n• Live order/offer sweep: not collected in this stored-evidence report.\n• Native XRPL DEX (24h): SOURCE UNAVAILABLE (no decision recorded)\n• Transaction coverage incomplete — do not treat as a complete window.\n• XRP price: ~$1.3882\n\n🙏 THE DAILY PRAYER\nPrayer text.\n\nSources\nSource text.';
+const technical=W.inject(story,{market_watch:envelope,market_watch_as_of_utc:at});
+const publicStory=W.publicReport(technical,{});
+assert(!/What’s missing|BACKLOG|Private storage|Daily collection budget|market activity watch|SOURCE UNAVAILABLE|not collected/.test(publicStory));
+assert.match(publicStory,/221.90M XRP across 72 transfers/);
+assert.match(publicStory,/Watched-wallet data through: 2026-10-12T10:19:31.000Z/);
+assert.match(publicStory,/Transaction coverage incomplete/,'material main-report limitations stay visible');
+assert.match(publicStory,/Prayer text/);assert.match(publicStory,/Source text/);assert.match(publicStory,/XRP price/);
+assert.equal(W.publicReport(publicStory,{}),publicStory);
+assert.match(technical,/BACKLOG/);assert.match(technical,/Private storage/);
+const core=require('fs').readFileSync(require('path').join(__dirname,'../src/brief/02-core.js'),'utf8');
+assert.match(core,/structured\s*\? window.SW_MARKET_WATCH.inject\(out, pack\)\s*: window.SW_MARKET_WATCH.publicReport\(out, pack\)/);
+console.log('PASS public/technical separation: pilot withheld, evidence timestamp and main coverage warnings retained');
