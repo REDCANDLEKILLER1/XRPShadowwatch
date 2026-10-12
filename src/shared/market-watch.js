@@ -30,6 +30,22 @@
   if(match){var at=match.index+(t[match.index]==='\n'?1:0);return t.slice(0,at)+block+t.slice(at);}
   return t+'\n\n'+block.trim();
  }
+ // The bounded market pilot belongs in the technical report until its period
+ // and coverage can support the public story. Never turn missing data into zero.
+ function publicReport(text,pack){
+  var out=String(text||'');
+  // Also handle an already enriched story passed through a late renderer.
+  out=out.replace(/(?:XRP\/RLUSD market activity watch|Market activity watch)\n[\s\S]*?(?=\n(?:How to Read It|What To Watch Next|Verdict|VERDICT|LEDGER DIAGNOSTICS|🙏 THE DAILY PRAYER|NEWS USED:)(?:\n|$)|$)/g,'');
+  out=out.split('\n').filter(function(line){
+   return !/^• (?:Live order\/offer sweep: not collected|Optional live enrichment connection unavailable|Native XRPL DEX \(24h\): SOURCE UNAVAILABLE)/.test(line);
+  }).map(function(line){
+   if(/^• Watched-ledger evidence current through:/.test(line)){
+    return line.replace('Watched-ledger evidence current through:','Watched-wallet data through:').replace(/ · CURRENT$/,'');
+   }
+   return line;
+  }).join('\n');
+  return out.replace(/\n{3,}/g,'\n\n');
+ }
  function instant(v){if(v===null||v===undefined||v==='')return null;var n=typeof v==='number'?v:Date.parse(v);return Number.isFinite(n)?n:null;}
  function reference(envelope,options){return instant(options&&options.asOf)??instant(envelope&&envelope.checked_at);}
  function minutes(ms){var n=Math.max(0,Math.ceil(ms/60000));return n+' minute'+(n===1?'':'s');}
@@ -122,5 +138,5 @@
     {collector:collector||{status:'UNAVAILABLE',reason:'TIMEOUT'}}));controller.abort();},20000);})]);}
   finally{clearTimeout(timer);controller.abort();}
  }
- return{render:render,renderWallet:renderWallet,renderCollector:renderCollector,overview:overview,collectorStatus:collectorStatus,collectorLabel:collectorLabel,inject:inject,load:load};
+ return{publicReport:publicReport,render:render,renderWallet:renderWallet,renderCollector:renderCollector,overview:overview,collectorStatus:collectorStatus,collectorLabel:collectorLabel,inject:inject,load:load};
 });
