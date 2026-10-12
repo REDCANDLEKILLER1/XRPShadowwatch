@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20261012-O5SJF",
+  "generated_at": "2026-10-12T13:01:20.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107606469,
+  "transactions_in_window": null,
+  "new_observations": 0,
+  "xrpl_requests": 0,
+  "report_hash": "2e794eb62213fbdfd19aa9c3f03312ad9ee07ccc174f62dfddf2b970d93e1207"
+}
