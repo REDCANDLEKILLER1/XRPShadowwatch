@@ -1,0 +1,12 @@
+[
+  {
+    "report_id": "SW-20261013-57L22",
+    "scan_id": "SC-MV6NMCVU",
+    "generated_at": "2026-10-13T10:19:32.000Z",
+    "sealed_at": "2026-10-13T12:25:33.884Z",
+    "coverage_complete": true,
+    "anchor": 107626261,
+    "transactions": null,
+    "report_hash": "17ed92df1019f65cff00a212ab4111b2c5311817cfeebcff035a72e1b6668b87"
+  }
+]

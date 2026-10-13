@@ -1,0 +1,86 @@
+🩸 ℜᴇᴅᴄᴀɴᴅʟᴇᴋɪʟʟᴇR 🩸
+ＳＨＡＤＯＷ ＷＡＴＣＨ
+✨ 𝐹𝑒𝑎𝑡𝑢𝑟𝑖𝑛𝑔 ✨
+𝓛𝓪𝓭𝔂 𝓚'𝓼
+🄴🅇🄲🄴🄻🄻🄴🄽🅃!
+𝖂𝖍𝖎𝖑𝖊 𝖄𝖔𝖚 𝖂ᴇʀᴇ 𝕾𝖑𝖊𝖊𝔭𝖎𝖓𝖌
+𝗫𝗥𝗣𝗟  𝕌ℙ𝔻𝔸𝕋𝔼 ✨✨ on
+☕ COFFEE & CRYPTO with 𝐒𝐓ΟΝΕ
+October 13, 2026
+
+Executive Summary
+─────────────────
+133.63M XRP moved across 34 large transfers during the last 25h · gap since last scan. Each large transfer is at least 1 million XRP. These figures describe observed movement only; they do not prove intent.
+
+What Mattered Most
+──────────────────
+Binance (14 transfers) and Coinbase (2 transfers), plus 4 other labeled groups received 71.05M XRP this scan. Receiving XRP does not establish that an exchange bought it or kept it.
+
+Evidence
+────────
+20M XRP moved from an unidentified high-value wallet to Bitget in the scanned window. A second transfer of 19.30M XRP reached an unidentified wallet.
+
+Discovery queue: 12 flagged candidates — 6 found this scan, 5 recommended for review, separate from the 423 wallets on the permanent watch list. These wallet-activity flags are not ownership proof.
+
+Published news context: Standard Chartered brings Ripple’s RLUSD into banking custody after $765 million quarterly surge - CryptoRank · Standard Chartered Adds Custody for Ripple's RLUSD, Plans LMAX Collateral Link - BigGo Finance · Big Ripple (XRP) Development as Standard Chartered Goes Live With RLUSD Custody - CryptoPotato.
+
+Escrow Watch
+────────────
+Ripple escrow: 31.40B XRP locked now across 98 active validated-ledger escrow objects · registry check 20/20 known Ripple-labeled addresses.
+No Ripple escrow events are present in the acquired record for the last 36h; this alone does not prove an event-free window.
+Other XRPL escrow, last 36h: 5 new locks totalling 10.00M XRP · 4 releases totalling 2 XRP, across 2 owner wallets.
+• Flare Core Vault: 1 lock 10.00M XRP
+• rHCZiD…pp9P: 4 locks 2 XRP · 4 releases 2 XRP
+Escrow means XRP locked until its release conditions are met. The count is of separate locks (ledger objects, not owner wallets). Ripple and other owners are listed separately; this report covers observed escrow, not every escrow on the XRPL.
+
+Under the Surface
+─────────────────
+Smaller transfers tell another part of the story. 151.25M XRP moved in 548 payments of 100,000 to under 1 million XRP. 140.38M XRP across 505 of those payments matched 77 patterns: repeated routes, several wallets sending to one, or one wallet sending to several. These patterns are worth tracing; they do not prove funds were being hidden.
+
+How to Read It
+──────────────
+Shadow Volume counts transfers of at least 1 million XRP. Net watched flow is the overall change across watched wallets compared with their prior snapshot; it does not mean a wallet has a negative balance.
+
+What To Watch Next
+──────────────────
+• Check whether the receiving exchange wallets keep the XRP or send it onward.
+• Check whether the largest recipient in this window makes another move.
+
+Verdict
+───────
+The read, straight up: moderate watch score (40/100). This score summarizes watched transfers, activity flags, and available news context. It is not a price forecast or proof of wrongdoing. Main factors: number of large transfers, XRP moved in large transfers, small-payment or destination-tag flags. Overall, about 4.12M XRP moved inward to watched wallets. Not financial advice. XRP-only forensic watch.
+
+I’m XRPMan, and I tell on the banks.
+
+LEDGER DIAGNOSTICS
+──────────────────
+• Watched-wallet data through: 2026-10-13T10:19:32.000Z
+• Receiver tracing: 0 of 5 receivers have observed large onward payments after their largest receipt. Stored watched-wallet evidence only; complete receiver history and retention are not proved.
+• XRP price: ~$1.3562 (24h soft)
+• Market volume (exchanges, 24h): $1.74B
+• XRPL EVM: $32.1K TVL
+• Watched wallets: 423
+• Watched activity (all sizes, LAST 25H · GAP SINCE LAST SCAN): 65246 transactions · 381.93M XRP moved · 175 wallets active
+• Shadow volume (whale moves ≥1M, LAST 25H · GAP SINCE LAST SCAN): 133.63M XRP · 34 transfers
+• Net watched flow: 4.12M XRP inward
+
+🙏 THE DAILY PRAYER
+───────────────────
+Lord, you know who is moving and where to. We know only the ledger. Bless what we see, and give us wisdom for what we don’t.
+
+📖 THE DAILY SCRIPTURE
+──────────────────────
+Isaiah 32:17 (KJV)
+“And the work of righteousness shall be peace; and the effect of righteousness quietness and assurance for ever.”
+
+Sources
+───────
+[1] Standard Chartered brings Ripple’s RLUSD into banking custody after $765 million — https://news.google.com/rss/articles/CBMizAFBVV95cUxQS0ZISXhMTkVPd1QxSEE4bEFXS3pmQzEyOVdlZFYtRHpHV0NoeW4wVldfSlNia1ZzbFhjVFlGWGtGYl85eFByWkhUazRfZENFZ1F0bU9VZzJmenozX1FYVkctemxTSmdBbXpteWhDdEpSSDNHWEV2RlVieWk0OXFqUnR2YzdwRVVoVkdMYW5KMTdpZzQteWhUN21ESWlTOUlFSzBER1hTeGp0U2dFMnBwSFdmczh4SWZpOVlXR29WcmUwc253Qko2NEc3cE8?oc=5
+[2] Standard Chartered Adds Custody for Ripple's RLUSD, Plans LMAX Collateral Link - — https://news.google.com/rss/articles/CBMidkFVX3lxTE9vNGxzdEltY2lZVmVOaUVZRE9yeWFUUTFsMDdHR2thbDhXeGpQc2E1T2hyaGNLTDMxTWI3N2l6R01HVnhlOGlKTzVHVWZSeV9OOGxIeWhKYXJZNGM5dl9MTWJuRXVfSGwzQ1NvMWRpS1gyb293Rmc?oc=5
+[3] Big Ripple (XRP) Development as Standard Chartered Goes Live With RLUSD Custody  — https://news.google.com/rss/articles/CBMipgFBVV95cUxPR2txdDVVOUNva0pmM1dObjVOMXBJdDMyTkhxS2lHdUpDVnpvVi1nbmlGVGFsa1M2NzRMd1FGbUNlMzhyTzV2VHpwWVlWa05ieFh3NmV5NHMzNU5wWVA3eG4zLV9EbU8xNHRFVER3WjVjd1ZIeldQU0RiWlJRczV3TFFXaWdLQ1BBeG1hQXI0d3VKWVVobFRYTTlVWXR0UHFoanotWXVn?oc=5
+
+
+NEWS USED:
+[1] Google News — Standard Chartered brings Ripple’s RLUSD into banking custody after $765 million quarterly surge - CryptoRank
+[2] Google News — Standard Chartered Adds Custody for Ripple's RLUSD, Plans LMAX Collateral Link - BigGo Finance
+[3] Google News — Big Ripple (XRP) Development as Standard Chartered Goes Live With RLUSD Custody - CryptoPotato
