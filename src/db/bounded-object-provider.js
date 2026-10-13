@@ -239,9 +239,40 @@ function createR2Provider(options = {}) {
     }
     return writeETag(result);
   }
-  return Object.freeze({ prefix, rootKey, maxObjectBytes, kind: 'r2',
+  // Read-only current-key inventory. This deliberately does not claim to list
+  // historical object versions, provider billing overhead, or another prefix.
+  async function list() {
+    if(typeof sdk.ListObjectsV2Command!=='function')throw fault('BOUNDED_LIST_COMMAND_UNAVAILABLE');
+    const result=[],seen=new Set(),tokens=new Set();let token,pages=0;
+    do {
+      if(++pages>1000)throw fault('BOUNDED_INVENTORY_LIMIT');
+      let page;
+      try {page=await client.send(new sdk.ListObjectsV2Command({Bucket:bucket,Prefix:prefix,MaxKeys:1000,...(token?{ContinuationToken:token}:{})}));}
+      catch(error){throw fault('BOUNDED_PROVIDER_LIST_FAILED',error);}
+      if(!page || typeof page.IsTruncated!=='boolean' || (page.Contents!==undefined&&!Array.isArray(page.Contents)))throw fault('BOUNDED_INVENTORY_INCOMPLETE');
+      if((page.Prefix!==undefined&&page.Prefix!==prefix)||(page.Name!==undefined&&page.Name!==bucket)||
+          (page.KeyCount!==undefined&&page.KeyCount!==(page.Contents||[]).length)||
+          (page.CommonPrefixes!==undefined&&(!Array.isArray(page.CommonPrefixes)||page.CommonPrefixes.length))||
+          (!page.IsTruncated&&page.NextContinuationToken!==undefined))throw fault('BOUNDED_INVENTORY_INCOMPLETE');
+      for(const entry of page.Contents||[]) {
+        const key=checkKey(entry.Key,prefix);
+        if(seen.has(key)||!Number.isSafeInteger(entry.Size)||entry.Size<0)throw fault('BOUNDED_INVENTORY_INVALID');
+        seen.add(key);if(seen.size>100000)throw fault('BOUNDED_INVENTORY_LIMIT');
+        const stamp=entry.LastModified instanceof Date?entry.LastModified.toISOString():entry.LastModified;
+        if(stamp!==undefined&&!Number.isFinite(Date.parse(stamp)))throw fault('BOUNDED_INVENTORY_INVALID');
+        result.push({key,size:entry.Size,etag:checkETag(entry.ETag),...(stamp?{last_modified:new Date(stamp).toISOString()}:{})});
+      }
+      if(page.IsTruncated) {
+        token=page.NextContinuationToken;
+        if(typeof token!=='string'||!token||tokens.has(token))throw fault('BOUNDED_INVENTORY_INCOMPLETE');
+        tokens.add(token);
+      } else token=null;
+    }while(token);
+    return result.sort((a,b)=>a.key.localeCompare(b.key));
+  }
+  return Object.freeze({ prefix, rootKey, maxObjectBytes, kind: 'r2', identity:Object.freeze({backend:'r2',account:new URL(endpoint).hostname.split('.')[0],bucket,prefix}),
     get: async key => { const value = await getVersioned(key); return value ? value.bytes : null; },
-    getVersioned, putImmutable, compareAndSwap });
+    getVersioned, putImmutable, compareAndSwap, list });
 }
 
 function createMemoryProvider(options = {}) {
@@ -268,7 +299,7 @@ function createMemoryProvider(options = {}) {
     const existing = objects.get(key);
     if (existing) return requireEqual(existing, bytes);
     const etag = '"' + sha256(bytes) + '"';
-    objects.set(key, { bytes, etag });
+    objects.set(key, { bytes, etag, last_modified:new Date(options.now?options.now():Date.now()).toISOString() });
     return etag;
   }
   async function compareAndSwap(key, expectedETag, value) {
@@ -280,12 +311,16 @@ function createMemoryProvider(options = {}) {
     const existing = objects.get(key);
     if ((existing ? existing.etag : null) !== expectedETag) throw fault('BOUNDED_CAS_CONFLICT');
     const etag = '"' + sha256(bytes) + '"';
-    objects.set(key, { bytes, etag });
+    objects.set(key, { bytes, etag, last_modified:new Date(options.now?options.now():Date.now()).toISOString() });
     return etag;
   }
-  return Object.freeze({ prefix, rootKey, maxObjectBytes, kind: 'memory',
+  async function list() {
+    await before('list',prefix);
+    return [...objects.entries()].map(([key,value])=>({key,size:value.bytes.length,etag:value.etag,last_modified:value.last_modified})).sort((a,b)=>a.key.localeCompare(b.key));
+  }
+  return Object.freeze({ prefix, rootKey, maxObjectBytes, kind: 'memory', identity:Object.freeze({backend:'memory',account:options.identity?.account||'memory-fixture',bucket:options.identity?.bucket||crypto.randomUUID(),prefix}),
     get: async key => { const value = await getVersioned(key); return value ? value.bytes : null; },
-    getVersioned, putImmutable, compareAndSwap });
+    getVersioned, putImmutable, compareAndSwap, list });
 }
 
 module.exports = { PREFIX, ROOT_KEY, MAX_OBJECT_BYTES, ARCHIVE_BUCKET, sha256,

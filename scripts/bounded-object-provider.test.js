@@ -13,7 +13,8 @@ const checks = async (name, run) => { await run(); assertions++; console.log('PA
 const rejects = (promise, code) => assert.rejects(promise, error => error.code === code);
 const commands = {
   GetObjectCommand: class GetObjectCommand { constructor(input) { this.input = input; } },
-  PutObjectCommand: class PutObjectCommand { constructor(input) { this.input = input; } }
+  PutObjectCommand: class PutObjectCommand { constructor(input) { this.input = input; } },
+  ListObjectsV2Command: class ListObjectsV2Command { constructor(input) { this.input = input; } }
 };
 const env = extra => ({
   SHADOWWATCH_BOUNDED_STORAGE_MODE: 'r2',
@@ -30,6 +31,7 @@ function fakeR2(extra = {}) {
     calls.push({ operation, input });
     assert.equal(input.Bucket, 'bounded-offline-fixture');
     if (extra.before) await extra.before(operation, input, objects);
+    if(operation==='ListObjectsV2Command')return {IsTruncated:false,Contents:[...objects].map(([Key,v])=>({Key,Size:v.bytes.length,ETag:v.etag}))};
     if (operation === 'GetObjectCommand') {
       const entry = objects.get(input.Key);
       if (!entry) throw missing();
@@ -88,12 +90,24 @@ async function contract(factory) {
     await rejects(p.compareAndSwap(root, invalid, B('bad')), 'BOUNDED_ETAG_INVALID');
   }
   await rejects(p.putImmutable(key('plain-object'), {}), 'BOUNDED_BYTES_REQUIRED');
-  assert.equal(p.delete, undefined); assert.equal(p.list, undefined); assert(Object.isFrozen(p));
+  assert.equal(p.delete, undefined); assert.equal(typeof p.list, 'function'); assert(Object.isFrozen(p));
 }
 (async () => {
   await checks('memory and R2 expose matching immutable Buffer/CAS contract', async () => {
     await contract(() => P.createMemoryProvider());
     await contract(() => fakeR2().provider);
+  });
+  await checks('current-key inventory is read-only, paginated and fail-closed', async () => {
+    const m=P.createMemoryProvider({now:()=>0,identity:{account:'a',bucket:'b'}});
+    await m.putImmutable(key('objects/a'),B('a'));await m.compareAndSwap(root,null,B('r'));
+    const listing=await m.list();assert.equal(listing.length,2);assert.equal(listing[0].last_modified,'1970-01-01T00:00:00.000Z');
+    assert.deepEqual(m.identity,{backend:'memory',account:'a',bucket:'b',prefix:P.PREFIX});assert(Object.isFrozen(m.identity));
+    const fixture=fakeR2();await fixture.provider.putImmutable(key('objects/a'),B('a'));
+    assert.equal((await fixture.provider.list()).length,1);
+    const make=pages=>P.createR2Provider({env:env(),commands,client:{send:async command=>{assert(command instanceof commands.ListObjectsV2Command);return pages.shift();}}});
+    const item={Key:key('objects/a'),Size:1,ETag:'"a"'};
+    assert.equal((await make([{IsTruncated:true,Contents:[item],NextContinuationToken:'next'},{IsTruncated:false,Contents:[{...item,Key:key('objects/b')}]}]).list()).length,2);
+    for(const pages of [[{IsTruncated:false,Contents:null}],[{IsTruncated:false,Contents:[],KeyCount:1}],[{IsTruncated:false,Contents:[],Prefix:'elsewhere/'}],[{IsTruncated:false,Contents:[],CommonPrefixes:[{Prefix:key('objects/')}] }],[{IsTruncated:false,Contents:[],NextContinuationToken:'unexpected'}],[{IsTruncated:true,Contents:[]}],[{IsTruncated:false,Contents:[item,item]}],[{IsTruncated:false,Contents:[{...item,Key:'outside/a'}]}],[{Contents:[]}],[{IsTruncated:true,Contents:[],NextContinuationToken:'same'},{IsTruncated:true,Contents:[],NextContinuationToken:'same'}]])await assert.rejects(make(pages).list(),/BOUNDED_/);
   });
   await checks('preview and development cannot write even with configured credentials', async () => {
     for(const VERCEL_ENV of ['preview','development']) {
