@@ -42,7 +42,7 @@ const zlib = require('zlib');
 const T = require('./transactions');
 const B = require('./balance');
 const State = require('./evidence-state');
-const Store = require('./github-store');
+const DefaultStore = require('./github-store');
 const Journal = require('./run-journal');
 const X = require('./evidence-export');
 
@@ -464,9 +464,9 @@ class Stage {
 // treats it as such. The rows are not kept.
 async function stageJournal(journal, deps) {
   const d = deps || {};
+  const Store = d.store || DefaultStore;
   const stage = new Stage({ chunkBytes: d.chunkBytes });
-  await Store.readJournalRowsEach(journal, { env: d.env, gh: d.gh, fetch: d.fetch,
-    prefetch: d.prefetch, onShard: d.onShard }, row => stage.ingest(row));
+  await Store.readJournalRowsEach(journal, d, row => stage.ingest(row));
   return stage;
 }
 
@@ -476,17 +476,22 @@ async function stageJournal(journal, deps) {
 // carry what it always carried for those days and nothing for the rest.
 async function buildDays(stage, input, deps) {
   const d = deps || {};
+  const Store = d.store || DefaultStore;
   const phase = (name, detail) => { if (typeof d.onPhase === 'function') d.onPhase(name, detail || {}); };
-  const store = { env: d.env, gh: d.gh, fetch: d.fetch };
+  const store = d;
+  const incremental = d.incremental === true;
   const keep = new Set((input && input.keep_days) || []);
   const files = {}, shards = [], kept = [];
   const emit = (records, order, basePath) => {
     if (!records.length) return;
     for (const piece of X.shard(records.slice().sort(order), basePath, X.MAX_SHARD_BYTES)) {
       const packed = gz(piece.text);
-      const path = piece.path + '.gz';
+      const digest = X.sha256(packed);
+      const path = incremental
+        ? basePath.replace(/\.ndjson$/, '.' + digest + '.ndjson.gz')
+        : piece.path + '.gz';
       files[path] = packed;
-      shards.push({ path, sha256: X.sha256(packed), rows: piece.records.length });
+      shards.push({ path, sha256: digest, rows: piece.records.length });
     }
   };
   const mergeBy = (key, previous, fresh) => {
@@ -520,17 +525,20 @@ async function buildDays(stage, input, deps) {
       events.push(event);
       for (const p of T.participantsOf(row)) participants.push(X.participantOf(p));
     }
-    // What the day already holds, read before it is written, because a commit
-    // ADDS to a day rather than replacing it. Only this day: a run that merely
-    // reports on other days does not cause them to be rewritten.
-    phase('day-merge-read', { day, rows: merged.length });
-    const [pe, pp, pl] = await Promise.all([
-      Store.readDays([day], store),
-      Store.readDays([day], store, 'participants'),
-      Store.readDays([day], store, 'payloads', { lines: true })
-    ]);
-    phase('day-merge-read-done', { day, events: pe.events.length, participants: pp.events.length,
-      payloads: pl.lines.length, took_ms: Date.now() - tDay });
+    // Legacy days are whole-file snapshots and must retain their prior rows.
+    // Bounded storage appends immutable batches instead: it reads no old day
+    // here, and its report reader deduplicates the referenced batches.
+    let pe = { events: [] }, pp = { events: [] }, pl = { lines: [] };
+    if (!incremental) {
+      phase('day-merge-read', { day, rows: merged.length });
+      [pe, pp, pl] = await Promise.all([
+        Store.readDays([day], store),
+        Store.readDays([day], store, 'participants'),
+        Store.readDays([day], store, 'payloads', { lines: true })
+      ]);
+      phase('day-merge-read-done', { day, events: pe.events.length, participants: pp.events.length,
+        payloads: pl.lines.length, took_ms: Date.now() - tDay });
+    }
     emit(mergeBy(eventId, pe.events, events), X.orderEvents, base + '/events.ndjson');
     emit(mergeBy(participantId, pp.events, participants), X.orderParticipants, base + '/participants.ndjson');
 
@@ -570,9 +578,10 @@ async function buildDays(stage, input, deps) {
       for (const entry of lines) sharder.push(entry.line);
     }
     for (const piece of sharder.end()) {
-      const path = piece.path + '.gz';
+      const digest = X.sha256(piece.packed);
+      const path = incremental ? base + '/payloads.' + digest + '.ndjson.gz' : piece.path + '.gz';
       files[path] = piece.packed;
-      shards.push({ path, sha256: X.sha256(piece.packed), rows: piece.rows });
+      shards.push({ path, sha256: digest, rows: piece.rows });
     }
     // Sent up now, if the caller can: what stays behind is the blob id and
     // the hash, and the bytes of a week's evidence are never resident at once.
@@ -623,6 +632,7 @@ function groupByCause(results) {
 // ── The run ────────────────────────────────────────────────────────────────
 async function acquire(input, deps) {
   const d = deps || {};
+  const Store = d.store || DefaultStore;
   const reader = d.reader;
   if (!reader) throw new Error('READER_REQUIRED');
   const run = input || {};
@@ -638,7 +648,7 @@ async function acquire(input, deps) {
   // was built to remove; it just moved one level up.
   const phase = (name, detail) => { if (typeof d.onPhase === 'function') d.onPhase(name, detail || {}); };
   const [loaded, header, journalRead] = await Promise.all([
-    Store.readState({ env: d.env, gh: d.gh, fetch: d.fetch })
+    Store.readState(d)
       .then(r => { phase('state', { seeded: !r.missing,
         state_version: r.state ? r.state.state_version : null,
         wallets: r.state ? r.state.wallet_count : 0 }); return r; }),
@@ -647,7 +657,7 @@ async function acquire(input, deps) {
         endpoint: reader.stats.actual_endpoint || null }); return h; }),
     // A third independent lane. An absent journal is the normal case and costs
     // one 404; a present one is a previous run that did not finish.
-    Store.readJournal({ env: d.env, gh: d.gh, fetch: d.fetch })
+    Store.readJournal(d)
       .then(r => r, e => ({ journal: null, missing: true, error: e.message }))
   ]);
   if (loaded.missing) throw new Error('EVIDENCE_STATE_MISSING: seed the checkpoint from a sealed report before the first run');
@@ -688,7 +698,7 @@ async function acquire(input, deps) {
   if (journalRead && !journalRead.missing && journalRead.journal && stale && stale.ok) {
     try {
       missingShards = await Store.missingJournalShards(journalRead.journal,
-        { env: d.env, gh: d.gh, fetch: d.fetch });
+        d);
     } catch (e) {
       // If the branch cannot be listed, the journal cannot be shown to be
       // sound. Refuse it rather than adopt it on the strength of a read that
@@ -709,7 +719,7 @@ async function acquire(input, deps) {
     phase('journal', resumed);
     try {
       const discarded = await Store.clearJournal(journalRead.journal,
-        { env: d.env, gh: d.gh, fetch: d.fetch });
+        d);
       resumed.discard_status = discarded && discarded.status;
     } catch (e) { resumed.discard_error = e.message; }
   } else if (journalRead && journalRead.journal && stale && stale.ok) {
@@ -945,7 +955,7 @@ async function acquire(input, deps) {
     }
     if (!wallets.length && !rows.length) return;
     const written = await Store.appendJournal(journal,
-      { wallets, rows }, { env: d.env, gh: d.gh, fetch: d.fetch });
+      { wallets, rows }, d);
     journal = written.journal; journalWritten = true;
     for (const l of landed) {
       bankedThrough[l.i] = l.through; bankedBalance[l.i] = l.balance;
@@ -1354,7 +1364,7 @@ async function acquire(input, deps) {
       rows: resumed && resumed.rows_awaiting_load });
     try {
       const t0 = Date.now();
-      staged = await stageJournal(journal, { env: d.env, gh: d.gh, fetch: d.fetch,
+      staged = await stageJournal(journal, { ...d,
         onShard: (n, total, rowCount) => phase('journal-shard',
           { shard: n, of: total, rows: rowCount, ms: Date.now() - t0 }) });
       phase('journal-loaded', { rows: staged.total, distinct: staged.best.size,
@@ -1368,7 +1378,7 @@ async function acquire(input, deps) {
       // next attempt walks those wallets again.
       const saved = { journal_rows_unreadable: e.message };
       try {
-        const discarded = await Store.clearJournal(journal, { env: d.env, gh: d.gh, fetch: d.fetch });
+        const discarded = await Store.clearJournal(journal, d);
         saved.discard_status = discarded && discarded.status;
       } catch (e2) { saved.discard_error = e2.message; }
 
@@ -1405,8 +1415,9 @@ async function acquire(input, deps) {
   // time is to guess. Each day now reports as it is read, merged and built.
   const tBuild = Date.now();
   const built = await buildDays(staged, { keep_days: keepDays },
-    { env: d.env, gh: d.gh, fetch: d.fetch, onPhase: phase,
-      upload: packed => Store.uploadBlob(packed, { env: d.env, gh: d.gh, fetch: d.fetch }) });
+    { ...d, onPhase: phase,
+      incremental: d.incremental === true || (typeof Store.isBounded === 'function' && Store.isBounded(d)),
+      upload: packed => Store.uploadBlob(packed, d) });
   staged = null;
   phase('shards-built', { files: Object.keys(built.files).length,
     bytes: Object.values(built.files).reduce((n, b) => n + (Buffer.isBuffer(b) ? b.length : (Number(b.size) || 0)), 0),
@@ -1427,7 +1438,7 @@ async function acquire(input, deps) {
     // call that can fail after the evidence is already in.
     journal: journalWritten ? journal : null,
     files: built.files
-    }, { env: d.env, gh: d.gh, fetch: d.fetch,
+    }, { ...d,
       onBlob: (n, total, path) => { if (n === 1 || n === total || n % 5 === 0) {
         phase('uploading', { file: n, of: total, path, ms: Date.now() - tCommit }); } } });
     phase('committed', { took_ms: Date.now() - tCommit });
@@ -1550,6 +1561,7 @@ function reconstructProvenance(input) {
 // Deduped by hash, because a transaction inside the overlap appears in both.
 async function readReportWindow(input, deps) {
   const d = deps || {};
+  const Store = d.store || DefaultStore;
   const from = new Date(input.window_start_ms), to = new Date(input.window_end_ms);
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || to < from) {
     throw new Error('INVALID_REPORT_WINDOW');
@@ -1636,3 +1648,4 @@ async function readReportWindow(input, deps) {
 
 module.exports = { acquire, walkWallet, buildShards, Stage, stageJournal, buildDays, windowDays,
   readReportWindow, reconstructProvenance, groupByCause, PAGE_LIMIT };
+

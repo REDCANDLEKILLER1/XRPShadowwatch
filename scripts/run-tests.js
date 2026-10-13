@@ -27,6 +27,9 @@ const ROOT = path.join(__dirname, '..');
 // name, file, port. Ports are distinct so a leaked listener from one suite
 // cannot make the next one fail for the wrong reason.
 const SUITES = [
+  ['bounded-object-provider', 'bounded-object-provider.test.js', null],
+  ['bounded-store', 'bounded-store.test.js', null],
+  ['bounded-store-routing', 'bounded-store-routing.test.js', null],
   ['pattern-surfaces', 'pattern-surfaces.test.js', 8240],
   ['optional-lookups', 'optional-lookups.test.js', 8241],
   ['forensic-archive', 'forensic-archive.test.js', null],
@@ -190,3 +193,4 @@ console.log('\n' + (failed
   ? failed + ' of ' + results.length + ' SUITES FAILED'
   : 'ALL ' + results.length + ' SUITES PASS'));
 process.exit(failed ? 1 : 0);
+

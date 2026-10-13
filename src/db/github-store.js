@@ -754,6 +754,31 @@ async function readDays(days, deps, kind, opts) {
   return out;
 }
 
-module.exports = { STATE_PATH, JOURNAL_PATH, historyPath, runPath, journalRowPath, readBytes, readFile,
+const legacy = { STATE_PATH, JOURNAL_PATH, historyPath, runPath, journalRowPath, readBytes, readFile,
   readState, readPinnedState, commitRun, seedGenesis, uploadBlob, readDays, resolveDayManifests, resolveStateAtOrBefore,
   readJournal, readJournalRows, readJournalRowsEach, appendJournal, clearJournal, missingJournalShards };
+
+// Keep the GitHub implementation intact while rollout is disabled. The
+// bounded backend is selected once for each public operation; enabled errors
+// never fall back to a legacy write. Positional readBytes/readFile deliberately
+// remain unchanged, since pinned bounded reads supply a read-only gh shim.
+function boundedRuntime(deps) {
+  return require('./bounded-store').runtime(deps || {}, { legacy });
+}
+function isBounded(deps) { return !!boundedRuntime(deps); }
+
+const routed = { ...legacy, isBounded };
+const dependencyAt = {
+  readState: 0, readPinnedState: 0, readJournal: 0,
+  readDays: 1, resolveDayManifests: 1, resolveStateAtOrBefore: 1,
+  commitRun: 1, uploadBlob: 1, seedGenesis: 1, clearJournal: 1,
+  missingJournalShards: 1, readJournalRows: 1, readJournalRowsEach: 1,
+  appendJournal: 2
+};
+for (const [name, index] of Object.entries(dependencyAt)) {
+  routed[name] = function (...args) {
+    const backend = boundedRuntime(args[index]);
+    return (backend || legacy)[name](...args);
+  };
+}
+module.exports = routed;
