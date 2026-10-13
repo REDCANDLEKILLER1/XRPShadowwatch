@@ -290,7 +290,7 @@ async function storedReport(input, deps) {
     ...d, gh:loaded.gh, ref:loaded.ref, loaded_state:loaded.state, baseline_ms:startMs
   });
   total = Object.values(manifests.byDay).reduce((n, day) => n +
-    Object.keys(day.shards || {}).filter(p => /\/(events|participants)(\.\d+)?\.ndjson\.gz$/.test(p)).length, 0);
+    Object.keys(day.shards || {}).filter(p => /\/(events|participants)(\.(?:\d+|[a-f0-9]{64}))?\.ndjson\.gz$/.test(p)).length, 0);
   d.onReportProgress({ phase:'verifying', files_verified:0, files_total:total,
     state_version:loaded.state.state_version });
   const state = manifests.state;

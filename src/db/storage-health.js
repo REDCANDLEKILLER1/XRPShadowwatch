@@ -17,6 +17,7 @@ function inventory(tree){
  return{current_files:files,current_file_bytes:bytes,largest_file_bytes:max,groups};
 }
 async function health(deps={}){
+ if(Store.isBounded(deps))throw Error('BOUNDED_STORAGE_HEALTH_NOT_QUALIFIED: legacy Git size and backup receipts do not cover the bounded object backend');
  const target=A.evidenceTarget(deps.env);const gh=deps.gh||A.client(target.token,target.repo,deps.fetch||fetch);
  const ref=await gh('GET','/git/ref/heads/'+target.branch);
  const commit=await gh('GET','/git/commits/'+ref.object.sha);
