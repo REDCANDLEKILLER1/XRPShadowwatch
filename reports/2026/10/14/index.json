@@ -1,0 +1,12 @@
+[
+  {
+    "report_id": "SW-20261014-6CZVZ",
+    "scan_id": "SC-MV832SB4",
+    "generated_at": "2026-10-14T10:19:32.000Z",
+    "sealed_at": "2026-10-14T12:26:00.785Z",
+    "coverage_complete": true,
+    "anchor": 107648405,
+    "transactions": null,
+    "report_hash": "3aa69520a237973809ca15f84871e7efe7c425aa330df2b32a7534665561508e"
+  }
+]
