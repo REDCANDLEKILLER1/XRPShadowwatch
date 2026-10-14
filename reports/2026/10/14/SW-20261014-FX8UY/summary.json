@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20261014-FX8UY",
+  "generated_at": "2026-10-14T13:01:21.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107650905,
+  "transactions_in_window": null,
+  "new_observations": 0,
+  "xrpl_requests": 0,
+  "report_hash": "0fb21d30cbf21adfcacf0534ff84c281d334963ba17d8315bfb9e6fb310c3c55"
+}
