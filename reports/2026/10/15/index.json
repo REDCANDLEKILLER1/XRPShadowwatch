@@ -8,5 +8,15 @@
     "anchor": 107670661,
     "transactions": null,
     "report_hash": "65674a326e5a80062e44e5388e3f4bd62d1692c8eb1ca2d74f96baa81fd0ef08"
+  },
+  {
+    "report_id": "SW-20261015-PUK49",
+    "scan_id": "SC-MV9JTAYZ",
+    "generated_at": "2026-10-15T10:19:32.000Z",
+    "sealed_at": "2026-10-15T13:02:18.065Z",
+    "coverage_complete": true,
+    "anchor": 107670661,
+    "transactions": null,
+    "report_hash": "df6c6399159d0257d7ae8ff47efaa544a994164d39b647e8464248fdc5953190"
   }
 ]
