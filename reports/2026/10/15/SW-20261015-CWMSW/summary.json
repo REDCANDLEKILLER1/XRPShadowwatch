@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20261015-CWMSW",
+  "generated_at": "2026-10-15T10:19:32.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107670661,
+  "transactions_in_window": null,
+  "new_observations": 0,
+  "xrpl_requests": 0,
+  "report_hash": "65674a326e5a80062e44e5388e3f4bd62d1692c8eb1ca2d74f96baa81fd0ef08"
+}
