@@ -1,0 +1,12 @@
+[
+  {
+    "report_id": "SW-20261016-CH2RJ",
+    "scan_id": "SC-MVAY108I",
+    "generated_at": "2026-10-16T10:19:32.000Z",
+    "sealed_at": "2026-10-16T12:27:58.196Z",
+    "coverage_complete": true,
+    "anchor": 107692970,
+    "transactions": null,
+    "report_hash": "551beabd43d96926253d0006f2cc17032fee91dc7f406d99d70f052c0437edc9"
+  }
+]
