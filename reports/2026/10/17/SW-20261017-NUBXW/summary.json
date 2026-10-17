@@ -1,0 +1,12 @@
+{
+  "report_id": "SW-20261017-NUBXW",
+  "generated_at": "2026-10-17T10:19:32.000Z",
+  "coverage_complete": true,
+  "target_wallets": 423,
+  "transaction_windows_proved": 423,
+  "validated_anchor_ledger": 107715254,
+  "transactions_in_window": null,
+  "new_observations": 0,
+  "xrpl_requests": 0,
+  "report_hash": "4757a7115813b0ddc3a9bd937158275639ec162a4ce6d8b4afb4974f229eef19"
+}

@@ -1,0 +1,12 @@
+[
+  {
+    "report_id": "SW-20261017-NUBXW",
+    "scan_id": "SC-MVCDG0VT",
+    "generated_at": "2026-10-17T10:19:32.000Z",
+    "sealed_at": "2026-10-17T12:27:19.291Z",
+    "coverage_complete": true,
+    "anchor": 107715254,
+    "transactions": null,
+    "report_hash": "4757a7115813b0ddc3a9bd937158275639ec162a4ce6d8b4afb4974f229eef19"
+  }
+]
